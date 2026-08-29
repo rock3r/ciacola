@@ -1,166 +1,99 @@
-# Storyboard
+# Compose Deck Foundation
 
-A [Compose Multiplatform][compose] library for building presentations.
-Inspired by [reveal.js](https://github.com/hakimel/reveal.js),
-[Spectacle](https://github.com/FormidableLabs/spectacle),
-and many others!
+An experimental foundation for one Compose Desktop conference talk.
 
-> ## sto·ry·board
-> 
-> A sequence of drawings, typically with some directions and dialogue, 
-> representing the shots planned for a movie or television production.
+The deck uses [Storyboard](https://github.com/bnorm/storyboard) for scenes, state, navigation,
+transitions, shared elements, and fixed-resolution rendering. The `deck` module adds the visual
+language and a small set of provisional scenes. It is a spike, not a presentation framework and
+not the talk's narrative.
 
-## Usage
+## What is here
 
-As a Compose Multiplatform library, Storyboard requires the [JetBrains Compose plugin][compose-compiler].
-With the Compose plugin present, Storyboard can be used just like any other library.
+The sample deck has four scenes and nine states. Together they exercise:
 
-```kotlin
-dependencies {
-    implementation("dev.bnorm.storyboard:storyboard:0.1.0-alpha03")
-    implementation("dev.bnorm.storyboard:storyboard-easel:0.1.0-alpha03")
-    implementation("dev.bnorm.storyboard:storyboard-text:0.1.0-alpha03")
-}
+- deterministic forward and backward navigation;
+- a shared-bounds, Magic-Move-style transition;
+- animation that keeps running without advancing the scene;
+- an animated mesh made from indexed Compose `Vertices`;
+- MagicText transitions for prose;
+- MagicText transitions for syntax-highlighted Kotlin; and
+- a single 1920×1080 design system for type, colour, and spacing.
+
+All visible copy is marked provisional on purpose.
+
+## Run it
+
+The build needs JDK 21. On a machine where that is already the default:
+
+```shell
+./gradlew :deck:run
 ```
 
-<details>
-<summary>Snapshots of the latest version are available in the Central Portal Snapshots repository.</summary>
-<p>
+Otherwise, point Gradle at a JDK 21 installation:
 
-```kotlin
-repository {
-    mavenCentral()
-    maven("https://central.sonatype.com/repository/maven-snapshots/")
-}
-
-dependencies {
-    implementation("dev.bnorm.storyboard:storyboard:0.1.0-SNAPSHOT")
-    implementation("dev.bnorm.storyboard:storyboard-easel:0.1.0-SNAPSHOT")
-    implementation("dev.bnorm.storyboard:storyboard-layout:0.1.0-SNAPSHOT")
-    implementation("dev.bnorm.storyboard:storyboard-text:0.1.0-SNAPSHOT")
-}
+```shell
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew :deck:run
 ```
 
-Snapshot documentation is available at [bnorm.github.io/storyboard/docs/api/latest/](https://bnorm.github.io/storyboard/docs/api/latest/).
+Use the left and right arrow keys to move through the deck.
 
-</p>
-</details>
+## Project layout
 
-## Examples
+| Path | Purpose |
+|---|---|
+| [`deck/`](deck/) | Desktop application, scenes, design system, mesh effect, and text-engine binding |
+| [`storyboard-text/`](storyboard-text/) | Upstream MagicText with focused hardening and tests |
+| [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) | Architecture, source notes, attribution, retained TODOs, and verification record |
+| [`docs/MAGIC-TEXT-V2-SEAM.md`](docs/MAGIC-TEXT-V2-SEAM.md) | Design boundary and fixtures for a future paragraph-layout renderer |
 
-[Various examples](examples) are available to demonstrate how to build Storyboards of
-varying levels of complexity and functionality.
+The other modules are the original Storyboard checkout and examples.
 
-## Getting Started
+## MagicText work
 
-Looking for help? Join the discussion in the [KotlinLang Slack](https://kotlinlang.slack.com/archives/C08R5V4EHDH)!
+The existing renderer remains in use. This branch tightens a few parts of its behaviour:
 
-### Terminology
+- Unicode tokenization no longer splits surrogate pairs, common emoji sequences, or combining
+  marks from their base word;
+- unchanged whitespace keeps stable correspondence keys;
+- settled transition state is recorded as a Compose side effect;
+- returning to an interrupted target reuses its shared-bounds plan; and
+- repeated tokens, line breaks, style changes, large inputs, annotations, and representative
+  difficult scripts are covered by tests.
 
-This library is all about building _**storyboards**_.
-A storyboard is analogous to a slide show in other presentation software.
-While other software may have _**slides**_ with _**advancements**_,
-Storyboard uses the terms _**scenes**_ and _**states**_ respectively.
-Building on the _**state**_-driven nature of Compose UI,
-Storyboard provides a _**state**_-based way to build your presentation
-and requires each scene to provide a list of states.
-When a storyboard advances, it simply moves to the next state specified for your scene,
-or the first state of the next scene.
+The deck sees text rendering through one application-level `DeckTextRenderer` binding. That is the
+replacement point for future work; scenes do not choose between engines.
 
-For the purpose of rendering, the states of a scene are converted into _**frames**_.
-If a scene comes after another scene, a _**start**_ frame will be added as the first frame.
-If a scene comes before another scene, an _**end**_ frame will be added as the last frame.
-Frames are used to control the transitions between scenes and states.
+MagicText v2 is not implemented here. Neither are text shaping, glyph extraction, Canvas text
+rendering, or the unfinished gradual-entrance renderer. The intended boundary is documented in
+[`MAGIC-TEXT-V2-SEAM.md`](docs/MAGIC-TEXT-V2-SEAM.md).
 
-For example, imagine there is a storyboard with three scenes, each with one, three, and two states respectively.
-The frames of this storyboard could be displayed as follows:
+## Checks
 
-```text
-1-1, 1-End, 2-Start, 2-1, 2-2, 2-3, 2-End, 3-Start, 3-1, 3-2
+Run the focused suites with:
+
+```shell
+./gradlew :storyboard-text:jvmTest :deck:desktopTest
 ```
 
-This sequence of frames is what controls the advancement of a storyboard.
-Start and end frames are only used for intermediate rendering when transitioning between scenes.
-This enables start and end animations for a scene and smooth transitions between scenes.
-This also enables the use of scenes which do not have any states to create more complex transitions.
+The full non-browser gate is:
 
-### Compose
-
-Along with defining a list of states, [a scene must also define a `@Composable` lambda][StoryboardBuilder],
-which takes a [`SceneScope`][SceneScope] as a receiver.
-The SceneScope providers a number of properties to the scene Composable,
-including a [`Transition`][Transition] instance that defines the current and target frames.
-This allows animating values between the states of the scene and synchronizing with the storyboard advancement.
-And because of the start and end frame, scene start and end animations are also easy to achieve.
-
-An [`AnimatedVisibilityScope`][AnimatedVisibilityScope] and [`SharedTransitionScope`][SharedTransitionScope] are also
-provided by via context parameters.
-These scopes are provided for animating and sharing elements between scenes.
-
-Along with the Composable lambda and states, a scene is also able to define enter and exit transitions.
-These transitions determine how the scene transitions into view
-and can be based on the current advancement direction of the storyboard.
-For example, these transitions can be used to create a carousel like animation between scenes.
-
-[When building a storyboard][Storyboard], a custom [SceneFormat][SceneFormat] may be provided;
-otherwise the default format is used.
-The scene format is a combination of `DpSize` and `Density`
-which determines the _**constant render size**_ of all scenes.
-This makes it so the scenes of the storyboard automatically scale according to the available space,
-while maintaining a constant pixel space for defining the size and spacing of elements.
-
-A [ContentDecorator][ContentDecorator] may also be provided when building a storyboard.
-This decorator will be applied around all scenes
-and can be used to adjust theming, provide composition locals, or add a shared background.
-
-## Libraries
-
-There are two main libraries in Storyboard: Storyboard and Easel.
-The Storyboard library contains the building blocks for Storyboards,
-while Easel contains UI components which make Storyboard usable on desktop and web.
-
-```kotlin
-dependencies {
-    implementation("dev.bnorm.storyboard:storyboard")
-    implementation("dev.bnorm.storyboard:storyboard-easel")
-}
+```shell
+./gradlew check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest
 ```
 
-There are also some experimental libraries that hold common utilities for building storyboards.
+The browser tests inherited from Storyboard expect ChromeHeadless. They are excluded above so the
+gate also works in environments without Chrome; JVM tests, Wasm compilation, and API checks still
+run.
 
-* _**storyboard-text**_ - Contains utilities for complex text animations and code rendering.
-* _**storyboard-diagram**_ - Todo: utilities for drawing diagrams with shapes and arrows.
+## Sources and licences
 
-## References
+This repository retains Storyboard's Git history and Apache 2.0 licence. The implementation is based
+on Storyboard revision `499cda890a7591c8fc56044726531f6f38a82e35`.
 
-Want to see Storyboard in action?
-
-* **Kotlin + Power-Assert = Love** _(KotlinConf 2024)_ - 
-  [Storyboard](https://deck.bnorm.dev/kotlinconf2024),
-  [Code](https://github.com/bnorm/deck.bnorm.dev/tree/kotlinconf2024/kotlinconf2024),
-  [Recording](https://www.youtube.com/watch?v=N8u-6d0iCiE)
-* **Writing Your Third Kotlin Compiler Plugin** _(KotlinConf 2025)_ - 
-  [Storyboard](https://deck.bnorm.dev/kc25),
-  [Code](https://github.com/bnorm/deck.bnorm.dev/tree/kc25/kotlinconf2025/story),
-  [Recording](https://www.youtube.com/watch?v=9P7qUGi5_gc)
-* **(Re)creating Magic(Move) with Compose** _(droidcon NYC 2025)_ -
-  [Storyboard](https://deck.bnorm.dev/dcnyc25),
-  [Code](https://github.com/bnorm/deck.bnorm.dev/tree/dcnyc25/dcnyc25/story),
-  [Recording](https://www.youtube.com/watch?v=PgzBWebeJsk)
-
-[//]: # (Storyboard Links)
-
-[Storyboard]: storyboard/src/commonMain/kotlin/dev/bnorm/storyboard/Storyboard.kt
-[StoryboardBuilder]: storyboard/src/commonMain/kotlin/dev/bnorm/storyboard/StoryboardBuilder.kt
-[ContentDecorator]: /storyboard/src/commonMain/kotlin/dev/bnorm/storyboard/ContentDecorator.kt
-[SceneFormat]: /storyboard/src/commonMain/kotlin/dev/bnorm/storyboard/SceneFormat.kt
-[SceneScope]: /storyboard/src/commonMain/kotlin/dev/bnorm/storyboard/SceneScope.kt
-
-[//]: # (Compose Links)
-
-[compose]: https://www.jetbrains.com/lp/compose-multiplatform
-[compose-compiler]: https://www.jetbrains.com/help/kotlin-multiplatform-dev/compose-compiler.html
-
-[AnimatedVisibilityScope]: https://developer.android.com/reference/kotlin/androidx/compose/animation/AnimatedVisibilityScope
-[SharedTransitionScope]: https://developer.android.com/reference/kotlin/androidx/compose/animation/SharedTransitionScope
-[Transition]: https://developer.android.com/reference/kotlin/androidx/compose/animation/core/Transition
+The vertex-mesh technique was studied in
+[Sina Samaki's ChromaDecks](https://github.com/sinasamaki/ChromaDecks), and the shared-text approach
+was compared with
+[Brian Norman's Magic Move deck](https://github.com/bnorm/deck.bnorm.dev/tree/dcnyc25/dcnyc25/story).
+Neither reference repository exposed a licence file at the revisions studied, so no source or assets
+were copied from them. Exact revisions and source locations are recorded in
+[`DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md).

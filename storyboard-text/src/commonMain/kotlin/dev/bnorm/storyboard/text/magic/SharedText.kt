@@ -1,5 +1,7 @@
 package dev.bnorm.storyboard.text.magic
 
+// Modified from Storyboard upstream: stable whitespace correspondence and large-run invariant.
+
 import androidx.compose.ui.text.AnnotatedString
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -61,8 +63,10 @@ internal fun findShared(
     }
     val afterItems = after.mapIndexed { index, value -> MutableSharedText(index, value) }
 
-    val beforeNonBlank = beforeItems.filter { it.value.isNotBlank() || it.value.text == "\n" }
-    val afterNonBlank = afterItems.filter { it.value.isNotBlank() || it.value.text == "\n" }
+    // Whitespace participates in correspondence as well. Excluding it made unchanged caller-supplied
+    // tokens acquire fresh shared-bounds keys on every transition and fragmented large unchanged runs.
+    val beforeNonBlank = beforeItems
+    val afterNonBlank = afterItems
 
     var prev: MutableSharedText? = null
     for (item in beforeNonBlank) {
@@ -84,7 +88,9 @@ internal fun findShared(
         if (text.key == null) text.key = "stable:${key.addAndFetch(1)}"
     }
 
-    // TODO is there a way to merge items to help with large amounts of text that don't change?
+    // Adjacent unchanged tokens intentionally remain separate here: their existing shared-bounds keys
+    // identify independently moving tokens. A paragraph-layout renderer can batch their drawing after
+    // consuming the correspondence plan; v1 cannot merge them without changing transition geometry.
     return afterItems.map { it.toSharedItem() }
 }
 

@@ -1,6 +1,8 @@
 import com.strumenta.antlrkotlin.gradle.AntlrKotlinTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
+// Modified from Storyboard upstream to add MagicText characterization tests.
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.plugin.compose)
@@ -24,6 +26,11 @@ kotlin {
             dependencies {
                 implementation(compose.material)
                 implementation(libs.antlr.kotlin.runtime)
+            }
+        }
+        commonTest {
+            dependencies {
+                implementation(kotlin("test"))
             }
         }
     }

@@ -1,5 +1,7 @@
 @file:Suppress("UnstableApiUsage")
 
+// Modified from Storyboard upstream to include the talk-specific :deck module.
+
 pluginManagement {
     repositories {
         mavenCentral()
@@ -27,6 +29,7 @@ include(":storyboard-easel")
 include(":storyboard-layout")
 include(":storyboard-text")
 include(":storyboard-warp")
+include(":deck")
 
 include(":examples:basic")
 include(":examples:diagram")

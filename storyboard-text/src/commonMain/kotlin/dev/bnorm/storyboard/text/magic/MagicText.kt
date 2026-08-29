@@ -1,5 +1,7 @@
 package dev.bnorm.storyboard.text.magic
 
+// Modified from Storyboard upstream: transition bookkeeping and interruption stability hardened.
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.Column
@@ -140,23 +142,39 @@ private fun MagicTextInternal(
 @OptIn(ExperimentalAtomicApi::class)
 @Composable
 private fun Transition<List<AnnotatedString>>.createSharedTextTransition(): Transition<List<SharedText>> {
-    // TODO this is still not great...
-    //  - switching from element to bounds seems to break everything
     val key: AtomicLong = remember { AtomicLong(0) }
-    var previousState by remember { mutableStateOf<List<SharedText>>(emptyList()) }
+    val state = remember { MagicTextTransitionState(key) }
     val child = createChildTransition("SharedText") { targetState ->
-        remember(targetState) { findShared(key, previousState, targetState.flatMap { toLines(it) }) }
+        state.plan(targetState.flatMap { toLines(it) })
     }
 
-    // TODO doing this in remember seems broken...
-    remember(child.currentState, child.targetState) {
-        // When we reach the target state, update the previous state.
-        if (child.currentState == child.targetState) {
-            previousState = child.currentState
+    if (child.currentState == child.targetState) {
+        SideEffect {
+            state.settle(child.currentState)
         }
     }
 
     return child
+}
+
+@OptIn(ExperimentalAtomicApi::class)
+internal class MagicTextTransitionState(
+    private val key: AtomicLong,
+    initialState: List<SharedText> = emptyList(),
+) {
+    private var settledState = initialState
+    private val interruptedPlans = mutableMapOf<List<AnnotatedString>, List<SharedText>>()
+
+    fun plan(target: List<AnnotatedString>): List<SharedText> {
+        return interruptedPlans.getOrPut(target) { findShared(key, settledState, target) }
+    }
+
+    fun settle(state: List<SharedText>) {
+        if (settledState === state) return
+        settledState = state
+        interruptedPlans.clear()
+        interruptedPlans[state.map { it.value }] = state
+    }
 }
 
 private fun toLines(string: AnnotatedString): List<AnnotatedString> = buildList {
