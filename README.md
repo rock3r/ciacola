@@ -1,4 +1,4 @@
-# Ciacola
+![Ciacola mascot presenting the project name on stage](artwork/ciacola-banner.jpg)
 
 **Ciacola** is an experimental foundation for one Compose Desktop conference talk. Its name comes
 from Venetian *ciàcola* — a chat or conversation — and is pronounced roughly “CHAH-koh-lah”.
