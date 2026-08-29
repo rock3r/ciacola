@@ -1,6 +1,7 @@
-# Compose Deck Foundation
+# Ciacola
 
-An experimental foundation for one Compose Desktop conference talk.
+**Ciacola** is an experimental foundation for one Compose Desktop conference talk. Its name comes
+from Venetian *ciàcola* — a chat or conversation — and is pronounced roughly “CHAH-koh-lah”.
 
 The deck uses [Storyboard](https://github.com/bnorm/storyboard) for scenes, state, navigation,
 transitions, shared elements, and fixed-resolution rendering. The `deck` module adds the visual
@@ -85,10 +86,12 @@ The browser tests inherited from Storyboard expect ChromeHeadless. They are excl
 gate also works in environments without Chrome; JVM tests, Wasm compilation, and API checks still
 run.
 
-## Sources and licences
+## Upstream and licence
 
-This repository retains Storyboard's Git history and Apache 2.0 licence. The implementation is based
-on Storyboard revision `499cda890a7591c8fc56044726531f6f38a82e35`.
+Ciacola is a fork of Brian Norman's
+[Storyboard](https://github.com/bnorm/storyboard), based on revision
+`499cda890a7591c8fc56044726531f6f38a82e35`. This repository retains Storyboard's Git history and is
+distributed under the same [Apache License 2.0](LICENSE.txt). See [NOTICE](NOTICE) for attribution.
 
 The vertex-mesh technique was studied in
 [Sina Samaki's ChromaDecks](https://github.com/sinasamaki/ChromaDecks), and the shared-text approach

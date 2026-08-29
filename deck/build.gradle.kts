@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.compose)
 }
 
-group = "dev.sebastiano.deck"
+group = "dev.sebastiano.ciacola"
 version = "0.1-SNAPSHOT"
 
 kotlin {
@@ -37,10 +37,10 @@ kotlin {
 
 compose.desktop {
     application {
-        mainClass = "dev.sebastiano.deck.MainKt"
+        mainClass = "dev.sebastiano.ciacola.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "ComposeDeckFoundation"
+            packageName = "Ciacola"
             packageVersion = "1.0.0"
         }
     }

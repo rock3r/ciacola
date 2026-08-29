@@ -22,7 +22,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "storyboard-root"
+rootProject.name = "ciacola"
 
 include(":storyboard")
 include(":storyboard-easel")

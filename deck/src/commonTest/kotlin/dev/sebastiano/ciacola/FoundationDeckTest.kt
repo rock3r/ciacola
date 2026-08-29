@@ -1,4 +1,4 @@
-package dev.sebastiano.deck
+package dev.sebastiano.ciacola
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -13,7 +13,7 @@ class FoundationDeckTest {
     fun deckUsesFixedTalkFormatAndRepresentativeSceneStates() {
         val deck = createFoundationDeck()
 
-        assertEquals("Conference deck — foundation spike", deck.title)
+        assertEquals("Ciacola", deck.title)
         assertEquals(IntSize(1920, 1080), deck.format.size)
         assertEquals(listOf(3, 2, 1, 3), deck.scenes.map { it.frames.size })
         assertEquals(deck.indices, deck.indices.sorted())

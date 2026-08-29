@@ -1,4 +1,4 @@
-package dev.sebastiano.deck
+package dev.sebastiano.ciacola
 
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.darkColors

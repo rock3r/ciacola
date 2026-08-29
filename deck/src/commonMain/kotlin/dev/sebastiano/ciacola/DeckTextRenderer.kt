@@ -1,4 +1,4 @@
-package dev.sebastiano.deck
+package dev.sebastiano.ciacola
 
 import androidx.compose.animation.core.Transition
 import androidx.compose.foundation.layout.fillMaxWidth

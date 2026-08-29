@@ -1,4 +1,4 @@
-package dev.sebastiano.deck
+package dev.sebastiano.ciacola
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.ExperimentalTransitionApi
@@ -92,7 +92,7 @@ object DeckDesign {
 fun createFoundationDeck(
     textRenderer: DeckTextRenderer = MagicTextV1Renderer,
 ): Storyboard = Storyboard.build(
-    title = "Conference deck — foundation spike",
+    title = "Ciacola",
     description = "Provisional scenes proving the presentation architecture; not talk narrative.",
     format = DeckDesign.format,
     decorator = deckDecorator(textRenderer),
