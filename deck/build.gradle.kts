@@ -1,4 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JvmVendorSpec
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -35,9 +37,15 @@ kotlin {
     }
 }
 
+val jbr25 = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(25)
+    vendor = JvmVendorSpec.JETBRAINS
+}
+
 compose.desktop {
     application {
         mainClass = "dev.sebastiano.ciacola.MainKt"
+        javaHome = jbr25.get().metadata.installationPath.asFile.absolutePath
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Ciacola"

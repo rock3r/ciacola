@@ -24,16 +24,11 @@ All visible copy is marked provisional on purpose.
 
 ## Run it
 
-The build needs JDK 21. On a machine where that is already the default:
+The build uses a JetBrains Runtime 25 toolchain for the desktop application. Gradle downloads it
+automatically when necessary:
 
 ```shell
 ./gradlew :deck:run
-```
-
-Otherwise, point Gradle at a JDK 21 installation:
-
-```shell
-JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew :deck:run
 ```
 
 Use the left and right arrow keys to move through the deck.

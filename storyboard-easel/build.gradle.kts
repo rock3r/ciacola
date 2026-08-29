@@ -32,6 +32,7 @@ kotlin {
         jvmMain {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(libs.filekit.core)
                 implementation(libs.filekit.compose)
                 implementation(libs.pdfbox)
             }

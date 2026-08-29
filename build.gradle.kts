@@ -2,6 +2,7 @@ import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.dokka.gradle.engine.parameters.VisibilityModifier
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 
@@ -37,10 +38,6 @@ allprojects {
         extensions.configure<KotlinMultiplatformExtension> {
             sourceSets.all {
                 languageSettings {
-                    enableLanguageFeature("ContextParameters")
-                    enableLanguageFeature("WhenGuards")
-                    enableLanguageFeature("MultiDollarInterpolation")
-
                     optIn("kotlinx.coroutines.ExperimentalCoroutinesApi")
                     optIn("kotlin.time.ExperimentalTime")
                     optIn("androidx.compose.animation.core.ExperimentalTransitionApi")
@@ -52,7 +49,7 @@ allprojects {
             targets.withType(KotlinJvmTarget::class.java) {
                 compilerOptions {
                     jvmTarget.set(JvmTarget.fromTarget(javaVersion.toString()))
-                    freeCompilerArgs.add("-Xjvm-default=all")
+                    jvmDefault.set(JvmDefaultMode.NO_COMPATIBILITY)
                 }
             }
         }

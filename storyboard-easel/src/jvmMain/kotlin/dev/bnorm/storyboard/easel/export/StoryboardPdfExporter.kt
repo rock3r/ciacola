@@ -6,7 +6,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.renderComposeScene
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.ScenePreview
-import io.github.vinceglb.filekit.core.FileKit
+import io.github.vinceglb.filekit.FileKit
+import io.github.vinceglb.filekit.dialogs.openFileSaver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -29,12 +30,10 @@ class StoryboardPdfExporter {
     suspend fun export(
         storyboard: Storyboard,
     ) {
-        val file = FileKit.saveFile(
-            bytes = null,
-            baseName = storyboard.title,
-            extension = "pdf",
-            initialDirectory = null,
-            platformSettings = null,
+        val file = FileKit.openFileSaver(
+            suggestedName = storyboard.title,
+            defaultExtension = "pdf",
+            allowedExtensions = setOf("pdf"),
         )
         if (file != null) {
             exportAsPdf(
