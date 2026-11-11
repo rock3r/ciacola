@@ -18,6 +18,7 @@ dependencyResolutionManagement {
     repositories {
         mavenCentral()
         google()
+        maven(url = uri("https://www.jetbrains.com/intellij-repository/releases"))
         maven(url = uri("https://repo.eclipse.org/content/repositories/tm4e-snapshots/")) {
             mavenContent {
                 includeGroupAndSubgroups("org.eclipse")

@@ -1,11 +1,12 @@
 package dev.sebastiano.ciacola
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.Button
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,12 +30,17 @@ import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Rectangle
 import java.awt.Robot
 import java.io.File
 import javax.imageio.ImageIO
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.jetbrains.jewel.foundation.theme.JewelTheme
+import org.jetbrains.jewel.ui.component.GroupHeader
+import org.jetbrains.jewel.ui.component.InfoText
+import org.jetbrains.jewel.ui.component.RadioButtonRow
 
 fun main() = application {
     var preset by remember {
@@ -158,33 +164,52 @@ private fun rememberThemeSwitcherWindow(
 
         @Composable
         override fun MenuScope.Menu() {
-            Item(
-                text = if (currentPreset == DeckThemePreset.StageDark) "✓ Stage Dark" else "Stage Dark",
+            RadioButtonItem(
+                text = "Stage Dark",
+                selected = currentPreset == DeckThemePreset.StageDark,
                 onClick = { onSelectPreset(DeckThemePreset.StageDark) },
             )
-            Item(
-                text = if (currentPreset == DeckThemePreset.KeynoteLight) "✓ Keynote Light" else "Keynote Light",
+            RadioButtonItem(
+                text = "Keynote Light",
+                selected = currentPreset == DeckThemePreset.KeynoteLight,
                 onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
             )
             Separator()
-            Item(
-                text = if (visible) "Hide Theme Inspector" else "Show Theme Inspector",
-                onClick = { visible = !visible },
+            CheckboxItem(
+                text = "Show Theme Inspector",
+                checked = visible,
+                onCheckedChange = { visible = it },
             )
         }
 
         @Composable
         override fun Content() {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Active preset: ${currentPreset.name}")
-                Button(onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) }) {
-                    Text("Switch to Keynote Light")
-                }
-                Button(onClick = { onSelectPreset(DeckThemePreset.StageDark) }) {
-                    Text("Switch to Stage Dark")
+            val isDark = currentPreset == DeckThemePreset.StageDark
+            CiacolaJewelTheme(isDark = isDark) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(JewelTheme.globalColors.panelBackground)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    GroupHeader("Deck theme preset:")
+                    Column(
+                        modifier = Modifier.selectableGroup(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        RadioButtonRow(
+                            text = "Stage Dark",
+                            selected = currentPreset == DeckThemePreset.StageDark,
+                            onClick = { onSelectPreset(DeckThemePreset.StageDark) },
+                        )
+                        RadioButtonRow(
+                            text = "Keynote Light",
+                            selected = currentPreset == DeckThemePreset.KeynoteLight,
+                            onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
+                        )
+                    }
+                    InfoText("Switches slide stage, code cards, and Jewel chrome live without losing slide position.")
                 }
             }
         }

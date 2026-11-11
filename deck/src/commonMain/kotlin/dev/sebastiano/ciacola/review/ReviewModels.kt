@@ -83,7 +83,7 @@ data class RegisteredTargetSnapshot(
     val stageBounds: Rect,
 )
 
-private const val MIN_REGION_DRAG_PX = 16f
+private const val MIN_REGION_DRAG_PX = 48f
 private const val MAX_SNIPPET_CHARS = 1_200
 
 fun normalizeDragRect(start: Offset, end: Offset): Rect = Rect(

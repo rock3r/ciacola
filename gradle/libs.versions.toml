@@ -2,6 +2,8 @@
 antlr-kotlin = "1.0.13"
 compose-jb = "1.12.0"
 compose-hot-reload = "1.2.0"
+jewel = "0.41.0-262.10968.63"
+intellij-icons = "262.10968.63"
 kotlin = "2.4.10"
 ktor = "3.5.2"
 collection = "1.6.0"
@@ -30,6 +32,8 @@ jetbrains-annotations = { module = "org.jetbrains:annotations", version.ref = "a
 antlr-kotlin-runtime = { module = "com.strumenta:antlr-kotlin-runtime", version.ref = "antlr-kotlin" }
 compose-materialIcons = { module = "org.jetbrains.compose.material:material-icons-core", version = "1.7.3" }
 compose-hotReload-runtimeApi = { module = "org.jetbrains.compose.hot-reload:hot-reload-runtime-api", version.ref = "compose-hot-reload" }
+jewel-int-ui-standalone = { module = "org.jetbrains.jewel:jewel-int-ui-standalone", version.ref = "jewel" }
+intellij-icons = { module = "com.jetbrains.intellij.platform:icons", version.ref = "intellij-icons" }
 filekit-core = { module = "io.github.vinceglb:filekit-core", version.ref = "filekit" }
 filekit-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
 kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version = "0.5.2" }

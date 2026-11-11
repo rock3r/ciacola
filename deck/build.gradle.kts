@@ -38,6 +38,8 @@ kotlin {
         getByName("desktopMain") {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(libs.jewel.int.ui.standalone)
+                implementation(libs.intellij.icons)
             }
         }
         getByName("desktopTest") {
@@ -61,6 +63,10 @@ compose.resources {
 val jbr25 = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(25)
     vendor = JvmVendorSpec.JETBRAINS
+}
+
+tasks.withType<Test>().configureEach {
+    javaLauncher.set(jbr25)
 }
 
 compose.desktop {

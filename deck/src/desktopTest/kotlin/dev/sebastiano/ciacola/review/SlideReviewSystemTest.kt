@@ -9,20 +9,22 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
-import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.Easel
+import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.bnorm.storyboard.plus
 import dev.sebastiano.ciacola.createFoundationDeck
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
@@ -125,7 +127,9 @@ class SlideReviewSystemTest {
 
                 Box(Modifier.size(960.dp, 540.dp)) {
                     reviewWindow.decorator.decorate {
-                        Easel(animatic)
+                        EaselOverview(animatic) {
+                            Easel(animatic)
+                        }
                     }
                 }
             }
@@ -133,25 +137,32 @@ class SlideReviewSystemTest {
             waitForIdle()
 
             // Simulate macOS Ctrl + Click (which delivers Ctrl modifier + Secondary mouse button!)
-            onNodeWithTag("ciacola-review-stage").performKeyInput {
+            onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performKeyInput {
                 keyDown(Key.CtrlLeft)
             }
-            onNodeWithTag("ciacola-review-stage").performMouseInput {
+            onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performMouseInput {
                 click(
                     position = Offset(300f, 240f),
                     button = MouseButton.Secondary,
                 )
             }
-            onNodeWithTag("ciacola-review-stage").performKeyInput {
+            onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performKeyInput {
                 keyUp(Key.CtrlLeft)
             }
             waitForIdle()
+            mainClock.advanceTimeBy(300)
+            waitForIdle()
 
-            // Floating comment composer should open and accept feedback text.
-            onNodeWithTag("ciacola-review-note-input")
-                .performTextInput("Make this headline punchier and warm coral")
-            onNodeWithTag("ciacola-review-send-button")
-                .performClick()
+            // Prove keyboard focus genuinely stays on Jewel's TextArea inside EaselOverview (no focus theft!).
+            onNodeWithTag("ciacola-review-note-input").assertIsFocused()
+            onNodeWithTag("ciacola-review-note-input").performTextInput("Make this headline punchier and warm coral")
+
+            // Submit via real Ctrl+Enter keyboard shortcut!
+            onNodeWithTag("ciacola-review-note-input").performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.Enter)
+                keyUp(Key.CtrlLeft)
+            }
 
             waitUntil(timeoutMillis = 5_000) {
                 store.comments.isNotEmpty() && dispatchLog.exists()
@@ -171,6 +182,58 @@ class SlideReviewSystemTest {
             assertTrue(logText.contains("conv-test-42"))
             assertTrue(logText.contains("Make this headline punchier and warm coral"))
         }
+
+    @Test
+    fun pressingEscapeClosesOpenCommentPopupWithoutTriggeringEaselOverviewGrid() = runComposeUiTest {
+        val tempRoot = Files.createTempDirectory("ciacola-review-esc")
+        val storyboardDir = tempRoot.resolve(".storyboard").also { Files.createDirectories(it) }
+        val store = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
+
+        setContent {
+            val stageCoordinator = rememberReviewStageCoordinator()
+            val deck = createFoundationDeck(
+                includeKeynoteEffectsLab = true,
+                stageDecorator = stageCoordinator.stageDecorator,
+            )
+            val animatic = rememberAnimatic(storyboard = { deck })
+            val reviewWindow = rememberSlideReviewWindow(
+                animatic = animatic,
+                store = store,
+                stageCoordinator = stageCoordinator,
+            )
+
+            Box(Modifier.size(960.dp, 540.dp)) {
+                reviewWindow.decorator.decorate {
+                    EaselOverview(animatic) {
+                        Easel(animatic)
+                    }
+                }
+            }
+        }
+
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performKeyInput { keyDown(Key.CtrlLeft) }
+        onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performMouseInput {
+            click(position = Offset(320f, 240f), button = MouseButton.Secondary)
+        }
+        onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performKeyInput { keyUp(Key.CtrlLeft) }
+        waitForIdle()
+        mainClock.advanceTimeBy(300)
+        waitForIdle()
+
+        onNodeWithTag("ciacola-review-note-input").assertIsFocused()
+
+        // Press Escape (KeyDown + KeyUp) while the comment box is open: must close popup AND keep Story stage!
+        onNodeWithTag("ciacola-review-note-input").performKeyInput {
+            pressKey(Key.Escape)
+        }
+        waitForIdle()
+        mainClock.advanceTimeBy(350)
+        waitForIdle()
+
+        assertEquals(0, onAllNodesWithTag("ciacola-review-note-input").fetchSemanticsNodes().size)
+        onNodeWithTag("ciacola-review-stage").assertIsDisplayed()
+    }
 
     @Test
     fun storeReloadsAgentAppliedResolutionFromDiskWithoutLosingComments() = runBlocking {
