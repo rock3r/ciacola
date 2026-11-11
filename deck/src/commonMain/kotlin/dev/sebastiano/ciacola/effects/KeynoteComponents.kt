@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.layout.decorated.Decoration
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
+import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 
 @Composable
@@ -53,7 +54,13 @@ fun DottedLeaderRow(
 ) {
     val theme = LocalDeckTheme.current
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .reviewTarget(
+                kind = "DottedLeaderRow",
+                label = "$leading → $trailing",
+                textSnippet = "$leading … $trailing",
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
@@ -93,6 +100,7 @@ fun KeynoteStamp(
     val shape = RoundedCornerShape(stampStyle.cornerRadius)
     Box(
         modifier = modifier
+            .reviewTarget(kind = "KeynoteStamp", label = text, textSnippet = text)
             .background(color.copy(alpha = 0.14f), shape)
             .border(stampStyle.borderWidth, color, shape)
             .padding(
@@ -118,7 +126,11 @@ fun DetourSign(
     val badge = theme.styles.detourBadge
     val signShape = RoundedCornerShape(badge.cornerRadius)
     Column(
-        modifier = modifier,
+        modifier = modifier.reviewTarget(
+            kind = "DetourSign",
+            label = "$symbol $label",
+            textSnippet = label,
+        ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {

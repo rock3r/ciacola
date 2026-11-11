@@ -27,6 +27,7 @@ import dev.bnorm.storyboard.State
 import dev.bnorm.storyboard.Token
 import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
+import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 
@@ -61,11 +62,18 @@ fun DeckWarpCodeCard(
         }
     }
 
+    val currentCodeSnippet = codeStates[stateTransition.targetState.coerceIn(0, codeStates.lastIndex)]
     val shape = RoundedCornerShape(cardStyle.cornerRadius)
     Surface(
         color = palette.background,
         shape = shape,
-        modifier = modifier.border(cardStyle.borderWidth, theme.colors.border, shape),
+        modifier = modifier
+            .reviewTarget(
+                kind = "WarpCodeCard",
+                label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
+                textSnippet = currentCodeSnippet,
+            )
+            .border(cardStyle.borderWidth, theme.colors.border, shape),
     ) {
         SharedTransitionLayout(Modifier.padding(cardStyle.padding)) {
             stateTransition.AnimatedContent(

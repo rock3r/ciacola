@@ -24,6 +24,9 @@ import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.EaselWindow
 import dev.bnorm.storyboard.easel.assist.rememberAssistantWindow
 import dev.bnorm.storyboard.easel.rememberAnimatic
+import dev.sebastiano.ciacola.review.ReviewCommentStore
+import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
+import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
 import java.awt.Rectangle
@@ -54,11 +57,14 @@ fun main() = application {
     ) {
         val smokeDirectory = System.getenv("DECK_VISUAL_SMOKE_DIR")
         if (smokeDirectory == null) {
-            val storyboard = rememberHotReloadStoryboard(preset) {
+            val reviewStore = remember { ReviewCommentStore() }
+            val reviewStageCoordinator = rememberReviewStageCoordinator()
+            val storyboard = rememberHotReloadStoryboard(preset, reviewStageCoordinator) {
                 createFoundationDeck(
                     theme = hostTheme,
                     bundledPreset = preset,
                     includeKeynoteEffectsLab = true,
+                    stageDecorator = reviewStageCoordinator.stageDecorator,
                 )
             }
             val animatic = rememberAnimatic(
@@ -69,9 +75,15 @@ fun main() = application {
                 currentPreset = preset,
                 onSelectPreset = { preset = it },
             )
+            val reviewWindow = rememberSlideReviewWindow(
+                animatic = animatic,
+                store = reviewStore,
+                stageCoordinator = reviewStageCoordinator,
+                currentPresetProvider = { preset },
+            )
             DesktopEasel(
                 animatic = animatic,
-                windows = listOf(rememberAssistantWindow(animatic), themeWindow),
+                windows = listOf(rememberAssistantWindow(animatic), themeWindow, reviewWindow),
             )
         } else {
             val storyboard = rememberHotReloadStoryboard(preset) {

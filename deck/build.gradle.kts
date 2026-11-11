@@ -5,6 +5,7 @@ import org.gradle.jvm.toolchain.JvmVendorSpec
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.plugin.compose)
+    alias(libs.plugins.kotlin.plugin.serialization)
     alias(libs.plugins.compose)
 }
 
@@ -23,8 +24,10 @@ kotlin {
                 implementation(project(":storyboard-text"))
                 implementation(project(":storyboard-warp"))
                 implementation(compose.material)
+                implementation(libs.compose.materialIcons)
                 implementation(compose.components.resources)
                 implementation(libs.compose.hotReload.runtimeApi)
+                implementation(libs.kotlinx.serialization.json)
             }
         }
         commonTest {

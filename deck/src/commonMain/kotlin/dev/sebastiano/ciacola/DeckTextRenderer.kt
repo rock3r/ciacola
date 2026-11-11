@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import dev.bnorm.storyboard.text.magic.MagicText
+import dev.sebastiano.ciacola.review.reviewTarget
 
 interface DeckTextRenderer {
     @Composable
@@ -51,5 +52,11 @@ fun DeckMagicText(
     modifier: Modifier = Modifier.fillMaxWidth(),
     style: TextStyle = DeckDesign.body,
 ) {
-    LocalDeckTextRenderer.current.AnimatedText(transition, modifier, style)
+    val currentText = transition.targetState.text
+    val taggedModifier = modifier.reviewTarget(
+        kind = "MagicText",
+        label = currentText.take(48).ifBlank { "MagicText" },
+        textSnippet = currentText,
+    )
+    LocalDeckTextRenderer.current.AnimatedText(transition, taggedModifier, style)
 }

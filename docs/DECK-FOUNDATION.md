@@ -56,6 +56,12 @@ CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
   window UI compositions automatically), while `rememberAnimatic` and `AnimaticPersistenceEffect`
   retain and scene-clamp `(sceneIndex, frameIndex)` across `Storyboard` rebuilds without
   overwriting `.storyboard/animatic.json`.
+- **Interactive Ctrl-click slide review (`dev.sebastiano.ciacola.review`):** Holding `Ctrl`
+  (or toggling `F3` Inspect Mode) highlights slide targets in `1920×1080` stage space; `Ctrl+Click`
+  or `Ctrl+Drag` captures a clean annotated `GraphicsLayer` PNG (`.storyboard/review-captures/`),
+  opens an inline comment composer, persists `.storyboard/review-comments.json`, and dispatches
+  feedback to the active agent conversation via `agentapi send-message` so edits hot-reload in
+  place via `:deck:reload` and flip numbered stage pins green (`✓ Applied`).
 
 ## Source orientation and attribution
 
@@ -120,8 +126,10 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
 - `:storyboard-text:jvmTest --tests '*MagicText*Test'`: passed (12 focused tests).
 - `:storyboard-easel:jvmTest --tests '*AnimaticHotReloadPersistenceTest'`: passed (hot-reload slide
   and build retention + clamping without clobbering disk state).
-- `:deck:desktopTest`: passed (11 tests across `FoundationDeckTest`, `DeckThemeTest`, and
-  `KeynoteEffectsTest`, including pixel-verified `LineDraw` decorations and 5-build lab navigation).
+- `:deck:desktopTest`: passed (14 tests across `FoundationDeckTest`, `DeckThemeTest`,
+  `KeynoteEffectsTest`, and `SlideReviewSystemTest`, including pixel-verified `LineDraw`
+  decorations, 5-build lab navigation, macOS `Ctrl+Click` secondary-button composer capture,
+  `agentapi` dispatch without `ANTIGRAVITY_SOURCE_METADATA`, and live resolution hot-sync).
 - `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passed, including
   all JVM suites, Wasm compilation, and API checks. The unmodified upstream browser task cannot run
   in this image because it requests ChromeHeadless and only Firefox is installed; a literal `check`

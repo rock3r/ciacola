@@ -37,6 +37,7 @@ import dev.bnorm.storyboard.StoryboardBuilder
 import dev.bnorm.storyboard.easel.rememberSharedContentState
 import dev.bnorm.storyboard.easel.sharedBounds
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
+import dev.bnorm.storyboard.plus
 import dev.bnorm.storyboard.text.highlight.CodeStyle
 import dev.bnorm.storyboard.text.highlight.Language
 import dev.bnorm.storyboard.text.highlight.highlight
@@ -55,6 +56,8 @@ import dev.sebastiano.ciacola.effects.keynoteFadeMove
 import dev.sebastiano.ciacola.effects.keynoteFromDarkness
 import dev.sebastiano.ciacola.effects.keynotePop
 import dev.sebastiano.ciacola.effects.keynoteSpotlight
+import dev.sebastiano.ciacola.review.ReportSceneHeader
+import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
@@ -112,11 +115,12 @@ fun createFoundationDeck(
     theme: DeckTheme = DeckThemes.stageDark(),
     bundledPreset: DeckThemePreset? = null,
     includeKeynoteEffectsLab: Boolean = false,
+    stageDecorator: ContentDecorator = ContentDecorator.None,
 ): Storyboard = Storyboard.build(
     title = "Ciacola",
     description = "Provisional scenes proving the presentation architecture; not talk narrative.",
     format = DeckDesign.format,
-    decorator = deckDecorator(textRenderer, theme, bundledPreset),
+    decorator = deckDecorator(textRenderer, theme, bundledPreset) + stageDecorator,
 ) {
     beatsScene()
     sharedMoveScene()
@@ -381,13 +385,21 @@ private fun FoundationFrame(
     contentPadding: Int = LocalDeckTheme.current.styles.slidePadding.value.toInt(),
     content: @Composable BoxScope.() -> Unit,
 ) {
+    ReportSceneHeader(eyebrow)
     val theme = LocalDeckTheme.current
-    Box(Modifier.fillMaxSize().padding(contentPadding.dp)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .padding(contentPadding.dp)
+            .reviewTarget(kind = "Frame", label = eyebrow, isContainer = true),
+    ) {
         Text(
             eyebrow,
             color = theme.colors.muted,
             style = theme.typography.eyebrow,
-            modifier = Modifier.align(Alignment.TopStart),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .reviewTarget(kind = "Eyebrow", label = eyebrow, textSnippet = eyebrow),
         )
         Box(Modifier.fillMaxSize().padding(top = 56.dp), content = content)
     }
