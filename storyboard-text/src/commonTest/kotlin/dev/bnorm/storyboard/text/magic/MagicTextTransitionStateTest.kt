@@ -1,54 +1,62 @@
 package dev.bnorm.storyboard.text.magic
 
 import androidx.compose.ui.text.AnnotatedString
-import kotlin.concurrent.atomics.AtomicLong
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
-@OptIn(ExperimentalAtomicApi::class)
 class MagicTextTransitionStateTest {
     @Test
-    fun forwardAndBackwardTransitionsReuseSettledKeys() {
-        val initial = keyed("alpha", "beta")
-        val state = MagicTextTransitionState(AtomicLong(0), initial)
+    fun planIsAPureFunctionOfTheFromToPairRegardlessOfHistory() {
+        val a = tokens("A", " ", "scene", " ", "begins")
+        val b = tokens("A", " ", "scene", " ", "advances")
+        val c = tokens("The", " ", "same", " ", "path")
 
-        val forward = state.plan(tokens("beta", "alpha", "new"))
-        state.settle(forward)
-        val backward = state.plan(tokens("alpha", "beta"))
+        val first = MagicTextPlanner.plan(a, b)
+        // Plan unrelated pairs in between (forward, backward, and repeated targets).
+        MagicTextPlanner.plan(b, c)
+        MagicTextPlanner.plan(c, b)
+        MagicTextPlanner.plan(b, a)
+        val again = MagicTextPlanner.plan(a, b)
 
-        assertEquals(listOf("initial:0", "initial:1"), backward.map { it.key })
+        assertEquals(first.source.map { it.key to it.crossFade }, again.source.map { it.key to it.crossFade })
+        assertEquals(first.target.map { it.key to it.crossFade }, again.target.map { it.key to it.crossFade })
     }
 
     @Test
-    fun interruptedTargetReusesTheExactPreviouslyPlannedState() {
-        val state = MagicTextTransitionState(AtomicLong(0), keyed("stable"))
+    fun matchedTokensShareKeysAcrossSourceAndTargetAndUnmatchedTokensDoNot() {
+        val plan = MagicTextPlanner.plan(tokens("alpha", " ", "beta"), tokens("beta", " ", "alpha", " ", "new"))
+        val sourceKeys = plan.source.associate { it.value.text to it.key }
+        val targetByText = plan.target.groupBy { it.value.text }
 
-        val firstAttempt = state.plan(tokens("stable", "inserted"))
-        state.plan(tokens("stable", "other"))
-        val resumedAttempt = state.plan(tokens("stable", "inserted"))
-
-        assertSame(firstAttempt, resumedAttempt)
-        assertEquals(firstAttempt.map { it.key }, resumedAttempt.map { it.key })
+        assertEquals(sourceKeys["alpha"], targetByText.getValue("alpha").single().key)
+        assertEquals(sourceKeys["beta"], targetByText.getValue("beta").single().key)
+        assertTrue(targetByText.getValue("new").single().key !in sourceKeys.values)
     }
 
     @Test
-    fun onlyACompletedTransitionBecomesTheNextCorrespondenceBaseline() {
-        val state = MagicTextTransitionState(AtomicLong(0), keyed("origin"))
-        val interrupted = state.plan(tokens("origin", "temporary"))
+    fun settledStateKeepsTheSameKeysItStartsItsNextTransitionWith() {
+        val settled = tokens("origin", " ", "text")
+        val settledPlan = MagicTextPlanner.plan(settled, settled)
+        val nextPlan = MagicTextPlanner.plan(settled, tokens("origin", " ", "changed"))
 
-        val withoutSettlement = state.plan(tokens("temporary"))
-        assertNotEquals(interrupted.last().key, withoutSettlement.single().key)
-
-        state.settle(interrupted)
-        val afterSettlement = state.plan(tokens("temporary"))
-        assertEquals(interrupted.last().key, afterSettlement.single().key)
+        assertEquals(settledPlan.source.map { it.key }, nextPlan.source.map { it.key })
+        assertEquals(settledPlan.source, settledPlan.target)
     }
 
-    private fun keyed(vararg values: String): List<SharedText> =
-        values.mapIndexed { index, value -> SharedText(AnnotatedString(value), "initial:$index") }
+    @Test
+    fun planningOnePairNeverMutatesAnotherPairsSourceFlags() {
+        val from = tokens("keep", " ", "styled")
+        val styledTarget = listOf(AnnotatedString("keep"), AnnotatedString(" "), AnnotatedString.Builder().apply {
+            append("styled")
+            addStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), 0, 6)
+        }.toAnnotatedString())
+
+        val plain = MagicTextPlanner.plan(from, tokens("keep", " ", "plain"))
+        val flagsBefore = plain.source.map { it.crossFade }
+        MagicTextPlanner.plan(from, styledTarget)
+        assertEquals(flagsBefore, plain.source.map { it.crossFade })
+    }
 
     private fun tokens(vararg values: String): List<AnnotatedString> = values.map(::AnnotatedString)
 }

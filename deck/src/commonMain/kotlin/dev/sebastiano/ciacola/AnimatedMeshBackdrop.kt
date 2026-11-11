@@ -2,7 +2,9 @@ package dev.sebastiano.ciacola
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
 import dev.sebastiano.ciacola.timeline.rememberDeckLoopMillis
+import dev.sebastiano.ciacola.timeline.timelineTarget
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -79,11 +81,15 @@ fun AnimatedMeshBackdrop(
         label = "Ambient Vertex Mesh",
         periodMillis = periodMillis,
     )
-    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), elapsed))
+    // The mesh choreography is authored over a 6 s cycle; scale the loop clock's position within
+    // the (possibly overridden) period onto it so period overrides stay seamless at the wrap.
+    val effectivePeriod = LocalDeckLoopClock.current.effectivePeriodMillis(loopId, periodMillis)
+    val authoredElapsed = (elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong()
+    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), authoredElapsed))
     val paint = Paint()
 
     androidx.compose.foundation.layout.Box(
-        modifier.drawBehind {
+        modifier.timelineTarget("loop:$loopId").drawBehind {
             drawIntoCanvas { canvas ->
                 scale(size.width, size.height, Offset.Zero) {
                     canvas.drawVertices(

@@ -1,12 +1,15 @@
 package dev.sebastiano.ciacola
 
 import androidx.compose.animation.core.Transition
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.ProvideTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -20,6 +23,7 @@ import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
+import dev.sebastiano.ciacola.timeline.timelineTarget
 
 interface DeckTextRenderer {
     @Composable
@@ -104,5 +108,13 @@ fun DeckMagicText(
         label = currentText.take(48).ifBlank { "MagicText" },
         textSnippet = currentText,
     )
-    LocalDeckTextRenderer.current.AnimatedText(transition, taggedModifier, style)
+    // The timeline target wraps the text's own bounds (not the filled slot) so stage picking and
+    // the selection highlight hug the visible prose.
+    Box(taggedModifier) {
+        LocalDeckTextRenderer.current.AnimatedText(
+            transition,
+            Modifier.wrapContentSize(Alignment.TopStart).timelineTarget(trackId),
+            style,
+        )
+    }
 }

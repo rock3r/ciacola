@@ -12,8 +12,11 @@ The current upstream implementation already has two conceptual stages:
 2. `MagicTextInternal` in `MagicText.kt` consumes that plan with rows of `Text` composables and
    Compose shared bounds.
 
-`MagicTextTransitionState` sits between them. It owns the last settled correspondence baseline and
-cached interrupted plans; it does not render. The deck adds a second, intentionally narrow seam:
+`MagicTextPlanner` sits between them. `plan(from, to)` is a pure function of the two texts: the
+source keeps canonical keys and the target is matched against it, so the same pair always yields
+the same shared-bounds plan regardless of how a scrub or an interrupted transition arrived there
+(no settled baseline, no cached interrupted plans). It does not render. The deck adds a second,
+intentionally narrow seam:
 `DeckTextRenderer`, installed once at the application root. A future implementation replaces that
 single binding. There is no scene-level v1/v2 switch and no presentation beat that changes engines.
 

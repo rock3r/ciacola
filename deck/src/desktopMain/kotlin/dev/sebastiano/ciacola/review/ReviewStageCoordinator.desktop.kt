@@ -61,6 +61,7 @@ import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.LocalStoryboard
 import dev.bnorm.storyboard.easel.SceneMode
+import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.rememberReviewStatusPalette
 import java.awt.Window as AwtWindow
@@ -236,7 +237,9 @@ class ReviewStageCoordinator : ReviewStageBridge {
     }
 
     val stageDecorator: ContentDecorator = ContentDecorator { content ->
-        if (LocalSceneMode.current != SceneMode.Story) {
+        // Offscreen timeline indexing scenes also render in Story mode; they must never take over
+        // (or, when they close, reset) the live stage's coordinates, capture layer, or popups.
+        if (LocalSceneMode.current != SceneMode.Story || LocalTimelineOffscreen.current) {
             content()
             return@ContentDecorator
         }

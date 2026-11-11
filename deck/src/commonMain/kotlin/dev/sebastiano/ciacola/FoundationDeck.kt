@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import dev.bnorm.storyboard.ContentDecorator
@@ -75,6 +76,8 @@ import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.VirtualizedFrame
 import dev.sebastiano.ciacola.timeline.buildVirtualizedFrames
 import dev.sebastiano.ciacola.timeline.deckSharedBounds
+import dev.sebastiano.ciacola.timeline.timelineTarget
+import androidx.compose.animation.AnimatedVisibilityScope
 
 enum class FoundationProof {
     DeterministicNavigation,
@@ -262,6 +265,10 @@ private fun StoryboardBuilder.sharedMoveScene(
     overrides = overrides,
 ) {
     val activeTheme = LocalDeckTheme.current
+    // Scene-level visibility scope: the card entering from Slide 1 must morph against this scope
+    // (the inner expanded/collapsed host is idle during the slide transition).
+    val sceneVisibility: AnimatedVisibilityScope = contextOf<AnimatedVisibilityScope>()
+    val innerMorphing = transition.currentState.toValue().value.expanded != transition.targetState.toValue().value.expanded
     FoundationFrame("SHARED ELEMENT / PROVISIONAL") {
         transition.DeterministicStateHost(
             modifier = Modifier.fillMaxSize(),
@@ -271,17 +278,22 @@ private fun StoryboardBuilder.sharedMoveScene(
         ) { frame ->
             val vf = frame.toValue()
             val expanded = vf.value.expanded
+            val sharedScope = if (innerMorphing) this else sceneVisibility
             Box(Modifier.fillMaxSize()) {
                 Surface(
                     color = activeTheme.colors.accent,
                     shape = RoundedCornerShape(if (expanded) 40.dp else 24.dp),
                     modifier = Modifier
                         .align(if (expanded) Alignment.Center else Alignment.TopStart)
-                        .deckSharedBounds(
-                            sharedKey = "foundation-shared-card",
-                            label = "Shared Card",
-                            defaultDurationMs = activeTheme.motion.sharedBoundsDurationMs,
-                            currentBeatInScene = vf.virtualBeatIndex,
+                        .then(
+                            with(sharedScope) {
+                                Modifier.deckSharedBounds(
+                                    sharedKey = "foundation-shared-card",
+                                    label = "Shared Card",
+                                    defaultDurationMs = activeTheme.motion.sharedBoundsDurationMs,
+                                    currentBeatInScene = vf.virtualBeatIndex,
+                                )
+                            }
                         )
                         .size(if (expanded) 520.dp else 240.dp),
                 ) {
@@ -423,9 +435,11 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     val warpSnippets = remember {
         listOf(
             "fun fade(s: String) {\n  BasicText(s)\n}",
-            "fun fade(s: String, a: Float) {\n  BasicText(s, alpha = a)\n}",
+            "fun fade(\n  s: String,\n  a: Float,\n) {\n  BasicText(s, alpha = a)\n}",
         )
     }
+    // Compact code type for this dense two-column slide, so nothing wraps or clips.
+    val labCode = theme.typography.code.copy(fontSize = 17.sp, lineHeight = 24.sp)
     @OptIn(ExperimentalTransitionApi::class)
     val warpStep = stepTransition.createChildTransition("warp-idx") { if (it >= 3) 1 else 0 }
 
@@ -472,26 +486,31 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                         color = theme.colors.foreground,
                         modifier = Modifier
                             .decorate("optimistic-claim")
+                            .timelineTarget("lab-strikeout-loupe")
                             .keynoteSpotlight(dimProgress = { calloutBuild * (1f - reversalBuild) }),
                     )
                     DottedLeaderRow(
                         leading = "Web",
                         trailing = "<span style=\"opacity\">",
+                        trailingStyle = labCode,
                         modifier = Modifier
                             .keynoteFadeMoveTracked(
                                 trackId = "lab-leader-stagger",
                                 progress = { staggerRows.progressFor(0) },
+                                itemIndex = 0,
                             )
                             .keynoteSpotlight(dimProgress = { calloutBuild }),
                     )
                     DottedLeaderRow(
                         leading = "Compose",
                         trailing = "BasicText(AnnotatedString)",
+                        trailingStyle = labCode,
                         highlightTrailing = stampBuild > 0.2f,
                         trailingModifier = Modifier.decorate("compose-target"),
                         modifier = Modifier.keynoteFadeMoveTracked(
                             trackId = "lab-leader-stagger",
                             progress = { staggerRows.progressFor(1) },
+                            itemIndex = 1,
                         ),
                     )
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
@@ -499,6 +518,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                             text = "IMMUTABLE",
                             modifier = Modifier
                                 .decorate("immutable-stamp")
+                                .timelineTarget("lab-immutable-stamp")
                                 .keynotePop(progress = { stampBuild }),
                         )
                     }
@@ -508,12 +528,15 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                     modifier = Modifier
                         .weight(0.96f)
                         .decorate("warp-card")
+                        // The card fades in with stagger item 2 and is outlined by the callout build.
+                        .timelineTarget("lab-warp-callout", "lab-leader-stagger", "lab-leader-stagger#item1")
                         .keynoteFromDarkness(progress = { staggerRows.progressFor(1) }),
                 ) {
                     DeckWarpCodeCard(
                         codeStates = warpSnippets,
                         stateTransition = warpStep,
                         modifier = Modifier.fillMaxWidth(),
+                        textStyle = labCode.copy(fontSize = 18.sp, lineHeight = 26.sp),
                     )
                 }
             }

@@ -11,10 +11,12 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.AnnotatedString
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmName
+import kotlin.math.roundToInt
 
 const val DefaultMoveDurationMillis = 300
 const val DefaultFadeDurationMillis = 300
@@ -71,14 +73,13 @@ fun MagicText(
     fadeDurationMillis: Int = DefaultFadeDurationMillis,
     delayDurationMillis: Int = DefaultDelayDurationMillis,
 ) {
-    val child = transition.createSharedTextTransition()
-    MagicTextInternal(child, modifier, fadeDurationMillis, moveDurationMillis, delayDurationMillis)
+    MagicTextInternal(transition, modifier, fadeDurationMillis, moveDurationMillis, delayDurationMillis)
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MagicTextInternal(
-    transition: Transition<List<SharedText>>,
+    transition: Transition<List<AnnotatedString>>,
     modifier: Modifier,
     fadeDuration: Int, // Millis
     moveDuration: Int, // Millis
@@ -86,16 +87,29 @@ private fun MagicTextInternal(
 ) {
     val moveDelay = delayDuration + fadeDuration
     val fadeInDelay = 2 * delayDuration + fadeDuration + moveDuration
+    val totalDuration = fadeInDelay + fadeDuration
+
+    // The correspondence plan is a pure function of the (from, to) pair, so a seek renders the same
+    // frame no matter which states were visited before (timeline scrubbing depends on this).
+    val from = transition.currentState
+    val to = transition.targetState
+    val plan = remember(from, to) {
+        MagicTextPlanner.plan(from.flatMap { toLines(it) }, to.flatMap { toLines(it) })
+    }
+    val sizeProgress = transition.animateFloat(
+        transitionSpec = { tween(totalDuration, easing = EaseInOut) },
+        label = "MagicTextSize",
+    ) { if (it == transition.targetState) 1f else 0f }
 
     SharedTransitionLayout(modifier) {
-        transition.AnimatedContent(
-            transitionSpec = {
-                fadeIn(tween(fadeDuration, delayMillis = fadeInDelay, easing = EaseInCubic)) togetherWith
-                        fadeOut(tween(fadeDuration, easing = EaseOutCubic)) using
-                        SizeTransform(clip = false)
-            },
-            modifier = Modifier.wrapContentSize(align = Alignment.TopStart, unbounded = true)
-        ) { parts ->
+        transition.SeekSafeTokenHost(
+            sizeProgress = sizeProgress,
+            enter = fadeIn(tween(fadeDuration, delayMillis = fadeInDelay, easing = EaseInCubic)),
+            exit = fadeOut(tween(fadeDuration, easing = EaseOutCubic)),
+            modifier = Modifier.wrapContentSize(align = Alignment.TopStart, unbounded = true),
+        ) { tokens ->
+            val parts = if (from != to && tokens == to) plan.target else plan.source
+
             @Composable
             fun SharedText.toModifier(): Modifier {
                 return if (key == null) {
@@ -103,7 +117,7 @@ private fun MagicTextInternal(
                 } else {
                     Modifier.sharedBounds(
                         rememberSharedContentState(key),
-                        animatedVisibilityScope = this@AnimatedContent,
+                        animatedVisibilityScope = this@SeekSafeTokenHost,
                         enter =
                             if (crossFade) fadeIn(tween(moveDuration, delayMillis = moveDelay, easing = EaseInOut))
                             else EnterTransition.None,
@@ -139,41 +153,73 @@ private fun MagicTextInternal(
     }
 }
 
-@OptIn(ExperimentalAtomicApi::class)
+/**
+ * Seek-safe replacement for `AnimatedContent`: mounts only the transition's current and target
+ * states (never a queue of stale states), and interpolates the container size between them with a
+ * transition-driven [sizeProgress], so every frame is a pure function of the transition position.
+ */
 @Composable
-private fun Transition<List<AnnotatedString>>.createSharedTextTransition(): Transition<List<SharedText>> {
-    val key: AtomicLong = remember { AtomicLong(0) }
-    val state = remember { MagicTextTransitionState(key) }
-    val child = createChildTransition("SharedText") { targetState ->
-        state.plan(targetState.flatMap { toLines(it) })
-    }
-
-    if (child.currentState == child.targetState) {
-        SideEffect {
-            state.settle(child.currentState)
+private fun <S> Transition<S>.SeekSafeTokenHost(
+    sizeProgress: State<Float>,
+    enter: EnterTransition,
+    exit: ExitTransition,
+    modifier: Modifier = Modifier,
+    content: @Composable AnimatedVisibilityScope.(S) -> Unit,
+) {
+    val from = currentState
+    val to = targetState
+    val active = if (from == to) listOf(to) else listOf(from, to)
+    Layout(
+        modifier = modifier,
+        content = {
+            for (state in active) {
+                key(state) {
+                    AnimatedVisibility(
+                        visible = { it == state },
+                        enter = enter,
+                        exit = exit,
+                    ) {
+                        content(state)
+                    }
+                }
+            }
+        },
+    ) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints) }
+        val (width, height) = if (placeables.size == 2) {
+            val p = sizeProgress.value.coerceIn(0f, 1f)
+            val w = placeables[0].width + (placeables[1].width - placeables[0].width) * p
+            val h = placeables[0].height + (placeables[1].height - placeables[0].height) * p
+            w.roundToInt() to h.roundToInt()
+        } else {
+            (placeables.firstOrNull()?.width ?: 0) to (placeables.firstOrNull()?.height ?: 0)
+        }
+        layout(width.coerceIn(constraints.minWidth, constraints.maxWidth), height.coerceIn(constraints.minHeight, constraints.maxHeight)) {
+            placeables.forEach { it.place(0, 0) }
         }
     }
-
-    return child
 }
 
+internal class MagicTextPlan(
+    val source: List<SharedText>,
+    val target: List<SharedText>,
+)
+
+/**
+ * Pure, history-free correspondence planning. The source side always uses canonical, index-derived
+ * keys, so a settled state keeps the same keys it will start its next transition with, and the
+ * target side derives its keys from that canonical source. Planning never mutates shared inputs.
+ */
 @OptIn(ExperimentalAtomicApi::class)
-internal class MagicTextTransitionState(
-    private val key: AtomicLong,
-    initialState: List<SharedText> = emptyList(),
-) {
-    private var settledState = initialState
-    private val interruptedPlans = mutableMapOf<List<AnnotatedString>, List<SharedText>>()
+internal object MagicTextPlanner {
+    fun canonical(tokens: List<AnnotatedString>): List<SharedText> =
+        tokens.mapIndexed { index, value -> SharedText(value, "c:$index") }
 
-    fun plan(target: List<AnnotatedString>): List<SharedText> {
-        return interruptedPlans.getOrPut(target) { findShared(key, settledState, target) }
-    }
-
-    fun settle(state: List<SharedText>) {
-        if (settledState === state) return
-        settledState = state
-        interruptedPlans.clear()
-        interruptedPlans[state.map { it.value }] = state
+    fun plan(from: List<AnnotatedString>, to: List<AnnotatedString>): MagicTextPlan {
+        val source = canonical(from)
+        if (from == to) return MagicTextPlan(source, source)
+        val target = findShared(AtomicLong(0), source, to)
+        return MagicTextPlan(source, target)
     }
 }
 

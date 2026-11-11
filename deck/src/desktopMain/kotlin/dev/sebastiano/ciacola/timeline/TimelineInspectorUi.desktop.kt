@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.hypot
@@ -38,10 +39,13 @@ import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.GroupHeader
+import org.jetbrains.jewel.ui.component.Icon
+import org.jetbrains.jewel.ui.component.IconButton
 import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
 import org.jetbrains.jewel.ui.typography
 
@@ -349,26 +353,27 @@ private fun NumericStepperRow(
     onInc: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().height(26.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = JewelTheme.typography.small, color = JewelTheme.globalColors.text.info)
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedButton(onClick = onDec, modifier = Modifier.testTag(decTag)) {
-                Text("−", style = JewelTheme.typography.small)
+            IconButton(onClick = onDec, modifier = Modifier.size(22.dp).testTag(decTag)) {
+                Icon(AllIconsKeys.General.Remove, contentDescription = "Decrease $label", modifier = Modifier.size(12.dp))
             }
             Text(
                 text = valueText,
                 style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
                 color = JewelTheme.globalColors.text.normal,
-                modifier = Modifier.padding(horizontal = 4.dp),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(58.dp).testTag("$decTag-value"),
             )
-            OutlinedButton(onClick = onInc, modifier = Modifier.testTag(incTag)) {
-                Text("+", style = JewelTheme.typography.small)
+            IconButton(onClick = onInc, modifier = Modifier.size(22.dp).testTag(incTag)) {
+                Icon(AllIconsKeys.General.Add, contentDescription = "Increase $label", modifier = Modifier.size(12.dp))
             }
         }
     }

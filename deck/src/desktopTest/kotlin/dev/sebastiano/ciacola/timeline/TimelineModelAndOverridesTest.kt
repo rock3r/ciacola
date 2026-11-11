@@ -31,14 +31,22 @@ class TimelineModelAndOverridesTest {
             )
         }
 
-        // Event beat lines must exist for every frame and map round-trip to (stateIndex, fraction)
-        assertTrue(snapshot.eventBeats.size >= 14)
-        val midBeat = snapshot.eventBeats[4]
+        // One click beat per resting state that is followed by an animation (all but the last).
+        val restingStates = deck.scenes.sumOf { it.frames.size }
+        assertEquals(restingStates - 1, snapshot.eventBeats.size)
+        // Segments that animate nothing measure 0 ms, so pick a beat whose segment really plays.
+        val midBeat = snapshot.eventBeats.filter { it.segmentDurationMs > 0 }[3]
         val midTime = midBeat.timeMs + midBeat.segmentDurationMs / 2
         val (stateIdx, frac) = snapshot.stateFractionForTimeMs(midTime)
         assertEquals(midBeat.stateIndex, stateIdx)
         assertEquals(0.5f, frac, absoluteTolerance = 0.05f)
         assertEquals(midTime, snapshot.timeMsForStateFraction(stateIdx, frac), "Time round-trip mismatch")
+
+        // A click hold maps its whole time range onto the settled beat; the beat line sits at its end.
+        val hold = snapshot.stateSpans.first { it.isHold && it.stateIndex == midBeat.stateIndex }
+        assertEquals(midBeat.stateIndex to 0f, snapshot.stateFractionForTimeMs(hold.startMs + hold.durationMs / 2))
+        assertEquals(midBeat.timeMs, snapshot.timeMsForStateFraction(midBeat.stateIndex, 0f))
+        assertEquals(hold.startMs + hold.durationMs, midBeat.timeMs)
 
         // Categories harvested across the whole deck (even scenes not currently mounted!)
         val categories = snapshot.tracks.map { it.category }.toSet()

@@ -7,10 +7,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MonotonicFrameClock
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.roundToInt
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import dev.bnorm.storyboard.*
 import dev.bnorm.storyboard.easel.internal.FixedSize
@@ -22,12 +35,52 @@ fun Easel(
     mode: SceneMode = SceneMode.Story,
     modifier: Modifier = Modifier,
 ) {
-    Easel(
-        storyboard = animatic.storyboard,
-        transition = animatic.transition,
-        mode = mode,
-        modifier = modifier
-    )
+    // Navigation must count frames on *this* window's clock (see Animatic.renderFrameClock).
+    val renderScope = rememberCoroutineScope()
+    DisposableEffect(animatic, renderScope) {
+        val clock = renderScope.coroutineContext[MonotonicFrameClock]
+        animatic.renderFrameClock = clock
+        onDispose { if (animatic.renderFrameClock === clock) animatic.renderFrameClock = null }
+    }
+    // While the animatic settles a segment (see Animatic.scrubSettling), keep presenting a pixel
+    // snapshot of the last frame so the play-time-0 settle frames never reach the screen. A pixel
+    // snapshot is required: a recorded layer still references its children's live layers.
+    val presentedFrame = rememberGraphicsLayer()
+    var frozenFrame by remember { mutableStateOf<ImageBitmap?>(null) }
+    DisposableEffect(animatic, presentedFrame) {
+        animatic.freezeCapture = {
+            frozenFrame = runCatching { presentedFrame.toImageBitmap() }.getOrNull()
+        }
+        onDispose { animatic.freezeCapture = null }
+    }
+    val settling = animatic.scrubSettling
+    LaunchedEffect(settling) {
+        if (!settling) frozenFrame = null
+    }
+    Box(
+        modifier = modifier.drawWithContent {
+            val frozen = frozenFrame
+            if (animatic.scrubSettling && frozen != null) {
+                drawImage(frozen, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()))
+            } else {
+                if (!animatic.scrubSettling) {
+                    presentedFrame.record { this@drawWithContent.drawContent() }
+                }
+                drawLayer(presentedFrame)
+            }
+        },
+        propagateMinConstraints = true,
+    ) {
+        // Keyed on the scrub epoch: every scrub step recomposes the scene subtree from scratch so
+        // transition state can never leak along the scrub path (see Animatic.scrubEpoch).
+        key(animatic.scrubEpoch) {
+            Easel(
+                storyboard = animatic.storyboard,
+                transition = animatic.transition,
+                mode = mode,
+            )
+        }
+    }
 }
 
 /**

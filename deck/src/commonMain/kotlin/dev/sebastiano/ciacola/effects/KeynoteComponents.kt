@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.TextStyle
 import dev.bnorm.storyboard.layout.decorated.Decoration
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
@@ -51,6 +52,7 @@ fun DottedLeaderRow(
     modifier: Modifier = Modifier,
     highlightTrailing: Boolean = false,
     trailingModifier: Modifier = Modifier,
+    trailingStyle: TextStyle = LocalDeckTheme.current.typography.code,
 ) {
     val theme = LocalDeckTheme.current
     Row(
@@ -82,7 +84,7 @@ fun DottedLeaderRow(
         }
         Text(
             text = trailing,
-            style = theme.typography.code,
+            style = trailingStyle,
             color = if (highlightTrailing) theme.colors.accent else theme.colors.foreground,
             modifier = trailingModifier,
         )

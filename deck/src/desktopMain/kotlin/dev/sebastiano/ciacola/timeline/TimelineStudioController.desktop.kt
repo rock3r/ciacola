@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
@@ -17,15 +18,26 @@ import dev.sebastiano.ciacola.review.ReviewTargetHit
 import dev.sebastiano.ciacola.review.SlideReviewComment
 import dev.sebastiano.ciacola.review.generateReviewCommentId
 import java.time.Instant
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
+
+/** A requested playhead position, already mapped to an Animatic segment. */
+internal data class ScrubRequest(
+    val timeMs: Int,
+    val stateIndex: Int,
+    val fraction: Float,
+    val sequence: Long,
+)
 
 /**
  * Presenter/coordinator for Ciacola's After Effects Timeline Studio.
  *
  * Owns timeline snapshot indexing, playhead scrubbing, transport playback, 0-ms event-beat
- * insertion/deletion, loop sub-composition drill-down, and live track overrides.
+ * insertion/deletion, loop sub-composition drill-down, selection, zoom/pan, and live overrides.
  */
 @Stable
 class TimelineStudioController(
@@ -34,55 +46,121 @@ class TimelineStudioController(
     val loopClock: DeckLoopClock,
     val reviewStore: ReviewCommentStore? = null,
     val motionPathPreview: MotionPathPreviewState = MotionPathPreviewState(),
+    val stageSelection: TimelineStageSelection = TimelineStageSelection(),
 ) {
     var animatic: Animatic by mutableStateOf(initialAnimatic)
         internal set
 
+    val viewport = TimelineViewportState()
+    val preview = StagePreviewViewportState()
+
     var dockedInStoryWindow by mutableStateOf(
         System.getenv("CIACOLA_TIMELINE_OPEN")?.equals("true", ignoreCase = true) == true
     )
+    var detachedWindowVisible by mutableStateOf(false)
+
+    /** Authoring mode: the timeline is visible (docked or detached). */
+    val authoringActive: Boolean get() = dockedInStoryWindow || detachedWindowVisible
+
     var splitFraction by mutableFloatStateOf(0.56f)
 
+    /** Canonical selected track (stagger items resolve to their group) for the Inspector. */
     var selectedTrackId by mutableStateOf<String?>(null)
         private set
 
-    var zoomPxPerSecond by mutableFloatStateOf(120f)
+    /** Exact selected track id, including a stagger item's `#itemN` suffix. */
+    var selectedExactTrackId by mutableStateOf<String?>(null)
+        private set
+
     var isPlaying by mutableStateOf(false)
         private set
+
+    /** Space is held: drags pan (AE hand tool); a tap without dragging toggles playback. */
+    var spaceHeld by mutableStateOf(false)
+        internal set
+    internal var spaceUsedForPan = false
 
     var snapshot by mutableStateOf(DeckTimelineSnapshot(340, emptyList(), emptyList(), emptyList()))
         internal set
 
     private var playbackJob: Job? = null
+    private var scrubSequence = 0L
+    private val scrubRequests = MutableStateFlow<ScrubRequest?>(null)
+    private var lastRequested by mutableStateOf<ScrubRequest?>(null)
+
+    init {
+        stageSelection.onPick = { trackId ->
+            selectTrack(trackId)
+            if (trackId != null) viewport.pendingRevealTrackId = trackId
+        }
+    }
 
     val currentPlayheadTimeMs: Int
         get() {
-            val activeLoop = loopClock.activeSubCompLoopId
-            if (activeLoop != null) {
+            if (loopClock.activeSubCompLoopId != null) {
                 return (loopClock.scrubbedMillis ?: 0L).toInt()
             }
-            return snapshot.timeMsForStateFraction(
-                stateIndex = animatic.activeFromStateIndex,
-                fraction = animatic.activeFraction,
-            )
+            val from = animatic.activeFromStateIndex
+            val fraction = animatic.activeFraction
+            // Show the exact requested time while the animatic sits where that request mapped
+            // (a click hold maps a whole time range onto one settled state).
+            val requested = lastRequested
+            if (requested != null) {
+                val (expectedState, expectedFraction) = normalized(requested.stateIndex, requested.fraction)
+                if (from == expectedState && abs(fraction - expectedFraction) < 0.002f) {
+                    return requested.timeMs
+                }
+            }
+            return snapshot.timeMsForStateFraction(stateIndex = from, fraction = fraction)
         }
+
+    private fun normalized(stateIndex: Int, fraction: Float): Pair<Int, Float> {
+        val last = animatic.stateDescriptors.lastIndex
+        return if (fraction >= 1f && stateIndex < last) (stateIndex + 1) to 0f else stateIndex to fraction
+    }
 
     fun refreshSnapshot(storyboard: Storyboard = animatic.storyboard) {
         snapshot = indexDeckTimeline(storyboard, overridesStore.data())
-        if (selectedTrackId != null && snapshot.tracks.none { it.trackId == selectedTrackId }) {
-            // Keep selection if it's a parent track of a stagger item
-            val baseId = selectedTrackId?.substringBefore("#")
-            selectedTrackId = baseId?.takeIf { id -> snapshot.tracks.any { it.trackId == id } }
+        viewport.contentDurationMs = snapshot.totalDurationMs.coerceAtLeast(1)
+        val selected = selectedExactTrackId
+        if (selected != null && snapshot.tracks.none { it.trackId == selected || it.trackId == selected.substringBefore("#") }) {
+            selectTrack(null)
         }
+    }
+
+    /**
+     * Whether the row for [trackId] reads as selected: the exact track, or every row of a selected
+     * stagger group (matching the stage, which highlights every item of a selected group).
+     */
+    fun isTrackRowSelected(trackId: String): Boolean {
+        val exact = selectedExactTrackId ?: return false
+        if (exact == trackId) return true
+        return '#' !in exact && trackId.substringBefore("#") == exact
     }
 
     fun selectTrack(trackId: String?) {
         val canonical = trackId?.substringBefore("#")
+        selectedExactTrackId = trackId
         selectedTrackId = canonical
         motionPathPreview.selectedTrackId = canonical
+        stageSelection.selectedTrackId = trackId
+        stageSelection.selectedLabel = trackId?.let { id ->
+            val parent = snapshot.tracks.firstOrNull { it.trackId == canonical }?.label?.substringAfter(" · ")
+                ?.removePrefix("⇄ ")?.removePrefix("⟳ ")
+            if ('#' in id) {
+                val item = id.substringAfter("#item").toIntOrNull()?.plus(1)
+                listOfNotNull(parent, item?.let { "Item $it" }).joinToString(" · ")
+            } else {
+                parent ?: id
+            }
+        }
     }
 
-    fun scrubToTimeMs(scope: CoroutineScope, timeMs: Int) {
+    /**
+     * Requests the playhead at [timeMs]. Requests are conflated and applied by a single worker
+     * ([runScrubWorker]), so pointer bursts never queue up or interleave.
+     */
+    fun scrubToTimeMs(timeMs: Int) {
         stopPlayback()
         val subLoopId = loopClock.activeSubCompLoopId
         if (subLoopId != null) {
@@ -91,11 +169,17 @@ class TimelineStudioController(
             loopClock.scrubbedMillis = timeMs.toLong().coerceIn(0L, period)
             return
         }
-
         val clamped = timeMs.coerceIn(0, snapshot.totalDurationMs)
         val (stateIdx, frac) = snapshot.stateFractionForTimeMs(clamped)
-        scope.launch {
-            animatic.seekToSegment(stateIdx, frac)
+        val request = ScrubRequest(clamped, stateIdx, frac, ++scrubSequence)
+        lastRequested = request
+        scrubRequests.value = request
+    }
+
+    /** Applies the latest scrub request; slow seeks simply skip superseded requests. */
+    suspend fun runScrubWorker() {
+        scrubRequests.filterNotNull().collect { request ->
+            animatic.seekToSegment(request.stateIndex, request.fraction)
         }
     }
 
@@ -104,40 +188,64 @@ class TimelineStudioController(
             stopPlayback()
             return
         }
+        val subLoopId = loopClock.activeSubCompLoopId
+        val totalMs = snapshot.totalDurationMs.coerceAtLeast(1)
+        val startMs = if (subLoopId != null) 0 else currentPlayheadTimeMs.let { if (it >= totalMs - 8) 0 else it }
+        playRange(scope, startMs, if (subLoopId != null) Int.MAX_VALUE else totalMs)
+    }
+
+    private fun playRange(scope: CoroutineScope, startMs: Int, endMs: Int) {
+        stopPlayback()
         isPlaying = true
         playbackJob = scope.launch {
-            var lastNanos = -1L
-            val subLoopId = loopClock.activeSubCompLoopId
-            if (subLoopId != null) {
-                val desc = loopClock.registeredLoops[subLoopId]
-                val period = loopClock.effectivePeriodMillis(subLoopId, desc?.defaultPeriodMillis ?: 6_000L)
-                var currentMs = (loopClock.scrubbedMillis ?: 0L).toFloat()
-                while (isPlaying) {
-                    withFrameNanos { now ->
-                        if (lastNanos >= 0L) {
-                            currentMs = (currentMs + (now - lastNanos) / 1_000_000f) % period.toFloat()
-                            loopClock.scrubbedMillis = currentMs.toLong()
+            try {
+                var lastNanos = -1L
+                val subLoopId = loopClock.activeSubCompLoopId
+                if (subLoopId != null) {
+                    val desc = loopClock.registeredLoops[subLoopId]
+                    val period = loopClock.effectivePeriodMillis(subLoopId, desc?.defaultPeriodMillis ?: 6_000L)
+                    var currentMs = (loopClock.scrubbedMillis ?: 0L).toFloat()
+                    while (true) {
+                        withFrameNanos { now ->
+                            if (lastNanos >= 0L) {
+                                currentMs = (currentMs + (now - lastNanos) / 1_000_000f) % period.toFloat()
+                                loopClock.scrubbedMillis = currentMs.toLong()
+                            }
+                            lastNanos = now
                         }
-                        lastNanos = now
                     }
                 }
-            } else {
-                val totalMs = snapshot.totalDurationMs.coerceAtLeast(1)
-                var playMs = currentPlayheadTimeMs.let { if (it >= totalMs - 8) 0 else it }.toFloat()
-                while (isPlaying && playMs < totalMs) {
-                    var deltaMs = 0f
-                    withFrameNanos { now ->
-                        if (lastNanos >= 0L) {
-                            deltaMs = ((now - lastNanos) / 1_000_000f).coerceIn(0f, 64f)
+                // Playback is real arrow-key playback: each animated segment runs through the
+                // animatic's own animateTo (so it looks exactly like presenting), and click holds
+                // just advance the playhead while the slide rests on its beat.
+                var playMs = startMs
+                val spans = snapshot.stateSpans
+                var spanIndex = spans.indexOfFirst { playMs < it.startMs + it.durationMs }
+                while (spanIndex in spans.indices && playMs < endMs) {
+                    val span = spans[spanIndex++]
+                    val spanEnd = span.startMs + span.durationMs
+                    if (span.isHold) {
+                        if (animatic.activeFromStateIndex != span.stateIndex || animatic.activeToStateIndex != span.stateIndex) {
+                            animatic.seekToSegment(span.stateIndex, 0f)
                         }
-                        lastNanos = now
+                        var heldMs = playMs.toFloat()
+                        lastNanos = -1L
+                        while (heldMs < spanEnd) {
+                            withFrameNanos { now ->
+                                if (lastNanos >= 0L) heldMs += ((now - lastNanos) / 1_000_000f).coerceIn(0f, 64f)
+                                lastNanos = now
+                            }
+                            val shown = heldMs.toInt().coerceAtMost(spanEnd)
+                            lastRequested = ScrubRequest(shown, span.stateIndex, 0f, ++scrubSequence)
+                        }
+                    } else {
+                        val fraction = if (span.durationMs > 0) (playMs - span.startMs).toFloat() / span.durationMs else 0f
+                        lastRequested = null
+                        animatic.playSegmentToEnd(span.stateIndex, fraction.coerceIn(0f, 1f))
                     }
-                    if (deltaMs > 0f) {
-                        playMs = (playMs + deltaMs).coerceAtMost(totalMs.toFloat())
-                        val (stIdx, frac) = snapshot.stateFractionForTimeMs(playMs.toInt())
-                        animatic.seekToSegment(stIdx, frac)
-                    }
+                    playMs = maxOf(playMs, spanEnd)
                 }
+            } finally {
                 isPlaying = false
             }
         }
@@ -149,25 +257,23 @@ class TimelineStudioController(
         playbackJob = null
     }
 
-    fun stepBeat(scope: CoroutineScope, delta: Int) {
+    fun stepBeat(delta: Int) {
         stopPlayback()
         if (loopClock.activeSubCompLoopId != null) {
             val step = 500L * delta
-            val next = ((loopClock.scrubbedMillis ?: 0L) + step).coerceAtLeast(0L)
-            loopClock.scrubbedMillis = next
+            loopClock.scrubbedMillis = ((loopClock.scrubbedMillis ?: 0L) + step).coerceAtLeast(0L)
             return
         }
-        val beats = snapshot.eventBeats.filter { !it.isSlideBoundary }
+        val beats = snapshot.eventBeats
         if (beats.isEmpty()) return
         val nowMs = currentPlayheadTimeMs
         val targetBeat = if (delta > 0) {
-            beats.firstOrNull { it.timeMs > nowMs + 12 } ?: beats.last()
+            beats.firstOrNull { it.timeMs > nowMs + 2 } ?: beats.last()
         } else {
-            beats.lastOrNull { it.timeMs < nowMs - 12 } ?: beats.first()
+            beats.lastOrNull { it.timeMs < nowMs - 2 } ?: beats.first()
         }
-        scope.launch {
-            animatic.seekToSegment(targetBeat.stateIndex, 0f)
-        }
+        scrubToTimeMs(targetBeat.timeMs)
+        viewport.ensureTimeVisible(targetBeat.timeMs.toFloat())
     }
 
     fun insertEventBeatAtPlayhead() {
@@ -190,17 +296,14 @@ class TimelineStudioController(
 
     fun enterLoopSubComp(scope: CoroutineScope, loopId: String, sceneIndex: Int? = null) {
         stopPlayback()
-        loopClock.enterSubComp(loopId)
         if (sceneIndex != null) {
-            val stateIdx = animatic.stateDescriptors.firstOrNull {
-                it.sceneIndex == sceneIndex && it.frameIndex == 0 && !it.isBoundaryStart && !it.isBoundaryEnd
-            }?.stateIndex
-            if (stateIdx != null) {
-                scope.launch {
-                    animatic.seekToSegment(stateIdx, 0f)
-                }
+            val slide = snapshot.slides.getOrNull(sceneIndex)
+            if (slide != null) {
+                // Park the master playhead on the loop's slide (after its entrance).
+                scrubToTimeMs(slide.startMs + slide.overlapInMs + 1)
             }
         }
+        loopClock.enterSubComp(loopId)
     }
 
     fun exitLoopSubComp() {
@@ -209,32 +312,14 @@ class TimelineStudioController(
     }
 
     fun previewSelectedBlock(scope: CoroutineScope) {
-        val selId = selectedTrackId ?: return
-        val row = snapshot.tracks.firstOrNull { it.trackId == selId } ?: return
+        val selId = selectedExactTrackId ?: selectedTrackId ?: return
+        val row = snapshot.tracks.firstOrNull { it.trackId == selId }
+            ?: snapshot.tracks.firstOrNull { it.trackId == selectedTrackId }
+            ?: return
         val firstBlock = row.blocks.firstOrNull() ?: return
-        stopPlayback()
-        isPlaying = true
-        val startMs = (firstBlock.startMs - firstBlock.delayMs).coerceAtLeast(0)
-        val endMs = (firstBlock.startMs + firstBlock.durationMs + 40).coerceAtMost(snapshot.totalDurationMs)
-        playbackJob = scope.launch {
-            var playMs = startMs.toFloat()
-            val (initIdx, initFrac) = snapshot.stateFractionForTimeMs(startMs)
-            animatic.seekToSegment(initIdx, initFrac)
-            var lastNanos = -1L
-            while (isPlaying && playMs < endMs) {
-                var delta = 0f
-                withFrameNanos { now ->
-                    if (lastNanos >= 0L) delta = ((now - lastNanos) / 1_000_000f).coerceIn(0f, 64f)
-                    lastNanos = now
-                }
-                if (delta > 0f) {
-                    playMs = (playMs + delta).coerceAtMost(endMs.toFloat())
-                    val (sIdx, frac) = snapshot.stateFractionForTimeMs(playMs.toInt())
-                    animatic.seekToSegment(sIdx, frac)
-                }
-            }
-            isPlaying = false
-        }
+        val startMs = (firstBlock.startMs - firstBlock.delayMs - 120).coerceAtLeast(0)
+        val endMs = (firstBlock.startMs + firstBlock.durationMs + 120).coerceAtMost(snapshot.totalDurationMs)
+        playRange(scope, startMs, endMs)
     }
 
     fun bakeOverridesViaAgent(scope: CoroutineScope) {
@@ -271,9 +356,10 @@ fun rememberTimelineStudioController(
     loopClock: DeckLoopClock,
     reviewStore: ReviewCommentStore? = null,
     motionPathPreview: MotionPathPreviewState = remember { MotionPathPreviewState() },
+    stageSelection: TimelineStageSelection = remember { TimelineStageSelection() },
 ): TimelineStudioController {
-    val controller = remember(overridesStore, loopClock, reviewStore, motionPathPreview) {
-        TimelineStudioController(animatic, overridesStore, loopClock, reviewStore, motionPathPreview)
+    val controller = remember(overridesStore, loopClock, reviewStore, motionPathPreview, stageSelection) {
+        TimelineStudioController(animatic, overridesStore, loopClock, reviewStore, motionPathPreview, stageSelection)
     }
     controller.animatic = animatic
     LaunchedEffect(
@@ -282,6 +368,19 @@ fun rememberTimelineStudioController(
         overridesStore.parameterRevision,
     ) {
         controller.refreshSnapshot(animatic.storyboard)
+    }
+    LaunchedEffect(controller) {
+        controller.runScrubWorker()
+    }
+    // While authoring, ambient loops follow the master playhead (AE pre-comp semantics), so the
+    // stage always shows exactly the frame under the playhead; otherwise they free-run.
+    LaunchedEffect(controller) {
+        snapshotFlow {
+            if (controller.authoringActive) controller.currentPlayheadTimeMs.toLong() else null
+        }.collect { loopClock.masterTimeMillis = it }
+    }
+    LaunchedEffect(controller) {
+        snapshotFlow { controller.authoringActive }.collect { stageSelection.pickingEnabled = it }
     }
     return controller
 }

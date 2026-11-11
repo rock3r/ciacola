@@ -41,6 +41,7 @@ import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
+import dev.sebastiano.ciacola.timeline.timelineTarget
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -276,12 +277,18 @@ fun Modifier.keynoteFadeMoveTracked(
     direction: SlideDirection = SlideDirection.Up,
     distance: Dp = 24.dp,
     easing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+    itemIndex: Int? = null,
 ): Modifier {
     val spatial = LocalTimelineOverrides.current.tracks[trackId]?.spatial
-    return if (spatial == null) {
-        keynoteFadeMove(progress, direction, distance, easing)
+    val tagged = if (itemIndex != null) {
+        timelineTarget(trackId, "$trackId#item$itemIndex")
     } else {
-        graphicsLayer {
+        timelineTarget(trackId)
+    }
+    return if (spatial == null) {
+        tagged.keynoteFadeMove(progress, direction, distance, easing)
+    } else {
+        tagged.graphicsLayer {
             val raw = progress().coerceIn(0f, 1f)
             val eased = easing.transform(raw)
             alpha = raw

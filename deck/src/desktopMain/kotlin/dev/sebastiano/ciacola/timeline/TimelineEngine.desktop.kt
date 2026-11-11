@@ -3,20 +3,86 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.renderComposeScene
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.Animatic
+import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.ScenePreview
+import dev.bnorm.storyboard.easel.rememberAnimatic
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 private const val DEFAULT_BEAT_FLOOR_MS = 340
-private const val DEFAULT_SLIDE_OVERLAP_MS = 280
+
+/** Visual rest between beats: the deck waits for a click here (not part of real playback time). */
+internal const val CLICK_HOLD_MS = 400
+
+/**
+ * Measures how long arrow-key playback spends animating each segment `i -> i+1`, by driving a real
+ * [Animatic] through every segment inside an offscreen [ImageComposeScene].
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun measureSegmentDurationsMs(
+    storyboard: Storyboard,
+    overrides: DeckTimelineOverridesFile,
+    stateCount: Int,
+): IntArray {
+    val result = IntArray((stateCount - 1).coerceAtLeast(0))
+    if (result.isEmpty()) return result
+    var animatic: Animatic? = null
+    var scope: CoroutineScope? = null
+    val frozenLoops = DeckLoopClock().apply { masterTimeMillis = 0L }
+    val scene = ImageComposeScene(
+        width = 64,
+        height = 36,
+        density = storyboard.format.density,
+        coroutineContext = Dispatchers.Unconfined,
+    ) {
+        CompositionLocalProvider(
+            LocalTimelineOffscreen provides true,
+            LocalTimelineOverrides provides overrides,
+            LocalDeckLoopClock provides frozenLoops,
+        ) {
+            scope = rememberCoroutineScope()
+            val a = rememberAnimatic(storyboard = { storyboard })
+            animatic = a
+            Easel(a)
+        }
+    }
+    try {
+        var timeNanos = 0L
+        scene.render(timeNanos)
+        val a = animatic ?: return result
+        val job = scope!!.launch {
+            val measured = a.measurePlaybackDurationsNanos()
+            for (i in result.indices) {
+                result[i] = (measured.getOrElse(i) { 0L } / 1_000_000L).toInt().coerceAtLeast(0)
+            }
+        }
+        var frames = 0
+        while (!job.isCompleted && frames < 50_000) {
+            timeNanos += 16_000_000L
+            scene.render(timeNanos)
+            frames++
+        }
+        job.cancel()
+    } finally {
+        scene.close()
+    }
+    return result
+}
 
 data class SlideSectionBar(
     val sceneIndex: Int,
@@ -73,6 +139,8 @@ data class StateTimeSpan(
     val startMs: Int,
     val durationMs: Int,
     val isBoundary: Boolean,
+    /** A click hold: the deck rests on Value state [stateIndex] (fraction 0) for the whole span. */
+    val isHold: Boolean = false,
 )
 
 data class DeckTimelineSnapshot(
@@ -86,8 +154,10 @@ data class DeckTimelineSnapshot(
         if (stateSpans.isEmpty()) return 0 to 0f
         val clamped = timeMs.coerceIn(0, totalDurationMs.coerceAtLeast(1))
         for (span in stateSpans) {
+            if (span.durationMs <= 0 && span != stateSpans.last()) continue
             val end = span.startMs + span.durationMs
             if (clamped < end || span == stateSpans.last()) {
+                if (span.isHold) return span.stateIndex to 0f
                 val frac = if (span.durationMs <= 0) {
                     0f
                 } else {
@@ -96,15 +166,23 @@ data class DeckTimelineSnapshot(
                 return span.stateIndex to frac
             }
         }
-        return stateSpans.last().stateIndex to 1f
+        return stateSpans.last().stateIndex to 0f
     }
 
+    /**
+     * Time of `(stateIndex, fraction)`. A settled Value state (`fraction == 0`) maps to the end of
+     * its click hold, i.e. the event-beat line where the next click's animation starts.
+     */
     fun timeMsForStateFraction(stateIndex: Int, fraction: Float): Int {
         if (stateSpans.isEmpty()) return 0
-        val span = stateSpans.firstOrNull { it.stateIndex == stateIndex }
-            ?: stateSpans.lastOrNull { it.stateIndex <= stateIndex }
-            ?: stateSpans.first()
-        return span.startMs + (fraction.coerceIn(0f, 1f) * span.durationMs).toInt()
+        val segment = stateSpans.firstOrNull { it.stateIndex == stateIndex && !it.isHold }
+        if (segment != null) {
+            return segment.startMs + (fraction.coerceIn(0f, 1f) * segment.durationMs).toInt()
+        }
+        val hold = stateSpans.lastOrNull { it.stateIndex == stateIndex && it.isHold }
+        if (hold != null) return hold.startMs + hold.durationMs
+        val fallback = stateSpans.lastOrNull { it.stateIndex <= stateIndex } ?: stateSpans.first()
+        return fallback.startMs + fallback.durationMs
     }
 }
 
@@ -235,6 +313,7 @@ fun indexDeckTimeline(
         runCatching {
             renderComposeScene(width = 64, height = 36, density = storyboard.format.density) {
                 CompositionLocalProvider(
+                    LocalTimelineOffscreen provides true,
                     LocalTimelineHarvestCollector provides collector,
                     LocalTimelineOverrides provides overrides,
                     LocalDeckLoopClock provides harvestLoopClock,
@@ -273,139 +352,90 @@ fun indexDeckTimeline(
 
     val harvestedRecords = collector.records.values.toList()
 
-    // Compute per-(scene, beat) animation duration ceiling so every beat segment fits its longest stagger/build!
-    fun maxBeatContentDurationMs(sceneIndex: Int, beatIndex: Int): Int {
-        val matching = harvestedRecords.filter {
-            it.sceneIndex == sceneIndex && it.triggerBeat == beatIndex
-        }
-        val maxTrackEnd = matching.maxOfOrNull { it.delayMs + it.durationMs } ?: 0
-        return maxOf(DEFAULT_BEAT_FLOOR_MS, maxTrackEnd + 60)
-    }
+    // Real playback durations for every segment (state i -> i+1), measured on a live animatic. The
+    // timeline therefore shows exactly the time an arrow-key advance spends animating each segment,
+    // and scrubbing to time t lands on the frame playback shows at t.
+    val segmentDurationMs = measureSegmentDurationsMs(storyboard, overrides, rawStates.size)
 
     val stateSpans = mutableListOf<StateTimeSpan>()
     val eventBeats = mutableListOf<EventBeatLine>()
     val beatStartTimeMap = mutableMapOf<Pair<Int, Int>, Int>()
+    val valueStateIndex = mutableMapOf<Pair<Int, Int>, Int>()
+    val startStateIndex = mutableMapOf<Int, Int>()
+    val segmentStart = IntArray(rawStates.size)
     val sceneStartTime = IntArray(storyboard.scenes.size)
     val sceneEndTime = IntArray(storyboard.scenes.size)
+    val sceneOverlapIn = IntArray(storyboard.scenes.size)
+    val sceneOverlapOut = IntArray(storyboard.scenes.size)
 
     var cursorMs = 0
     var beatCounter = 0
-
     for (i in rawStates.indices) {
         val st = rawStates[i]
-        val isLastOverall = i == rawStates.lastIndex
-        val nextSt = rawStates.getOrNull(i + 1)
-
-        when {
-            // Value frame transitioning to next Value frame in the SAME scene
-            !st.isStart && !st.isEnd && nextSt != null && !nextSt.isStart && !nextSt.isEnd && nextSt.sceneIndex == st.sceneIndex -> {
-                if (st.frameIndex == 0 && st.sceneIndex == 0) {
-                    sceneStartTime[0] = cursorMs
-                }
-                beatStartTimeMap[st.sceneIndex to st.frameIndex] = cursorMs
-                // Transition from Frame(f) -> Frame(f+1) triggers animations keyed on Beat(f+1)!
-                val dur = maxBeatContentDurationMs(st.sceneIndex, st.frameIndex + 1)
-                val injectedSet = overrides.sceneBeats[st.sceneIndex]?.injectedAfterBeats.orEmpty()
-                val isInjected = injectedSet.isNotEmpty() && st.frameIndex > 0
-                eventBeats += EventBeatLine(
-                    beatGlobalIndex = beatCounter++,
-                    stateIndex = st.stateIndex,
-                    sceneIndex = st.sceneIndex,
-                    frameIndex = st.frameIndex,
-                    timeMs = cursorMs,
-                    segmentDurationMs = dur,
-                    isSlideBoundary = false,
-                    isInjected = isInjected,
-                )
-                stateSpans += StateTimeSpan(st.stateIndex, st.sceneIndex, st.frameIndex, cursorMs, dur, isBoundary = false)
-                cursorMs += dur
-            }
-
-            // Last Value frame of Scene s -> Scene s Frame.End (first half of cross-slide overlap!)
-            !st.isStart && !st.isEnd && nextSt != null && nextSt.isEnd -> {
-                if (st.frameIndex == 0 && st.sceneIndex == 0) {
-                    sceneStartTime[0] = cursorMs
-                }
-                beatStartTimeMap[st.sceneIndex to st.frameIndex] = cursorMs
-                val holdBeforeExitMs = maxBeatContentDurationMs(st.sceneIndex, st.frameIndex).coerceAtLeast(DEFAULT_BEAT_FLOOR_MS)
-                eventBeats += EventBeatLine(
-                    beatGlobalIndex = beatCounter++,
-                    stateIndex = st.stateIndex,
-                    sceneIndex = st.sceneIndex,
-                    frameIndex = st.frameIndex,
-                    timeMs = cursorMs,
-                    segmentDurationMs = holdBeforeExitMs,
-                    isSlideBoundary = false,
-                    isInjected = false,
-                )
-                // Notice: Scene s+1 visually begins overlapping right as Scene s starts exiting!
-                stateSpans += StateTimeSpan(st.stateIndex, st.sceneIndex, st.frameIndex, cursorMs, holdBeforeExitMs, isBoundary = false)
-                cursorMs += holdBeforeExitMs
-            }
-
-            // Scene s Frame.End -> Scene s+1 Frame.Start (the overlapping slide transition zone!)
-            st.isEnd -> {
-                val nextSceneIdx = st.sceneIndex + 1
-                val overlapStartMs = cursorMs
-                if (nextSceneIdx in sceneStartTime.indices) {
-                    sceneStartTime[nextSceneIdx] = overlapStartMs
-                }
-                eventBeats += EventBeatLine(
-                    beatGlobalIndex = beatCounter++,
-                    stateIndex = st.stateIndex,
-                    sceneIndex = st.sceneIndex,
-                    frameIndex = st.frameIndex,
-                    timeMs = overlapStartMs,
-                    segmentDurationMs = DEFAULT_SLIDE_OVERLAP_MS,
-                    isSlideBoundary = true,
-                    isInjected = false,
-                )
-                stateSpans += StateTimeSpan(st.stateIndex, st.sceneIndex, st.frameIndex, overlapStartMs, DEFAULT_SLIDE_OVERLAP_MS, isBoundary = true)
-                cursorMs += DEFAULT_SLIDE_OVERLAP_MS
-                sceneEndTime[st.sceneIndex] = cursorMs
-            }
-
-            // Scene s+1 Frame.Start -> Scene s+1 Frame.Value(0) (settle into first frame of new slide)
-            st.isStart -> {
-                val settleMs = 60
-                stateSpans += StateTimeSpan(st.stateIndex, st.sceneIndex, st.frameIndex, cursorMs, settleMs, isBoundary = true)
-                cursorMs += settleMs
-            }
-
-            // Final Value frame of the final scene in the deck
-            isLastOverall -> {
-                if (st.frameIndex == 0 && st.sceneIndex == 0) {
-                    sceneStartTime[0] = cursorMs
-                }
-                beatStartTimeMap[st.sceneIndex to st.frameIndex] = cursorMs
-                val finalHoldMs = DEFAULT_BEAT_FLOOR_MS
-                eventBeats += EventBeatLine(
-                    beatGlobalIndex = beatCounter++,
-                    stateIndex = st.stateIndex,
-                    sceneIndex = st.sceneIndex,
-                    frameIndex = st.frameIndex,
-                    timeMs = cursorMs,
-                    segmentDurationMs = finalHoldMs,
-                    isSlideBoundary = false,
-                    isInjected = false,
-                )
-                stateSpans += StateTimeSpan(st.stateIndex, st.sceneIndex, st.frameIndex, cursorMs, finalHoldMs, isBoundary = false)
-                cursorMs += finalHoldMs
-                sceneEndTime[st.sceneIndex] = cursorMs
-            }
+        val isValue = !st.isStart && !st.isEnd
+        if (isValue) {
+            valueStateIndex[st.sceneIndex to st.frameIndex] = i
+            beatStartTimeMap[st.sceneIndex to st.frameIndex] = cursorMs
+            // Click hold: the slide rests on this beat until the presenter clicks.
+            stateSpans += StateTimeSpan(i, st.sceneIndex, st.frameIndex, cursorMs, CLICK_HOLD_MS, isBoundary = false, isHold = true)
+            cursorMs += CLICK_HOLD_MS
         }
+        if (st.isStart) startStateIndex[st.sceneIndex] = i
+        if (i == rawStates.lastIndex) break
+
+        val next = rawStates[i + 1]
+        val duration = segmentDurationMs[i]
+        segmentStart[i] = cursorMs
+        if (isValue) {
+            val injectedSet = overrides.sceneBeats[st.sceneIndex]?.injectedAfterBeats.orEmpty()
+            eventBeats += EventBeatLine(
+                beatGlobalIndex = beatCounter++,
+                stateIndex = i,
+                sceneIndex = st.sceneIndex,
+                frameIndex = st.frameIndex,
+                timeMs = cursorMs,
+                segmentDurationMs = duration,
+                isSlideBoundary = next.isEnd,
+                isInjected = !next.isEnd && (st.frameIndex + 1) in injectedSet.map { it + 1 },
+            )
+        }
+        if (st.isEnd) {
+            // Scene s and s+1 are both on stage for the whole End -> Start segment.
+            sceneEndTime[st.sceneIndex] = cursorMs + duration
+            sceneOverlapOut[st.sceneIndex] = duration
+            sceneStartTime[next.sceneIndex] = cursorMs
+            sceneOverlapIn[next.sceneIndex] = duration
+        }
+        stateSpans += StateTimeSpan(i, st.sceneIndex, st.frameIndex, cursorMs, duration, isBoundary = st.isEnd || st.isStart)
+        cursorMs += duration
+    }
+    sceneEndTime[storyboard.scenes.lastIndex] = cursorMs
+
+    /** Start of the segment during which animations keyed on [beat] of [sceneIndex] play. */
+    fun beatSegmentStartMs(sceneIndex: Int, beat: Int): Int {
+        val segmentState = if (beat > 0) {
+            valueStateIndex[sceneIndex to (beat - 1)]
+        } else {
+            startStateIndex[sceneIndex]
+        }
+        return segmentState?.let { segmentStart[it] } ?: sceneStartTime.getOrElse(sceneIndex) { 0 }
+    }
+
+    fun beatSegmentEndMs(sceneIndex: Int, beat: Int): Int {
+        val segmentState = if (beat > 0) valueStateIndex[sceneIndex to (beat - 1)] else startStateIndex[sceneIndex]
+        return segmentState?.let { segmentStart[it] + segmentDurationMs[it] } ?: beatSegmentStartMs(sceneIndex, beat)
     }
 
     val slideBars = storyboard.scenes.mapIndexed { sIdx, scene ->
         val start = sceneStartTime[sIdx]
-        val end = sceneEndTime[sIdx].coerceAtLeast(start + DEFAULT_BEAT_FLOOR_MS)
+        val end = sceneEndTime[sIdx].coerceAtLeast(start + 1)
         SlideSectionBar(
             sceneIndex = sIdx,
             label = sceneDisplayTitle(sIdx, scene.frames.size),
             startMs = start,
             endMs = end,
-            overlapInMs = if (sIdx > 0) DEFAULT_SLIDE_OVERLAP_MS else 0,
-            overlapOutMs = if (sIdx < storyboard.scenes.lastIndex) DEFAULT_SLIDE_OVERLAP_MS else 0,
+            overlapInMs = sceneOverlapIn[sIdx],
+            overlapOutMs = sceneOverlapOut[sIdx],
             beatCount = scene.frames.size,
         )
     }
@@ -418,15 +448,9 @@ fun indexDeckTimeline(
         val sorted = pairs.sortedWith(compareBy({ it.first }, { it.second }))
         val firstSighting = sorted.first()
         val lastSighting = sorted.last()
-        val startMs = beatStartTimeMap[firstSighting]
-            ?: slideBars.getOrNull(firstSighting.first)?.startMs
-            ?: 0
-        val lastBeatStart = beatStartTimeMap[lastSighting]
-            ?: slideBars.getOrNull(lastSighting.first)?.startMs
-            ?: startMs
+        val startMs = beatSegmentStartMs(firstSighting.first, firstSighting.second)
         val trackId = "shared:$sharedKey"
-        val customDur = overrides.tracks[trackId]?.durationMs ?: 420
-        val spanEnd = maxOf(lastBeatStart + customDur, startMs + customDur)
+        val spanEnd = maxOf(beatSegmentEndMs(lastSighting.first, lastSighting.second), startMs + 1)
         val label = collector.sharedLabels[sharedKey] ?: sharedKey
 
         trackRows += TimelineTrackRow(
@@ -448,7 +472,7 @@ fun indexDeckTimeline(
                     endSceneIndex = lastSighting.first,
                     triggerBeatInScene = firstSighting.second,
                     startMs = startMs,
-                    durationMs = (spanEnd - startMs).coerceAtLeast(240),
+                    durationMs = (spanEnd - startMs).coerceAtLeast(1),
                     sharedKey = sharedKey,
                 )
             ),
@@ -460,15 +484,8 @@ fun indexDeckTimeline(
     for ((trackId, entries) in groupedByTrack) {
         val representative = entries.first()
         val blocks = entries.sortedBy { it.triggerBeat }.map { rec ->
-            // Note: Beat `b > 0` starts during transition from Frame `b - 1` -> Frame `b`!
-            val segmentStartMs = if (rec.triggerBeat > 0) {
-                beatStartTimeMap[rec.sceneIndex to (rec.triggerBeat - 1)]
-                    ?: beatStartTimeMap[rec.sceneIndex to rec.triggerBeat]
-                    ?: slideBars.getOrNull(rec.sceneIndex)?.startMs
-                    ?: 0
-            } else {
-                slideBars.getOrNull(rec.sceneIndex)?.startMs ?: 0
-            }
+            // Beat `b > 0` plays during the Frame `b - 1` -> Frame `b` segment.
+            val segmentStartMs = beatSegmentStartMs(rec.sceneIndex, rec.triggerBeat)
             TimelineBlockBar(
                 id = "${rec.trackId}@b${rec.triggerBeat}",
                 trackId = rec.trackId,

@@ -28,9 +28,18 @@ data class LoopSubCompDescriptor(
 class DeckLoopClock {
     var activeSubCompLoopId by mutableStateOf<String?>(null)
     var scrubbedMillis by mutableStateOf<Long?>(null)
+
+    /**
+     * When non-null (Timeline Studio open), every loop follows the master playhead like an After
+     * Effects pre-comp follows its parent comp: the stage shows exactly the frame at the playhead.
+     */
+    var masterTimeMillis by mutableStateOf<Long?>(null)
     var isPlaying by mutableStateOf(true)
     val registeredLoops = mutableStateMapOf<String, LoopSubCompDescriptor>()
     val periodOverridesMillis = mutableStateMapOf<String, Long>()
+
+    /** Free-running loop time lives here, not in composition, so scene rebuilds never reset it. */
+    internal val freeRunMillis = mutableStateMapOf<String, Long>()
 
     fun effectivePeriodMillis(loopId: String, defaultPeriodMillis: Long): Long =
         (periodOverridesMillis[loopId] ?: defaultPeriodMillis).coerceAtLeast(200L)
@@ -94,7 +103,6 @@ fun rememberDeckLoopMillis(
         }
     }
 
-    var accumulatedMillis by remember(loopId) { mutableLongStateOf(0L) }
     val isThisSubCompScrubbed =
         (clock.activeSubCompLoopId == null || clock.activeSubCompLoopId == loopId) &&
             clock.scrubbedMillis != null
@@ -104,6 +112,11 @@ fun rememberDeckLoopMillis(
         return ((raw % effectivePeriod) + effectivePeriod) % effectivePeriod
     }
 
+    val master = clock.masterTimeMillis
+    if (master != null) {
+        return ((master % effectivePeriod) + effectivePeriod) % effectivePeriod
+    }
+
     LaunchedEffect(loopId, clock.isPlaying, effectivePeriod) {
         if (!clock.isPlaying) return@LaunchedEffect
         var lastNanos = -1L
@@ -111,12 +124,13 @@ fun rememberDeckLoopMillis(
             withFrameNanos { nowNanos ->
                 if (lastNanos >= 0L) {
                     val deltaMs = ((nowNanos - lastNanos) / 1_000_000L).coerceAtLeast(0L)
-                    accumulatedMillis = (accumulatedMillis + deltaMs) % effectivePeriod
+                    val previous = clock.freeRunMillis[loopId] ?: 0L
+                    clock.freeRunMillis[loopId] = (previous + deltaMs) % effectivePeriod
                 }
                 lastNanos = nowNanos
             }
         }
     }
 
-    return accumulatedMillis % effectivePeriod
+    return (clock.freeRunMillis[loopId] ?: 0L) % effectivePeriod
 }

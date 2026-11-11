@@ -75,6 +75,42 @@ CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
     offsets, live quadratic-Bezier `arcBend` trajectories rendered on stage via
     `MotionArcStageOverlay`, Loop Sub-Composition harmonic wave scrubbing (`Sub-Comp ▸` /
     `← Master Deck`), and optional `Bake to Kotlin` agent dispatch.
+  - **One playback engine.** `Animatic.advance` (arrow keys), timeline `Play`, and scrubbing all
+    drive the same `SeekableTransitionState` by seeking: a segment is first composed at play time
+    0 for a few settle frames (Compose delays any transition child created at a non-zero play time
+    by that play time, so nested content would otherwise lag), then its fraction is advanced frame
+    by frame. Presenting therefore renders exactly the frames a scrub renders. A newer navigation
+    supersedes an in-flight one, so rapid arrow presses skip ahead instead of queueing. Frames are
+    counted on the clock of the window that renders the animatic (`Easel` registers it), because
+    callers such as the timeline controller live in the application composition, whose clock ticks
+    independently. While a segment settles, `Easel` presents a pixel snapshot of the last frame
+    (a recorded layer would still show its children's live, half-set-up content).
+  - **Effective durations.** A segment lasts as long as something on stage actually changes: the
+    longest running animation whose start and end values differ. Plain `Transition` totals also
+    count the full `tween` of every unchanged animation, which used to leave up to 900 ms of dead
+    time after a click (for example before a slide transition). Animations whose keyframes return
+    to their start value are treated as static.
+  - **Path-independent scrubbing.** Every scrub step bumps `Animatic.scrubEpoch`, which re-keys the
+    scene subtree so no transition, shared-bounds anchor, or text plan leaks from the scrub path.
+    The fresh subtree settles on the segment's `from` state, then seeks. Resting exactly on a beat
+    line shows the settled beat. `ScrubPathIndependenceTest` checks forward, backward, jittering,
+    and unawaited bursts against a fresh composition, compares every scrubbed frame and segment
+    length against live arrow-key playback, and checks that rapid presses skip ahead.
+  - **Measured timing.** The timeline is laid out from the effective durations measured by playing
+    the whole deck with the real engine in an offscreen `ImageComposeScene` (resting on each beat
+    like a presenter), plus a 400 ms click hold per resting beat; time `t` on the ruler is the frame
+    playback shows at `t`. Offscreen scenes set `LocalTimelineOffscreen`, so live studio state
+    (selection, loop clock) never leaks into them.
+  - **After Effects navigation.** Timeline: wheel scrolls rows, `Shift`+wheel scrolls time,
+    `Alt`/`Ctrl`+wheel zooms at the cursor, `=`/`-` zoom around the playhead, `;` toggles fit and
+    frame level, `Space`+drag or middle-drag pans (a `Space` tap toggles playback), scrollbars on
+    both axes (`Modifier.scrollable2D`). Preview (while the timeline is open): wheel zooms at the
+    cursor, `Space`/middle-drag pans, `.`/`,` zoom, `/` fits. Ctrl-click review keeps working on a
+    zoomed preview.
+  - **Selection both ways.** Elements register with `Modifier.timelineTarget(trackId…)`. Selecting a
+    timeline row or block outlines the element(s) it animates on the slide; with the timeline open,
+    a plain click on a slide element selects its most specific track and scrolls its row into view
+    (disabled while review Inspect mode or a pending review selection is active).
 - **Hot-reload state retention:** `Main.kt` drives the desktop app through
   `rememberHotReloadStoryboard` (`AfterHotReloadEffect`, with Compose Hot Reload instrumenting
   window UI compositions automatically), while `rememberAnimatic` and `AnimaticPersistenceEffect`
@@ -132,8 +168,11 @@ Changes made from those tests:
 - unchanged whitespace receives stable correspondence keys instead of becoming a new shared bound
   every time;
 - transition settlement is now a `SideEffect`, not a state mutation hidden inside `remember`;
-- interrupted targets are cached until a state settles, so returning to an in-flight target reuses
-  the exact shared-bounds plan and keys;
+- plans are pure (`MagicTextPlanner.plan(from, to)`): the source keeps canonical keys and
+  `findShared` no longer mutates the source plan, so a scrub that arrives at a segment from any
+  direction gets the exact same shared-bounds plan and keys. `MagicTextInternal` mounts only the
+  `from`/`to` token sets (`SeekSafeTokenHost`) instead of an internal `AnimatedContent`, whose queue
+  drifts under seeking;
 - the old large-run TODO is resolved as an explicit v1 invariant: adjacent items cannot be merged
   without changing their independently moving geometry. Paragraph batching belongs after the v2
   layout boundary, not inside v1.
@@ -151,13 +190,14 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
 - `:storyboard-text:jvmTest --tests '*MagicText*Test'`: passed (12 focused tests).
 - `:storyboard-easel:jvmTest --tests '*AnimaticHotReloadPersistenceTest'`: passed (hot-reload slide
   and build retention + clamping without clobbering disk state).
-- `:deck:desktopTest`: passed (19 tests across `FoundationDeckTest`, `DeckThemeTest`,
-  `KeynoteEffectsTest`, `SlideReviewSystemTest`, `TimelineModelAndOverridesTest`, and
-  `DeterministicEaselScrubAndLoopTest`).
-- `:deck:spectreTest`: passed (real-window Spectre `0.9.0` E2E verification of docked Timeline
-  Studio, 0-ms `+ Beat` / `- Beat` virtualization, Inspector timing/Bezier/arc-bend overrides,
-  cross-slide shared-element arc overlay, Loop Sub-Composition harmonic wave scrubbing, ruler
-  pointer-drag scrubbing, and Jewel `PopupContainer` typing + `Escape` dismissal).
+- `:deck:desktopTest`: passed (adds `ScrubPathIndependenceTest`, `TimelineViewportAndSelectionTest`,
+  and `TimelineOffscreenIsolationTest` to `FoundationDeckTest`, `DeckThemeTest`, `KeynoteEffectsTest`,
+  `SlideReviewSystemTest`, `TimelineModelAndOverridesTest`, and `DeterministicEaselScrubAndLoopTest`).
+- `:deck:spectreTest`: passed (four real-window Spectre `0.9.0` tests: mouse scrubbing across a beat
+  and back, compared pixel-for-pixel with a direct scrub; After Effects zoom/pan/scroll gestures in
+  the timeline and the preview, including Ctrl-click review on a zoomed preview; selection in both
+  directions with compact Inspector steppers; beats, loop sub-composition, and the review composer
+  with the timeline open).
 - `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passed, including
   all JVM suites, Wasm compilation, and API checks. The unmodified upstream browser task cannot run
   in this image because it requests ChromeHeadless and only Firefox is installed; a literal `check`

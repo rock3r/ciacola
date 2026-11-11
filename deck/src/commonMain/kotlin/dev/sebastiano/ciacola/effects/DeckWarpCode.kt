@@ -1,6 +1,7 @@
 package dev.sebastiano.ciacola.effects
 
 import androidx.compose.animation.BoundsTransform
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.spring
@@ -37,6 +38,7 @@ import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
+import dev.sebastiano.ciacola.timeline.timelineTarget
 
 @Composable
 fun DeckWarpCodeCard(
@@ -44,12 +46,13 @@ fun DeckWarpCodeCard(
     stateTransition: Transition<Int>,
     modifier: Modifier = Modifier,
     language: Language = Kotlin,
+    textStyle: TextStyle = LocalDeckTheme.current.typography.code,
 ) {
     require(codeStates.isNotEmpty()) { "codeStates must not be empty" }
     val theme = LocalDeckTheme.current
     val cardStyle = theme.styles.codeCard
     val palette = theme.colors.code
-    val codeTextStyle = theme.typography.code
+    val codeTextStyle = textStyle
     val sceneCtx = LocalActiveSceneTimeline.current
     val collector = LocalTimelineHarvestCollector.current
     val warpTrackId = if (sceneCtx != null) "s${sceneCtx.sceneIndex}:warp-code" else "warp-code"
@@ -100,6 +103,7 @@ fun DeckWarpCodeCard(
                 label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
                 textSnippet = currentCodeSnippet,
             )
+            .timelineTarget(warpTrackId)
             .border(cardStyle.borderWidth, theme.colors.border, shape),
     ) {
         SharedTransitionLayout(Modifier.padding(cardStyle.padding).horizontalScroll(rememberScrollState())) {

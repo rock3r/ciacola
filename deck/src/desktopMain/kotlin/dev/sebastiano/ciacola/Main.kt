@@ -34,6 +34,7 @@ import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.timeline.DeckLoopClock
 import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
 import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
+import dev.sebastiano.ciacola.timeline.TimelineStageSelection
 import dev.sebastiano.ciacola.timeline.rememberTimelineStageDecorator
 import dev.sebastiano.ciacola.timeline.rememberTimelineStudioController
 import dev.sebastiano.ciacola.timeline.rememberTimelineStudioWindow
@@ -74,7 +75,12 @@ fun main() = application {
             val timelineOverridesStore = remember { TimelineOverridesStore() }
             val deckLoopClock = remember { DeckLoopClock() }
             val motionPathPreview = remember { MotionPathPreviewState() }
+            val stageSelection = remember { TimelineStageSelection() }
             val reviewStageCoordinator = rememberReviewStageCoordinator()
+            // Plain stage clicks pick timeline tracks unless the review tools own the click.
+            stageSelection.pickingSuppressed = {
+                reviewStageCoordinator.inspectModeEnabled || reviewStageCoordinator.pendingSelection != null
+            }
             val structuralRev = timelineOverridesStore.structuralRevision
             val paramRev = timelineOverridesStore.parameterRevision
             val currentOverrides = remember(structuralRev, paramRev) {
@@ -86,6 +92,7 @@ fun main() = application {
                 loopClock = deckLoopClock,
                 motionPathPreview = motionPathPreview,
                 overridesStore = timelineOverridesStore,
+                stageSelection = stageSelection,
             )
             val storyboard = rememberHotReloadStoryboard(
                 preset,
@@ -111,6 +118,7 @@ fun main() = application {
                 loopClock = deckLoopClock,
                 reviewStore = reviewStore,
                 motionPathPreview = motionPathPreview,
+                stageSelection = stageSelection,
             )
             val timelineWindow = rememberTimelineStudioWindow(
                 controller = timelineController,
