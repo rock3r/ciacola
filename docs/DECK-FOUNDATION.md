@@ -22,11 +22,40 @@ form the executable spike:
 by the storyboard decorator. Scenes call `DeckMagicText`; they neither select nor know an engine.
 The only supplied implementation is `MagicTextV1Renderer`.
 
-Run the desktop deck with:
+Run the desktop deck (or launch with Compose Hot Reload on JetBrains Runtime 25) with:
 
 ```shell
-JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew :deck:run
+./gradlew :deck:run
+./gradlew :deck:hotRunDesktop        # explicit reload via `./gradlew :deck:reload`
+CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
 ```
+
+## Theme system, Keynote effects kit, and hot reload
+
+- **`DeckTheme` (`dev.sebastiano.ciacola.theme`):** `LocalDeckTheme` supplies `@Immutable` tokens for
+  `DeckColors` (including a single `DeckCodePalette` shared by `MagicText` `CodeStyle` and
+  `DeckWarpCodeCard` TextMate scopes), `DeckTypography` (bundled `Inter` and `JetBrains Mono` cached
+  once via `rememberBundledDeckTheme` so `FontFamily` and `TextStyle` references never churn across
+  recomposition), `DeckStyles` (code cards, dashed callouts, leader arrows, strikeouts, stamps,
+  detour badges, and loupe geometry), and `DeckMotion` (300–380 ms Keynote curves, 55 ms stagger
+  step, and spring pop parameters). Two presets ship out of the box (`StageDark` and `KeynoteLight`,
+  toggleable live from the `Theme` menu).
+- **Reusable Keynote effects (`dev.sebastiano.ciacola.effects`):**
+  - Zero-relayout `graphicsLayer` / clip build modifiers (`keynoteDissolve`, `keynoteFadeMove`,
+    `keynoteFromDarkness`, `keynotePop`, `keynoteWipe`, `keynoteSpotlight`) driven by
+    `Transition.animateBuildProgress` and direction-symmetric `Transition.animateStaggerGroup`
+    (forward cascade `0..N-1`, backward reverse cascade `N-1..0`, with layout space reserved so
+    centered stacks never jump).
+  - Multi-contour Skia `PathMeasure` `LineDraw` decorations on `DecorationLayout`: `AnimatedLine`
+    and `AnimatedCubicLine` (with tangent `ArrowHead`), `AnimatedCalloutOutline` (dashed rounded
+    focus boxes), and `AnimatedStrikeout`.
+  - Stage components: `DottedLeaderRow`, `KeynoteStamp`, `DetourSign`, `DeckWarpCodeCard`, and
+    `MagnifierLoupeStage` (live `GraphicsLayer` zoomed iris loupe with animated dotted connectors).
+- **Hot-reload state retention:** `Main.kt` drives the desktop app through
+  `rememberHotReloadStoryboard` (`AfterHotReloadEffect`, with Compose Hot Reload instrumenting
+  window UI compositions automatically), while `rememberAnimatic` and `AnimaticPersistenceEffect`
+  retain and scene-clamp `(sceneIndex, frameIndex)` across `Storyboard` rebuilds without
+  overwriting `.storyboard/animatic.json`.
 
 ## Source orientation and attribution
 
@@ -89,7 +118,10 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
 ## Verification record
 
 - `:storyboard-text:jvmTest --tests '*MagicText*Test'`: passed (12 focused tests).
-- `:deck:desktopTest --tests '*FoundationDeckTest'`: passed (5 foundation tests).
+- `:storyboard-easel:jvmTest --tests '*AnimaticHotReloadPersistenceTest'`: passed (hot-reload slide
+  and build retention + clamping without clobbering disk state).
+- `:deck:desktopTest`: passed (11 tests across `FoundationDeckTest`, `DeckThemeTest`, and
+  `KeynoteEffectsTest`, including pixel-verified `LineDraw` decorations and 5-build lab navigation).
 - `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passed, including
   all JVM suites, Wasm compilation, and API checks. The unmodified upstream browser task cannot run
   in this image because it requests ChromeHeadless and only Firefox is installed; a literal `check`
@@ -98,6 +130,7 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
   `deck/build/visual-smoke`. They cover every settled state and every forward/backward transition.
   Forward and backward shared-move transition hashes differ from their settled frames. `loop-a.png`
   and `loop-b.png`, captured one second apart at the same scene index, also have different hashes.
-- Source audit: no v2 implementation, custom text renderer, shaping engine, cluster extractor, Canvas
-  glyph renderer, gradual-entrance renderer, or per-scene engine toggle exists. The Canvas use in the
-  deck is limited to the colored vertex mesh.
+- Source audit: no MagicText v2 implementation, custom text-shaping engine, or per-scene text-engine
+  toggle exists (`DeckTextRenderer` remains the sole prose-engine seam). Canvas drawing in `:deck`
+  covers the vertex-mesh backdrop and the `DecorationLayout` / `GraphicsLayer` Keynote presentation
+  effects (`LineDraw`, `DottedLeaderRow`, and `MagnifierLoupeStage`).

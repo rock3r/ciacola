@@ -21,7 +21,10 @@ kotlin {
                 implementation(project(":storyboard-easel"))
                 implementation(project(":storyboard-layout"))
                 implementation(project(":storyboard-text"))
+                implementation(project(":storyboard-warp"))
                 implementation(compose.material)
+                implementation(compose.components.resources)
+                implementation(libs.compose.hotReload.runtimeApi)
             }
         }
         commonTest {
@@ -34,7 +37,22 @@ kotlin {
                 implementation(compose.desktop.currentOs)
             }
         }
+        getByName("desktopTest") {
+            dependencies {
+                @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+                implementation(compose.uiTest)
+            }
+        }
     }
+}
+
+compose.resources {
+    customDirectory(
+        sourceSetName = "commonMain",
+        directoryProvider = provider {
+            rootProject.layout.projectDirectory.dir("examples/shared/src/commonMain/composeResources")
+        },
+    )
 }
 
 val jbr25 = javaToolchains.launcherFor {

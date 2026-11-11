@@ -24,3 +24,9 @@ __pycache__/
 
 ### Storyboard ###
 .storyboard/
+
+### Local agent worktrees, plans & isolated Gradle homes ###
+.worktrees/
+.plans/
+.gradle-agent-home/
+.gradle-agent-home-*/

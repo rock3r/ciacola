@@ -10,23 +10,47 @@ import dev.bnorm.storyboard.Scene
 import dev.bnorm.storyboard.Storyboard
 import kotlin.math.abs
 
+private class RetainedAnimaticHolder(var current: Animatic? = null)
+
 @Composable
 fun rememberAnimatic(
     initialIndex: Storyboard.Index = Storyboard.Index(0, 0),
     storyboard: () -> Storyboard,
 ): Animatic {
-    val storyboard = remember(storyboard) { storyboard() }
-    val states = remember(storyboard) { Animatic.buildStates(storyboard) }
+    val holder = remember { RetainedAnimaticHolder() }
+    val builtStoryboard = remember(storyboard) { storyboard() }
+    val states = remember(builtStoryboard) { Animatic.buildStates(builtStoryboard) }
 
-    val transitionState = remember(storyboard) {
-        val initialState = states.find { it.index == initialIndex } ?: states.first()
+    val transitionState = remember(builtStoryboard) {
+        val desiredIndex = holder.current?.currentIndex ?: initialIndex
+        val clampedIndex = clampStoryboardIndex(builtStoryboard.indices, desiredIndex)
+        val initialState = states.find { it.index == clampedIndex } ?: states.first()
         SeekableTransitionState(initialState)
     }
 
     val transition = rememberTransition(transitionState, label = "Animatic")
-    return remember(storyboard, states, transitionState, transition) {
-        Animatic(storyboard, states, transitionState, transition)
+    return remember(builtStoryboard, states, transitionState, transition) {
+        Animatic(builtStoryboard, states, transitionState, transition).also {
+            holder.current = it
+        }
     }
+}
+
+internal fun clampStoryboardIndex(
+    indices: List<Storyboard.Index>,
+    target: Storyboard.Index,
+): Storyboard.Index {
+    if (indices.isEmpty()) return target
+    val exact = indices.binarySearch(target)
+    if (exact >= 0) return indices[exact]
+
+    val sameScene = indices.filter { it.sceneIndex == target.sceneIndex }
+    if (sameScene.isNotEmpty()) {
+        return sameScene.lastOrNull { it.frameIndex <= target.frameIndex } ?: sameScene.first()
+    }
+
+    val earlierScene = indices.lastOrNull { it.sceneIndex < target.sceneIndex }
+    return earlierScene ?: indices.first()
 }
 
 @Stable

@@ -1,16 +1,31 @@
 package dev.sebastiano.ciacola
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
-import androidx.compose.material.darkColors
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.MenuScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.easel.DesktopEasel
 import dev.bnorm.storyboard.easel.Easel
+import dev.bnorm.storyboard.easel.EaselWindow
+import dev.bnorm.storyboard.easel.assist.rememberAssistantWindow
 import dev.bnorm.storyboard.easel.rememberAnimatic
+import dev.sebastiano.ciacola.theme.DeckThemePreset
+import dev.sebastiano.ciacola.theme.DeckThemes
 import java.awt.Rectangle
 import java.awt.Robot
 import java.io.File
@@ -19,12 +34,53 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 fun main() = application {
-    MaterialTheme(colors = darkColors()) {
+    var preset by remember {
+        val envPreset = System.getenv("CIACOLA_THEME")
+        mutableStateOf(
+            if (envPreset.equals("light", ignoreCase = true)) {
+                DeckThemePreset.KeynoteLight
+            } else {
+                DeckThemePreset.StageDark
+            }
+        )
+    }
+    val hostTheme = remember(preset) { DeckThemes.forPreset(preset) }
+    val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
+    val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
+
+    MaterialTheme(
+        colors = materialColors,
+        typography = materialTypography,
+    ) {
         val smokeDirectory = System.getenv("DECK_VISUAL_SMOKE_DIR")
         if (smokeDirectory == null) {
-            DesktopEasel { createFoundationDeck() }
+            val storyboard = rememberHotReloadStoryboard(preset) {
+                createFoundationDeck(
+                    theme = hostTheme,
+                    bundledPreset = preset,
+                    includeKeynoteEffectsLab = true,
+                )
+            }
+            val animatic = rememberAnimatic(
+                fileName = "animatic",
+                storyboard = { storyboard },
+            )
+            val themeWindow = rememberThemeSwitcherWindow(
+                currentPreset = preset,
+                onSelectPreset = { preset = it },
+            )
+            DesktopEasel(
+                animatic = animatic,
+                windows = listOf(rememberAssistantWindow(animatic), themeWindow),
+            )
         } else {
-            val animatic = rememberAnimatic(storyboard = ::createFoundationDeck)
+            val storyboard = rememberHotReloadStoryboard(preset) {
+                createFoundationDeck(
+                    theme = hostTheme,
+                    bundledPreset = preset,
+                )
+            }
+            val animatic = rememberAnimatic(storyboard = { storyboard })
             Window(
                 onCloseRequest = ::exitApplication,
                 title = "Deck visual smoke",
@@ -73,6 +129,50 @@ fun main() = application {
                     }
                     window.dispose()
                     exitApplication()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberThemeSwitcherWindow(
+    currentPreset: DeckThemePreset,
+    onSelectPreset: (DeckThemePreset) -> Unit,
+): EaselWindow = remember(currentPreset, onSelectPreset) {
+    object : EaselWindow {
+        override val name: String = "Theme"
+        override var visible: Boolean by mutableStateOf(false)
+
+        @Composable
+        override fun MenuScope.Menu() {
+            Item(
+                text = if (currentPreset == DeckThemePreset.StageDark) "✓ Stage Dark" else "Stage Dark",
+                onClick = { onSelectPreset(DeckThemePreset.StageDark) },
+            )
+            Item(
+                text = if (currentPreset == DeckThemePreset.KeynoteLight) "✓ Keynote Light" else "Keynote Light",
+                onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
+            )
+            Separator()
+            Item(
+                text = if (visible) "Hide Theme Inspector" else "Show Theme Inspector",
+                onClick = { visible = !visible },
+            )
+        }
+
+        @Composable
+        override fun Content() {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Active preset: ${currentPreset.name}")
+                Button(onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) }) {
+                    Text("Switch to Keynote Light")
+                }
+                Button(onClick = { onSelectPreset(DeckThemePreset.StageDark) }) {
+                    Text("Switch to Stage Dark")
                 }
             }
         }

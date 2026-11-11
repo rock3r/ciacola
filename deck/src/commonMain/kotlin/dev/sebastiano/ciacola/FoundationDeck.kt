@@ -12,38 +12,54 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.material.Typography
-import androidx.compose.material.darkColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.SceneFormat
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.StoryboardBuilder
 import dev.bnorm.storyboard.easel.rememberSharedContentState
 import dev.bnorm.storyboard.easel.sharedBounds
+import dev.bnorm.storyboard.layout.decorated.DecorationLayout
 import dev.bnorm.storyboard.text.highlight.CodeStyle
 import dev.bnorm.storyboard.text.highlight.Language
 import dev.bnorm.storyboard.text.highlight.highlight
 import dev.bnorm.storyboard.toValue
+import dev.sebastiano.ciacola.effects.AnimatedCalloutOutline
+import dev.sebastiano.ciacola.effects.AnimatedLine
+import dev.sebastiano.ciacola.effects.AnimatedStrikeout
+import dev.sebastiano.ciacola.effects.DeckWarpCodeCard
+import dev.sebastiano.ciacola.effects.DottedLeaderRow
+import dev.sebastiano.ciacola.effects.KeynoteStamp
+import dev.sebastiano.ciacola.effects.MagnifierLoupeStage
+import dev.sebastiano.ciacola.effects.SlideDirection
+import dev.sebastiano.ciacola.effects.animateBuildProgress
+import dev.sebastiano.ciacola.effects.animateStaggerGroup
+import dev.sebastiano.ciacola.effects.keynoteFadeMove
+import dev.sebastiano.ciacola.effects.keynoteFromDarkness
+import dev.sebastiano.ciacola.effects.keynotePop
+import dev.sebastiano.ciacola.effects.keynoteSpotlight
+import dev.sebastiano.ciacola.theme.DeckTheme
+import dev.sebastiano.ciacola.theme.DeckThemePreset
+import dev.sebastiano.ciacola.theme.DeckThemeProvider
+import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.LocalDeckTheme
 
 enum class FoundationProof {
     DeterministicNavigation,
@@ -73,53 +89,57 @@ enum class FoundationSceneSpec(
 }
 
 object DeckDesign {
-    val background = Color(0xFF0B0D12)
-    val surface = Color(0xFF171B24)
-    val foreground = Color(0xFFF4F1EA)
-    val muted = Color(0xFFA9B0C0)
-    val accent = Color(0xFFFF6B5E)
-    val secondary = Color(0xFF71D7C5)
+    private val defaultTheme = DeckThemes.stageDark()
 
-    val title = TextStyle(fontSize = 72.sp, lineHeight = 78.sp, fontWeight = FontWeight.Bold)
-    val heading = TextStyle(fontSize = 46.sp, lineHeight = 54.sp, fontWeight = FontWeight.SemiBold)
-    val body = TextStyle(fontSize = 30.sp, lineHeight = 40.sp)
-    val code = TextStyle(fontSize = 27.sp, lineHeight = 36.sp, fontFamily = FontFamily.Monospace)
-    val codeEmphasis = code.copy(fontWeight = FontWeight.Bold)
+    val background get() = defaultTheme.colors.background
+    val surface get() = defaultTheme.colors.surface
+    val foreground get() = defaultTheme.colors.foreground
+    val muted get() = defaultTheme.colors.muted
+    val accent get() = defaultTheme.colors.accent
+    val secondary get() = defaultTheme.colors.secondary
+
+    val title: TextStyle get() = defaultTheme.typography.title
+    val heading: TextStyle get() = defaultTheme.typography.heading
+    val body: TextStyle get() = defaultTheme.typography.body
+    val code: TextStyle get() = defaultTheme.typography.code
+    val codeEmphasis: TextStyle get() = defaultTheme.typography.codeEmphasis
 
     val format = SceneFormat(IntSize(1920, 1080), Density(2f))
 }
 
 fun createFoundationDeck(
     textRenderer: DeckTextRenderer = MagicTextV1Renderer,
+    theme: DeckTheme = DeckThemes.stageDark(),
+    bundledPreset: DeckThemePreset? = null,
+    includeKeynoteEffectsLab: Boolean = false,
 ): Storyboard = Storyboard.build(
     title = "Ciacola",
     description = "Provisional scenes proving the presentation architecture; not talk narrative.",
     format = DeckDesign.format,
-    decorator = deckDecorator(textRenderer),
+    decorator = deckDecorator(textRenderer, theme, bundledPreset),
 ) {
     beatsScene()
     sharedMoveScene()
     ambientLoopScene()
-    kotlinCodeScene()
+    kotlinCodeScene(theme.colors.code.toCodeStyle())
+    if (includeKeynoteEffectsLab) {
+        keynoteEffectsLabScene()
+    }
 }
 
-private fun deckDecorator(textRenderer: DeckTextRenderer) = ContentDecorator { content ->
-    val colors = darkColors(
-        background = DeckDesign.background,
-        surface = DeckDesign.surface,
-        onBackground = DeckDesign.foreground,
-        onSurface = DeckDesign.foreground,
-        primary = DeckDesign.accent,
-        secondary = DeckDesign.secondary,
-    )
-    val typography = Typography(
-        h1 = DeckDesign.title,
-        h2 = DeckDesign.heading,
-        body1 = DeckDesign.body,
-    )
+private fun deckDecorator(
+    textRenderer: DeckTextRenderer,
+    theme: DeckTheme,
+    bundledPreset: DeckThemePreset? = null,
+) = ContentDecorator { content ->
+    val activeTheme = if (bundledPreset != null) {
+        DeckThemes.rememberBundledDeckTheme(bundledPreset)
+    } else {
+        theme
+    }
     DeckTextRendererProvider(textRenderer) {
-        MaterialTheme(colors = colors, typography = typography) {
-            Surface(Modifier.fillMaxSize(), color = DeckDesign.background) { content() }
+        DeckThemeProvider(activeTheme) {
+            Surface(Modifier.fillMaxSize(), color = activeTheme.colors.background) { content() }
         }
     }
 }
@@ -147,6 +167,7 @@ private data class SharedMoveState(val expanded: Boolean)
 private fun StoryboardBuilder.sharedMoveScene() = scene(
     frames = listOf(SharedMoveState(false), SharedMoveState(true)),
 ) {
+    val theme = LocalDeckTheme.current
     FoundationFrame("SHARED ELEMENT / PROVISIONAL") {
         transition.AnimatedContent(
             transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -155,18 +176,18 @@ private fun StoryboardBuilder.sharedMoveScene() = scene(
             val expanded = frame.toValue().expanded
             Box(Modifier.fillMaxSize()) {
                 Surface(
-                    color = DeckDesign.accent,
+                    color = theme.colors.accent,
                     shape = RoundedCornerShape(if (expanded) 40.dp else 24.dp),
                     modifier = Modifier
                         .align(if (expanded) Alignment.Center else Alignment.TopStart)
                         .sharedBounds(
                             rememberSharedContentState("foundation-shared-card"),
-                            boundsTransform = { _, _ -> tween(700) },
+                            boundsTransform = { _, _ -> tween(theme.motion.sharedBoundsDurationMs) },
                         )
                         .size(if (expanded) 520.dp else 240.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("shared", style = DeckDesign.heading, color = DeckDesign.background)
+                        Text("shared", style = theme.typography.heading, color = theme.colors.background)
                     }
                 }
             }
@@ -175,27 +196,32 @@ private fun StoryboardBuilder.sharedMoveScene() = scene(
 }
 
 private fun StoryboardBuilder.ambientLoopScene() = scene(frameCount = 1) {
+    val theme = LocalDeckTheme.current
     FoundationFrame("CONTINUOUS COMPOSE / PROVISIONAL", contentPadding = 0) {
         AnimatedMeshBackdrop(Modifier.fillMaxSize())
         Column(
-            Modifier.align(Alignment.Center).background(DeckDesign.background.copy(alpha = 0.78f)).padding(48.dp),
+            Modifier
+                .align(Alignment.Center)
+                .background(theme.colors.background.copy(alpha = 0.78f))
+                .padding(48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("one stable scene state", style = DeckDesign.heading)
-            Text("the visual keeps moving", style = DeckDesign.body, color = DeckDesign.muted)
+            Text("one stable scene state", style = theme.typography.heading, color = theme.colors.foreground)
+            Text("the visual keeps moving", style = theme.typography.body, color = theme.colors.muted)
         }
     }
 }
 
 private data class CodeState(val description: AnnotatedString, val source: AnnotatedString)
 
-private fun StoryboardBuilder.kotlinCodeScene() = scene(
+private fun StoryboardBuilder.kotlinCodeScene(codeStyle: CodeStyle) = scene(
     frames = listOf(
-        codeState("Syntax highlighting is data carried by AnnotatedString.", "fun provisional() = Unit"),
-        codeState("Retained Kotlin tokens move while styles remain attached.", "fun provisional() {\n    println(\"foundation\")\n}"),
-        codeState("The sample remains intentionally small and replaceable.", "fun provisional(message: String) {\n    println(message)\n}"),
+        codeState("Syntax highlighting is data carried by AnnotatedString.", "fun provisional() = Unit", codeStyle),
+        codeState("Retained Kotlin tokens move while styles remain attached.", "fun provisional() {\n    println(\"foundation\")\n}", codeStyle),
+        codeState("The sample remains intentionally small and replaceable.", "fun provisional(message: String) {\n    println(message)\n}", codeStyle),
     ),
 ) {
+    val theme = LocalDeckTheme.current
     @OptIn(ExperimentalTransitionApi::class)
     val description = transition.createChildTransition("code-description") { it.toValue().description }
     @OptIn(ExperimentalTransitionApi::class)
@@ -204,47 +230,163 @@ private fun StoryboardBuilder.kotlinCodeScene() = scene(
     FoundationFrame("MAGIC TEXT / KOTLIN / PROVISIONAL") {
         Column(verticalArrangement = Arrangement.spacedBy(44.dp)) {
             DeckMagicText(description)
-            Surface(color = DeckDesign.surface, shape = RoundedCornerShape(24.dp)) {
-                DeckMagicText(code, Modifier.fillMaxSize().padding(40.dp), DeckDesign.code)
+            Surface(
+                color = theme.colors.code.background,
+                shape = RoundedCornerShape(theme.styles.codeCard.cornerRadius),
+            ) {
+                DeckMagicText(
+                    code,
+                    Modifier.fillMaxSize().padding(theme.styles.codeCard.padding),
+                    theme.typography.code,
+                )
             }
         }
     }
 }
 
-private val foundationCodeStyle = CodeStyle.build(SpanStyle(color = DeckDesign.foreground)) {
-    keyword = simple + SpanStyle(color = DeckDesign.accent)
-    string = simple + SpanStyle(color = DeckDesign.secondary)
-    functionDeclaration = simple + SpanStyle(color = Color(0xFFFFD166), fontWeight = FontWeight.Bold)
-    staticFunctionCall = simple + SpanStyle(color = Color(0xFF8CB4FF))
-    punctuation = simple + SpanStyle(color = DeckDesign.muted)
-}
-
-private fun codeState(description: String, source: String): CodeState = CodeState(
+private fun codeState(
+    description: String,
+    source: String,
+    codeStyle: CodeStyle,
+): CodeState = CodeState(
     description = AnnotatedString(description),
     source = source.highlight(
-        codeStyle = foundationCodeStyle,
+        codeStyle = codeStyle,
         language = Language.Kotlin,
         identifierStyle = {
             when (it) {
-                "provisional" -> foundationCodeStyle.functionDeclaration
-                "println" -> foundationCodeStyle.staticFunctionCall
+                "provisional" -> codeStyle.functionDeclaration
+                "println" -> codeStyle.staticFunctionCall
                 else -> null
             }
         },
     ),
 )
 
+// Provisional interactive lab scene exercising every Keynote effect + DeckWarpCode + MagnifierLoupe.
+private fun StoryboardBuilder.keynoteEffectsLabScene() = scene(
+    frames = listOf(0, 1, 2, 3, 4),
+) {
+    val theme = LocalDeckTheme.current
+    @OptIn(ExperimentalTransitionApi::class)
+    val stepTransition = transition.createChildTransition("keynote-lab-step") { it.toValue() }
+
+    val staggerRows = transition.animateStaggerGroup(count = 2) { it.toValue() >= 1 }
+    val stampBuild by transition.animateBuildProgress { it.toValue() >= 2 }
+    val calloutBuild by transition.animateBuildProgress(
+        durationMillis = theme.motion.lineDrawDurationMs,
+    ) { it.toValue() >= 3 }
+    val reversalBuild by transition.animateBuildProgress(
+        durationMillis = theme.motion.loupeDurationMs,
+    ) { it.toValue() >= 4 }
+
+    val warpSnippets = remember {
+        listOf(
+            "fun fade(text: AnnotatedString) {\n  BasicText(text)\n}",
+            "fun fade(text: AnnotatedString, alpha: Float) {\n  BasicText(text.withAlpha(alpha))\n}",
+        )
+    }
+    @OptIn(ExperimentalTransitionApi::class)
+    val warpStep = stepTransition.createChildTransition("warp-idx") { if (it >= 3) 1 else 0 }
+
+    FoundationFrame("KEYNOTE EFFECTS LAB / PROVISIONAL") {
+        MagnifierLoupeStage(
+            targetKey = "compose-target",
+            progress = { reversalBuild },
+            modifier = Modifier.fillMaxSize(),
+            decorations = listOf(
+                AnimatedLine(
+                    startKey = "immutable-stamp",
+                    startAlignment = Alignment.TopCenter,
+                    endKey = "compose-target",
+                    endAlignment = Alignment.BottomCenter,
+                    progress = { stampBuild },
+                    color = theme.colors.accent,
+                    strokeWidth = theme.styles.leaderArrow.strokeWidth,
+                    gap = theme.styles.leaderArrow.gap,
+                ),
+                AnimatedCalloutOutline(
+                    targetKey = "warp-card",
+                    progress = { calloutBuild },
+                    color = theme.colors.secondary,
+                ),
+                AnimatedStrikeout(
+                    targetKey = "optimistic-claim",
+                    progress = { reversalBuild },
+                    color = theme.colors.danger,
+                ),
+            ),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                ) {
+                    Text(
+                        text = "Fix with SpanStyle(alpha)!",
+                        style = theme.typography.heading,
+                        color = theme.colors.foreground,
+                        modifier = Modifier
+                            .decorate("optimistic-claim")
+                            .keynoteSpotlight(dimProgress = { calloutBuild * (1f - reversalBuild) }),
+                    )
+                    DottedLeaderRow(
+                        leading = "Web",
+                        trailing = "<span style=\"opacity\">",
+                        modifier = Modifier
+                            .keynoteFadeMove(progress = { staggerRows.progressFor(0) })
+                            .keynoteSpotlight(dimProgress = { calloutBuild }),
+                    )
+                    DottedLeaderRow(
+                        leading = "Compose",
+                        trailing = "BasicText(AnnotatedString)",
+                        highlightTrailing = stampBuild > 0.2f,
+                        trailingModifier = Modifier.decorate("compose-target"),
+                        modifier = Modifier.keynoteFadeMove(progress = { staggerRows.progressFor(1) }),
+                    )
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        KeynoteStamp(
+                            text = "IMMUTABLE",
+                            modifier = Modifier
+                                .decorate("immutable-stamp")
+                                .keynotePop(progress = { stampBuild }),
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(0.95f)
+                        .decorate("warp-card")
+                        .keynoteFromDarkness(progress = { staggerRows.progressFor(1) }),
+                ) {
+                    DeckWarpCodeCard(
+                        codeStates = warpSnippets,
+                        stateTransition = warpStep,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun FoundationFrame(
     eyebrow: String,
-    contentPadding: Int = 64,
+    contentPadding: Int = LocalDeckTheme.current.styles.slidePadding.value.toInt(),
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val theme = LocalDeckTheme.current
     Box(Modifier.fillMaxSize().padding(contentPadding.dp)) {
         Text(
             eyebrow,
-            color = DeckDesign.muted,
-            style = TextStyle(fontSize = 16.sp, letterSpacing = 3.sp, fontWeight = FontWeight.Bold),
+            color = theme.colors.muted,
+            style = theme.typography.eyebrow,
             modifier = Modifier.align(Alignment.TopStart),
         )
         Box(Modifier.fillMaxSize().padding(top = 56.dp), content = content)

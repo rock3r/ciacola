@@ -37,5 +37,13 @@ kotlin {
                 implementation(libs.pdfbox)
             }
         }
+
+        val jvmTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+                @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+                implementation(compose.uiTest)
+            }
+        }
     }
 }

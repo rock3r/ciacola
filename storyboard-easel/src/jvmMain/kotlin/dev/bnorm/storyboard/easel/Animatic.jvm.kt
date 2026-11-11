@@ -31,7 +31,7 @@ fun rememberAnimatic(
     format: StringFormat = Json,
     storyboard: () -> Storyboard,
 ): Animatic {
-    val animatic = rememberAnimatic { storyboard() }
+    val animatic = rememberAnimatic(storyboard = storyboard)
     AnimaticPersistenceEffect(animatic, fileName, format)
     return animatic
 }
@@ -42,10 +42,9 @@ fun AnimaticPersistenceEffect(
     fileName: String,
     format: StringFormat = Json,
 ) {
-    // TODO extract this directory to somewhere as a constant?
     val path = Paths.get(".storyboard", "${fileName.lowercase()}.json")
-    var loaded by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    var loaded by remember(fileName) { mutableStateOf(false) }
+    LaunchedEffect(fileName, format) {
         val index = runInterruptible(Dispatchers.IO) {
             if (path.exists()) {
                 val text = path.readText()
@@ -58,12 +57,7 @@ fun AnimaticPersistenceEffect(
         }
 
         if (index != null) {
-            val indices = animatic.storyboard.indices
-            val searchIndex = indices.binarySearch(index)
-            val jumpIndex = when {
-                searchIndex >= 0 -> indices[searchIndex]
-                else -> indices[(-searchIndex - 1).coerceAtMost(indices.lastIndex)]
-            }
+            val jumpIndex = clampStoryboardIndex(animatic.storyboard.indices, index)
             animatic.jumpTo(jumpIndex)
         }
 
@@ -78,9 +72,10 @@ fun AnimaticPersistenceEffect(
 @Composable
 private fun LaunchedStoryboardIndexWriter(animatic: Animatic, path: Path, format: StringFormat) {
     val index = animatic.currentIndex
-    LaunchedEffect(index, path, format) {
+    LaunchedEffect(animatic, index, path, format) {
         try {
             runInterruptible(Dispatchers.IO) {
+                path.createParentDirectories()
                 val text = format.encodeToString(StoryboardIndexSerializer, index)
                 path.writeText(text, options = arrayOf(WRITE, CREATE, TRUNCATE_EXISTING))
             }
