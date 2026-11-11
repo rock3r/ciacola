@@ -5,12 +5,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.ProvideTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import dev.bnorm.storyboard.text.magic.DefaultDelayDurationMillis
+import dev.bnorm.storyboard.text.magic.DefaultFadeDurationMillis
+import dev.bnorm.storyboard.text.magic.DefaultMoveDurationMillis
 import dev.bnorm.storyboard.text.magic.MagicText
 import dev.sebastiano.ciacola.review.reviewTarget
+import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
+import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
+import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
+import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
+import dev.sebastiano.ciacola.timeline.TrackCategory
 
 interface DeckTextRenderer {
     @Composable
@@ -28,8 +37,21 @@ object MagicTextV1Renderer : DeckTextRenderer {
         modifier: Modifier,
         style: TextStyle,
     ) {
+        val sceneCtx = LocalActiveSceneTimeline.current
+        val trackId = if (sceneCtx != null) "s${sceneCtx.sceneIndex}:magic-text" else "magic-text"
+        val override = LocalTimelineOverrides.current.tracks[trackId]
+        val totalDefault = DefaultFadeDurationMillis * 2 + DefaultMoveDurationMillis
+        val effectiveTotal = (override?.durationMs ?: totalDefault).coerceAtLeast(90)
+        val phaseMs = (effectiveTotal / 3).coerceAtLeast(30)
+
         ProvideTextStyle(style) {
-            MagicText(transition, modifier)
+            MagicText(
+                transition = transition,
+                modifier = modifier,
+                moveDurationMillis = phaseMs,
+                fadeDurationMillis = phaseMs,
+                delayDurationMillis = DefaultDelayDurationMillis,
+            )
         }
     }
 }
@@ -52,6 +74,30 @@ fun DeckMagicText(
     modifier: Modifier = Modifier.fillMaxWidth(),
     style: TextStyle = DeckDesign.body,
 ) {
+    val sceneCtx = LocalActiveSceneTimeline.current
+    val collector = LocalTimelineHarvestCollector.current
+    val trackId = if (sceneCtx != null) "s${sceneCtx.sceneIndex}:magic-text" else "magic-text"
+    val override = LocalTimelineOverrides.current.tracks[trackId]
+    val defaultTotal = DefaultFadeDurationMillis * 2 + DefaultMoveDurationMillis
+
+    SideEffect {
+        if (sceneCtx != null && sceneCtx.totalBeats > 1) {
+            for (beat in 1 until sceneCtx.totalBeats) {
+                collector?.record(
+                    HarvestedTrackRecord(
+                        trackId = trackId,
+                        label = "MagicText Diff",
+                        category = TrackCategory.MagicText,
+                        sceneIndex = sceneCtx.sceneIndex,
+                        triggerBeat = override?.enterBeat ?: beat,
+                        durationMs = override?.durationMs ?: defaultTotal,
+                        delayMs = override?.delayMs ?: 0,
+                    )
+                )
+            }
+        }
+    }
+
     val currentText = transition.targetState.text
     val taggedModifier = modifier.reviewTarget(
         kind = "MagicText",

@@ -30,6 +30,8 @@ import org.jetbrains.skia.PaintMode
 import org.jetbrains.skia.Rect as SkiaRect
 import org.jetbrains.skia.Surface
 
+const val ReviewCommentHitForBake = "TIMELINE OVERRIDES BAKE"
+
 class ReviewCommentStore(
     val storyboardDir: Path = Path.of(".storyboard"),
     val workspaceRoot: Path = Path.of("").toAbsolutePath(),

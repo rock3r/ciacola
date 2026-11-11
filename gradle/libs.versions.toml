@@ -1,9 +1,11 @@
 [versions]
 antlr-kotlin = "1.0.13"
-compose-jb = "1.12.0"
+compose-jb = "1.13.0-beta02"
 compose-hot-reload = "1.2.0"
-jewel = "0.41.0-262.10968.63"
-intellij-icons = "262.10968.63"
+jewel = "0.42.0-263.7307.200"
+intellij-icons = "263.7307.200"
+spectre = "0.9.0"
+junit-jupiter = "5.11.4"
 kotlin = "2.4.10"
 ktor = "3.5.2"
 collection = "1.6.0"
@@ -34,6 +36,11 @@ compose-materialIcons = { module = "org.jetbrains.compose.material:material-icon
 compose-hotReload-runtimeApi = { module = "org.jetbrains.compose.hot-reload:hot-reload-runtime-api", version.ref = "compose-hot-reload" }
 jewel-int-ui-standalone = { module = "org.jetbrains.jewel:jewel-int-ui-standalone", version.ref = "jewel" }
 intellij-icons = { module = "com.jetbrains.intellij.platform:icons", version.ref = "intellij-icons" }
+spectre-core = { module = "dev.sebastiano.spectre:spectre-core", version.ref = "spectre" }
+spectre-testing = { module = "dev.sebastiano.spectre:spectre-testing", version.ref = "spectre" }
+spectre-recording = { module = "dev.sebastiano.spectre:spectre-recording", version.ref = "spectre" }
+spectre-recording-macos = { module = "dev.sebastiano.spectre:spectre-recording-macos", version.ref = "spectre" }
+junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit-jupiter" }
 filekit-core = { module = "io.github.vinceglb:filekit-core", version.ref = "filekit" }
 filekit-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
 kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version = "0.5.2" }

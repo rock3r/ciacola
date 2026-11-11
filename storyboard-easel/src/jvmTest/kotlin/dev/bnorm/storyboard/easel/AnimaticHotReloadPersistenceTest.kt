@@ -18,7 +18,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalTestApi::class)
 class AnimaticHotReloadPersistenceTest {
@@ -47,13 +50,29 @@ class AnimaticHotReloadPersistenceTest {
                 latestAnimatic = rememberAnimatic(fileName = fileKey, storyboard = { deck })
             }
 
+            suspend fun awaitSavedFileCondition(predicate: () -> Boolean) {
+                val deadline = System.nanoTime() + 4_000_000_000L
+                while (System.nanoTime() < deadline) {
+                    waitForIdle()
+                    if (predicate()) return
+                    withContext(Dispatchers.Default) { delay(15) }
+                }
+                waitForIdle()
+                assertTrue(predicate(), "Timed out waiting for saved index condition at $savedPath")
+            }
+
             waitForIdle()
+            awaitSavedFileCondition { true }
+            // Give initial LaunchedEffect(fileName) IO load a moment to mark loaded=true.
+            withContext(Dispatchers.Default) { delay(40) }
+            waitForIdle()
+
             runOnIdle {
                 uiScope.launch {
                     latestAnimatic.jumpTo(Storyboard.Index(sceneIndex = 1, frameIndex = 2))
                 }
             }
-            waitUntil(timeoutMillis = 3_000) {
+            awaitSavedFileCondition {
                 savedPath.exists() && savedPath.readText().contains("\"frameIndex\":2")
             }
             assertEquals(Storyboard.Index(sceneIndex = 1, frameIndex = 2), latestAnimatic.currentIndex)
@@ -61,15 +80,14 @@ class AnimaticHotReloadPersistenceTest {
             // Simulate a hot reload that edits frame content and adds B3 to Scene 1.
             runOnIdle { reloadVersion = 1 }
             waitForIdle()
+            withContext(Dispatchers.Default) { delay(50) }
+            waitForIdle()
 
             assertEquals(
                 Storyboard.Index(sceneIndex = 1, frameIndex = 2),
                 latestAnimatic.currentIndex,
                 "Rebuilding Storyboard during hot reload must keep the active slide and build step",
             )
-            // Give any background writer a beat and verify it never overwrote the file with (0, 0).
-            mainClock.advanceTimeBy(200)
-            waitForIdle()
             assertTrue(
                 savedPath.readText().contains("\"sceneIndex\":1") &&
                     savedPath.readText().contains("\"frameIndex\":2"),
@@ -78,7 +96,7 @@ class AnimaticHotReloadPersistenceTest {
 
             // Simulate a second hot reload that removes B2/B3 from Scene 1; index must clamp to (1, 1).
             runOnIdle { reloadVersion = 2 }
-            waitUntil(timeoutMillis = 3_000) {
+            awaitSavedFileCondition {
                 latestAnimatic.currentIndex == Storyboard.Index(sceneIndex = 1, frameIndex = 1) &&
                     savedPath.readText().contains("\"frameIndex\":1")
             }

@@ -1,6 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JvmVendorSpec
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -13,7 +14,15 @@ group = "dev.sebastiano.ciacola"
 version = "0.1-SNAPSHOT"
 
 kotlin {
-    jvm("desktop")
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(25))
+        vendor.set(JvmVendorSpec.JETBRAINS)
+    }
+    jvm("desktop") {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_25)
+        }
+    }
 
     sourceSets {
         commonMain {
@@ -46,6 +55,11 @@ kotlin {
             dependencies {
                 @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
                 implementation(compose.uiTest)
+                implementation(libs.spectre.core)
+                implementation(libs.spectre.testing)
+                runtimeOnly(libs.junit.jupiter.api)
+                runtimeOnly(libs.spectre.recording)
+                runtimeOnly(libs.spectre.recording.macos)
             }
         }
     }
@@ -65,8 +79,26 @@ val jbr25 = javaToolchains.launcherFor {
     vendor = JvmVendorSpec.JETBRAINS
 }
 
-tasks.withType<Test>().configureEach {
+tasks.withType<JavaCompile>().configureEach {
+    sourceCompatibility = "25"
+    targetCompatibility = "25"
+}
+
+tasks.named<Test>("desktopTest") {
     javaLauncher.set(jbr25)
+    exclude("**/*SpectreTest.class")
+}
+
+val desktopTestTask = tasks.named<Test>("desktopTest")
+tasks.register<Test>("spectreTest") {
+    description = "Runs real-window Spectre 0.9.0 E2E tests on JetBrains Runtime 25."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    testClassesDirs = desktopTestTask.get().testClassesDirs
+    classpath = desktopTestTask.get().classpath
+    include("**/*SpectreTest.class")
+    systemProperty("java.awt.headless", "false")
+    outputs.upToDateWhen { false }
 }
 
 compose.desktop {

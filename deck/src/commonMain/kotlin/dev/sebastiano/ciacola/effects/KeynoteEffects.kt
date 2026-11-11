@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -35,6 +36,11 @@ import androidx.compose.ui.unit.toIntSize
 import androidx.compose.ui.unit.toOffset
 import dev.bnorm.storyboard.layout.decorated.Decoration
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
+import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
+import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
+import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
+import dev.sebastiano.ciacola.timeline.TrackCategory
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -118,40 +124,137 @@ class StaggerGroupState internal constructor(
 @Composable
 fun <S> Transition<S>.animateBuildProgress(
     label: String = "keynote-build",
+    trackId: String? = null,
+    category: TrackCategory = TrackCategory.Build,
+    defaultTriggerBeat: Int = 1,
     durationMillis: Int = LocalDeckTheme.current.motion.fadeMoveDurationMs,
     easing: Easing = LocalDeckTheme.current.motion.standardEasing,
     visible: (S) -> Boolean,
-): State<Float> = animateFloat(
-    transitionSpec = { tween(durationMillis = durationMillis, easing = easing) },
-    label = label,
-) { state ->
-    if (visible(state)) 1f else 0f
+): State<Float> {
+    val sceneCtx = LocalActiveSceneTimeline.current
+    val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
+    val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
+    val collector = LocalTimelineHarvestCollector.current
+
+    val effectiveDuration = override?.durationMs ?: durationMillis
+    val effectiveDelay = override?.delayMs ?: 0
+    val effectiveTriggerBeat = override?.enterBeat ?: defaultTriggerBeat
+    val effectiveExitBeat = override?.exitBeat
+
+    SideEffect {
+        if (sceneCtx != null) {
+            collector?.record(
+                HarvestedTrackRecord(
+                    trackId = resolvedTrackId,
+                    label = label,
+                    category = category,
+                    sceneIndex = sceneCtx.sceneIndex,
+                    triggerBeat = effectiveTriggerBeat.coerceIn(0, (sceneCtx.totalBeats - 1).coerceAtLeast(0)),
+                    durationMs = effectiveDuration,
+                    delayMs = effectiveDelay,
+                )
+            )
+        }
+    }
+
+    return animateFloat(
+        transitionSpec = {
+            if (override?.curve != null) {
+                override.curve.toAnimationSpec(effectiveDuration, effectiveDelay)
+            } else {
+                tween(
+                    durationMillis = effectiveDuration,
+                    delayMillis = effectiveDelay,
+                    easing = easing,
+                )
+            }
+        },
+        label = label,
+    ) { state ->
+        val isVisible = if (sceneCtx != null && (override?.enterBeat != null || effectiveExitBeat != null)) {
+            val beatIdx = sceneCtx.frameBeatIndexOf(state)
+            val afterEnter = beatIdx >= effectiveTriggerBeat
+            val beforeExit = effectiveExitBeat == null || beatIdx < effectiveExitBeat
+            afterEnter && beforeExit
+        } else {
+            visible(state)
+        }
+        if (isVisible) 1f else 0f
+    }
 }
 
 @Composable
 fun <S> Transition<S>.animateStaggerGroup(
     count: Int,
     label: String = "keynote-stagger",
+    trackId: String? = null,
+    defaultTriggerBeat: Int = 1,
     itemDurationMs: Int = LocalDeckTheme.current.motion.fadeMoveDurationMs,
     staggerStepMs: Int = LocalDeckTheme.current.motion.staggerStepMs,
     easing: Easing = LocalDeckTheme.current.motion.standardEasing,
     visible: (S) -> Boolean,
 ): StaggerGroupState {
     val safeCount = count.coerceAtLeast(1)
-    val totalDurationMs = itemDurationMs + (safeCount - 1) * staggerStepMs
+    val sceneCtx = LocalActiveSceneTimeline.current
+    val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
+    val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
+    val collector = LocalTimelineHarvestCollector.current
+
+    val effectiveItemDuration = override?.durationMs ?: itemDurationMs
+    val effectiveStep = override?.staggerStepMs ?: staggerStepMs
+    val effectiveDelay = override?.delayMs ?: 0
+    val effectiveTriggerBeat = override?.enterBeat ?: defaultTriggerBeat
+    val totalDurationMs = effectiveItemDuration + (safeCount - 1) * effectiveStep
+
+    SideEffect {
+        if (sceneCtx != null) {
+            collector?.record(
+                HarvestedTrackRecord(
+                    trackId = resolvedTrackId,
+                    label = label,
+                    category = TrackCategory.StaggerGroup,
+                    sceneIndex = sceneCtx.sceneIndex,
+                    triggerBeat = effectiveTriggerBeat.coerceIn(0, (sceneCtx.totalBeats - 1).coerceAtLeast(0)),
+                    durationMs = totalDurationMs,
+                    delayMs = effectiveDelay,
+                    staggerCount = safeCount,
+                    staggerStepMs = effectiveStep,
+                )
+            )
+        }
+    }
+
+    fun isVisibleAt(state: S): Boolean {
+        return if (sceneCtx != null && override?.enterBeat != null) {
+            sceneCtx.frameBeatIndexOf(state) >= effectiveTriggerBeat
+        } else {
+            visible(state)
+        }
+    }
+
     val progress = animateFloat(
-        transitionSpec = { tween(durationMillis = totalDurationMs, easing = easing) },
+        transitionSpec = {
+            if (override?.curve != null) {
+                override.curve.toAnimationSpec(totalDurationMs, effectiveDelay)
+            } else {
+                tween(
+                    durationMillis = totalDurationMs,
+                    delayMillis = effectiveDelay,
+                    easing = easing,
+                )
+            }
+        },
         label = label,
     ) { state ->
-        if (visible(state)) 1f else 0f
+        if (isVisibleAt(state)) 1f else 0f
     }
-    return remember(this, progress, safeCount, itemDurationMs, staggerStepMs) {
+    return remember(this, progress, safeCount, effectiveItemDuration, effectiveStep, override) {
         StaggerGroupState(
             overallProgress = progress,
             count = safeCount,
-            itemDurationMs = itemDurationMs,
-            staggerStepMs = staggerStepMs,
-            isReversing = { visible(currentState) && !visible(targetState) },
+            itemDurationMs = effectiveItemDuration,
+            staggerStepMs = effectiveStep,
+            isReversing = { isVisibleAt(currentState) && !isVisibleAt(targetState) },
         )
     }
 }
@@ -164,6 +267,28 @@ fun trimPath(
 
 fun Modifier.keynoteDissolve(progress: () -> Float): Modifier = graphicsLayer {
     alpha = progress().coerceIn(0f, 1f)
+}
+
+@Composable
+fun Modifier.keynoteFadeMoveTracked(
+    trackId: String,
+    progress: () -> Float,
+    direction: SlideDirection = SlideDirection.Up,
+    distance: Dp = 24.dp,
+    easing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+): Modifier {
+    val spatial = LocalTimelineOverrides.current.tracks[trackId]?.spatial
+    return if (spatial == null) {
+        keynoteFadeMove(progress, direction, distance, easing)
+    } else {
+        graphicsLayer {
+            val raw = progress().coerceIn(0f, 1f)
+            val eased = easing.transform(raw)
+            alpha = raw
+            translationX = (1f - eased) * spatial.offsetXDp.dp.toPx()
+            translationY = (1f - eased) * spatial.offsetYDp.dp.toPx()
+        }
+    }
 }
 
 fun Modifier.keynoteFadeMove(

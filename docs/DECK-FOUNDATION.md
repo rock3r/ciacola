@@ -28,10 +28,13 @@ Run the desktop deck (or launch with Compose Hot Reload on JetBrains Runtime 25)
 ./gradlew :deck:run
 ./gradlew :deck:hotRunDesktop        # explicit reload via `./gradlew :deck:reload`
 CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
+./gradlew :deck:spectreTest          # real-window Spectre 0.9.0 E2E suite on JBR 25
 ```
 
-## Theme system, Keynote effects kit, and hot reload
+## Theme system, Keynote effects kit, timeline studio, and hot reload
 
+- **Runtime baseline:** `:deck` targets JetBrains Runtime 25 (`JVM_25`) on Compose Multiplatform
+  `1.13.0-beta02` and Jewel Standalone `0.42.0-263.7307.200`.
 - **`DeckTheme` (`dev.sebastiano.ciacola.theme`):** `LocalDeckTheme` supplies `@Immutable` tokens for
   `DeckColors` (including a single `DeckCodePalette` shared by `MagicText` `CodeStyle` and
   `DeckWarpCodeCard` TextMate scopes), `DeckTypography` (bundled `Inter` and `JetBrains Mono` cached
@@ -40,6 +43,12 @@ CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
   detour badges, and loupe geometry), and `DeckMotion` (300–380 ms Keynote curves, 55 ms stagger
   step, and spring pop parameters). Two presets ship out of the box (`StageDark` and `KeynoteLight`,
   toggleable live from the `Theme` menu).
+- **Deterministic state switching (`DeterministicStateHost`):** `Easel`, `sharedMoveScene`, and
+  `DeckWarpCodeCard` mount `setOf(currentState, targetState)` through
+  `Transition.DeterministicStateHost` (`key(contentKey) { AnimatedVisibility(...) }`) instead of
+  `AnimatedContent`, eliminating internal `currentlyVisible` queue drift during random-access
+  `Animatic.seekToSegment` scrubbing while preserving `SharedTransitionScope` / `AnimatedVisibilityScope`
+  contracts.
 - **Reusable Keynote effects (`dev.sebastiano.ciacola.effects`):**
   - Zero-relayout `graphicsLayer` / clip build modifiers (`keynoteDissolve`, `keynoteFadeMove`,
     `keynoteFromDarkness`, `keynotePop`, `keynoteWipe`, `keynoteSpotlight`) driven by
@@ -51,6 +60,21 @@ CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
     focus boxes), and `AnimatedStrikeout`.
   - Stage components: `DottedLeaderRow`, `KeynoteStamp`, `DetourSign`, `DeckWarpCodeCard`, and
     `MagnifierLoupeStage` (live `GraphicsLayer` zoomed iris loupe with animated dotted connectors).
+- **After Effects Timeline Studio (`dev.sebastiano.ciacola.timeline`, Jewel standalone):**
+  - Toggleable docked in the Story window (`F5` or top-right `Timeline` HUD button) or detached as
+    a separate window (`F6`).
+  - Offscreen `indexDeckTimeline` harvests every slide's `Build`, `StaggerGroup` + staircase
+    `StaggerItem` rows, `MagicText` diffs, `WarpCode` morphs, `LineDraw` strokes, cross-slide
+    `deckSharedBounds` span bars, and `rememberDeckLoopMillis` Loop Sub-Compositions onto a single
+    contiguous timeline with diagonal-hatched cross-slide transition overlap zones and full-height
+    vertical dotted Event Keyframe lines.
+  - Zero-latency hybrid overrides (`.storyboard/timeline-overrides.json`): `+ Beat` / `- Beat`
+    virtualizes event keyframes in `0 ms` without waiting for an agent turn; dragging block edges or
+    bodies updates `delayMs`, `durationMs`, and `enterBeat`; the right-hand Inspector provides
+    numeric steppers, an interactive 2D Cubic-Bezier curve editor + Spring presets, spatial slide
+    offsets, live quadratic-Bezier `arcBend` trajectories rendered on stage via
+    `MotionArcStageOverlay`, Loop Sub-Composition harmonic wave scrubbing (`Sub-Comp ▸` /
+    `← Master Deck`), and optional `Bake to Kotlin` agent dispatch.
 - **Hot-reload state retention:** `Main.kt` drives the desktop app through
   `rememberHotReloadStoryboard` (`AfterHotReloadEffect`, with Compose Hot Reload instrumenting
   window UI compositions automatically), while `rememberAnimatic` and `AnimaticPersistenceEffect`
@@ -127,11 +151,13 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
 - `:storyboard-text:jvmTest --tests '*MagicText*Test'`: passed (12 focused tests).
 - `:storyboard-easel:jvmTest --tests '*AnimaticHotReloadPersistenceTest'`: passed (hot-reload slide
   and build retention + clamping without clobbering disk state).
-- `:deck:desktopTest`: passed (15 tests across `FoundationDeckTest`, `DeckThemeTest`,
-  `KeynoteEffectsTest`, and `SlideReviewSystemTest`, including pixel-verified `LineDraw`
-  decorations, 5-build lab navigation, macOS `Ctrl+Click` secondary-button Jewel popup typing,
-  `Escape` dismissal without triggering `EaselOverview`, `agentapi` dispatch without
-  `ANTIGRAVITY_SOURCE_METADATA`, and live resolution hot-sync).
+- `:deck:desktopTest`: passed (19 tests across `FoundationDeckTest`, `DeckThemeTest`,
+  `KeynoteEffectsTest`, `SlideReviewSystemTest`, `TimelineModelAndOverridesTest`, and
+  `DeterministicEaselScrubAndLoopTest`).
+- `:deck:spectreTest`: passed (real-window Spectre `0.9.0` E2E verification of docked Timeline
+  Studio, 0-ms `+ Beat` / `- Beat` virtualization, Inspector timing/Bezier/arc-bend overrides,
+  cross-slide shared-element arc overlay, Loop Sub-Composition harmonic wave scrubbing, ruler
+  pointer-drag scrubbing, and Jewel `PopupContainer` typing + `Escape` dismissal).
 - `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passed, including
   all JVM suites, Wasm compilation, and API checks. The unmodified upstream browser task cannot run
   in this image because it requests ChromeHeadless and only Firefox is installed; a literal `check`

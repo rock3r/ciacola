@@ -1,6 +1,5 @@
 package dev.sebastiano.ciacola.effects
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Transition
@@ -8,15 +7,17 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import dev.bnorm.storyboard.BasicCode
@@ -27,9 +28,15 @@ import dev.bnorm.storyboard.State
 import dev.bnorm.storyboard.Token
 import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
+import dev.bnorm.storyboard.easel.DeterministicStateHost
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
+import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
+import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
+import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
+import dev.sebastiano.ciacola.timeline.TrackCategory
 
 @Composable
 fun DeckWarpCodeCard(
@@ -43,7 +50,27 @@ fun DeckWarpCodeCard(
     val cardStyle = theme.styles.codeCard
     val palette = theme.colors.code
     val codeTextStyle = theme.typography.code
-    val tokenDurationMs = theme.motion.warpTokenDurationMs
+    val sceneCtx = LocalActiveSceneTimeline.current
+    val collector = LocalTimelineHarvestCollector.current
+    val warpTrackId = if (sceneCtx != null) "s${sceneCtx.sceneIndex}:warp-code" else "warp-code"
+    val warpOverride = LocalTimelineOverrides.current.tracks[warpTrackId]
+    val tokenDurationMs = (warpOverride?.durationMs ?: theme.motion.warpTokenDurationMs).coerceAtLeast(40)
+
+    SideEffect {
+        if (sceneCtx != null && codeStates.size > 1) {
+            collector?.record(
+                HarvestedTrackRecord(
+                    trackId = warpTrackId,
+                    label = "Warp Code Morph",
+                    category = TrackCategory.WarpCode,
+                    sceneIndex = sceneCtx.sceneIndex,
+                    triggerBeat = warpOverride?.enterBeat ?: 3.coerceAtMost((sceneCtx.totalBeats - 1).coerceAtLeast(0)),
+                    durationMs = tokenDurationMs,
+                    delayMs = warpOverride?.delayMs ?: 0,
+                )
+            )
+        }
+    }
 
     val diffList: List<DiffContents> = remember(codeStates, language) {
         val blocks = if (codeStates.size == 1) {
@@ -75,11 +102,10 @@ fun DeckWarpCodeCard(
             )
             .border(cardStyle.borderWidth, theme.colors.border, shape),
     ) {
-        SharedTransitionLayout(Modifier.padding(cardStyle.padding)) {
-            stateTransition.AnimatedContent(
-                transitionSpec = {
-                    fadeIn(tween(tokenDurationMs)) togetherWith fadeOut(tween(tokenDurationMs))
-                },
+        SharedTransitionLayout(Modifier.padding(cardStyle.padding).horizontalScroll(rememberScrollState())) {
+            stateTransition.DeterministicStateHost(
+                enter = { _, _ -> fadeIn(tween(tokenDurationMs)) },
+                exit = { _, _ -> fadeOut(tween(tokenDurationMs)) },
             ) { rawIndex ->
                 val clampedIndex = rawIndex.coerceIn(0, diffList.lastIndex)
                 val diffContents = diffList[clampedIndex]
@@ -94,11 +120,13 @@ fun DeckWarpCodeCard(
                                                 text = state.content(),
                                                 style = codeTextStyle,
                                                 color = state.current.colorIn(palette),
+                                                softWrap = false,
+                                                maxLines = 1,
                                                 modifier = Modifier.sharedElement(
                                                     sharedContentState = rememberSharedContentState(
                                                         key = state.sharedWarpKey(rowIdx, colIdx),
                                                     ),
-                                                    animatedVisibilityScope = this@AnimatedContent,
+                                                    animatedVisibilityScope = this@DeterministicStateHost,
                                                     boundsTransform = warpBoundsTransform,
                                                 ),
                                             )
@@ -109,17 +137,19 @@ fun DeckWarpCodeCard(
                                     -> {
                                         val tok = state.warpToken()
                                         with(this@SharedTransitionLayout) {
-                                            with(this@AnimatedContent) {
+                                            with(this@DeterministicStateHost) {
                                                 Text(
                                                     text = state.content(),
                                                     style = codeTextStyle,
                                                     color = tok.colorIn(palette),
+                                                    softWrap = false,
+                                                    maxLines = 1,
                                                     modifier = Modifier
                                                         .sharedElement(
                                                             sharedContentState = rememberSharedContentState(
                                                                 key = "delta:${tok.key()}:$rowIdx:$colIdx",
                                                             ),
-                                                            animatedVisibilityScope = this@AnimatedContent,
+                                                            animatedVisibilityScope = this@DeterministicStateHost,
                                                             boundsTransform = warpBoundsTransform,
                                                         )
                                                         .renderInSharedTransitionScopeOverlay()

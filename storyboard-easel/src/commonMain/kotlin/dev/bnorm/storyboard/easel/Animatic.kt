@@ -29,6 +29,9 @@ fun rememberAnimatic(
     }
 
     val transition = rememberTransition(transitionState, label = "Animatic")
+    // Ensure SeekableTransitionState's composition continuation always observes targetState changes
+    // on CMP 1.13+ even when a caller has not yet mounted Easel(animatic).
+    transition.targetState
     return remember(builtStoryboard, states, transitionState, transition) {
         Animatic(builtStoryboard, states, transitionState, transition).also {
             holder.current = it
@@ -78,6 +81,87 @@ class Animatic internal constructor(
 
         override fun compareTo(other: LinkedState<*>): Int {
             return compareValues(stateIndex, other.stateIndex)
+        }
+    }
+
+    @Immutable
+    data class StateDescriptor(
+        val stateIndex: Int,
+        val sceneIndex: Int,
+        val frameIndex: Int,
+        val isBoundaryStart: Boolean,
+        val isBoundaryEnd: Boolean,
+    )
+
+    val stateDescriptors: List<StateDescriptor> = states.map { s ->
+        StateDescriptor(
+            stateIndex = s.stateIndex,
+            sceneIndex = s.index.sceneIndex,
+            frameIndex = s.index.frameIndex,
+            isBoundaryStart = s.frame is Frame.Start,
+            isBoundaryEnd = s.frame is Frame.End,
+        )
+    }
+
+    val activeFromStateIndex: Int get() = transitionState.currentState.stateIndex
+    val activeToStateIndex: Int get() = transitionState.targetState.stateIndex
+    val activeFraction: Float get() = transitionState.fraction
+
+    suspend fun seekToSegment(fromStateIndex: Int, fraction: Float) {
+        if (states.isEmpty()) return
+        val clampedFrom = fromStateIndex.coerceIn(0, states.lastIndex)
+        val clampedFraction = fraction.coerceIn(0f, 1f)
+
+        fun resolveBackwardValueState(idx: Int): LinkedState<*> {
+            var cursor = idx.coerceIn(0, states.lastIndex)
+            while (cursor > 0 && states[cursor].frame !is Frame.Value) cursor--
+            return states[cursor]
+        }
+
+        fun resolveForwardValueState(idx: Int): LinkedState<*> {
+            var cursor = idx.coerceIn(0, states.lastIndex)
+            while (cursor < states.lastIndex && states[cursor].frame !is Frame.Value) cursor++
+            return states[cursor]
+        }
+
+        if (clampedFrom == states.lastIndex || clampedFraction <= 0f) {
+            val exact = states[clampedFrom]
+            transitionState.snapTo(exact)
+            val settled = resolveBackwardValueState(clampedFrom)
+            currentState = settled
+            targetState = settled
+            return
+        }
+
+        val nextIdx = (clampedFrom + 1).coerceAtMost(states.lastIndex)
+        if (clampedFraction >= 1f) {
+            val exact = states[nextIdx]
+            transitionState.snapTo(exact)
+            val settled = if (exact.frame is Frame.Value) exact else resolveForwardValueState(nextIdx)
+            currentState = settled
+            targetState = settled
+            return
+        }
+
+        val fromState = states[clampedFrom]
+        val toState = states[nextIdx]
+        if (transitionState.currentState != fromState) {
+            transitionState.snapTo(fromState)
+        }
+        currentState = resolveBackwardValueState(clampedFrom)
+        targetState = resolveForwardValueState(nextIdx)
+        transitionState.seekTo(clampedFraction, toState)
+    }
+
+    suspend fun playSegmentToEnd(fromStateIndex: Int, startFraction: Float = 0f) {
+        if (states.size < 2) return
+        val clampedFrom = fromStateIndex.coerceIn(0, states.lastIndex - 1)
+        seekToSegment(clampedFrom, startFraction.coerceIn(0f, 0.999f))
+        val toState = states[clampedFrom + 1]
+        transitionState.animateTo(toState)
+        if (toState.frame is Frame.Value) {
+            currentState = toState
+            targetState = toState
         }
     }
 
@@ -261,27 +345,10 @@ class Animatic internal constructor(
         }
 
     internal suspend fun seek(storyFraction: Float) {
-        // TODO this whole thing needs to be reworked... BADLY!
-        val progress = storyFraction * storyDistance
-        val index = progress.toInt()
-        val nextFraction = progress - index
-
-        if (transitionState.currentState.stateIndex != index) {
-            transitionState.snapTo(states[index])
-
-            var currentIndex = index
-            while (currentIndex >= 0 && states[currentIndex].frame !is Frame.Value) currentIndex--
-            currentState = states[currentIndex]
-
-            var targetIndex = index + if (nextFraction > 0f) 1 else 0
-            while (targetIndex < states.size && states[targetIndex].frame !is Frame.Value) targetIndex++
-            targetState = states[targetIndex]
-        }
-
-        // TODO there seems to be some serious bugs with SeekableTransitionState still...
-        //  - seeking backwards seems to be broken for the opening animation
-        //  - seeking backwards in general actually seems a little broken
-        //  maybe I can create a minimal reproducer?
-        transitionState.seekTo(nextFraction, states[(index + 1).coerceAtMost(states.lastIndex)])
+        if (states.isEmpty()) return
+        val progress = (storyFraction.coerceIn(0f, 1f)) * storyDistance
+        val index = progress.toInt().coerceIn(0, states.lastIndex)
+        val nextFraction = (progress - index).coerceIn(0f, 1f)
+        seekToSegment(index, nextFraction)
     }
 }

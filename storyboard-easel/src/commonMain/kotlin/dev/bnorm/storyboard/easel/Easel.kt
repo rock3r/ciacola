@@ -3,8 +3,11 @@ package dev.bnorm.storyboard.easel
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.createChildTransition
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
@@ -27,6 +30,45 @@ fun Easel(
     )
 }
 
+/**
+ * Deterministic, seek-safe replacement for `Transition.AnimatedContent`.
+ *
+ * Mounts only `setOf(currentState, targetState)` in deterministic order and wraps each state in
+ * `Transition.AnimatedVisibility` so random-access scrubbing (`SeekableTransitionState.seekTo`)
+ * never suffers from `AnimatedContent`'s internal `currentlyVisible` queue drift.
+ */
+@Composable
+fun <S> Transition<S>.DeterministicStateHost(
+    modifier: Modifier = Modifier,
+    enter: (S, S) -> EnterTransition = { _, _ -> fadeIn() },
+    exit: (S, S) -> ExitTransition = { _, _ -> fadeOut() },
+    contentKey: (S) -> Any? = { it },
+    content: @Composable AnimatedVisibilityScope.(S) -> Unit,
+) {
+    val from = currentState
+    val to = targetState
+    val activeStates = remember(from, to) {
+        if (contentKey(from) == contentKey(to)) {
+            listOf(to)
+        } else {
+            listOf(from, to)
+        }
+    }
+    Box(modifier = modifier) {
+        for (state in activeStates) {
+            key(contentKey(state)) {
+                AnimatedVisibility(
+                    visible = { contentKey(it) == contentKey(state) },
+                    enter = enter(from, to),
+                    exit = exit(from, to),
+                ) {
+                    content(state)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun Easel(
     storyboard: Storyboard,
@@ -37,17 +79,27 @@ fun Easel(
     val holder = rememberSaveableStateHolder()
     SceneWrapper(storyboard, mode, modifier) {
         SharedTransitionLayout {
-            val sceneTransition = transition.createChildTransition(label = "Scene") { it.scene }
-            sceneTransition.AnimatedContent(
-                transitionSpec = {
-                    val direction = when {
-                        targetState > initialState -> AdvanceDirection.Forward
-                        else -> AdvanceDirection.Backward
+            transition.DeterministicStateHost(
+                modifier = Modifier.fillMaxSize(),
+                contentKey = { it.scene },
+                enter = { fromState, toState ->
+                    val direction = if (toState.scene >= fromState.scene) {
+                        AdvanceDirection.Forward
+                    } else {
+                        AdvanceDirection.Backward
                     }
-                    targetState.enterTransition(direction) togetherWith
-                            initialState.exitTransition(direction)
-                }
-            ) { scene ->
+                    toState.scene.enterTransition(direction)
+                },
+                exit = { fromState, toState ->
+                    val direction = if (toState.scene >= fromState.scene) {
+                        AdvanceDirection.Forward
+                    } else {
+                        AdvanceDirection.Backward
+                    }
+                    fromState.scene.exitTransition(direction)
+                },
+            ) { state ->
+                val scene = state.scene
                 holder.SaveableStateProvider(scene) {
                     SceneContent(scene, transition)
                 }

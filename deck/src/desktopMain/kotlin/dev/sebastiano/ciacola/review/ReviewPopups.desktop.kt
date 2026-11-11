@@ -77,10 +77,12 @@ import org.jetbrains.jewel.ui.typography
 internal fun BoxScope.ReviewHudToolbar(
     inspectActive: Boolean,
     inspectPinned: Boolean,
+    timelineDocked: Boolean = false,
     queuedCount: Int,
     applyingCount: Int,
     appliedCount: Int,
     onToggleInspectMode: () -> Unit,
+    onToggleTimeline: (() -> Unit)? = null,
     onOpenReviewPanel: () -> Unit,
     onFlushQueued: () -> Unit,
 ) {
@@ -103,7 +105,8 @@ internal fun BoxScope.ReviewHudToolbar(
             Row(
                 modifier = Modifier
                     .clickable(onClick = onToggleInspectMode)
-                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                    .padding(horizontal = 2.dp, vertical = 2.dp)
+                    .testTag("ciacola-hud-toggle-inspect"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
@@ -126,6 +129,30 @@ internal fun BoxScope.ReviewHudToolbar(
                         globalColors.text.info
                     },
                 )
+            }
+        }
+
+        if (onToggleTimeline != null) {
+            Tooltip(tooltip = { Text("Toggle After Effects Timeline Studio (F5)") }) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClick = onToggleTimeline)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                        .testTag("ciacola-hud-toggle-timeline"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        key = AllIconsKeys.Actions.Preview,
+                        contentDescription = "Toggle Timeline Studio",
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        text = if (timelineDocked) "Timeline ●" else "Timeline",
+                        style = JewelTheme.typography.small,
+                        color = if (timelineDocked) statusPalette.inspectAccent else globalColors.text.info,
+                    )
+                }
             }
         }
 

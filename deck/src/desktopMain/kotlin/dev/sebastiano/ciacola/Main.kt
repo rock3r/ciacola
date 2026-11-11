@@ -25,11 +25,18 @@ import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.EaselWindow
 import dev.bnorm.storyboard.easel.assist.rememberAssistantWindow
 import dev.bnorm.storyboard.easel.rememberAnimatic
+import dev.bnorm.storyboard.plus
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.timeline.DeckLoopClock
+import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
+import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
+import dev.sebastiano.ciacola.timeline.rememberTimelineStageDecorator
+import dev.sebastiano.ciacola.timeline.rememberTimelineStudioController
+import dev.sebastiano.ciacola.timeline.rememberTimelineStudioWindow
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Rectangle
 import java.awt.Robot
@@ -64,18 +71,54 @@ fun main() = application {
         val smokeDirectory = System.getenv("DECK_VISUAL_SMOKE_DIR")
         if (smokeDirectory == null) {
             val reviewStore = remember { ReviewCommentStore() }
+            val timelineOverridesStore = remember { TimelineOverridesStore() }
+            val deckLoopClock = remember { DeckLoopClock() }
+            val motionPathPreview = remember { MotionPathPreviewState() }
             val reviewStageCoordinator = rememberReviewStageCoordinator()
-            val storyboard = rememberHotReloadStoryboard(preset, reviewStageCoordinator) {
+            val structuralRev = timelineOverridesStore.structuralRevision
+            val paramRev = timelineOverridesStore.parameterRevision
+            val currentOverrides = remember(structuralRev, paramRev) {
+                timelineOverridesStore.data()
+            }
+
+            // Stage decorator provides loop clock + motion-path arc overlay + Ctrl-click review stage
+            val stageLoopAndArcDecorator = rememberTimelineStageDecorator(
+                loopClock = deckLoopClock,
+                motionPathPreview = motionPathPreview,
+                overridesStore = timelineOverridesStore,
+            )
+            val storyboard = rememberHotReloadStoryboard(
+                preset,
+                reviewStageCoordinator,
+                structuralRev,
+                paramRev,
+            ) {
                 createFoundationDeck(
                     theme = hostTheme,
                     bundledPreset = preset,
                     includeKeynoteEffectsLab = true,
-                    stageDecorator = reviewStageCoordinator.stageDecorator,
+                    stageDecorator = stageLoopAndArcDecorator + reviewStageCoordinator.stageDecorator,
+                    timelineOverrides = currentOverrides,
                 )
             }
             val animatic = rememberAnimatic(
                 fileName = "animatic",
                 storyboard = { storyboard },
+            )
+            val timelineController = rememberTimelineStudioController(
+                animatic = animatic,
+                overridesStore = timelineOverridesStore,
+                loopClock = deckLoopClock,
+                reviewStore = reviewStore,
+                motionPathPreview = motionPathPreview,
+            )
+            val timelineWindow = rememberTimelineStudioWindow(
+                controller = timelineController,
+                currentPresetProvider = { preset },
+                suppressShortcutsProvider = {
+                    reviewStageCoordinator.pendingSelection != null ||
+                        reviewStageCoordinator.selectedPinCommentId != null
+                },
             )
             val themeWindow = rememberThemeSwitcherWindow(
                 currentPreset = preset,
@@ -86,10 +129,19 @@ fun main() = application {
                 store = reviewStore,
                 stageCoordinator = reviewStageCoordinator,
                 currentPresetProvider = { preset },
+                timelineDockedProvider = { timelineController.dockedInStoryWindow },
+                onToggleTimeline = {
+                    timelineController.dockedInStoryWindow = !timelineController.dockedInStoryWindow
+                },
             )
             DesktopEasel(
                 animatic = animatic,
-                windows = listOf(rememberAssistantWindow(animatic), themeWindow, reviewWindow),
+                windows = listOf(
+                    rememberAssistantWindow(animatic),
+                    themeWindow,
+                    reviewWindow,
+                    timelineWindow,
+                ),
             )
         } else {
             val storyboard = rememberHotReloadStoryboard(preset) {

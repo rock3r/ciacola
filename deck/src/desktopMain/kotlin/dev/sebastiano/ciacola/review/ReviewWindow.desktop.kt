@@ -70,11 +70,16 @@ import org.jetbrains.jewel.ui.typography
  * menu actions, and Jewel-styled review feed window.
  */
 class SlideReviewWindow(
-    val animatic: Animatic,
+    initialAnimatic: Animatic,
     val store: ReviewCommentStore,
     val stageCoordinator: ReviewStageCoordinator,
     val currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
+    val timelineDockedProvider: () -> Boolean = { false },
+    val onToggleTimeline: (() -> Unit)? = null,
 ) : EaselWindow {
+    var animatic: Animatic by mutableStateOf(initialAnimatic)
+        internal set
+
     override val name: String = "Review"
     override var visible: Boolean by mutableStateOf(false)
 
@@ -141,8 +146,19 @@ fun rememberSlideReviewWindow(
     store: ReviewCommentStore,
     stageCoordinator: ReviewStageCoordinator,
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
-): SlideReviewWindow = remember(animatic, store, stageCoordinator) {
-    SlideReviewWindow(animatic, store, stageCoordinator, currentPresetProvider)
+    timelineDockedProvider: () -> Boolean = { false },
+    onToggleTimeline: (() -> Unit)? = null,
+): SlideReviewWindow = remember(store, stageCoordinator) {
+    SlideReviewWindow(
+        initialAnimatic = animatic,
+        store = store,
+        stageCoordinator = stageCoordinator,
+        currentPresetProvider = currentPresetProvider,
+        timelineDockedProvider = timelineDockedProvider,
+        onToggleTimeline = onToggleTimeline,
+    )
+}.also {
+    it.animatic = animatic
 }
 
 @Composable
@@ -180,6 +196,10 @@ private fun ReviewOuterWindowOverlay(
                 if (ev.key == Key.CtrlLeft || ev.key == Key.CtrlRight) {
                     coordinator.isCtrlKeyHeld = ev.type == KeyEventType.KeyDown
                 }
+                if (ev.type == KeyEventType.KeyDown && ev.key == Key.F3) {
+                    coordinator.inspectModeEnabled = !coordinator.inspectModeEnabled
+                    return@onPreviewKeyEvent true
+                }
                 if (ev.key == Key.Escape) {
                     if (coordinator.swallowNextEscapeKeyUp) {
                         if (ev.type == KeyEventType.KeyUp) {
@@ -216,12 +236,14 @@ private fun ReviewOuterWindowOverlay(
                     ReviewHudToolbar(
                         inspectActive = coordinator.inspectModeEnabled || coordinator.isCtrlKeyHeld,
                         inspectPinned = coordinator.inspectModeEnabled,
+                        timelineDocked = windowController.timelineDockedProvider(),
                         queuedCount = queuedCount,
                         applyingCount = applyingCount,
                         appliedCount = appliedCount,
                         onToggleInspectMode = {
                             coordinator.inspectModeEnabled = !coordinator.inspectModeEnabled
                         },
+                        onToggleTimeline = windowController.onToggleTimeline,
                         onOpenReviewPanel = { windowController.visible = true },
                         onFlushQueued = { scope.launch { store.flushQueued() } },
                     )

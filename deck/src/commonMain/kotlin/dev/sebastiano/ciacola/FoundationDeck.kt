@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -31,12 +32,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import dev.bnorm.storyboard.ContentDecorator
+import dev.bnorm.storyboard.Frame
+import dev.bnorm.storyboard.SceneEnterTransition
+import dev.bnorm.storyboard.SceneExitTransition
 import dev.bnorm.storyboard.SceneFormat
+import dev.bnorm.storyboard.SceneScope
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.StoryboardBuilder
-import dev.bnorm.storyboard.easel.rememberSharedContentState
-import dev.bnorm.storyboard.easel.sharedBounds
+import dev.bnorm.storyboard.easel.DeterministicStateHost
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
+import dev.bnorm.storyboard.map
 import dev.bnorm.storyboard.plus
 import dev.bnorm.storyboard.text.highlight.CodeStyle
 import dev.bnorm.storyboard.text.highlight.Language
@@ -49,10 +54,9 @@ import dev.sebastiano.ciacola.effects.DeckWarpCodeCard
 import dev.sebastiano.ciacola.effects.DottedLeaderRow
 import dev.sebastiano.ciacola.effects.KeynoteStamp
 import dev.sebastiano.ciacola.effects.MagnifierLoupeStage
-import dev.sebastiano.ciacola.effects.SlideDirection
 import dev.sebastiano.ciacola.effects.animateBuildProgress
 import dev.sebastiano.ciacola.effects.animateStaggerGroup
-import dev.sebastiano.ciacola.effects.keynoteFadeMove
+import dev.sebastiano.ciacola.effects.keynoteFadeMoveTracked
 import dev.sebastiano.ciacola.effects.keynoteFromDarkness
 import dev.sebastiano.ciacola.effects.keynotePop
 import dev.sebastiano.ciacola.effects.keynoteSpotlight
@@ -63,6 +67,14 @@ import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.timeline.ActiveSceneTimelineContext
+import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
+import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
+import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
+import dev.sebastiano.ciacola.timeline.TrackCategory
+import dev.sebastiano.ciacola.timeline.VirtualizedFrame
+import dev.sebastiano.ciacola.timeline.buildVirtualizedFrames
+import dev.sebastiano.ciacola.timeline.deckSharedBounds
 
 enum class FoundationProof {
     DeterministicNavigation,
@@ -116,18 +128,19 @@ fun createFoundationDeck(
     bundledPreset: DeckThemePreset? = null,
     includeKeynoteEffectsLab: Boolean = false,
     stageDecorator: ContentDecorator = ContentDecorator.None,
+    timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
 ): Storyboard = Storyboard.build(
     title = "Ciacola",
     description = "Provisional scenes proving the presentation architecture; not talk narrative.",
     format = DeckDesign.format,
-    decorator = deckDecorator(textRenderer, theme, bundledPreset) + stageDecorator,
+    decorator = deckDecorator(textRenderer, theme, bundledPreset, timelineOverrides) + stageDecorator,
 ) {
-    beatsScene()
-    sharedMoveScene()
-    ambientLoopScene()
-    kotlinCodeScene(theme.colors.code.toCodeStyle())
+    beatsScene(theme, timelineOverrides)
+    sharedMoveScene(theme, timelineOverrides)
+    ambientLoopScene(theme, timelineOverrides)
+    kotlinCodeScene(theme, theme.colors.code.toCodeStyle(), timelineOverrides)
     if (includeKeynoteEffectsLab) {
-        keynoteEffectsLabScene()
+        keynoteEffectsLabScene(theme, timelineOverrides)
     }
 }
 
@@ -135,63 +148,145 @@ private fun deckDecorator(
     textRenderer: DeckTextRenderer,
     theme: DeckTheme,
     bundledPreset: DeckThemePreset? = null,
+    timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
 ) = ContentDecorator { content ->
     val activeTheme = if (bundledPreset != null) {
         DeckThemes.rememberBundledDeckTheme(bundledPreset)
     } else {
         theme
     }
-    DeckTextRendererProvider(textRenderer) {
-        DeckThemeProvider(activeTheme) {
-            Surface(Modifier.fillMaxSize(), color = activeTheme.colors.background) { content() }
+    CompositionLocalProvider(LocalTimelineOverrides provides timelineOverrides) {
+        DeckTextRendererProvider(textRenderer) {
+            DeckThemeProvider(activeTheme) {
+                Surface(Modifier.fillMaxSize(), color = activeTheme.colors.background) { content() }
+            }
+        }
+    }
+}
+
+private fun <T> StoryboardBuilder.choreographedScene(
+    sceneIndex: Int,
+    sceneTitle: String,
+    baseFrames: List<T>,
+    theme: DeckTheme,
+    overrides: DeckTimelineOverridesFile,
+    content: @Composable context(androidx.compose.animation.AnimatedVisibilityScope, androidx.compose.animation.SharedTransitionScope) SceneScope<VirtualizedFrame<T>>.() -> Unit,
+) {
+    val vFrames = buildVirtualizedFrames(baseFrames, overrides.sceneBeats[sceneIndex])
+    val dissolveMs = theme.motion.dissolveDurationMs
+    scene(
+        frames = vFrames,
+        enterTransition = SceneEnterTransition { fadeIn(tween(dissolveMs)) },
+        exitTransition = SceneExitTransition { fadeOut(tween(dissolveMs)) },
+    ) {
+        val ctx = remember(sceneIndex, sceneTitle, vFrames) {
+            ActiveSceneTimelineContext(
+                sceneIndex = sceneIndex,
+                sceneTitle = sceneTitle,
+                totalBeats = vFrames.size,
+                frameBeatIndexOf = { rawFrame ->
+                    when (rawFrame) {
+                        is Frame.Start -> 0
+                        is Frame.End -> (vFrames.size - 1).coerceAtLeast(0)
+                        is Frame.Value<*> -> (rawFrame.value as? VirtualizedFrame<*>)?.virtualBeatIndex ?: 0
+                        is VirtualizedFrame<*> -> rawFrame.virtualBeatIndex
+                        is Int -> rawFrame
+                        else -> 0
+                    }
+                },
+            )
+        }
+        val previewState = dev.sebastiano.ciacola.timeline.LocalMotionPathPreviewState.current
+        if (dev.bnorm.storyboard.easel.LocalSceneMode.current == dev.bnorm.storyboard.easel.SceneMode.Story) {
+            androidx.compose.runtime.SideEffect {
+                previewState?.activeStageSceneIndex = sceneIndex
+            }
+        }
+        CompositionLocalProvider(LocalActiveSceneTimeline provides ctx) {
+            content()
         }
     }
 }
 
 private data class BeatState(val eyebrow: String, val prose: AnnotatedString)
 
-private fun StoryboardBuilder.beatsScene() = scene(
-    frames = listOf(
+private fun StoryboardBuilder.beatsScene(
+    theme: DeckTheme,
+    overrides: DeckTimelineOverridesFile,
+) = choreographedScene(
+    sceneIndex = 0,
+    sceneTitle = "Beats",
+    baseFrames = listOf(
         BeatState("FOUNDATION / PROVISIONAL", AnnotatedString("A scene begins with one deterministic state.")),
         BeatState("FOUNDATION / PROVISIONAL", AnnotatedString("A scene advances to a deterministic next state.")),
         BeatState("FOUNDATION / PROVISIONAL", AnnotatedString("The same path is reversible without inventing a second navigation model.")),
     ),
+    theme = theme,
+    overrides = overrides,
 ) {
     @OptIn(ExperimentalTransitionApi::class)
-    val prose = transition.createChildTransition("foundation-prose") { it.toValue().prose }
-    val current = transition.currentState.toValue()
+    val prose = transition.createChildTransition("foundation-prose") { it.toValue().value.prose }
+    val currentVf = transition.currentState.toValue()
+    val targetVf = transition.targetState.toValue()
 
-    FoundationFrame(current.eyebrow) {
+    FoundationFrame(currentVf.value.eyebrow) {
         DeckMagicText(prose, Modifier.fillMaxSize())
+        if (targetVf.baseBeatIndex >= 2) {
+            Surface(
+                color = theme.colors.accent,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .deckSharedBounds(
+                        sharedKey = "foundation-shared-card",
+                        label = "Shared Card",
+                        defaultDurationMs = theme.motion.sharedBoundsDurationMs,
+                        currentBeatInScene = targetVf.virtualBeatIndex,
+                    )
+                    .size(28.dp),
+            ) {}
+        }
     }
 }
 
 private data class SharedMoveState(val expanded: Boolean)
 
-private fun StoryboardBuilder.sharedMoveScene() = scene(
-    frames = listOf(SharedMoveState(false), SharedMoveState(true)),
+private fun StoryboardBuilder.sharedMoveScene(
+    theme: DeckTheme,
+    overrides: DeckTimelineOverridesFile,
+) = choreographedScene(
+    sceneIndex = 1,
+    sceneTitle = "Shared Move",
+    baseFrames = listOf(SharedMoveState(false), SharedMoveState(true)),
+    theme = theme,
+    overrides = overrides,
 ) {
-    val theme = LocalDeckTheme.current
+    val activeTheme = LocalDeckTheme.current
     FoundationFrame("SHARED ELEMENT / PROVISIONAL") {
-        transition.AnimatedContent(
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+        transition.DeterministicStateHost(
             modifier = Modifier.fillMaxSize(),
+            enter = { _, _ -> fadeIn(tween(activeTheme.motion.dissolveDurationMs)) },
+            exit = { _, _ -> fadeOut(tween(activeTheme.motion.dissolveDurationMs)) },
+            contentKey = { it.toValue().value.expanded },
         ) { frame ->
-            val expanded = frame.toValue().expanded
+            val vf = frame.toValue()
+            val expanded = vf.value.expanded
             Box(Modifier.fillMaxSize()) {
                 Surface(
-                    color = theme.colors.accent,
+                    color = activeTheme.colors.accent,
                     shape = RoundedCornerShape(if (expanded) 40.dp else 24.dp),
                     modifier = Modifier
                         .align(if (expanded) Alignment.Center else Alignment.TopStart)
-                        .sharedBounds(
-                            rememberSharedContentState("foundation-shared-card"),
-                            boundsTransform = { _, _ -> tween(theme.motion.sharedBoundsDurationMs) },
+                        .deckSharedBounds(
+                            sharedKey = "foundation-shared-card",
+                            label = "Shared Card",
+                            defaultDurationMs = activeTheme.motion.sharedBoundsDurationMs,
+                            currentBeatInScene = vf.virtualBeatIndex,
                         )
                         .size(if (expanded) 520.dp else 240.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("shared", style = theme.typography.heading, color = theme.colors.background)
+                        Text("shared", style = activeTheme.typography.heading, color = activeTheme.colors.background)
                     }
                 }
             }
@@ -199,37 +294,54 @@ private fun StoryboardBuilder.sharedMoveScene() = scene(
     }
 }
 
-private fun StoryboardBuilder.ambientLoopScene() = scene(frameCount = 1) {
-    val theme = LocalDeckTheme.current
+private fun StoryboardBuilder.ambientLoopScene(
+    theme: DeckTheme,
+    overrides: DeckTimelineOverridesFile,
+) = choreographedScene(
+    sceneIndex = 2,
+    sceneTitle = "Ambient Loop",
+    baseFrames = listOf(0),
+    theme = theme,
+    overrides = overrides,
+) {
+    val activeTheme = LocalDeckTheme.current
     FoundationFrame("CONTINUOUS COMPOSE / PROVISIONAL", contentPadding = 0) {
         AnimatedMeshBackdrop(Modifier.fillMaxSize())
         Column(
             Modifier
                 .align(Alignment.Center)
-                .background(theme.colors.background.copy(alpha = 0.78f))
+                .background(activeTheme.colors.background.copy(alpha = 0.78f))
                 .padding(48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("one stable scene state", style = theme.typography.heading, color = theme.colors.foreground)
-            Text("the visual keeps moving", style = theme.typography.body, color = theme.colors.muted)
+            Text("one stable scene state", style = activeTheme.typography.heading, color = activeTheme.colors.foreground)
+            Text("the visual keeps moving", style = activeTheme.typography.body, color = activeTheme.colors.muted)
         }
     }
 }
 
 private data class CodeState(val description: AnnotatedString, val source: AnnotatedString)
 
-private fun StoryboardBuilder.kotlinCodeScene(codeStyle: CodeStyle) = scene(
-    frames = listOf(
+private fun StoryboardBuilder.kotlinCodeScene(
+    deckTheme: DeckTheme,
+    codeStyle: CodeStyle,
+    overrides: DeckTimelineOverridesFile,
+) = choreographedScene(
+    sceneIndex = 3,
+    sceneTitle = "Highlighted Code",
+    baseFrames = listOf(
         codeState("Syntax highlighting is data carried by AnnotatedString.", "fun provisional() = Unit", codeStyle),
         codeState("Retained Kotlin tokens move while styles remain attached.", "fun provisional() {\n    println(\"foundation\")\n}", codeStyle),
         codeState("The sample remains intentionally small and replaceable.", "fun provisional(message: String) {\n    println(message)\n}", codeStyle),
     ),
+    theme = deckTheme,
+    overrides = overrides,
 ) {
     val theme = LocalDeckTheme.current
     @OptIn(ExperimentalTransitionApi::class)
-    val description = transition.createChildTransition("code-description") { it.toValue().description }
+    val description = transition.createChildTransition("code-description") { it.toValue().value.description }
     @OptIn(ExperimentalTransitionApi::class)
-    val code = transition.createChildTransition("highlighted-kotlin") { it.toValue().source }
+    val code = transition.createChildTransition("highlighted-kotlin") { it.toValue().value.source }
 
     FoundationFrame("MAGIC TEXT / KOTLIN / PROVISIONAL") {
         Column(verticalArrangement = Arrangement.spacedBy(44.dp)) {
@@ -268,32 +380,56 @@ private fun codeState(
 )
 
 // Provisional interactive lab scene exercising every Keynote effect + DeckWarpCode + MagnifierLoupe.
-private fun StoryboardBuilder.keynoteEffectsLabScene() = scene(
-    frames = listOf(0, 1, 2, 3, 4),
+private fun StoryboardBuilder.keynoteEffectsLabScene(
+    deckTheme: DeckTheme,
+    overrides: DeckTimelineOverridesFile,
+) = choreographedScene(
+    sceneIndex = 4,
+    sceneTitle = "Keynote Effects Lab",
+    baseFrames = listOf(0, 1, 2, 3, 4),
+    theme = deckTheme,
+    overrides = overrides,
 ) {
     val theme = LocalDeckTheme.current
     @OptIn(ExperimentalTransitionApi::class)
-    val stepTransition = transition.createChildTransition("keynote-lab-step") { it.toValue() }
+    val stepTransition = transition.createChildTransition("keynote-lab-step") { it.toValue().virtualBeatIndex }
 
-    val staggerRows = transition.animateStaggerGroup(count = 2) { it.toValue() >= 1 }
-    val stampBuild by transition.animateBuildProgress { it.toValue() >= 2 }
+    val staggerRows = transition.animateStaggerGroup(
+        count = 2,
+        label = "Leader Rows Stagger",
+        trackId = "lab-leader-stagger",
+        defaultTriggerBeat = 1,
+    ) { it.toValue().virtualBeatIndex >= 1 }
+    val stampBuild by transition.animateBuildProgress(
+        label = "IMMUTABLE Stamp + Arrow",
+        trackId = "lab-immutable-stamp",
+        defaultTriggerBeat = 2,
+    ) { it.toValue().virtualBeatIndex >= 2 }
     val calloutBuild by transition.animateBuildProgress(
+        label = "Warp Callout Outline",
+        trackId = "lab-warp-callout",
+        category = TrackCategory.LineDraw,
+        defaultTriggerBeat = 3,
         durationMillis = theme.motion.lineDrawDurationMs,
-    ) { it.toValue() >= 3 }
+    ) { it.toValue().virtualBeatIndex >= 3 }
     val reversalBuild by transition.animateBuildProgress(
+        label = "Strikeout & Zoom Loupe",
+        trackId = "lab-strikeout-loupe",
+        category = TrackCategory.LineDraw,
+        defaultTriggerBeat = 4,
         durationMillis = theme.motion.loupeDurationMs,
-    ) { it.toValue() >= 4 }
+    ) { it.toValue().virtualBeatIndex >= 4 }
 
     val warpSnippets = remember {
         listOf(
-            "fun fade(text: AnnotatedString) {\n  BasicText(text)\n}",
-            "fun fade(text: AnnotatedString, alpha: Float) {\n  BasicText(text.withAlpha(alpha))\n}",
+            "fun fade(s: String) {\n  BasicText(s)\n}",
+            "fun fade(s: String, a: Float) {\n  BasicText(s, alpha = a)\n}",
         )
     }
     @OptIn(ExperimentalTransitionApi::class)
     val warpStep = stepTransition.createChildTransition("warp-idx") { if (it >= 3) 1 else 0 }
 
-    FoundationFrame("KEYNOTE EFFECTS LAB / PROVISIONAL") {
+    FoundationFrame("KEYNOTE EFFECTS LAB / PROVISIONAL", contentPadding = 40) {
         MagnifierLoupeStage(
             targetKey = "compose-target",
             progress = { reversalBuild },
@@ -323,12 +459,12 @@ private fun StoryboardBuilder.keynoteEffectsLabScene() = scene(
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(48.dp),
+                horizontalArrangement = Arrangement.spacedBy(36.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                    modifier = Modifier.weight(1.04f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
                         text = "Fix with SpanStyle(alpha)!",
@@ -342,7 +478,10 @@ private fun StoryboardBuilder.keynoteEffectsLabScene() = scene(
                         leading = "Web",
                         trailing = "<span style=\"opacity\">",
                         modifier = Modifier
-                            .keynoteFadeMove(progress = { staggerRows.progressFor(0) })
+                            .keynoteFadeMoveTracked(
+                                trackId = "lab-leader-stagger",
+                                progress = { staggerRows.progressFor(0) },
+                            )
                             .keynoteSpotlight(dimProgress = { calloutBuild }),
                     )
                     DottedLeaderRow(
@@ -350,7 +489,10 @@ private fun StoryboardBuilder.keynoteEffectsLabScene() = scene(
                         trailing = "BasicText(AnnotatedString)",
                         highlightTrailing = stampBuild > 0.2f,
                         trailingModifier = Modifier.decorate("compose-target"),
-                        modifier = Modifier.keynoteFadeMove(progress = { staggerRows.progressFor(1) }),
+                        modifier = Modifier.keynoteFadeMoveTracked(
+                            trackId = "lab-leader-stagger",
+                            progress = { staggerRows.progressFor(1) },
+                        ),
                     )
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                         KeynoteStamp(
@@ -364,7 +506,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene() = scene(
 
                 Box(
                     modifier = Modifier
-                        .weight(0.95f)
+                        .weight(0.96f)
                         .decorate("warp-card")
                         .keynoteFromDarkness(progress = { staggerRows.progressFor(1) }),
                 ) {

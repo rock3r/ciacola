@@ -1,13 +1,8 @@
 package dev.sebastiano.ciacola
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import dev.sebastiano.ciacola.timeline.rememberDeckLoopMillis
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -74,15 +69,17 @@ fun planMesh(points: List<List<Pair<Offset, Color>>>): MeshPlan {
 }
 
 @Composable
-fun AnimatedMeshBackdrop(modifier: Modifier = Modifier) {
-    val loop = rememberInfiniteTransition("foundation-mesh-loop")
-    val elapsed by loop.animateFloat(
-        initialValue = 0f,
-        targetValue = 6_000f,
-        animationSpec = infiniteRepeatable(tween(6_000), RepeatMode.Restart),
-        label = "mesh-time",
+fun AnimatedMeshBackdrop(
+    modifier: Modifier = Modifier,
+    loopId: String = "foundation-mesh-loop",
+    periodMillis: Long = 6_000L,
+) {
+    val elapsed = rememberDeckLoopMillis(
+        loopId = loopId,
+        label = "Ambient Vertex Mesh",
+        periodMillis = periodMillis,
     )
-    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), elapsed.toLong()))
+    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), elapsed))
     val paint = Paint()
 
     androidx.compose.foundation.layout.Box(
