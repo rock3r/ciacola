@@ -225,7 +225,7 @@ class PresenterNotesAndControllerTest {
         }
         waitForIdle()
 
-        assertEquals(2, controller.connectedDisplays().size)
+        assertEquals(2, controller.refreshDisplays().size)
         assertTrue(controller.presentOnDisplay(fakeScreens[1]))
         assertEquals("d2", presentedOn?.id)
         assertTrue(controller.swapAudienceAndPresenterDisplays())

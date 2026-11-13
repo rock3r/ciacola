@@ -445,8 +445,6 @@ class PresenterController(
         return screens
     }
 
-    fun connectedDisplays(): List<DisplayScreenInfo> = refreshDisplays()
-
     fun presentOnDisplay(screen: DisplayScreenInfo): Boolean =
         displayRouter.presentStoryOn(screen)
 

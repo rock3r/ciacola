@@ -319,4 +319,34 @@ class StoryboardVideoExporterTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun cancellationDuringSinkSpawnStillAbortsSpawnedSink() = runTest {
+        val dir = Files.createTempDirectory("video-export-cancel-during-spawn")
+        try {
+            val sink = RecordingVideoSink()
+            lateinit var exporter: StoryboardVideoExporter
+            exporter = StoryboardVideoExporter(
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ ->
+                    exporter.cancel()
+                    sink
+                },
+            )
+
+            val job = launch {
+                assertFailsWith<CancellationException> {
+                    exporter.exportAsMp4(animatedDeck, dir.resolve("cancelled-during-spawn.mp4"))
+                }
+            }
+            job.join()
+
+            assertTrue(sink.aborted, "Sink spawned concurrently with cancellation must still be aborted")
+            assertFalse(sink.finished)
+            assertNull(exporter.status)
+            assertFalse(exporter.isExporting)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

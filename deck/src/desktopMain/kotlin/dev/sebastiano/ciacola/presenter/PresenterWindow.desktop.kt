@@ -67,11 +67,10 @@ class PresenterWindow(
     @Composable
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
-        LaunchedEffect(controller, visible) {
-            controller.refreshDisplays()
-            while (visible) {
-                delay(2_000L)
+        LaunchedEffect(controller) {
+            while (true) {
                 controller.refreshDisplays()
+                delay(2_000L)
             }
         }
         val displays = controller.availableDisplays

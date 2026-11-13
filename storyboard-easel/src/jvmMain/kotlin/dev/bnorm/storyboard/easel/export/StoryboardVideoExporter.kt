@@ -24,6 +24,8 @@ import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -160,8 +162,11 @@ class StoryboardVideoExporter(
         var finishedCleanly = false
 
         try {
-            val activeSink = runInterruptible(Dispatchers.IO) { sinkFactory(path, width, height, fps) }
-            sink = activeSink
+            currentCoroutineContext().ensureActive()
+            val activeSink = withContext(NonCancellable + Dispatchers.IO) {
+                sinkFactory(path, width, height, fps).also { sink = it }
+            }
+            currentCoroutineContext().ensureActive()
             var frameTick = 0L
             fun nextTimeNanos(): Long = (frameTick++) * 1_000_000_000L / fps
 
@@ -360,8 +365,9 @@ internal class FfmpegVideoFrameSink(
         tempOutput = Files.createTempFile(parent, ".storyboard-export-", ".mp4")
         logFile = Files.createTempFile(parent, ".storyboard-ffmpeg-", ".log")
 
-        process = try {
-            ProcessBuilder(
+        var spawned: Process? = null
+        try {
+            val started = ProcessBuilder(
                 "ffmpeg",
                 "-y",
                 "-f", "rawvideo",
@@ -380,13 +386,18 @@ internal class FfmpegVideoFrameSink(
                 .redirectErrorStream(true)
                 .redirectOutput(logFile.toFile())
                 .start()
-        } catch (e: IOException) {
+            spawned = started
+            if (Thread.currentThread().isInterrupted) {
+                throw IOException("Interrupted while spawning ffmpeg")
+            }
+            process = started
+            stdin = BufferedOutputStream(started.outputStream, 1024 * 1024)
+        } catch (t: Throwable) {
+            spawned?.destroyForcibly()
             runCatching { Files.deleteIfExists(tempOutput) }
             runCatching { Files.deleteIfExists(logFile) }
-            throw e
+            throw t
         }
-
-        stdin = BufferedOutputStream(process.outputStream, 1024 * 1024)
     }
 
     override suspend fun writeFrame(rgbaBytes: ByteArray) {
