@@ -16,6 +16,8 @@ import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 
+internal const val MAX_ELEMENT_OFFSET_DP = 480f
+
 /**
  * Coordinates direct stage element selection, inline stage text editing, keyboard nudging,
  * and synchronization with [ElementEditorPanel] and [ElementOverridesStore].
@@ -64,6 +66,19 @@ class ElementEditorController(
         return inspectionRegistry.nodesForSlide(sceneIndex, beatIndex)
             .filter { it.isEditable && it.effectiveAlpha > 0.02f }
             .sortedWith(compareBy({ it.stageBounds.top }, { it.stageBounds.left }, { it.elementId }))
+    }
+
+    /**
+     * Returns true when [selectedElementId] is currently visible and editable on the active slide/beat.
+     */
+    fun isSelectedElementOnCurrentBeat(): Boolean {
+        val id = selectedElementId ?: return false
+        val sceneIndex = currentSceneIndexProvider()
+        val beatIndex = currentBeatIndexProvider()
+        return slidesNodesForCurrentSlide().any { it.elementId == id } ||
+            inspectionRegistry.nodes[id]?.let {
+                it.sceneIndex == sceneIndex && it.beatIndex == beatIndex && it.effectiveAlpha > 0.02f
+            } == true
     }
 
     fun selectElement(elementId: String?) {
@@ -130,15 +145,15 @@ class ElementEditorController(
 
     fun nudgeSelected(deltaXDp: Float, deltaYDp: Float): Boolean {
         val id = selectedElementId ?: return false
-        if (!editorActive || inlineEditingElementId != null) return false
+        if (!editorActive || inlineEditingElementId != null || !isSelectedElementOnCurrentBeat()) return false
         overridesStore.updateElement(
             elementId = id,
             coalesce = true,
             coalesceKey = "nudge:$id",
         ) { patch ->
             patch.copy(
-                offsetXDp = ((patch.offsetXDp ?: 0f) + deltaXDp).coerceIn(-480f, 480f),
-                offsetYDp = ((patch.offsetYDp ?: 0f) + deltaYDp).coerceIn(-480f, 480f),
+                offsetXDp = ((patch.offsetXDp ?: 0f) + deltaXDp).coerceIn(-MAX_ELEMENT_OFFSET_DP, MAX_ELEMENT_OFFSET_DP),
+                offsetYDp = ((patch.offsetYDp ?: 0f) + deltaYDp).coerceIn(-MAX_ELEMENT_OFFSET_DP, MAX_ELEMENT_OFFSET_DP),
             )
         }
         return true
@@ -146,6 +161,7 @@ class ElementEditorController(
 
     fun resetSelectedElement(): Boolean {
         val id = selectedElementId ?: return false
+        if (!isSelectedElementOnCurrentBeat()) return false
         overridesStore.resetElement(id)
         return true
     }

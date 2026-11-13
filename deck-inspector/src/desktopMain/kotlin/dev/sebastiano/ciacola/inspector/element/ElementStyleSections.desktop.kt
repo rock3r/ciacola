@@ -16,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -25,9 +24,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
+import dev.sebastiano.ciacola.inspector.design.DesignTooltipIconButton
+import dev.sebastiano.ciacola.inspector.design.ModifiedDotBadge
+import dev.sebastiano.ciacola.inspector.design.designActivatableFocus
+import dev.sebastiano.ciacola.inspector.design.toArgbLong
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
-import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import java.util.Locale
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.GroupHeader
@@ -64,9 +67,9 @@ internal fun FillAndBorderSection(
         allowClearFill = true,
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
-        onColorChanged = { c ->
-            store.updateElement(elementId, coalesce = true, coalesceKey = "fill:$elementId") {
-                it.copy(fillColorArgb = colorToArgbLong(c))
+        onColorChanged = { c, coalesce ->
+            store.updateElement(elementId, coalesce = coalesce, coalesceKey = "fill:$elementId") {
+                it.copy(fillColorArgb = c.toArgbLong())
             }
         },
         onReset = { store.updateElement(elementId) { it.copy(fillColorArgb = null) } },
@@ -75,7 +78,11 @@ internal fun FillAndBorderSection(
     ElementStepperSliderRow(
         label = "Border Width",
         value = currentBorderWidth,
-        valueText = if (currentBorderWidth % 1f == 0f) "${currentBorderWidth.toInt()} dp" else "${"%.1f".format(currentBorderWidth)} dp",
+        valueText = if (currentBorderWidth % 1f == 0f) {
+            "${currentBorderWidth.toInt()} dp"
+        } else {
+            "${"%.1f".format(Locale.US, currentBorderWidth)} dp"
+        },
         valueRange = 0f..12f,
         step = 0.5f,
         isOverridden = patch.borderWidthDp != null,
@@ -97,9 +104,9 @@ internal fun FillAndBorderSection(
         testTagPrefix = "ciacola-element-bordercolor",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
-        onColorChanged = { c ->
-            store.updateElement(elementId, coalesce = true, coalesceKey = "bordercolor:$elementId") {
-                it.copy(borderColorArgb = colorToArgbLong(c))
+        onColorChanged = { c, coalesce ->
+            store.updateElement(elementId, coalesce = coalesce, coalesceKey = "bordercolor:$elementId") {
+                it.copy(borderColorArgb = c.toArgbLong())
             }
         },
         onReset = { store.updateElement(elementId) { it.copy(borderColorArgb = null) } },
@@ -131,9 +138,10 @@ internal fun SpacingAndPositionSection(
     meta: StageElementMetadata?,
     store: ElementOverridesStore,
 ) {
+    val offsetRange = -MAX_ELEMENT_OFFSET_DP..MAX_ELEMENT_OFFSET_DP
     val currentPadding = (patch.paddingDp ?: meta?.defaultPaddingDp ?: 0f).coerceIn(0f, 64f)
-    val currentOffsetX = (patch.offsetXDp ?: 0f).coerceIn(-240f, 240f)
-    val currentOffsetY = (patch.offsetYDp ?: 0f).coerceIn(-240f, 240f)
+    val currentOffsetX = (patch.offsetXDp ?: 0f).coerceIn(offsetRange.start, offsetRange.endInclusive)
+    val currentOffsetY = (patch.offsetYDp ?: 0f).coerceIn(offsetRange.start, offsetRange.endInclusive)
 
     GroupHeader("Spacing & Position:")
 
@@ -159,7 +167,7 @@ internal fun SpacingAndPositionSection(
         label = "Offset X",
         value = currentOffsetX,
         valueText = "${currentOffsetX.roundToInt()} dp",
-        valueRange = -240f..240f,
+        valueRange = offsetRange,
         step = 2f,
         isOverridden = patch.offsetXDp != null,
         resetTooltip = "Reset Offset X to 0 dp",
@@ -168,7 +176,7 @@ internal fun SpacingAndPositionSection(
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
             store.updateElement(elementId, coalesce = coalesce, coalesceKey = "offsetx:$elementId") {
-                it.copy(offsetXDp = next.coerceIn(-240f, 240f))
+                it.copy(offsetXDp = next.coerceIn(offsetRange.start, offsetRange.endInclusive))
             }
         },
         onReset = { store.updateElement(elementId) { it.copy(offsetXDp = null) } },
@@ -178,7 +186,7 @@ internal fun SpacingAndPositionSection(
         label = "Offset Y",
         value = currentOffsetY,
         valueText = "${currentOffsetY.roundToInt()} dp",
-        valueRange = -240f..240f,
+        valueRange = offsetRange,
         step = 2f,
         isOverridden = patch.offsetYDp != null,
         resetTooltip = "Reset Offset Y to 0 dp",
@@ -187,7 +195,7 @@ internal fun SpacingAndPositionSection(
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
             store.updateElement(elementId, coalesce = coalesce, coalesceKey = "offsety:$elementId") {
-                it.copy(offsetYDp = next.coerceIn(-240f, 240f))
+                it.copy(offsetYDp = next.coerceIn(offsetRange.start, offsetRange.endInclusive))
             }
         },
         onReset = { store.updateElement(elementId) { it.copy(offsetYDp = null) } },
@@ -213,6 +221,8 @@ internal fun ElementStepperSliderRow(
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
     var sliderDragging by remember(testTagPrefix) { mutableStateOf(false) }
+    val canDecrease = value > valueRange.start + 1e-4f
+    val canIncrease = value < valueRange.endInclusive - 1e-4f
 
     DisposableEffect(testTagPrefix) {
         onDispose {
@@ -229,28 +239,35 @@ internal fun ElementStepperSliderRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = if (isOverridden) "● $label" else label,
-                style = JewelTheme.typography.small,
-                color = if (isOverridden) globalColors.text.normal else globalColors.text.info,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Row(
                 modifier = Modifier.weight(1f),
-            )
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isOverridden) {
+                    ModifiedDotBadge(tooltip = "$label is overridden")
+                }
+                Text(
+                    text = label,
+                    style = JewelTheme.typography.small,
+                    color = if (isOverridden) globalColors.text.normal else globalColors.text.info,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                var decFocused by remember { mutableStateOf(false) }
                 Tooltip(tooltip = { Text("Decrease $label") }) {
                     IconButton(
                         onClick = {
                             onValueChanged((value - step).coerceIn(valueRange.start, valueRange.endInclusive), false)
                         },
+                        enabled = canDecrease,
                         modifier = Modifier
                             .size(22.dp)
-                            .accessibleFocusRing(decFocused, focusRingColor)
-                            .onFocusChanged { decFocused = it.isFocused }
+                            .designActivatableFocus(focusRingColor)
                             .testTag("$testTagPrefix-dec"),
                     ) {
                         Icon(AllIconsKeys.General.Remove, contentDescription = "Decrease $label", modifier = Modifier.size(12.dp))
@@ -263,35 +280,30 @@ internal fun ElementStepperSliderRow(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.width(54.dp).testTag("$testTagPrefix-value"),
                 )
-                var incFocused by remember { mutableStateOf(false) }
                 Tooltip(tooltip = { Text("Increase $label") }) {
                     IconButton(
                         onClick = {
                             onValueChanged((value + step).coerceIn(valueRange.start, valueRange.endInclusive), false)
                         },
+                        enabled = canIncrease,
                         modifier = Modifier
                             .size(22.dp)
-                            .accessibleFocusRing(incFocused, focusRingColor)
-                            .onFocusChanged { incFocused = it.isFocused }
+                            .designActivatableFocus(focusRingColor)
                             .testTag("$testTagPrefix-inc"),
                     ) {
                         Icon(AllIconsKeys.General.Add, contentDescription = "Increase $label", modifier = Modifier.size(12.dp))
                     }
                 }
-                var resetFocused by remember { mutableStateOf(false) }
-                Tooltip(tooltip = { Text(resetTooltip) }) {
-                    IconButton(
-                        onClick = onReset,
-                        enabled = isOverridden,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .accessibleFocusRing(resetFocused, focusRingColor)
-                            .onFocusChanged { resetFocused = it.isFocused }
-                            .testTag("$testTagPrefix-reset"),
-                    ) {
-                        Icon(AllIconsKeys.Actions.Rollback, contentDescription = resetTooltip, modifier = Modifier.size(12.dp))
-                    }
-                }
+                DesignTooltipIconButton(
+                    icon = AllIconsKeys.Actions.Rollback,
+                    contentDescription = resetTooltip,
+                    tooltip = resetTooltip,
+                    testTag = "$testTagPrefix-reset",
+                    enabled = isOverridden,
+                    size = 22.dp,
+                    iconSize = 12.dp,
+                    onClick = onReset,
+                )
             }
         }
         Slider(
@@ -310,7 +322,10 @@ internal fun ElementStepperSliderRow(
                 }
             },
             valueRange = valueRange,
-            modifier = Modifier.fillMaxWidth().testTag("$testTagPrefix-slider"),
+            modifier = Modifier
+                .fillMaxWidth()
+                .designActivatableFocus(focusRingColor)
+                .testTag("$testTagPrefix-slider"),
         )
     }
 }

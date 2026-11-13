@@ -505,4 +505,81 @@ class DeckLintTest {
             "Expected fast offscreen full-deck sweep, took ${controller.lastAuditDurationMs} ms",
         )
     }
+
+    @Test
+    fun keynoteLightDimmedNormalTextPassesWhileTranslucentTextColorStillFails() {
+        val lightTheme = DeckThemes.keynoteLight()
+        val bg = lightTheme.colors.background // #EBEBEB
+        val fg = lightTheme.colors.foreground // #242124 (13.4:1 on #EBEBEB)
+
+        val input = LintSlideInput(
+            sceneIndex = 0,
+            beatIndex = 1,
+            textNodes = listOf(
+                // KeynoteLight default spotlightDimAlpha = 0.55f on normal-size (18sp) text -> must NOT flag!
+                LintTextNodeCandidate(
+                    elementId = "dim-55",
+                    label = "Dimmed 55%",
+                    text = "Dimmed normal copy in KeynoteLight",
+                    stageBounds = Rect(100f, 100f, 620f, 150f),
+                    fontSizeSp = 18f,
+                    effectiveAlpha = 0.55f,
+                    effectiveForeground = fg,
+                    opaqueForeground = fg,
+                    effectiveBackground = bg,
+                ),
+                // Higher spotlightDimAlpha = 0.80f on normal-size text -> must NOT flag!
+                LintTextNodeCandidate(
+                    elementId = "dim-80",
+                    label = "Dimmed 80%",
+                    text = "Slightly dimmed normal copy",
+                    stageBounds = Rect(100f, 200f, 620f, 250f),
+                    fontSizeSp = 18f,
+                    effectiveAlpha = 0.80f,
+                    effectiveForeground = fg,
+                    opaqueForeground = fg,
+                    effectiveBackground = bg,
+                ),
+                // Text whose OWN color alpha is 0.20f (unreadable even un-dimmed) -> MUST still flag!
+                LintTextNodeCandidate(
+                    elementId = "own-alpha-20",
+                    label = "Faint Ink",
+                    text = "Translucent ink color",
+                    stageBounds = Rect(100f, 300f, 620f, 350f),
+                    fontSizeSp = 18f,
+                    effectiveAlpha = 0.55f,
+                    effectiveForeground = fg.copy(alpha = 0.20f),
+                    opaqueForeground = fg.copy(alpha = 0.20f),
+                    effectiveBackground = bg,
+                ),
+            ),
+        )
+
+        val issues = DeckLintRules.evaluateSlide(input)
+        val contrastIds = issues.filter { it.ruleId == LintRuleId.LOW_CONTRAST }.map { it.elementId }
+        assertEquals(listOf("own-alpha-20"), contrastIds, "Expected only own-alpha-20 to flag LOW_CONTRAST, got $issues")
+    }
+
+    @Test
+    fun sampleForegroundColorScalesStageRectToHiDpiPixelBuffer() {
+        // 2x HiDPI buffer (3840x2160) representing a 1920x1080 stage:
+        // Stage glyph rect (990..1010, 490..510) maps to buffer pixels (1980..2020, 980..1020).
+        val bgArgb = 0xFF0B0D12.toInt()
+        val glyphArgb = 0xFF38BDF8.toInt()
+        val hiDpiBuffer = object : StagePixelBuffer {
+            override val width: Int = 3840
+            override val height: Int = 2160
+            override fun getArgb(x: Int, y: Int): Int =
+                if (x in 1995..2005 && y in 995..1005) glyphArgb else bgArgb
+        }
+
+        val sampled = SemanticsSlideScanner.sampleForegroundColor(
+            buffer = hiDpiBuffer,
+            glyphRect = Rect(990f, 490f, 1010f, 510f),
+            background = Color(0xFF0B0D12),
+            stageWidth = 1920f,
+            stageHeight = 1080f,
+        )
+        assertEquals(Color(0xFF38BDF8), sampled)
+    }
 }

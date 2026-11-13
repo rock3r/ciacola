@@ -140,14 +140,19 @@ class DesignSystemEditorUiTest {
         }
         waitForIdle()
 
-        // Tab 2: Typography
+        // Tab 2: Typography (including per-row Font Weight reset)
         onNodeWithTag("design-tab-typography", useUnmergedTree = true).performClick()
         waitForIdle()
+        onNodeWithTag("design-typo-title-weight-reset", useUnmergedTree = true).performScrollTo().assertIsNotEnabled()
         onNodeWithTag("design-typo-title-size-inc", useUnmergedTree = true).performScrollTo().performClick()
         onNodeWithTag("design-typo-title-weight-800", useUnmergedTree = true).performScrollTo().performClick()
         waitForIdle()
         assertEquals(74f, store.overridesFor(DeckThemePreset.StageDark).typography.title?.fontSizeSp)
         assertEquals(800, store.overridesFor(DeckThemePreset.StageDark).typography.title?.fontWeight)
+        onNodeWithTag("design-typo-title-weight-reset", useUnmergedTree = true).assertIsEnabled().performClick()
+        waitForIdle()
+        assertNull(store.overridesFor(DeckThemePreset.StageDark).typography.title?.fontWeight)
+        assertEquals(74f, store.overridesFor(DeckThemePreset.StageDark).typography.title?.fontSizeSp)
         onNodeWithTag("design-typo-title-preview", useUnmergedTree = true).assertExists()
 
         // Tab 3: Surfaces & Effects
@@ -157,9 +162,15 @@ class DesignSystemEditorUiTest {
         waitForIdle()
         assertEquals(68f, store.overridesFor(DeckThemePreset.StageDark).styles.slidePaddingDp)
 
-        // Tab 4: Motion Tokens + Preview Motion button
+        // Tab 4: Motion Tokens + Preview Motion button (unwired spring/duration rows omitted)
         onNodeWithTag("design-tab-motion", useUnmergedTree = true).performClick()
         waitForIdle()
+        onNodeWithTag("design-motion-fromDarkness-inc", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("design-motion-spotlight-inc", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("design-motion-popDamping-slider", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("design-motion-popStiffness-slider", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("design-motion-popInitialScale-inc", useUnmergedTree = true).assertExists()
+        onNodeWithTag("design-motion-popOvershootScale-inc", useUnmergedTree = true).assertExists()
         onNodeWithTag("design-motion-fadeMove-inc", useUnmergedTree = true).performScrollTo().performClick()
         waitForIdle()
         assertEquals(375, store.overridesFor(DeckThemePreset.StageDark).motion.fadeMoveDurationMs)

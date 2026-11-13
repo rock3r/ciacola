@@ -236,7 +236,7 @@ internal fun DesignStepperRow(
                 }
             }
             DesignTooltipIconButton(
-                icon = AllIconsKeys.Actions.Refresh,
+                icon = AllIconsKeys.Actions.Rollback,
                 contentDescription = "Reset $label",
                 tooltip = "Reset $label to preset default",
                 testTag = "$testTagPrefix-reset",
@@ -306,7 +306,7 @@ internal fun DesignSliderRow(
                     modifier = Modifier.testTag("$testTagPrefix-value"),
                 )
                 DesignTooltipIconButton(
-                    icon = AllIconsKeys.Actions.Refresh,
+                    icon = AllIconsKeys.Actions.Rollback,
                     contentDescription = "Reset $label",
                     tooltip = "Reset $label to preset default",
                     testTag = "$testTagPrefix-reset",

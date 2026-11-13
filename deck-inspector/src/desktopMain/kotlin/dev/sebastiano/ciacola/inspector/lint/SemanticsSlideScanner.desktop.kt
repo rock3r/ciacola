@@ -340,6 +340,8 @@ internal object SemanticsSlideScanner {
             effectiveAlpha = effectiveAlpha,
             sampledBackground = sampledBg,
             pixelBuffer = pixelBuffer,
+            stageWidth = stageWidth,
+            stageHeight = stageHeight,
         )
 
         return LintTextNodeCandidate(
@@ -375,6 +377,8 @@ internal object SemanticsSlideScanner {
         effectiveAlpha: Float,
         sampledBackground: Color?,
         pixelBuffer: StagePixelBuffer?,
+        stageWidth: Float,
+        stageHeight: Float,
     ): Pair<Color?, Color?> {
         val annotatedText = layout.layoutInput.text
         val colorSpans = annotatedText.spanStyles.filter {
@@ -401,12 +405,12 @@ internal object SemanticsSlideScanner {
             } else {
                 candidateColors.first()
             }
-            return picked to picked.copy(alpha = 1f)
+            return picked to picked
         }
         if (pixelBuffer != null && sampledBackground != null) {
-            val sampled = sampleForegroundColor(pixelBuffer, tightGlyphRect, sampledBackground)
+            val sampled = sampleForegroundColor(pixelBuffer, tightGlyphRect, sampledBackground, stageWidth, stageHeight)
             if (sampled != null) {
-                val opaque = if (effectiveAlpha in 0.05f..0.98f) {
+                val opaque = if (effectiveAlpha >= 0.05f && effectiveAlpha < 0.99f) {
                     unblendOver(sampled, sampledBackground, effectiveAlpha)
                 } else {
                     sampled
@@ -488,17 +492,22 @@ internal object SemanticsSlideScanner {
         )
     }
 
-    private fun sampleForegroundColor(
+    internal fun sampleForegroundColor(
         buffer: StagePixelBuffer,
         glyphRect: Rect,
         background: Color,
+        stageWidth: Float,
+        stageHeight: Float,
     ): Color? {
         val bw = buffer.width
         val bh = buffer.height
-        val minX = glyphRect.left.roundToInt().coerceIn(0, bw - 1)
-        val maxX = glyphRect.right.roundToInt().coerceIn(0, bw - 1)
-        val minY = glyphRect.top.roundToInt().coerceIn(0, bh - 1)
-        val maxY = glyphRect.bottom.roundToInt().coerceIn(0, bh - 1)
+        if (bw <= 0 || bh <= 0) return null
+        val sx = bw / stageWidth.coerceAtLeast(1f)
+        val sy = bh / stageHeight.coerceAtLeast(1f)
+        val minX = (glyphRect.left * sx).roundToInt().coerceIn(0, bw - 1)
+        val maxX = (glyphRect.right * sx).roundToInt().coerceIn(0, bw - 1)
+        val minY = (glyphRect.top * sy).roundToInt().coerceIn(0, bh - 1)
+        val maxY = (glyphRect.bottom * sy).roundToInt().coerceIn(0, bh - 1)
         if (maxX <= minX || maxY <= minY) return null
 
         val bgR = background.red * 255f

@@ -191,7 +191,7 @@ fun ColorTokenRow(
                     )
                 }
                 DesignTooltipIconButton(
-                    icon = AllIconsKeys.Actions.Refresh,
+                    icon = AllIconsKeys.Actions.Rollback,
                     contentDescription = "Reset $label",
                     tooltip = "Reset $label to preset default",
                     testTag = "design-color-$tokenId-reset",
@@ -349,8 +349,9 @@ private fun InlineHsvColorEditor(
 
     val liveText = hexState.text.toString()
     LaunchedEffect(liveText) {
-        if (!hexHasFocus || liveText == lastProgrammaticHex) return@LaunchedEffect
-        val parsed = parseHexColorOrNull(liveText, defaultAlpha = localHsv.alpha)
+        val currentText = hexState.text.toString()
+        if (!hexHasFocus || currentText == lastProgrammaticHex) return@LaunchedEffect
+        val parsed = parseHexColorOrNull(currentText, defaultAlpha = localHsv.alpha)
         if (parsed == null) {
             hexError = if (supportsAlpha) "Use #RRGGBB or #AARRGGBB" else "Use #RRGGBB"
         } else {
@@ -368,47 +369,22 @@ private fun InlineHsvColorEditor(
             .padding(top = 2.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        SaturationValueCanvas(
+        HsvChannelPickers(
             tokenId = tokenId,
             label = label,
+            color = color,
             hsv = localHsv,
+            supportsAlpha = supportsAlpha,
+            svTestTag = "design-color-$tokenId-sv-canvas",
+            hueTestTag = "design-color-$tokenId-hue-bar",
+            alphaTestTag = "design-color-$tokenId-alpha-bar",
             onGestureStart = onGestureStart,
             onGestureEnd = onGestureEnd,
-            onSatValChanged = { sat, value, coalesce ->
-                val updated = localHsv.copy(saturation = sat, value = value)
+            onHsvAndColorChanged = { updated, nextColor, coalesce ->
                 localHsv = updated
-                onColorChanged(hsvToColor(updated.hue, updated.saturation, updated.value, updated.alpha), coalesce)
+                onColorChanged(nextColor, coalesce)
             },
         )
-
-        HueSliderBar(
-            tokenId = tokenId,
-            label = label,
-            hue = localHsv.hue,
-            onGestureStart = onGestureStart,
-            onGestureEnd = onGestureEnd,
-            onHueChanged = { hue, coalesce ->
-                val updated = localHsv.copy(hue = hue)
-                localHsv = updated
-                onColorChanged(hsvToColor(updated.hue, updated.saturation, updated.value, updated.alpha), coalesce)
-            },
-        )
-
-        if (supportsAlpha) {
-            AlphaSliderBar(
-                tokenId = tokenId,
-                label = label,
-                color = hsvToColor(localHsv.hue, localHsv.saturation, localHsv.value, localHsv.alpha),
-                alpha = localHsv.alpha,
-                onGestureStart = onGestureStart,
-                onGestureEnd = onGestureEnd,
-                onAlphaChanged = { alpha, coalesce ->
-                    val updated = localHsv.copy(alpha = alpha)
-                    localHsv = updated
-                    onColorChanged(hsvToColor(updated.hue, updated.saturation, updated.value, updated.alpha), coalesce)
-                },
-            )
-        }
 
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(
@@ -452,40 +428,135 @@ private fun InlineHsvColorEditor(
             }
         }
 
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            presetSwatches.forEachIndexed { index, swatch ->
-                val swatchHex = swatch.toHexString(includeAlpha = supportsAlpha)
-                Tooltip(tooltip = { Text("Apply $swatchHex") }) {
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .designActivatableFocus(focusRingColor, cornerRadius = 4.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(swatch)
-                            .border(
-                                width = if (swatch.toArgbLong() == color.toArgbLong()) 2.dp else 1.dp,
-                                color = if (swatch.toArgbLong() == color.toArgbLong()) {
-                                    globalColors.outlines.focused
-                                } else {
-                                    globalColors.borders.normal
-                                },
-                                shape = RoundedCornerShape(4.dp),
-                            )
-                            .clickable {
-                                val applied = if (supportsAlpha) swatch else swatch.copy(alpha = 1f)
-                                localHsv = applied.toHsv()
-                                onColorChanged(applied, false)
-                            }
-                            .testTag("design-color-$tokenId-preset-$index")
-                            .semantics {
-                                role = Role.Button
-                                contentDescription = "Preset swatch $swatchHex"
-                            },
-                    )
+        ColorPresetSwatchStrip(
+            selectedColor = color,
+            presetSwatches = presetSwatches,
+            supportsAlpha = supportsAlpha,
+            tooltipForSwatch = { hex -> "Apply $hex" },
+            contentDescriptionForSwatch = { hex -> "Preset swatch $hex" },
+            swatchTestTag = { index -> "design-color-$tokenId-preset-$index" },
+            onSwatchPicked = { applied ->
+                localHsv = applied.toHsv()
+                onColorChanged(applied, false)
+            },
+        )
+    }
+}
+
+@Composable
+internal fun HsvChannelPickers(
+    tokenId: String,
+    label: String,
+    color: Color,
+    hsv: HsvColor,
+    supportsAlpha: Boolean,
+    svTestTag: String,
+    hueTestTag: String,
+    alphaTestTag: String,
+    onGestureStart: () -> Unit,
+    onGestureEnd: () -> Unit,
+    onHsvAndColorChanged: (HsvColor, Color, coalesce: Boolean) -> Unit,
+) {
+    fun currentBaseHsv(): HsvColor {
+        val currentFromLocal = hsvToColor(hsv.hue, hsv.saturation, hsv.value, hsv.alpha)
+        return if (currentFromLocal.toArgbLong() != color.toArgbLong()) color.toHsv() else hsv
+    }
+
+    SaturationValueCanvas(
+        tokenId = tokenId,
+        label = label,
+        hsv = hsv,
+        testTag = svTestTag,
+        onGestureStart = onGestureStart,
+        onGestureEnd = onGestureEnd,
+        onSatValChanged = { sat, value, coalesce ->
+            val base = currentBaseHsv()
+            val pickedAlpha = if (supportsAlpha) resolvePickedAlpha(base.alpha) else 1f
+            val updated = base.copy(saturation = sat, value = value, alpha = pickedAlpha)
+            onHsvAndColorChanged(updated, hsvToColor(updated.hue, updated.saturation, updated.value, updated.alpha), coalesce)
+        },
+    )
+
+    HueSliderBar(
+        tokenId = tokenId,
+        label = label,
+        hue = hsv.hue,
+        testTag = hueTestTag,
+        onGestureStart = onGestureStart,
+        onGestureEnd = onGestureEnd,
+        onHueChanged = { hue, coalesce ->
+            val base = currentBaseHsv()
+            val pickedAlpha = if (supportsAlpha) resolvePickedAlpha(base.alpha) else 1f
+            val updated = base.copy(hue = hue, alpha = pickedAlpha)
+            onHsvAndColorChanged(updated, hsvToColor(updated.hue, updated.saturation, updated.value, updated.alpha), coalesce)
+        },
+    )
+
+    if (supportsAlpha) {
+        AlphaSliderBar(
+            tokenId = tokenId,
+            label = label,
+            color = hsvToColor(hsv.hue, hsv.saturation, hsv.value, hsv.alpha),
+            alpha = hsv.alpha,
+            testTag = alphaTestTag,
+            onGestureStart = onGestureStart,
+            onGestureEnd = onGestureEnd,
+            onAlphaChanged = { alpha, coalesce ->
+                val base = currentBaseHsv()
+                val updated = base.copy(alpha = alpha)
+                onHsvAndColorChanged(updated, hsvToColor(updated.hue, updated.saturation, updated.value, updated.alpha), coalesce)
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@Composable
+internal fun ColorPresetSwatchStrip(
+    selectedColor: Color,
+    presetSwatches: List<Color>,
+    supportsAlpha: Boolean,
+    tooltipForSwatch: (String) -> String,
+    contentDescriptionForSwatch: (String) -> String,
+    swatchTestTag: (Int) -> String,
+    onSwatchPicked: (Color) -> Unit,
+) {
+    val globalColors = JewelTheme.globalColors
+    val focusRingColor = rememberAccessibleFocusRingColor()
+
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        presetSwatches.forEachIndexed { index, swatch ->
+            val swatchHex = swatch.toHexString(includeAlpha = supportsAlpha && swatch.alpha < 0.999f)
+            val isSelected = swatch.toArgbLong() == selectedColor.toArgbLong()
+            Tooltip(tooltip = { Text(tooltipForSwatch(swatchHex)) }) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .designActivatableFocus(focusRingColor, cornerRadius = 4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .border(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = if (isSelected) globalColors.outlines.focused else globalColors.borders.normal,
+                            shape = RoundedCornerShape(4.dp),
+                        )
+                        .clickable {
+                            val applied = if (supportsAlpha) swatch else swatch.copy(alpha = 1f)
+                            onSwatchPicked(applied)
+                        }
+                        .testTag(swatchTestTag(index))
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = contentDescriptionForSwatch(swatchHex)
+                        },
+                ) {
+                    if (swatch.alpha < 0.999f) {
+                        CheckerboardBackground(Modifier.fillMaxSize())
+                    }
+                    Box(Modifier.fillMaxSize().background(swatch))
                 }
             }
         }

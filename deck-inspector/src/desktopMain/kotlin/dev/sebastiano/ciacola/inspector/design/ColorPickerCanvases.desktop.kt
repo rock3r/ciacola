@@ -49,6 +49,7 @@ internal fun SaturationValueCanvas(
     onGestureStart: () -> Unit,
     onGestureEnd: () -> Unit,
     onSatValChanged: (saturation: Float, value: Float, coalesce: Boolean) -> Unit,
+    testTag: String = "design-color-$tokenId-sv-canvas",
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
@@ -121,7 +122,7 @@ internal fun SaturationValueCanvas(
                         }
                     }
                 }
-                .testTag("design-color-$tokenId-sv-canvas")
+                .testTag(testTag)
                 .semantics {
                     contentDescription = "$label saturation and brightness picker"
                     stateDescription = "Saturation ${(hsv.saturation * 100).toInt()}%, Brightness ${(hsv.value * 100).toInt()}%"
@@ -144,6 +145,7 @@ internal fun HueSliderBar(
     onGestureStart: () -> Unit,
     onGestureEnd: () -> Unit,
     onHueChanged: (Float, coalesce: Boolean) -> Unit,
+    testTag: String = "design-color-$tokenId-hue-bar",
 ) {
     val spectrum = remember {
         listOf(
@@ -158,7 +160,7 @@ internal fun HueSliderBar(
     }
     HorizontalColorChannelBar(
         tooltip = "Drag or use Left/Right arrows to adjust $label hue",
-        testTag = "design-color-$tokenId-hue-bar",
+        testTag = testTag,
         contentDescriptionText = "$label hue slider",
         stateDescriptionText = "${hue.toInt()} degrees",
         fraction = (hue / 360f).coerceIn(0f, 1f),
@@ -182,11 +184,12 @@ internal fun AlphaSliderBar(
     onGestureStart: () -> Unit,
     onGestureEnd: () -> Unit,
     onAlphaChanged: (Float, coalesce: Boolean) -> Unit,
+    testTag: String = "design-color-$tokenId-alpha-bar",
 ) {
     val opaque = color.copy(alpha = 1f)
     HorizontalColorChannelBar(
         tooltip = "Drag or use Left/Right arrows to adjust $label opacity",
-        testTag = "design-color-$tokenId-alpha-bar",
+        testTag = testTag,
         contentDescriptionText = "$label alpha slider",
         stateDescriptionText = "${(alpha * 100).toInt()} percent",
         fraction = alpha.coerceIn(0f, 1f),

@@ -1,7 +1,6 @@
 package dev.sebastiano.ciacola.inspector.design
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -28,6 +27,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.sebastiano.ciacola.effects.keynotePopAlpha
+import dev.sebastiano.ciacola.effects.keynotePopScale
 import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DesignSystemOverrides
@@ -73,9 +74,7 @@ internal fun DesignSystemMotionTab(
         listOf(
             IntMotionTokenSpec("fadeMove", "Fade Move", "ms", 80..1500, 25, { it.motion.fadeMoveDurationMs }, { it.fadeMoveDurationMs != null }) { m, v -> m.copy(fadeMoveDurationMs = v) },
             IntMotionTokenSpec("dissolve", "Dissolve", "ms", 80..1500, 25, { it.motion.dissolveDurationMs }, { it.dissolveDurationMs != null }) { m, v -> m.copy(dissolveDurationMs = v) },
-            IntMotionTokenSpec("fromDarkness", "From Darkness", "ms", 80..1500, 25, { it.motion.fromDarknessDurationMs }, { it.fromDarknessDurationMs != null }) { m, v -> m.copy(fromDarknessDurationMs = v) },
             IntMotionTokenSpec("lineDraw", "Line Draw", "ms", 80..1500, 25, { it.motion.lineDrawDurationMs }, { it.lineDrawDurationMs != null }) { m, v -> m.copy(lineDrawDurationMs = v) },
-            IntMotionTokenSpec("spotlight", "Spotlight", "ms", 80..1500, 25, { it.motion.spotlightDurationMs }, { it.spotlightDurationMs != null }) { m, v -> m.copy(spotlightDurationMs = v) },
             IntMotionTokenSpec("loupe", "Loupe", "ms", 80..1500, 25, { it.motion.loupeDurationMs }, { it.loupeDurationMs != null }) { m, v -> m.copy(loupeDurationMs = v) },
             IntMotionTokenSpec("sharedBounds", "Shared Bounds", "ms", 100..2000, 25, { it.motion.sharedBoundsDurationMs }, { it.sharedBoundsDurationMs != null }) { m, v -> m.copy(sharedBoundsDurationMs = v) },
             IntMotionTokenSpec("warpToken", "Warp Token", "ms", 80..1500, 25, { it.motion.warpTokenDurationMs }, { it.warpTokenDurationMs != null }) { m, v -> m.copy(warpTokenDurationMs = v) },
@@ -196,37 +195,7 @@ internal fun DesignSystemMotionTab(
 
         DesignSectionCard {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                GroupHeader("Pop Spring:")
-                DesignSliderRow(
-                    label = "Damping Ratio",
-                    value = motion.popDampingRatio,
-                    valueRange = 0.25f..1.20f,
-                    valueText = "%.2f".format(Locale.US, motion.popDampingRatio),
-                    testTagPrefix = "design-motion-popDamping",
-                    isOverridden = overrides.motion.popDampingRatio != null,
-                    onValueChange = { next ->
-                        val snapped = ((next * 100f).roundToInt() / 100f).coerceIn(0.25f, 1.20f)
-                        store.updateMotion(preset, coalesceKey = "motion:popDamping", coalesce = true) {
-                            it.copy(popDampingRatio = snapped)
-                        }
-                    },
-                    onReset = { store.updateMotion(preset) { it.copy(popDampingRatio = null) } },
-                )
-                DesignSliderRow(
-                    label = "Stiffness",
-                    value = motion.popStiffness,
-                    valueRange = 100f..2000f,
-                    valueText = "${motion.popStiffness.roundToInt()}",
-                    testTagPrefix = "design-motion-popStiffness",
-                    isOverridden = overrides.motion.popStiffness != null,
-                    onValueChange = { next ->
-                        val snapped = (next / 10f).roundToInt() * 10f
-                        store.updateMotion(preset, coalesceKey = "motion:popStiffness", coalesce = true) {
-                            it.copy(popStiffness = snapped.coerceIn(100f, 2000f))
-                        }
-                    },
-                    onReset = { store.updateMotion(preset) { it.copy(popStiffness = null) } },
-                )
+                GroupHeader("Pop Curve:")
                 DesignStepperRow(
                     label = "Initial Scale",
                     valueText = "%.2f×".format(Locale.US, motion.popInitialScale),
@@ -276,7 +245,7 @@ private fun MotionPreviewBox(resolvedTheme: DeckTheme) {
     var playCounter by remember { mutableIntStateOf(0) }
 
     val slideProgress = remember { Animatable(1f) }
-    val popScale = remember { Animatable(1f) }
+    val popProgress = remember { Animatable(1f) }
     val staggerDot1 = remember { Animatable(1f) }
     val staggerDot2 = remember { Animatable(1f) }
 
@@ -284,39 +253,29 @@ private fun MotionPreviewBox(resolvedTheme: DeckTheme) {
         if (playCounter == 0) return@LaunchedEffect
         if (reducedMotion) {
             slideProgress.snapTo(0f)
-            popScale.snapTo(1f)
+            popProgress.snapTo(0f)
             staggerDot1.snapTo(0f)
             staggerDot2.snapTo(0f)
             val fadeSpec = tween<Float>(durationMillis = REDUCED_MOTION_FADE_DURATION_MS)
             launch { slideProgress.animateTo(1f, fadeSpec) }
+            launch { popProgress.animateTo(1f, fadeSpec) }
             launch { staggerDot1.animateTo(1f, fadeSpec) }
             launch { staggerDot2.animateTo(1f, fadeSpec) }
             return@LaunchedEffect
         }
 
         slideProgress.snapTo(0f)
-        popScale.snapTo(motion.popInitialScale)
+        popProgress.snapTo(0f)
         staggerDot1.snapTo(0f)
         staggerDot2.snapTo(0f)
 
-        launch {
-            slideProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = motion.fadeMoveDurationMs, easing = motion.standardEasing),
-            )
-        }
-        launch {
-            popScale.animateTo(
-                targetValue = 1f,
-                animationSpec = spring(dampingRatio = motion.popDampingRatio, stiffness = motion.popStiffness),
-            )
-        }
-        launch {
-            staggerDot1.animateTo(1f, tween(motion.fadeMoveDurationMs, easing = motion.standardEasing))
-        }
+        val buildSpec = tween<Float>(durationMillis = motion.fadeMoveDurationMs, easing = motion.standardEasing)
+        launch { slideProgress.animateTo(1f, buildSpec) }
+        launch { popProgress.animateTo(1f, buildSpec) }
+        launch { staggerDot1.animateTo(1f, buildSpec) }
         launch {
             delay(motion.staggerStepMs.toLong())
-            staggerDot2.animateTo(1f, tween(motion.fadeMoveDurationMs, easing = motion.standardEasing))
+            staggerDot2.animateTo(1f, buildSpec)
         }
     }
 
@@ -356,8 +315,17 @@ private fun MotionPreviewBox(resolvedTheme: DeckTheme) {
             Box(
                 modifier = Modifier
                     .graphicsLayer {
-                        scaleX = popScale.value
-                        scaleY = popScale.value
+                        val p = popProgress.value
+                        if (reducedMotion) {
+                            alpha = p.coerceIn(0f, 1f)
+                            scaleX = 1f
+                            scaleY = 1f
+                        } else {
+                            val scale = keynotePopScale(p, motion.popInitialScale, motion.popOvershootScale)
+                            alpha = keynotePopAlpha(p)
+                            scaleX = scale
+                            scaleY = scale
+                        }
                     }
                     .background(resolvedTheme.colors.accent, RoundedCornerShape(6.dp))
                     .padding(horizontal = 8.dp, vertical = 5.dp),
@@ -393,7 +361,7 @@ private fun MotionPreviewBox(resolvedTheme: DeckTheme) {
             }
         }
 
-        Tooltip(tooltip = { Text("Trigger live preview using FadeMove, Stagger, and Pop spring tokens") }) {
+        Tooltip(tooltip = { Text("Trigger live preview using FadeMove, Stagger, and Pop tokens") }) {
             DefaultButton(
                 onClick = { playCounter++ },
                 modifier = Modifier

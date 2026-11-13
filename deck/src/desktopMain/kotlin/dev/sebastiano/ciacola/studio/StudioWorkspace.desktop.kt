@@ -69,6 +69,7 @@ import dev.sebastiano.ciacola.inspector.lint.DeckLintController
 import dev.sebastiano.ciacola.inspector.lint.DeckLintPanel
 import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemePreset
+import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.timeline.TimelineBlockInspector
 import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
 import dev.sebastiano.ciacola.timeline.TimelineStudioController
@@ -299,23 +300,24 @@ class StudioWorkspaceController(
         val elementSelectionActive = elementController.editorActive &&
             activeTab == StudioInspectorTab.Element &&
             elementController.selectedElementId != null
+        val elementOnCurrentBeat = elementSelectionActive && elementController.isSelectedElementOnCurrentBeat()
 
         if (elementSelectionActive && event.type == KeyEventType.KeyDown && !event.isAltPressed) {
             val step = if (event.isShiftPressed) 10f else 1f
             when {
-                !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionLeft -> {
+                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionLeft -> {
                     elementController.nudgeSelected(-step, 0f)
                     return true
                 }
-                !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionRight -> {
+                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionRight -> {
                     elementController.nudgeSelected(step, 0f)
                     return true
                 }
-                !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionUp -> {
+                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionUp -> {
                     elementController.nudgeSelected(0f, -step)
                     return true
                 }
-                !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionDown -> {
+                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionDown -> {
                     elementController.nudgeSelected(0f, step)
                     return true
                 }
@@ -324,7 +326,7 @@ class StudioWorkspaceController(
                     elementController.selectElement(null)
                     return true
                 }
-                (event.isMetaPressed || event.isCtrlPressed) && (event.key == Key.Backspace || event.key == Key.Delete) -> {
+                elementOnCurrentBeat && (event.isMetaPressed || event.isCtrlPressed) && (event.key == Key.Backspace || event.key == Key.Delete) -> {
                     elementController.resetSelectedElement()
                     return true
                 }
@@ -496,8 +498,8 @@ fun StudioUnifiedInspectorPane(
     val hasMotionOverrides = workspace.timelineOverridesStore.data().hasOverrides
     val hasElementOverrides = workspace.elementOverridesStore.data().hasOverrides
     val hasThemeOverrides = workspace.designSystemStore.overridesFor(currentPreset).hasOverrides
-    val resolvedFallbackBg = remember(currentPreset, desRev, baseThemeProvider) {
-        workspace.designSystemStore.resolveTheme(currentPreset, baseThemeProvider(currentPreset)).colors.background
+    val activeDeckTheme = remember(currentPreset, desRev, baseThemeProvider) {
+        workspace.designSystemStore.resolveTheme(currentPreset, baseThemeProvider(currentPreset))
     }
     val lintErrorCount = workspace.lintController.errorCount
     val lintWarningCount = workspace.lintController.warningCount
@@ -548,52 +550,53 @@ fun StudioUnifiedInspectorPane(
         Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when (workspace.activeTab) {
-                StudioInspectorTab.Motion -> TimelineBlockInspector(
-                    controller = workspace.timelineController,
-                    modifier = Modifier.fillMaxSize(),
-                    fillWidth = true,
-                )
+            DeckThemeProvider(activeDeckTheme) {
+                when (workspace.activeTab) {
+                    StudioInspectorTab.Motion -> TimelineBlockInspector(
+                        controller = workspace.timelineController,
+                        modifier = Modifier.fillMaxSize(),
+                        fillWidth = true,
+                    )
 
-                StudioInspectorTab.Element -> ElementEditorPanel(
-                    controller = workspace.elementController,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    StudioInspectorTab.Element -> ElementEditorPanel(
+                        controller = workspace.elementController,
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-                StudioInspectorTab.Theme -> DesignSystemEditorPanel(
-                    store = workspace.designSystemStore,
-                    currentPreset = currentPreset,
-                    onSelectPreset = onSelectPreset,
-                    baseThemeProvider = baseThemeProvider,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    StudioInspectorTab.Theme -> DesignSystemEditorPanel(
+                        store = workspace.designSystemStore,
+                        currentPreset = currentPreset,
+                        onSelectPreset = onSelectPreset,
+                        baseThemeProvider = baseThemeProvider,
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-                StudioInspectorTab.Lint -> DeckLintPanel(
-                    controller = workspace.lintController,
-                    animatic = animatic,
-                    storyboardProvider = { animatic.storyboard },
-                    presetsToCheck = DeckThemePreset.entries,
-                    storyboardForPreset = storyboardForPreset,
-                    timelineOverridesProvider = { workspace.timelineOverridesStore.data() },
-                    fallbackBackground = resolvedFallbackBg,
-                    externalRevisionKey = motionStructRev + motionParamRev + elemRev + desRev,
-                    stageInspectionRegistry = workspace.stageInspectionRegistry,
-                    onApplyElementPatch = { patch -> workspace.applyElementPatch(patch) },
-                    onEditElement = { elementId, sceneIndex, beatIndex ->
-                        workspace.openElementInInspector(
-                            elementId = elementId,
-                            animatic = animatic,
-                            scope = scope,
-                            sceneIndex = sceneIndex,
-                            beatIndex = beatIndex,
-                        )
-                    },
-                    onOpenThemeEditor = {
-                        workspace.selectTabInStudio(StudioInspectorTab.Theme)
-                    },
-                    isActive = true,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    StudioInspectorTab.Lint -> DeckLintPanel(
+                        controller = workspace.lintController,
+                        animatic = animatic,
+                        storyboardProvider = { animatic.storyboard },
+                        presetsToCheck = DeckThemePreset.entries,
+                        storyboardForPreset = storyboardForPreset,
+                        timelineOverridesProvider = { workspace.timelineOverridesStore.data() },
+                        externalRevisionKey = motionStructRev + motionParamRev + elemRev + desRev,
+                        stageInspectionRegistry = workspace.stageInspectionRegistry,
+                        onApplyElementPatch = { patch -> workspace.applyElementPatch(patch) },
+                        onEditElement = { elementId, sceneIndex, beatIndex ->
+                            workspace.openElementInInspector(
+                                elementId = elementId,
+                                animatic = animatic,
+                                scope = scope,
+                                sceneIndex = sceneIndex,
+                                beatIndex = beatIndex,
+                            )
+                        },
+                        onOpenThemeEditor = {
+                            workspace.selectTabInStudio(StudioInspectorTab.Theme)
+                        },
+                        isActive = true,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }

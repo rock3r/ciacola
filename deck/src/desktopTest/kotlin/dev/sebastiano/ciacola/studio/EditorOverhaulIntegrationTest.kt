@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -131,6 +132,41 @@ class EditorOverhaulIntegrationTest {
             errors.isEmpty(),
             "Expected 0 lint errors across StageDark + KeynoteLight FoundationDeck, found:\n" +
                 errors.joinToString("\n") { "${it.id} (${it.locationBadge}): ${it.title} — ${it.detail}" },
+        )
+
+        // 1.5. Full-deck audit with spotlightDimAlpha = 0.8f across both presets produces 0 errors
+        //      and introduces 0 LOW_CONTRAST issues on spotlight-dimmed elements.
+        val baselineContrastIds = issues.filter { it.ruleId == LintRuleId.LOW_CONTRAST }.map { it.id }.toSet()
+        runOnIdle {
+            designStore.updateColors(DeckThemePreset.StageDark) { it.copy(spotlightDimAlpha = 0.8f) }
+            designStore.updateColors(DeckThemePreset.KeynoteLight) { it.copy(spotlightDimAlpha = 0.8f) }
+        }
+        waitForIdle()
+        var dimmedIssues: List<DeckLintIssue>? = null
+        runOnIdle {
+            uiScope.launch {
+                dimmedIssues = lintController.runFullDeckAudit(
+                    storyboard = storyboardForPreset(DeckThemePreset.StageDark),
+                    presetsToCheck = listOf(DeckThemePreset.StageDark, DeckThemePreset.KeynoteLight),
+                    storyboardForPreset = storyboardForPreset,
+                    timelineOverrides = timelineStore.data(),
+                )
+            }
+        }
+        waitUntil(conditionDescription = "Spotlight 0.8 audit completes", timeoutMillis = 10_000) {
+            dimmedIssues != null && !lintController.isAuditing
+        }
+        val dimmedErrors = dimmedIssues!!.filter { it.severity == LintSeverity.Error }
+        assertTrue(
+            dimmedErrors.isEmpty(),
+            "Expected 0 lint errors with spotlightDimAlpha = 0.8f, got $dimmedErrors",
+        )
+        val newContrastIssues = dimmedIssues!!.filter {
+            it.ruleId == LintRuleId.LOW_CONTRAST && it.id !in baselineContrastIds
+        }
+        assertTrue(
+            newContrastIssues.isEmpty(),
+            "Expected 0 new LOW_CONTRAST issues with spotlightDimAlpha = 0.8f, got $newContrastIssues",
         )
     }
 
@@ -450,6 +486,26 @@ class EditorOverhaulIntegrationTest {
         }
         waitForIdle()
         assertFalse(elementStore.data().hasOverrides)
+
+        // 6.5. Under KeynoteLight, StudioUnifiedInspectorPane provides KeynoteLight's DeckTheme to Element tab
+        //      so the first theme swatch equals KeynoteLight's foreground (#242124), not StageDark's!
+        runOnIdle { preset = DeckThemePreset.KeynoteLight }
+        waitForIdle()
+        onNodeWithTag("ciacola-element-textcolor-swatch", useUnmergedTree = true).performScrollTo().performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-element-textcolor-theme-swatch-0", useUnmergedTree = true).performScrollTo().performClick()
+        waitForIdle()
+        val expectedLightFgArgb = DeckThemes.KeynoteLightColors.foreground.toArgb().toLong() and 0xFFFFFFFFL
+        assertEquals(
+            expectedLightFgArgb,
+            elementStore.patchFor("s1:eyebrow")?.textColorArgb,
+            "First theme swatch on Element tab under KeynoteLight must apply KeynoteLight foreground",
+        )
+        runOnIdle {
+            assertTrue(workspace.undoInActiveContext())
+            preset = DeckThemePreset.StageDark
+        }
+        waitForIdle()
 
         // 7. Fullscreen presenting hides ALL stage authoring overlays even when Studio was open,
         //    and focused authoring text inputs prevent B/W blackout curtains from firing!

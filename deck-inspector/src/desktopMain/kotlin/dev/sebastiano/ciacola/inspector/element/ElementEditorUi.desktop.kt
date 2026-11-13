@@ -4,19 +4,16 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -32,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -48,8 +44,12 @@ import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
+import dev.sebastiano.ciacola.inspector.design.DesignSectionCard
+import dev.sebastiano.ciacola.inspector.design.DesignTooltipIconButton
+import dev.sebastiano.ciacola.inspector.design.ModifiedDotBadge
+import dev.sebastiano.ciacola.inspector.design.designActivatableFocus
+import dev.sebastiano.ciacola.inspector.design.toArgbLong
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
-import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlin.math.roundToInt
@@ -59,8 +59,6 @@ import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.GroupHeader
-import org.jetbrains.jewel.ui.component.Icon
-import org.jetbrains.jewel.ui.component.IconButton
 import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
@@ -95,6 +93,7 @@ fun ElementEditorPanel(
     val overridesFile = store.data()
     val slideNodes = controller.slidesNodesForCurrentSlide()
     val selectedId = controller.selectedElementId
+    val isOnCurrentBeat = controller.isSelectedElementOnCurrentBeat()
     val selectedSnapshot = selectedId?.let { id ->
         slideNodes.firstOrNull { it.elementId == id } ?: controller.inspectionRegistry.nodes[id]
     }
@@ -111,8 +110,8 @@ fun ElementEditorPanel(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
-                .padding(start = 10.dp, top = 10.dp, bottom = 12.dp, end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(start = 10.dp, top = 8.dp, bottom = 10.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             ElementEditorToolbar(
                 canUndo = store.canUndo,
@@ -140,6 +139,28 @@ fun ElementEditorPanel(
             }
 
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+
+            if (!isOnCurrentBeat) {
+                DesignSectionCard(modifier = Modifier.testTag("ciacola-element-missing-on-beat")) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        InfoText("$selectedId is not on this beat.")
+                        Tooltip(tooltip = { Text("Clear element selection (Esc)") }) {
+                            OutlinedButton(
+                                onClick = { controller.selectElement(null) },
+                                modifier = Modifier
+                                    .designActivatableFocus(focusRingColor)
+                                    .testTag("ciacola-element-clear-selection"),
+                            ) {
+                                Text("Clear Selection", style = JewelTheme.typography.small)
+                            }
+                        }
+                    }
+                }
+                return@Column
+            }
 
             SelectedElementHeader(
                 elementId = selectedId,
@@ -224,44 +245,34 @@ private fun ElementEditorToolbar(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            var undoFocused by remember { mutableStateOf(false) }
-            Tooltip(tooltip = { Text("Undo element edit (⌘Z)") }) {
-                IconButton(
-                    onClick = onUndo,
-                    enabled = canUndo,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .accessibleFocusRing(undoFocused, focusRingColor)
-                        .onFocusChanged { undoFocused = it.isFocused }
-                        .testTag("ciacola-element-undo"),
-                ) {
-                    Icon(AllIconsKeys.Actions.Undo, contentDescription = "Undo element edit", modifier = Modifier.size(14.dp))
-                }
-            }
-            var redoFocused by remember { mutableStateOf(false) }
-            Tooltip(tooltip = { Text("Redo element edit (⇧⌘Z)") }) {
-                IconButton(
-                    onClick = onRedo,
-                    enabled = canRedo,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .accessibleFocusRing(redoFocused, focusRingColor)
-                        .onFocusChanged { redoFocused = it.isFocused }
-                        .testTag("ciacola-element-redo"),
-                ) {
-                    Icon(AllIconsKeys.Actions.Redo, contentDescription = "Redo element edit", modifier = Modifier.size(14.dp))
-                }
-            }
+            DesignTooltipIconButton(
+                icon = AllIconsKeys.Actions.Undo,
+                contentDescription = "Undo element edit",
+                tooltip = "Undo element edit (⌘Z)",
+                testTag = "ciacola-element-undo",
+                enabled = canUndo,
+                size = 26.dp,
+                iconSize = 14.dp,
+                onClick = onUndo,
+            )
+            DesignTooltipIconButton(
+                icon = AllIconsKeys.Actions.Redo,
+                contentDescription = "Redo element edit",
+                tooltip = "Redo element edit (⇧⌘Z)",
+                testTag = "ciacola-element-redo",
+                enabled = canRedo,
+                size = 26.dp,
+                iconSize = 14.dp,
+                onClick = onRedo,
+            )
         }
 
-        var resetAllFocused by remember { mutableStateOf(false) }
         Tooltip(tooltip = { Text("Reset all element overrides across the deck") }) {
             OutlinedButton(
                 onClick = onResetAll,
                 enabled = hasAnyOverrides,
                 modifier = Modifier
-                    .accessibleFocusRing(resetAllFocused, focusRingColor)
-                    .onFocusChanged { resetAllFocused = it.isFocused }
+                    .designActivatableFocus(focusRingColor)
                     .testTag("ciacola-element-reset-all"),
             ) {
                 Text("Reset All", style = JewelTheme.typography.small)
@@ -292,7 +303,6 @@ private fun SlideElementPicker(
         nodes.forEach { node ->
             val isSelected = node.elementId == selectedElementId
             val isEdited = node.elementId in overriddenIds
-            var focused by remember(node.elementId) { mutableStateOf(false) }
             val rowBg = if (isSelected) {
                 focusRingColor.copy(alpha = 0.16f)
             } else {
@@ -303,12 +313,10 @@ private fun SlideElementPicker(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .designActivatableFocus(focusRingColor, cornerRadius = 5.dp)
                         .clip(RoundedCornerShape(5.dp))
                         .background(rowBg, RoundedCornerShape(5.dp))
                         .border(1.dp, rowBorder, RoundedCornerShape(5.dp))
-                        .accessibleFocusRing(focused, focusRingColor, cornerRadius = 5.dp)
-                        .onFocusChanged { focused = it.isFocused }
-                        .focusable()
                         .pointerHoverIcon(PointerIcon.Hand)
                         .clickable { onSelect(node.elementId) }
                         .padding(horizontal = 8.dp, vertical = 5.dp)
@@ -321,8 +329,11 @@ private fun SlideElementPicker(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    if (isEdited) {
+                        ModifiedDotBadge(tooltip = "${node.elementId} has overrides")
+                    }
                     Text(
-                        text = if (isEdited) "● ${node.label.ifBlank { node.elementId }}" else node.label.ifBlank { node.elementId },
+                        text = node.label.ifBlank { node.elementId },
                         style = JewelTheme.typography.small.copy(
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         ),
@@ -394,15 +405,18 @@ private fun SelectedElementHeader(
             }
             if (hasPatch) {
                 Tooltip(tooltip = { Text("Element has active overrides in .storyboard/element-overrides.json") }) {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .padding(start = 6.dp)
                             .background(editedAccent.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
                             .border(1.dp, editedAccent.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                             .testTag("ciacola-element-edited-badge"),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("● Edited", style = JewelTheme.typography.small, color = globalColors.text.normal)
+                        ModifiedDotBadge(tooltip = "Modified element")
+                        Text("Edited", style = JewelTheme.typography.small, color = globalColors.text.normal)
                     }
                 }
             }
@@ -417,7 +431,9 @@ private fun SelectedElementHeader(
                 Tooltip(tooltip = { Text("Edit text directly on the stage (or double-click element)") }) {
                     DefaultButton(
                         onClick = onEditInline,
-                        modifier = Modifier.testTag("ciacola-element-edit-inline"),
+                        modifier = Modifier
+                            .designActivatableFocus(focusRingColor)
+                            .testTag("ciacola-element-edit-inline"),
                     ) {
                         Text("Edit Text", style = JewelTheme.typography.small)
                     }
@@ -429,7 +445,9 @@ private fun SelectedElementHeader(
                         onCopyKotlin()
                         copiedBanner = true
                     },
-                    modifier = Modifier.testTag("ciacola-element-copy-kotlin"),
+                    modifier = Modifier
+                        .designActivatableFocus(focusRingColor)
+                        .testTag("ciacola-element-copy-kotlin"),
                 ) {
                     Text(if (copiedBanner) "Copied!" else "Copy Kotlin", style = JewelTheme.typography.small)
                 }
@@ -438,7 +456,9 @@ private fun SelectedElementHeader(
                 OutlinedButton(
                     onClick = onResetElement,
                     enabled = hasPatch,
-                    modifier = Modifier.testTag("ciacola-element-reset"),
+                    modifier = Modifier
+                        .designActivatableFocus(focusRingColor)
+                        .testTag("ciacola-element-reset"),
                 ) {
                     Text("Reset", style = JewelTheme.typography.small)
                 }
@@ -457,6 +477,7 @@ private fun TextCopySection(
     focusRingColor: Color,
 ) {
     val textFieldState = rememberTextFieldState(initialText = currentText)
+    var textHasFocus by remember(elementId) { mutableStateOf(false) }
     var lastExternalElementId by remember { mutableStateOf(elementId) }
     var lastExternalText by remember { mutableStateOf(currentText) }
 
@@ -470,9 +491,10 @@ private fun TextCopySection(
         }
     }
 
-    LaunchedEffect(textFieldState.text.toString()) {
+    val liveTyped = textFieldState.text.toString()
+    LaunchedEffect(liveTyped) {
         val typed = textFieldState.text.toString()
-        if (elementId == lastExternalElementId && typed != lastExternalText) {
+        if (textHasFocus && elementId == lastExternalElementId && typed != lastExternalText) {
             lastExternalText = typed
             store.updateElement(
                 elementId = elementId,
@@ -487,21 +509,26 @@ private fun TextCopySection(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GroupHeader(if (isOverridden) "● Text Copy:" else "Text Copy:")
-        var resetFocused by remember { mutableStateOf(false) }
-        Tooltip(tooltip = { Text("Reset text copy to slide default") }) {
-            IconButton(
-                onClick = { store.updateElement(elementId) { it.copy(text = null) } },
-                enabled = isOverridden,
-                modifier = Modifier
-                    .size(22.dp)
-                    .accessibleFocusRing(resetFocused, focusRingColor)
-                    .onFocusChanged { resetFocused = it.isFocused }
-                    .testTag("ciacola-element-text-reset"),
-            ) {
-                Icon(AllIconsKeys.Actions.Rollback, contentDescription = "Reset text copy", modifier = Modifier.size(13.dp))
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isOverridden) {
+                ModifiedDotBadge(tooltip = "Text Copy is overridden")
             }
+            GroupHeader("Text Copy:", modifier = Modifier.weight(1f))
         }
+        DesignTooltipIconButton(
+            icon = AllIconsKeys.Actions.Rollback,
+            contentDescription = "Reset text copy",
+            tooltip = "Reset text copy to slide default",
+            testTag = "ciacola-element-text-reset",
+            enabled = isOverridden,
+            size = 22.dp,
+            iconSize = 13.dp,
+            onClick = { store.updateElement(elementId) { it.copy(text = null) } },
+        )
     }
 
     TextArea(
@@ -509,8 +536,11 @@ private fun TextCopySection(
         lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 2, maxHeightInLines = 5),
         modifier = Modifier
             .fillMaxWidth()
-            .height(84.dp)
+            .height(68.dp)
             .trackAuthoringTextInputFocus()
+            .designActivatableFocus(focusRingColor) { focused ->
+                textHasFocus = focused
+            }
             .testTag("ciacola-element-text-input"),
     )
 }
@@ -554,40 +584,67 @@ private fun TypographySection(
         onReset = { store.updateElement(elementId) { it.copy(fontSizeSp = null) } },
     )
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = if (patch.fontWeight != null) "● Weight" else "Weight",
-            style = JewelTheme.typography.small,
-            color = JewelTheme.globalColors.text.info,
-            modifier = Modifier.width(64.dp),
-        )
-        listOf(400 to "400", 500 to "500", 600 to "600", 700 to "700").forEach { (weight, label) ->
-            val selected = currentWeight == weight
-            var pillFocused by remember(weight) { mutableStateOf(false) }
-            val pillMod = Modifier
-                .weight(1f)
-                .accessibleFocusRing(pillFocused, focusRingColor)
-                .onFocusChanged { pillFocused = it.isFocused }
-                .semantics {
-                    role = Role.RadioButton
-                    this.selected = selected
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (patch.fontWeight != null) {
+                    ModifiedDotBadge(tooltip = "Weight is overridden")
                 }
-                .testTag("ciacola-element-weight-$weight")
-            val onClick = {
-                store.updateElement(elementId) { it.copy(fontWeight = weight) }
+                Text(
+                    text = "Weight",
+                    style = JewelTheme.typography.small,
+                    color = if (patch.fontWeight != null) {
+                        JewelTheme.globalColors.text.normal
+                    } else {
+                        JewelTheme.globalColors.text.info
+                    },
+                )
             }
-            Tooltip(tooltip = { Text("Font weight $weight") }) {
-                if (selected) {
-                    DefaultButton(onClick = onClick, modifier = pillMod) {
-                        Text(label, style = JewelTheme.typography.small, maxLines = 1)
+            DesignTooltipIconButton(
+                icon = AllIconsKeys.Actions.Rollback,
+                contentDescription = "Reset Weight",
+                tooltip = "Reset Weight to default",
+                testTag = "ciacola-element-weight-reset",
+                enabled = patch.fontWeight != null,
+                size = 22.dp,
+                iconSize = 12.dp,
+                onClick = { store.updateElement(elementId) { it.copy(fontWeight = null) } },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            listOf(400 to "400", 500 to "500", 600 to "600", 700 to "700").forEach { (weight, label) ->
+                val selected = currentWeight == weight
+                val pillMod = Modifier
+                    .weight(1f)
+                    .designActivatableFocus(focusRingColor)
+                    .semantics {
+                        role = Role.RadioButton
+                        this.selected = selected
                     }
-                } else {
-                    OutlinedButton(onClick = onClick, modifier = pillMod) {
-                        Text(label, style = JewelTheme.typography.small, maxLines = 1)
+                    .testTag("ciacola-element-weight-$weight")
+                val onClick = {
+                    store.updateElement(elementId) { it.copy(fontWeight = weight) }
+                }
+                Tooltip(tooltip = { Text("Font weight $weight") }) {
+                    if (selected) {
+                        DefaultButton(onClick = onClick, modifier = pillMod) {
+                            Text(label, style = JewelTheme.typography.small, maxLines = 1)
+                        }
+                    } else {
+                        OutlinedButton(onClick = onClick, modifier = pillMod) {
+                            Text(label, style = JewelTheme.typography.small, maxLines = 1)
+                        }
                     }
                 }
             }
@@ -602,9 +659,9 @@ private fun TypographySection(
         contrastAgainst = effectiveBg,
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
-        onColorChanged = { c ->
-            store.updateElement(elementId, coalesce = true, coalesceKey = "textcolor:$elementId") {
-                it.copy(textColorArgb = colorToArgbLong(c))
+        onColorChanged = { c, coalesce ->
+            store.updateElement(elementId, coalesce = coalesce, coalesceKey = "textcolor:$elementId") {
+                it.copy(textColorArgb = c.toArgbLong())
             }
         },
         onReset = { store.updateElement(elementId) { it.copy(textColorArgb = null) } },

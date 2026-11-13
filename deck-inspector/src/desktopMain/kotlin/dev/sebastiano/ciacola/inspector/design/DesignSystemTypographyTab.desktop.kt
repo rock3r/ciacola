@@ -262,7 +262,7 @@ private fun TypographyRoleCard(
                     modifier = Modifier.testTag("design-typo-${spec.id}-preview"),
                 )
                 DesignTooltipIconButton(
-                    icon = AllIconsKeys.Actions.Refresh,
+                    icon = AllIconsKeys.Actions.Rollback,
                     contentDescription = "Reset ${spec.label}",
                     tooltip = "Reset ${spec.label} typography to preset default",
                     testTag = "design-typo-${spec.id}-reset",
@@ -330,11 +330,35 @@ private fun TypographyRoleCard(
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "Font Weight",
-                    style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (current.fontWeight != null) {
+                            ModifiedDotBadge(tooltip = "Font Weight is overridden from preset default")
+                        }
+                        Text(
+                            text = "Font Weight",
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.info,
+                        )
+                    }
+                    DesignTooltipIconButton(
+                        icon = AllIconsKeys.Actions.Rollback,
+                        contentDescription = "Reset Font Weight",
+                        tooltip = "Reset Font Weight to preset default",
+                        testTag = "design-typo-${spec.id}-weight-reset",
+                        enabled = current.fontWeight != null,
+                        size = 22.dp,
+                        iconSize = 12.dp,
+                        onClick = { onUpdate(current.copy(fontWeight = null)) },
+                    )
+                }
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),

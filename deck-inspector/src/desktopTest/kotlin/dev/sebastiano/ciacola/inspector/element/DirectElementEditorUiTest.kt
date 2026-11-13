@@ -16,6 +16,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -23,6 +26,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -44,6 +48,7 @@ import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -329,5 +334,95 @@ class DirectElementEditorUiTest {
         onNodeWithTag("ciacola-element-reset").performClick()
         waitForIdle()
         assertNull(store.patchFor("s1:headline"))
+    }
+
+    @Test
+    fun transparentFillPromotesToOpaqueOnPickRangeEndsDisableWeightResetsAndOffBeatHidesEditors() = runComposeUiTest {
+        val dir = Files.createTempDirectory("ciacola-el-pass-b")
+        val store = ElementOverridesStore(dir)
+        var activeScene by mutableStateOf(0)
+        val controller = ElementEditorController(store).apply {
+            editorActive = true
+            currentSceneIndexProvider = { activeScene }
+        }
+
+        setContent {
+            DeckThemeProvider(DeckThemes.keynoteLight()) {
+                CompositionLocalProvider(
+                    LocalElementOverrides provides store.data().also { store.revision },
+                    LocalStageInspectionRegistry provides controller.inspectionRegistry,
+                ) {
+                    Box(Modifier.size(1200.dp, 760.dp)) {
+                        Box(Modifier.size(800.dp, 600.dp)) {
+                            DeckEditableText(
+                                elementId = "s1:headline",
+                                text = "Headline",
+                            )
+                        }
+                        Box(Modifier.width(320.dp)) {
+                            CiacolaJewelTheme(isDark = false) {
+                                ElementEditorPanel(controller = controller)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-element-picker-s1:headline").performClick()
+        waitForIdle()
+
+        // 1. Default transparent fill promotes to alpha = 1f when picking on SV canvas or Hue bar.
+        onNodeWithTag("ciacola-element-fill-swatch", useUnmergedTree = true).performScrollTo().performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-element-fill-sv-canvas", useUnmergedTree = true).performScrollTo().performMouseInput {
+            click(Offset(width * 0.7f, height * 0.3f))
+        }
+        waitForIdle()
+        val pickedSvFill = Color(checkNotNull(store.patchFor("s1:headline")?.fillColorArgb))
+        assertEquals(1f, pickedSvFill.alpha, 0.01f, "Picking on SV canvas from transparent fill must yield alpha = 1f")
+
+        // Clear back to transparent via compact icon button, then pick on Hue bar -> alpha = 1f again.
+        onNodeWithTag("ciacola-element-fill-clear", useUnmergedTree = true).performScrollTo().performClick()
+        waitForIdle()
+        assertEquals(0L, store.patchFor("s1:headline")?.fillColorArgb)
+        onNodeWithTag("ciacola-element-fill-hue-bar", useUnmergedTree = true).performScrollTo().performMouseInput {
+            click(Offset(width * 0.5f, height * 0.5f))
+        }
+        waitForIdle()
+        val pickedHueFill = Color(checkNotNull(store.patchFor("s1:headline")?.fillColorArgb))
+        assertEquals(1f, pickedHueFill.alpha, 0.01f, "Picking on Hue bar after Clear must yield alpha = 1f")
+
+        // 2. Per-row Weight reset works cleanly.
+        onNodeWithTag("ciacola-element-weight-reset", useUnmergedTree = true).performScrollTo().assertIsNotEnabled()
+        onNodeWithTag("ciacola-element-weight-700", useUnmergedTree = true).performScrollTo().performClick()
+        waitForIdle()
+        assertEquals(700, store.patchFor("s1:headline")?.fontWeight)
+        onNodeWithTag("ciacola-element-weight-reset", useUnmergedTree = true).assertIsEnabled().performClick()
+        waitForIdle()
+        assertNull(store.patchFor("s1:headline")?.fontWeight)
+
+        // 3. Steppers disable at range ends and Offset X/Y share ±480dp range with nudgeSelected.
+        onNodeWithTag("ciacola-element-borderwidth-dec", useUnmergedTree = true).performScrollTo().assertIsNotEnabled()
+        runOnIdle { assertTrue(controller.nudgeSelected(300f, 0f)) }
+        waitForIdle()
+        onNodeWithTag("ciacola-element-offsetx-value", useUnmergedTree = true).performScrollTo().assertTextEquals("300 dp")
+        runOnIdle { assertTrue(controller.nudgeSelected(250f, 0f)) }
+        waitForIdle()
+        onNodeWithTag("ciacola-element-offsetx-value", useUnmergedTree = true).assertTextEquals("480 dp")
+        onNodeWithTag("ciacola-element-offsetx-inc", useUnmergedTree = true).assertIsNotEnabled()
+
+        // 4. Leaving the slide hides stale property editors, blocks off-beat nudge, and offers Clear Selection.
+        runOnIdle { activeScene = 1 }
+        waitForIdle()
+        onNodeWithTag("ciacola-element-missing-on-beat", useUnmergedTree = true).assertExists()
+        onNodeWithTag("ciacola-element-fill-swatch", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("ciacola-element-fontsize-inc", useUnmergedTree = true).assertDoesNotExist()
+        runOnIdle { assertFalse(controller.nudgeSelected(-20f, 0f)) }
+        assertEquals(480f, store.patchFor("s1:headline")?.offsetXDp)
+
+        onNodeWithTag("ciacola-element-clear-selection", useUnmergedTree = true).performClick()
+        waitForIdle()
+        assertNull(controller.selectedElementId)
     }
 }

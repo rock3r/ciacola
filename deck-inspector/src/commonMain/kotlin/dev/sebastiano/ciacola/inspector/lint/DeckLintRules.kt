@@ -285,20 +285,13 @@ object DeckLintRules {
             (node.isBold && node.fontSizeSp >= WCAG_LARGE_BOLD_TEXT_SP)
         val requiredRatio = if (isLargeText) WCAG_LARGE_TEXT_RATIO else WCAG_NORMAL_TEXT_RATIO
 
-        // Skip nodes intentionally dimmed by spotlight (< 0.45 alpha) unless their opaque color itself fails.
-        val opaqueFg = (node.opaqueForeground ?: fg).copy(alpha = 1f)
-        val compositeAlpha = (node.effectiveAlpha * fg.alpha).coerceIn(0f, 1f)
-        if (node.effectiveAlpha < SPOTLIGHT_SKIP_ALPHA) {
-            val opaqueRatio = contrastRatio(opaqueFg, bgOpaque)
-            if (opaqueRatio >= requiredRatio) {
-                return null
-            }
-        }
-
-        val blendedFg = if (compositeAlpha < 0.99f && node.effectiveAlpha >= SPOTLIGHT_SKIP_ALPHA) {
-            compositeOver(fg.copy(alpha = compositeAlpha), bgOpaque)
+        // Stage effectiveAlpha (< 0.99f) reflects build entrance or intentional keynoteSpotlight dimming;
+        // judge the un-dimmed foreground color while still blending the text color's own alpha over bgOpaque.
+        val unDimmedFg = if (node.effectiveAlpha < 0.99f) (node.opaqueForeground ?: fg) else fg
+        val blendedFg = if (unDimmedFg.alpha < 0.999f) {
+            compositeOver(unDimmedFg, bgOpaque)
         } else {
-            opaqueFg
+            unDimmedFg.copy(alpha = 1f)
         }
 
         val ratio = contrastRatio(blendedFg, bgOpaque)
@@ -309,7 +302,7 @@ object DeckLintRules {
             if (node.elementId != null && node.isEditable) {
                 val targetRatio = requiredRatio + 0.15f
                 val compliantColor = computeCompliantForeground(
-                    foreground = opaqueFg,
+                    foreground = blendedFg,
                     background = bgOpaque,
                     targetRatio = targetRatio,
                 )

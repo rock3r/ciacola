@@ -234,6 +234,13 @@ fun hslToColor(
 }
 
 /**
+ * Promotes nearly-transparent (`< 0.05f`) alpha to opaque (`1f`) when picking a hue/SV color so
+ * picking onto a cleared or default-transparent fill immediately produces a visible color.
+ */
+fun resolvePickedAlpha(currentAlpha: Float): Float =
+    if (currentAlpha < 0.05f) 1f else currentAlpha.coerceIn(0f, 1f)
+
+/**
  * Alpha-composites [foreground] over opaque [background] for accurate WCAG contrast evaluation.
  */
 fun compositeOver(foreground: Color, background: Color): Color {
