@@ -117,10 +117,11 @@ class SlideReviewWindow(
         }
         val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
 
+        // No accelerator: F3 is handled on onPreviewKeyEvent in the Story and Review windows, and a
+        // Swing menu accelerator would fire in addition to it and double-toggle inspectModeEnabled.
         CheckboxItem(
-            text = "Inspect Mode (Click without Ctrl)",
+            text = "Inspect Mode (Click without Ctrl) (F3)",
             checked = stageCoordinator.inspectModeEnabled,
-            shortcut = KeyShortcut(Key.F3),
         ) {
             stageCoordinator.inspectModeEnabled = it
         }
@@ -525,7 +526,16 @@ private fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(globalColors.panelBackground),
+            .background(globalColors.panelBackground)
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && ev.key == Key.F3) {
+                    windowController.stageCoordinator.inspectModeEnabled =
+                        !windowController.stageCoordinator.inspectModeEnabled
+                    true
+                } else {
+                    false
+                }
+            },
     ) {
         // Compact, always-visible header bar pinned at the top of the F4 Slide Review window.
         Column(

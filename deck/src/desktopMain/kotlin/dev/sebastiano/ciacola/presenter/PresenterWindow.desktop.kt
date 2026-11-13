@@ -4,7 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,6 +20,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -30,9 +34,9 @@ import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.EaselWindow
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
-import java.awt.Dimension
 import java.awt.Window as AwtWindow
 import kotlinx.coroutines.delay
 
@@ -49,6 +53,7 @@ class PresenterWindow(
     override val name: String = "Presenter"
     override var visible: Boolean by mutableStateOf(false)
     override val initialSize: DpSize get() = DpSize(1120.dp, 680.dp)
+    override val minimumSize: DpSize get() = DpSize(760.dp, 500.dp)
 
     override val decorator: ContentDecorator = ContentDecorator { content ->
         PresenterStageDecorator(
@@ -86,6 +91,7 @@ class PresenterWindow(
         Item(
             text = "Jump to Slide…",
             shortcut = KeyShortcut(Key.G, meta = true),
+            enabled = !controller.isOverviewOpen && !controller.isExternalTextInputActive,
             onClick = {
                 val presenterFocused = runCatching {
                     AwtWindow.getWindows()
@@ -139,16 +145,6 @@ class PresenterWindow(
     @Composable
     override fun Content() {
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
-        LaunchedEffect(visible) {
-            if (visible) {
-                val presenterWin = runCatching {
-                    AwtWindow.getWindows()
-                        .filterIsInstance<ComposeWindow>()
-                        .firstOrNull { it.isShowing && it.title.endsWith(" - Presenter") }
-                }.getOrNull()
-                presenterWin?.minimumSize = Dimension(760, 500)
-            }
-        }
         CiacolaJewelTheme(isDark = isDark) {
             PresenterDashboard(controller = controller)
         }
@@ -210,9 +206,16 @@ private fun PresenterStageDecorator(
 ) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val overviewOpen = LocalOverviewOpen.current
+    SideEffect {
+        controller.overviewOpenFromStage = overviewOpen
+    }
+    DisposableEffect(controller) {
+        onDispose { controller.overviewOpenFromStage = false }
+    }
     var lastObservedIndex by remember { mutableStateOf(controller.animatic.targetIndex) }
 
-    // Advancing/jumping clears any active blackout/whiteout curtain cleanly.
+    // Advancing/jumping or leaving Show Mode clears any active blackout/whiteout curtain cleanly.
     val currentTarget = controller.animatic.targetIndex
     LaunchedEffect(currentTarget) {
         if (currentTarget != lastObservedIndex) {
@@ -220,6 +223,12 @@ private fun PresenterStageDecorator(
             if (controller.curtain != StageCurtain.None) {
                 controller.clearCurtain()
             }
+        }
+    }
+    val showModeActive = controller.isShowModeActive()
+    LaunchedEffect(showModeActive) {
+        if (!showModeActive && controller.curtain != StageCurtain.None) {
+            controller.clearCurtain()
         }
     }
 
@@ -256,18 +265,34 @@ private fun PresenterStageDecorator(
         content()
 
         val activeCurtain = controller.curtain
-        if (activeCurtain != StageCurtain.None && controller.isShowModeActive()) {
+        if (activeCurtain != StageCurtain.None && showModeActive) {
             val curtainColor = when (activeCurtain) {
                 StageCurtain.Blackout -> Color.Black
                 StageCurtain.Whiteout -> Color.White
                 StageCurtain.None -> Color.Transparent
             }
+            val curtainDesc = when (activeCurtain) {
+                StageCurtain.Blackout -> "Stage blackout screen active. Press Escape, B, or click to resume."
+                StageCurtain.Whiteout -> "Stage whiteout screen active. Press Escape, W, or click to resume."
+                StageCurtain.None -> ""
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(curtainColor)
+                    .pointerInput(activeCurtain) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                event.changes.forEach { it.consume() }
+                                if (event.type == PointerEventType.Press) {
+                                    controller.clearCurtain()
+                                }
+                            }
+                        }
+                    }
                     .testTag("ciacola-stage-curtain")
-                    .semantics { contentDescription = "curtain=${activeCurtain.name}" },
+                    .semantics { contentDescription = curtainDesc },
             )
         }
 

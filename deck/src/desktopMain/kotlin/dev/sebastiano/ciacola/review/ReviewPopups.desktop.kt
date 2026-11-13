@@ -60,6 +60,7 @@ import java.time.Instant
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
+import org.jetbrains.jewel.ui.Outline
 import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Icon
@@ -439,6 +440,7 @@ internal fun AnchoredCommentComposerPopup(
 
                 TextArea(
                     state = noteState,
+                    outline = if (validationError != null && noteState.text.isBlank()) Outline.Error else Outline.None,
                     placeholder = {
                         Text(
                             text = "Describe what to change (⌘↵ sends & hot-reloads)…",
@@ -478,6 +480,7 @@ internal fun AnchoredCommentComposerPopup(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextField(
                             state = convIdState,
+                            outline = if (validationError != null && noteState.text.isNotBlank()) Outline.Error else Outline.None,
                             placeholder = { Text("Target Agent Conversation ID") },
                             modifier = Modifier
                                 .fillMaxWidth()

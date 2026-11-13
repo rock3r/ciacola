@@ -254,6 +254,7 @@ internal fun extractPdfTextRuns(
             if (textLayouts.isEmpty()) continue
 
             val origin = node.positionInRoot
+            val clipBounds = node.boundsInRoot
             for (layout in textLayouts) {
                 val rawSource = layout.layoutInput.text.text
                 if (rawSource.isEmpty()) continue
@@ -272,6 +273,11 @@ internal fun extractPdfTextRuns(
                     val bottom = origin.y + layout.getLineBottom(lineIdx)
                     val baseline = origin.y + layout.getLineBaseline(lineIdx)
                     if (right <= 0f || left >= pageWidth || bottom <= 0f || top >= pageHeight) continue
+                    if (right <= clipBounds.left || left >= clipBounds.right ||
+                        bottom <= clipBounds.top || top >= clipBounds.bottom
+                    ) {
+                        continue
+                    }
 
                     val lineFontSize = if (fontSizePx > 0f) fontSizePx else ((bottom - top) * 0.78f).coerceAtLeast(1f)
                     rawRuns += PdfTextRun(
@@ -435,16 +441,24 @@ private fun sanitizeForFont(text: String, font: PDFont): String {
 
 private fun loadUnicodeFont(doc: PDDocument): PDFont {
     val classpathCandidates = listOf(
+        "composeResources/ciacola.deck.generated.resources/font/Inter-Regular.ttf",
+        "composeResources/ciacola.deck.generated.resources/font/JetBrainsMono-Regular.ttf",
+        "font/Inter-Regular.ttf",
+        "font/JetBrainsMono-Regular.ttf",
         "fonts/Inter-Regular.ttf",
         "fonts/JetBrainsMono-Regular.ttf",
     )
-    val classLoader = StoryboardPdfExporter::class.java.classLoader
+    var basicFallback: PDFont? = null
+    val classLoader = Thread.currentThread().contextClassLoader ?: StoryboardPdfExporter::class.java.classLoader
     for (resource in classpathCandidates) {
         val stream = classLoader?.getResourceAsStream(resource) ?: continue
         val loaded = stream.use { input ->
             runCatching { PDType0Font.load(doc, input) }.getOrNull()
+        } ?: continue
+        if (supportsUnicodeSample(loaded)) return loaded
+        if (basicFallback == null && supportsBasicAscii(loaded)) {
+            basicFallback = loaded
         }
-        if (loaded != null && supportsBasicAscii(loaded)) return loaded
     }
 
     val javaHome = System.getProperty("java.home")
@@ -472,7 +486,6 @@ private fun loadUnicodeFont(doc: PDDocument): PDFont {
         add(Path.of(winDir, "Fonts", "arial.ttf"))
     }
 
-    var basicFallback: PDFont? = null
     for (fontPath in fileCandidates) {
         if (!Files.isRegularFile(fontPath) || !fontPath.exists()) continue
         val loaded = runCatching {

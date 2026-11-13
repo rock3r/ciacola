@@ -342,6 +342,14 @@ class PresenterController(
     val jumpDialogOpen: Boolean
         get() = jumpDialogHost != null
 
+    internal var overviewOpenFromStage: Boolean by mutableStateOf(false)
+
+    val isOverviewOpen: Boolean
+        get() = overviewOpenFromStage || isOverviewOpenProvider()
+
+    val isExternalTextInputActive: Boolean
+        get() = isExternalTextInputActiveProvider()
+
     internal var swallowNextEscapeKeyUp: Boolean by mutableStateOf(false)
 
     var unbakedNoticeDismissed: Boolean by mutableStateOf(false)
@@ -424,8 +432,8 @@ class PresenterController(
     fun isShowModeActive(): Boolean =
         !isStudioOpenProvider() &&
             !isInspectOpenProvider() &&
-            !isOverviewOpenProvider() &&
-            !isExternalTextInputActiveProvider() &&
+            !isOverviewOpen &&
+            !isExternalTextInputActive &&
             !jumpDialogOpen
 
     fun connectedDisplays(): List<DisplayScreenInfo> = displayRouter.screens()
@@ -529,7 +537,7 @@ class PresenterController(
 
         val primaryMod = event.isMetaPressed || event.isCtrlPressed
         if (primaryMod && !event.isAltPressed && !event.isShiftPressed && event.key == Key.G) {
-            if (!isExternalTextInputActiveProvider() && !isOverviewOpenProvider()) {
+            if (!isExternalTextInputActive && !isOverviewOpen) {
                 openJumpDialog(JumpDialogHost.Story)
                 return true
             }
@@ -573,11 +581,11 @@ class PresenterController(
     }
 
     /**
-     * Preview key handler installed on the Presenter window root: supports timer (`T`/`R`),
-     * speaker-notes zoom (`Cmd+-`/`Cmd+=`), slide jump (`Cmd+G`), stage curtains (`B`/`W`),
-     * and stage navigation keys.
+     * Capture-phase key handler on the Presenter window root: handles `Escape` dismissal and
+     * modifier chords (`Cmd+G`, `Cmd+-`, `Cmd+=`) without intercepting `Space` or `Enter` before
+     * focused child buttons receive them.
      */
-    fun handlePresenterKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean {
+    fun handlePresenterPreviewKeyEvent(event: KeyEvent): Boolean {
         if (event.key == Key.Escape) {
             if (jumpDialogOpen) {
                 if (event.type == KeyEventType.KeyDown) {
@@ -615,8 +623,16 @@ class PresenterController(
                 }
             }
         }
+        return false
+    }
 
-        if (jumpDialogOpen) return false
+    /**
+     * Bubble-phase key handler on the Presenter window root: runs after focused child buttons had
+     * first crack at `Space` / `Enter`, handling timer (`T`/`R`), curtains (`B`/`W`), and smooth
+     * deck navigation.
+     */
+    fun handlePresenterBubbleKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean {
+        if (event.type != KeyEventType.KeyDown || jumpDialogOpen) return false
 
         val noModifiers = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed
         if (!noModifiers) return false
@@ -673,6 +689,9 @@ class PresenterController(
             else -> false
         }
     }
+
+    fun handlePresenterKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean =
+        handlePresenterPreviewKeyEvent(event) || handlePresenterBubbleKeyEvent(event, scope)
 
     companion object {
         const val DEFAULT_NOTES_FONT_SP = 20f

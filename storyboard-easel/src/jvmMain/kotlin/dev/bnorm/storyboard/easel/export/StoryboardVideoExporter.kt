@@ -362,6 +362,7 @@ internal class FfmpegVideoFrameSink(
                 "-s", "${width}x${height}",
                 "-r", fps.toString(),
                 "-i", "-",
+                "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
                 "-c:v", "libx264",
                 "-preset", "fast",
                 "-crf", "18",

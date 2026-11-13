@@ -156,6 +156,7 @@ fun createFoundationDeck(
     includeKeynoteEffectsLab: Boolean = false,
     stageDecorator: ContentDecorator = ContentDecorator.None,
     timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
+    reducedMotion: Boolean = false,
 ): Storyboard {
     val notesBuilder = DeckSpeakerNotesBuilder()
     lateinit var speakerNotes: DeckSpeakerNotes
@@ -171,12 +172,12 @@ fun createFoundationDeck(
             speakerNotesProvider = { speakerNotes },
         ) + stageDecorator,
     ) {
-        beatsScene(theme, timelineOverrides, notesBuilder)
-        sharedMoveScene(theme, timelineOverrides, notesBuilder)
-        ambientLoopScene(theme, timelineOverrides, notesBuilder)
-        kotlinCodeScene(theme, theme.colors.code.toCodeStyle(), timelineOverrides, notesBuilder)
+        beatsScene(theme, timelineOverrides, notesBuilder, reducedMotion)
+        sharedMoveScene(theme, timelineOverrides, notesBuilder, reducedMotion)
+        ambientLoopScene(theme, timelineOverrides, notesBuilder, reducedMotion)
+        kotlinCodeScene(theme, theme.colors.code.toCodeStyle(), timelineOverrides, notesBuilder, reducedMotion)
         if (includeKeynoteEffectsLab) {
-            keynoteEffectsLabScene(theme, timelineOverrides, notesBuilder)
+            keynoteEffectsLabScene(theme, timelineOverrides, notesBuilder, reducedMotion)
         }
     }
     speakerNotes = notesBuilder.build()
@@ -220,6 +221,7 @@ private fun <T> StoryboardBuilder.choreographedScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
+    reducedMotion: Boolean = false,
     notes: (SceneSpeakerNotesBuilder.() -> Unit)? = null,
     content: @Composable context(androidx.compose.animation.AnimatedVisibilityScope, androidx.compose.animation.SharedTransitionScope) SceneScope<VirtualizedFrame<T>>.() -> Unit,
 ) {
@@ -229,7 +231,11 @@ private fun <T> StoryboardBuilder.choreographedScene(
         }
     }
     val vFrames = buildVirtualizedFrames(baseFrames, overrides.sceneBeats[sceneIndex])
-    val dissolveMs = theme.motion.dissolveDurationMs
+    val dissolveMs = if (reducedMotion) {
+        minOf(theme.motion.dissolveDurationMs, REDUCED_MOTION_FADE_DURATION_MS)
+    } else {
+        theme.motion.dissolveDurationMs
+    }
     scene(
         frames = vFrames,
         enterTransition = SceneEnterTransition { fadeIn(tween(dissolveMs)) },
@@ -278,6 +284,7 @@ private fun StoryboardBuilder.beatsScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
+    reducedMotion: Boolean = false,
 ) = choreographedScene(
     sceneIndex = 0,
     sceneTitle = "Beats",
@@ -289,6 +296,7 @@ private fun StoryboardBuilder.beatsScene(
     theme = theme,
     overrides = overrides,
     notesBuilder = notesBuilder,
+    reducedMotion = reducedMotion,
     notes = {
         overview("Open with the core promise: every beat is an explicit state, driven forward and backward by one transition model.")
         beat(0, "[Pause] Establish the baseline state. Point out that nothing runs imperatively on click — advancing targets the next state.")
@@ -356,6 +364,7 @@ private fun StoryboardBuilder.sharedMoveScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
+    reducedMotion: Boolean = false,
 ) = choreographedScene(
     sceneIndex = 1,
     sceneTitle = "Shared Move",
@@ -363,6 +372,7 @@ private fun StoryboardBuilder.sharedMoveScene(
     theme = theme,
     overrides = overrides,
     notesBuilder = notesBuilder,
+    reducedMotion = reducedMotion,
     notes = {
         overview("Demonstrates Storyboard sharedBounds across scenes and deterministic in-scene morphing.")
         beat(0, "Notice the accent badge from Slide 1 landed cleanly in the top-left slot as a 240dp card.")
@@ -501,6 +511,7 @@ private fun StoryboardBuilder.ambientLoopScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
+    reducedMotion: Boolean = false,
 ) = choreographedScene(
     sceneIndex = 2,
     sceneTitle = "Ambient Loop",
@@ -508,6 +519,7 @@ private fun StoryboardBuilder.ambientLoopScene(
     theme = theme,
     overrides = overrides,
     notesBuilder = notesBuilder,
+    reducedMotion = reducedMotion,
     notes = {
         overview("Single resting beat with a continuous vertex-mesh backdrop.")
         beat(0, "Emphasize separation of concerns: the ambient loop ticks independently without mutating slide navigation state, and adapts its palette to Stage Dark / Keynote Light.")
@@ -544,6 +556,7 @@ private fun StoryboardBuilder.kotlinCodeScene(
     codeStyle: CodeStyle,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
+    reducedMotion: Boolean = false,
 ) = choreographedScene(
     sceneIndex = 3,
     sceneTitle = "Highlighted Code",
@@ -555,6 +568,7 @@ private fun StoryboardBuilder.kotlinCodeScene(
     theme = deckTheme,
     overrides = overrides,
     notesBuilder = notesBuilder,
+    reducedMotion = reducedMotion,
     notes = {
         overview("Syntax-highlighted Kotlin carried as AnnotatedString spans through MagicText.")
         beat(0, "Start with the single-expression function; point out that token styles live on the AnnotatedString itself.")
@@ -609,6 +623,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     deckTheme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
+    reducedMotion: Boolean = false,
 ) = choreographedScene(
     sceneIndex = 4,
     sceneTitle = "Keynote Effects Lab",
@@ -616,6 +631,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     theme = deckTheme,
     overrides = overrides,
     notesBuilder = notesBuilder,
+    reducedMotion = reducedMotion,
     notes = {
         overview("Full choreography testbed: staggered rows, spring stamp, LineDraw callout, WarpCode morph, and Magnifier loupe.")
         beat(0, "Baseline heading only: sets up the naive claim ('Fix with SpanStyle(alpha)!') before revealing the breakdown.")

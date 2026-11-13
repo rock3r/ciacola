@@ -130,6 +130,7 @@ fun main() = application {
             )
             val storyboard = rememberHotReloadStoryboard(
                 preset,
+                effectiveReducedMotion,
                 reviewStageCoordinator,
                 structuralRev,
                 paramRev,
@@ -140,6 +141,7 @@ fun main() = application {
                     includeKeynoteEffectsLab = true,
                     stageDecorator = stageLoopAndArcDecorator + reviewStageCoordinator.stageDecorator,
                     timelineOverrides = currentOverrides,
+                    reducedMotion = effectiveReducedMotion,
                 ).also { built ->
                     presetRegistry.record(built, preset)
                 }

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
@@ -373,5 +374,46 @@ class PresenterWindowAndStageAidsTest {
         waitForIdle()
         onNodeWithTag("ciacola-presenter-jump-dialog").assertDoesNotExist()
         assertEquals(Storyboard.Index(3, 0), animatic.currentIndex)
+
+        // Clicking an active curtain resumes the stage without leaking clicks underneath.
+        onRoot().performKeyInput { pressKey(Key.B) }
+        waitForIdle()
+        assertEquals(StageCurtain.Blackout, presenterWindow.controller.curtain)
+        onNodeWithTag("ciacola-stage-curtain").performClick()
+        waitForIdle()
+        assertEquals(StageCurtain.None, presenterWindow.controller.curtain)
+    }
+
+    @Test
+    fun spaceOnFocusedPresenterControlActivatesControlWithoutAdvancingDeck() = runComposeUiTest {
+        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        lateinit var animatic: Animatic
+        lateinit var controller: PresenterController
+
+        setContent {
+            animatic = rememberAnimatic(storyboard = { deck })
+            controller = remember(animatic) {
+                PresenterController(initialAnimatic = animatic, wallClockProvider = { "14:30" })
+            }
+            Box(Modifier.size(900.dp, 600.dp)) {
+                CiacolaJewelTheme(isDark = true) {
+                    PresenterDashboard(controller = controller)
+                }
+            }
+        }
+
+        waitForIdle()
+        assertEquals(Storyboard.Index(0, 0), animatic.currentIndex)
+        assertEquals(TimerRunState.Stopped, controller.timer.runState)
+
+        // Focus the timer play/pause button and press Space: timer starts, slide stays at (0, 0).
+        onNodeWithTag("ciacola-presenter-timer-play-pause").requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-timer-play-pause").performKeyInput { pressKey(Key.Spacebar) }
+        waitForIdle()
+        mainClock.advanceTimeBy(500)
+        waitForIdle()
+        assertEquals(TimerRunState.Running, controller.timer.runState, "Space on focused timer button must start timer")
+        assertEquals(Storyboard.Index(0, 0), animatic.currentIndex, "Space on focused button must not advance deck")
     }
 }

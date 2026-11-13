@@ -21,10 +21,11 @@ The desktop app presents five scenes with fourteen base states (beats). Together
 - a Keynote effects lab (builds, staggers, line draws, code morphs, and a magnifier loupe); and
 - a single 1920×1080 design system for type, colour, and spacing.
 
-Around the stage it adds an Easel overview grid, a presenter Assistant window, a Ctrl-click slide
-review flow, a live theme switcher (`Stage Dark` / `Keynote Light`), PDF export, and an After
-Effects-style Timeline Studio for scrubbing and tuning animations. See
-[`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) for how each piece works.
+Around the stage it adds an Easel overview grid, a Jewel Presenter window with speaker notes and
+display routing, a Ctrl-click slide review flow, a live theme and reduced-motion switcher
+(`Stage Dark` / `Keynote Light`, `System` / `Reduced` / `Full` motion), selectable-text PDF and
+60 fps MP4 video export, and an After Effects-style Timeline Studio for scrubbing and tuning
+animations. See [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) for how each piece works.
 
 All visible copy is marked provisional on purpose.
 
@@ -46,16 +47,21 @@ remembered in `.storyboard/` at the repository root.
 |---|---|
 | `→` `↓` `PgDn` `Space` `Enter` | Next beat (presentation clickers send `PgDn`/`PgUp`) |
 | `←` `↑` `PgUp` `Backspace` | Previous beat |
-| `Esc` | Toggle the Overview grid (also **Easel ▸ Overview**); arrows move, `Enter` jumps |
+| `B` / `W` | Toggle blackout / whiteout curtain in Show Mode (`Esc`, `B`/`W`, click, or advancing clears it) |
+| `⌘G` | Jump to slide (`1..N`) |
+| `Esc` | Clear active popup/curtain, exit sub-comp / docked Timeline Studio, or toggle the Overview grid |
 | `⌥⌘P` | Toggle fullscreen (**Easel ▸ Fullscreen**) |
-| `F2` | Show the Assistant (presenter) window |
+| `F2` | Show the Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
 | `F3` or hold `Ctrl` | Inspect mode for slide review; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
 | `F4` | Show the Review window |
 | `F5` | Toggle the Timeline Studio docked in the Story window |
 | `F6` | Open the Timeline Studio in a detached window |
 
-The **Theme** menu switches between `Stage Dark` and `Keynote Light` live; **Export ▸ PDF** writes
-one page per beat.
+The **Theme** menu switches between `Stage Dark` and `Keynote Light` live, configures **Motion**
+(`System`, `Reduced Motion`, `Full Motion`, or `Pause Ambient Loops`, also via
+`CIACOLA_REDUCE_MOTION`), **Export ▸ PDF…** writes one high-resolution page per beat with an
+invisible selectable Unicode text layer, and **Export ▸ Video (MP4)…** renders deterministic 60 fps
+offscreen video via `ffmpeg` (cancellable at any time with `Esc`).
 
 ### Hot reload
 

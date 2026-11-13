@@ -32,12 +32,14 @@ Run the desktop deck (or launch with Compose Hot Reload on JetBrains Runtime 25)
 ./gradlew :deck:run
 ./gradlew :deck:hotRunDesktopAsync   # background launch; apply edits with `./gradlew :deck:reload`
 CIACOLA_THEME=light ./gradlew :deck:hotRunDesktopAsync
+CIACOLA_REDUCE_MOTION=true ./gradlew :deck:hotRunDesktopAsync
 CIACOLA_TIMELINE_OPEN=true ./gradlew :deck:hotRunDesktopAsync   # opens with the timeline docked
 ./gradlew :deck:spectreTest          # real-window Spectre 0.9.0 E2E suites on JBR 25 (focus-free)
 ```
 
 The first launch opens a 16:9 1280×720 Story window. Secondary windows (Timeline, Review,
-Assistant, Theme) only write `.storyboard/<window>.json` once they have been opened.
+Presenter, Theme) only write `.storyboard/<window>.json` once they have been opened, and minimized
+window state is normalized on save/load so relaunching never starts hidden in the Dock.
 
 ### Shortcuts
 
@@ -45,9 +47,11 @@ Assistant, Theme) only write `.storyboard/<window>.json` once they have been ope
 |---|---|
 | `→` `↓` `PgDn` `Space` `Enter` | Next beat |
 | `←` `↑` `PgUp` `Backspace` | Previous beat |
-| `Esc` | Toggle the Overview grid (also **Easel ▸ Overview (Esc)**); it tracks timeline scrubs |
+| `B` / `W` | Toggle blackout / whiteout curtain in Show Mode (`Esc`, `B`/`W`, click, or advancing clears it) |
+| `⌘G` | Jump to slide (`1..N`) |
+| `Esc` | Dismiss active popup/curtain, exit sub-comp / docked Studio, or toggle the Overview grid (**Easel ▸ Overview (Esc)**) |
 | `⌥⌘P` | Toggle fullscreen |
-| `F2` | Assistant (presenter) window |
+| `F2` | Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
 | `F3` / hold `Ctrl` | Review Inspect mode; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
 | `F4` | Review window |
 | `F5` | Timeline Studio docked in the Story window |
@@ -64,7 +68,22 @@ Assistant, Theme) only write `.storyboard/<window>.json` once they have been ope
   recomposition), `DeckStyles` (code cards, dashed callouts, leader arrows, strikeouts, stamps,
   detour badges, and loupe geometry), and `DeckMotion` (300–380 ms Keynote curves, 55 ms stagger
   step, and spring pop parameters). Two presets ship out of the box (`StageDark` and `KeynoteLight`,
-  toggleable live from the `Theme` menu).
+  toggleable live from the `Theme` menu), alongside **Reduced Motion** (`System` macOS `reduceMotion`
+  detection, `Reduced`, `Full`, and `Pause Ambient Loops`, exposed via `LocalReducedMotion` and
+  `LocalAmbientLoopsPaused`).
+- **Presenter View & Live Stage Aids (`dev.sebastiano.ciacola.presenter`, Jewel standalone):**
+  `F2` opens `PresenterWindow` with per-slide and per-beat `DeckSpeakerNotes` (`⌘-` / `⌘=` zoom),
+  live 16:9 Current and clickable Next previews (`SceneMode.Preview` so Story retains ownership of
+  `renderFrameClock` and `freezeCapture`), wall clock + elapsed talk timer (`T` / `R`) + target
+  duration pace pill, AWT `GraphicsDevice` display routing (`Present on…` / `Swap Displays`),
+  pre-show authoring hazard check (`Enter Clean Show Mode`), Show Mode `B` / `W` curtains, and
+  `⌘G` Quick Slide Jump.
+- **Selectable PDF & Deterministic MP4 Export (`dev.bnorm.storyboard.easel.export`):**
+  `ExportCoordinator` serializes exports with a cancellable `ExportProgressPopup` (`Esc` / `Cancel`).
+  `StoryboardPdfExporter` pairs full-fidelity slide rasters with an invisible `RenderingMode.NEITHER`
+  Unicode text layer extracted from Compose semantics in reading order; `StoryboardVideoExporter`
+  pre-flights `ffmpeg`, steps a reused offscreen `ImageComposeScene` deterministically at 60 fps
+  (`400 ms` beat holds + animated transitions), and streams RGBA frames off-EDT to `libx264` MP4.
 - **Deterministic state switching (`DeterministicStateHost`):** `Easel`, `sharedMoveScene`, and
   `DeckWarpCodeCard` mount `setOf(currentState, targetState)` through
   `Transition.DeterministicStateHost` (`key(contentKey) { AnimatedVisibility(...) }`) instead of

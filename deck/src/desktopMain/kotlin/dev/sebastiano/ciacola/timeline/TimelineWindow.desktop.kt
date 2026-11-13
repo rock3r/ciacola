@@ -725,31 +725,51 @@ fun createTimelineStageDecorator(
         content()
         return@ContentDecorator
     }
+    val sceneMode = LocalSceneMode.current
+    val isStory = sceneMode == SceneMode.Story
+    val insidePreviewViewport = LocalInsideStagePreviewViewport.current
+    if (insidePreviewViewport) {
+        DisposableEffect(stageSelection, sceneMode) {
+            when (sceneMode) {
+                SceneMode.Story -> stageSelection.storyStageMountCount++
+                SceneMode.Preview -> stageSelection.overviewPreviewMountCount++
+                null -> Unit
+            }
+            onDispose {
+                when (sceneMode) {
+                    SceneMode.Story -> stageSelection.storyStageMountCount = (stageSelection.storyStageMountCount - 1).coerceAtLeast(0)
+                    SceneMode.Preview -> stageSelection.overviewPreviewMountCount = (stageSelection.overviewPreviewMountCount - 1).coerceAtLeast(0)
+                    null -> Unit
+                }
+            }
+        }
+    }
+    if (!isStory) {
+        // Preview / offscreen export scenes (Overview thumbnails, Presenter View previews, PDF/MP4
+        // exporters) use an isolated loop clock inheriting period overrides so they animate
+        // deterministically without mutating live Story loop phase or selection state.
+        val isolatedClock = remember { DeckLoopClock() }.also { isolated ->
+            val staleKeys = isolated.periodOverridesMillis.keys.filter { it !in loopClock.periodOverridesMillis }
+            staleKeys.forEach { isolated.periodOverridesMillis.remove(it) }
+            for ((k, v) in loopClock.periodOverridesMillis) {
+                if (isolated.periodOverridesMillis[k] != v) isolated.periodOverridesMillis[k] = v
+            }
+        }
+        CompositionLocalProvider(
+            LocalDeckLoopClock provides isolatedClock,
+            LocalMotionPathPreviewState provides null,
+            LocalTimelineStageSelection provides null,
+        ) {
+            content()
+        }
+        return@ContentDecorator
+    }
     CompositionLocalProvider(
         LocalDeckLoopClock provides loopClock,
         LocalMotionPathPreviewState provides motionPathPreview,
         LocalTimelineStageSelection provides stageSelection,
     ) {
-        val sceneMode = LocalSceneMode.current
-        val isStory = sceneMode == SceneMode.Story
-        val insidePreviewViewport = LocalInsideStagePreviewViewport.current
-        if (insidePreviewViewport) {
-            DisposableEffect(stageSelection, sceneMode) {
-                when (sceneMode) {
-                    SceneMode.Story -> stageSelection.storyStageMountCount++
-                    SceneMode.Preview -> stageSelection.overviewPreviewMountCount++
-                    null -> Unit
-                }
-                onDispose {
-                    when (sceneMode) {
-                        SceneMode.Story -> stageSelection.storyStageMountCount = (stageSelection.storyStageMountCount - 1).coerceAtLeast(0)
-                        SceneMode.Preview -> stageSelection.overviewPreviewMountCount = (stageSelection.overviewPreviewMountCount - 1).coerceAtLeast(0)
-                        null -> Unit
-                    }
-                }
-            }
-        }
-        val isPresentingStoryStage = isStory && stageSelection.overviewPreviewMountCount == 0
+        val isPresentingStoryStage = stageSelection.overviewPreviewMountCount == 0
         Box(Modifier.fillMaxSize().then(if (isPresentingStoryStage) Modifier.stagePicking(stageSelection) else Modifier)) {
             content()
             if (isPresentingStoryStage) {

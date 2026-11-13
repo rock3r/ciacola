@@ -1399,7 +1399,8 @@ private fun MasterDeckTimelineCanvas(
                     },
             )
             val scrollY = viewport.verticalScroll.value.toFloat()
-            val pxPerMs = viewport.pxPerMs
+            val pxPerMs = viewport.pxPerMs(surface)
+            val surfaceWidthPx = viewport.viewportWidthPx(surface)
             snapshot.tracks.forEachIndexed { rIdx, row ->
                 val yTop = headerTotalPx + rIdx * rowHeightPx - scrollY + 4f
                 val barH = rowHeightPx - 8f
@@ -1412,29 +1413,10 @@ private fun MasterDeckTimelineCanvas(
                     } else {
                         liveOvr != null
                     }
-                    val drawStartMs = if (row.category != TrackCategory.SharedElement &&
-                        row.category != TrackCategory.LoopSubComp &&
-                        liveOvr?.delayMs != null
-                    ) {
-                        val stepOffset = (blk.staggerIndex ?: 0) * (liveOvr.staggerStepMs ?: 55)
-                        (blk.startMs - blk.delayMs) + liveOvr.delayMs + stepOffset
-                    } else {
-                        blk.startMs
-                    }
-                    val drawDurationMs = when {
-                        row.category == TrackCategory.SharedElement || row.category == TrackCategory.LoopSubComp -> blk.durationMs
-                        liveOvr?.curve?.isSpring == true -> liveOvr.curve.estimatedSpringDurationMs()
-                        row.category == TrackCategory.StaggerGroup && liveOvr?.durationMs != null -> {
-                            val count = (blk.staggerCount ?: 1).coerceAtLeast(1)
-                            val step = liveOvr.staggerStepMs ?: 55
-                            liveOvr.durationMs + (count - 1) * step
-                        }
-                        liveOvr?.durationMs != null -> liveOvr.durationMs
-                        else -> blk.durationMs
-                    }
-                    val x0 = viewport.xForTime(drawStartMs.toFloat())
+                    val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(row, blk, liveOvr)
+                    val x0 = viewport.xForTime(drawStartMs.toFloat(), surface)
                     val w = max(6f, drawDurationMs * pxPerMs)
-                    if (x0 + w < 0f || x0 > viewport.viewportWidthPx) continue
+                    if (x0 + w < 0f || x0 > surfaceWidthPx) continue
                     val wDp = with(density) { w.toDp() }
                     val hDp = with(density) { barH.toDp() }
                     Box(

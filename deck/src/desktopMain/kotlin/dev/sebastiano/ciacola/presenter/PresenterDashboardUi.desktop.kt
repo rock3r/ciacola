@@ -38,16 +38,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
@@ -64,9 +68,12 @@ import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.SceneMode
 import dev.bnorm.storyboard.easel.ScenePreview
+import dev.sebastiano.ciacola.timeline.accessibleFocusRing
+import dev.sebastiano.ciacola.timeline.rememberAccessibleFocusRingColor
 import kotlinx.coroutines.delay
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
+import org.jetbrains.jewel.ui.Outline
 import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Icon
@@ -186,7 +193,8 @@ fun PresenterDashboard(
             .background(globalColors.panelBackground)
             .focusRequester(dashboardFocusRequester)
             .focusable()
-            .onPreviewKeyEvent { ev -> controller.handlePresenterKeyEvent(ev, scope) }
+            .onPreviewKeyEvent { ev -> controller.handlePresenterPreviewKeyEvent(ev) }
+            .onKeyEvent { ev -> controller.handlePresenterBubbleKeyEvent(ev, scope) }
             .testTag("ciacola-presenter-dashboard"),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -598,6 +606,8 @@ private fun CurtainToggleChip(
     onClick: () -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
+    val focusRingColor = rememberAccessibleFocusRingColor()
+    var focused by remember { mutableStateOf(false) }
     val bg = if (active) palette.curtainActiveBg else Color.Transparent
     val border = if (active) palette.curtainActiveBorder else globalColors.borders.normal
     val ink = if (active) palette.curtainActiveInk else globalColors.text.normal
@@ -608,8 +618,10 @@ private fun CurtainToggleChip(
                 .clip(RoundedCornerShape(4.dp))
                 .background(bg)
                 .border(1.dp, border, RoundedCornerShape(4.dp))
+                .onFocusChanged { focused = it.isFocused }
+                .accessibleFocusRing(focused = focused, ringColor = focusRingColor, cornerRadius = 4.dp)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .clickable(onClick = onClick)
+                .clickable(role = Role.Checkbox, onClick = onClick)
                 .padding(horizontal = 8.dp, vertical = 3.dp)
                 .semantics {
                     contentDescription = tooltip
@@ -638,6 +650,14 @@ private fun DisplayRoutingPopup(
         onDismissRequest = { onDismiss() },
         horizontalAlignment = Alignment.End,
         popupProperties = PopupProperties(focusable = true),
+        modifier = Modifier.onPreviewKeyEvent { ev ->
+            if (ev.key == Key.Escape) {
+                if (ev.type == KeyEventType.KeyDown) onDismiss()
+                true
+            } else {
+                false
+            }
+        },
     ) {
         Column(
             modifier = Modifier
@@ -658,7 +678,7 @@ private fun DisplayRoutingPopup(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(4.dp))
                         .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable { onSelectDisplay(screen) }
+                        .clickable(role = Role.Button) { onSelectDisplay(screen) }
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -685,7 +705,7 @@ private fun DisplayRoutingPopup(
                     .clip(RoundedCornerShape(4.dp))
                     .then(
                         if (canSwap) {
-                            Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { onSwapDisplays() }
+                            Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button) { onSwapDisplays() }
                         } else {
                             Modifier
                         }
@@ -1138,12 +1158,16 @@ private fun PresenterIconButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val focusRingColor = rememberAccessibleFocusRingColor()
+    var focused by remember { mutableStateOf(false) }
     Tooltip(tooltip = { Text(tooltip) }) {
         IconButton(
             onClick = onClick,
             enabled = enabled,
             modifier = Modifier
                 .size(26.dp)
+                .onFocusChanged { focused = it.isFocused }
+                .accessibleFocusRing(focused = focused, ringColor = focusRingColor, cornerRadius = 4.dp)
                 .testTag(testTag),
         ) {
             Icon(
@@ -1235,6 +1259,7 @@ internal fun QuickSlideJumpOverlay(
 
             TextField(
                 state = inputState,
+                outline = if (validationError != null) Outline.Error else Outline.None,
                 placeholder = { Text("1..$slideCount") },
                 modifier = Modifier
                     .fillMaxWidth()
