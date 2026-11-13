@@ -1,7 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JvmVendorSpec
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -10,68 +9,34 @@ plugins {
     alias(libs.plugins.compose)
 }
 
-group = "dev.sebastiano.ciacola"
-version = "0.1-SNAPSHOT"
-
 kotlin {
-    jvmToolchain {
-        languageVersion.set(JavaLanguageVersion.of(25))
-        vendor.set(JvmVendorSpec.JETBRAINS)
-    }
-    jvm("desktop") {
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_25)
-        }
-    }
-
     sourceSets {
-        commonMain {
-            dependencies {
-                implementation(project(":storyboard"))
-                implementation(project(":storyboard-easel"))
-                implementation(project(":storyboard-layout"))
-                implementation(project(":storyboard-text"))
-                implementation(project(":storyboard-warp"))
-                implementation(compose.material)
-                implementation(libs.compose.materialIcons)
-                implementation(compose.components.resources)
-                implementation(libs.compose.hotReload.runtimeApi)
-                implementation(libs.kotlinx.serialization.json)
-            }
+        commonMain.dependencies {
+            implementation(project(":deck-core"))
+            implementation(project(":deck-effects"))
+            implementation(project(":deck-presenter"))
+            implementation(project(":deck-review"))
+            implementation(project(":deck-timeline"))
+            implementation(project(":deck-inspector"))
+            implementation(project(":storyboard"))
+            implementation(project(":storyboard-easel"))
+            implementation(project(":storyboard-layout"))
+            implementation(project(":storyboard-text"))
+            implementation(project(":storyboard-warp"))
+            implementation(compose.material)
+            implementation(libs.compose.materialIcons)
+            implementation(libs.compose.hotReload.runtimeApi)
+            implementation(libs.kotlinx.serialization.json)
         }
-        commonTest {
-            dependencies {
-                implementation(kotlin("test"))
-            }
-        }
-        getByName("desktopMain") {
-            dependencies {
-                implementation(compose.desktop.currentOs)
-                implementation(libs.jewel.int.ui.standalone)
-                implementation(libs.intellij.icons)
-            }
-        }
-        getByName("desktopTest") {
-            dependencies {
-                @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
-                implementation(compose.uiTest)
-                implementation(libs.spectre.core)
-                implementation(libs.spectre.testing)
-                implementation(libs.spectre.recording)
-                runtimeOnly(libs.junit.jupiter.api)
-                runtimeOnly(libs.spectre.recording.macos)
-            }
+        getByName("desktopTest").dependencies {
+            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+            implementation(compose.uiTest)
+            implementation(libs.spectre.core)
+            implementation(libs.spectre.testing)
+            implementation(libs.spectre.recording)
+            runtimeOnly(libs.spectre.recording.macos)
         }
     }
-}
-
-compose.resources {
-    customDirectory(
-        sourceSetName = "commonMain",
-        directoryProvider = provider {
-            rootProject.layout.projectDirectory.dir("examples/shared/src/commonMain/composeResources")
-        },
-    )
 }
 
 val jbr25 = javaToolchains.launcherFor {
@@ -79,16 +44,8 @@ val jbr25 = javaToolchains.launcherFor {
     vendor = JvmVendorSpec.JETBRAINS
 }
 
-tasks.withType<JavaCompile>().configureEach {
-    sourceCompatibility = "25"
-    targetCompatibility = "25"
-}
-
 tasks.named<Test>("desktopTest") {
-    javaLauncher.set(jbr25)
     exclude("**/*SpectreTest.class")
-    jvmArgs("-Dapple.awt.UIElement=true")
-    systemProperty("apple.awt.UIElement", "true")
 }
 
 val sckRecording = providers.gradleProperty("ciacola.sckRecording")

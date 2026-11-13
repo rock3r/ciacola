@@ -152,7 +152,9 @@ fun main() = application {
                 animatic = animatic,
                 overridesStore = timelineOverridesStore,
                 loopClock = deckLoopClock,
-                reviewStore = reviewStore,
+                bakeDispatcher = reviewStore.asBakeDispatcher(),
+                bakeWorkspaceRoot = reviewStore.workspaceRoot,
+                bakeGradleTaskHint = reviewStore.config.gradleTaskHint,
                 motionPathPreview = motionPathPreview,
                 stageSelection = stageSelection,
             )

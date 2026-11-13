@@ -6,6 +6,20 @@ or a generic slide editor.
 
 ## Architecture
 
+### Module DAG
+
+`:deck` is organized as an acyclic multi-module Gradle DAG (enforced by `:ciacolaStaticCheck`, wired into `check`):
+
+| Module | Role | Direct `:deck*` dependencies |
+|---|---|---|
+| `:deck-core` | `DeckTheme`, `DeckDesign`, `DesignSystemOverrides`, `StageElementContracts`, `ReducedMotion`, `SpeakerNotes`, review/timeline runtime contracts, `AgentBakeDispatcher`, Jewel theme/a11y helpers | — |
+| `:deck-effects` | `DeckTextRenderer`, `AnimatedMeshBackdrop`, Keynote effects kit, `DeckWarpCodeCard`, Skia `trimMultiContourPath` | `:deck-core` |
+| `:deck-presenter` | `PresenterWindow`, `PresenterController`, dashboard, top bar, stage curtains & quick jump | `:deck-core` |
+| `:deck-review` | `SlideReviewWindow`, `ReviewStageCoordinator`, `ReviewCommentStore`, anchored popups & feed cards | `:deck-core` |
+| `:deck-timeline` | `TimelineWindow`, `TimelineStudioController`, offscreen indexer, track canvas, loop sub-comp, inspector | `:deck-core` |
+| `:deck-inspector` | Live Design System Inspector, Direct Element Editor, and Deck Linter | `:deck-core`, `:deck-effects` |
+| `:deck` | Composition root (`Main.kt`, `FoundationDeck.kt`, `HotReloadStoryboard.kt`) and cross-seam / Spectre E2E tests | all `:deck-*` modules |
+
 `createFoundationDeck()` is the composition root. Storyboard owns scene/state ordering, forward and
 backward navigation, scene transitions, shared-transition scopes, and the fixed 1920×1080 render
 space. `DeckDesign` owns the palette, type roles, spacing conventions, and `SceneFormat`. Five scenes

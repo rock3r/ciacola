@@ -545,7 +545,9 @@ class TimelineWave2FixesTest {
                 animatic = animatic,
                 overridesStore = store,
                 loopClock = loopClock,
-                reviewStore = reviewStore,
+                bakeDispatcher = reviewStore.asBakeDispatcher(),
+                bakeWorkspaceRoot = reviewStore.workspaceRoot,
+                bakeGradleTaskHint = reviewStore.config.gradleTaskHint,
             )
             Box(Modifier.size(Dp(1280f), Dp(600f))) {
                 TimelineStudioPanel(controller = controller, isDark = true)

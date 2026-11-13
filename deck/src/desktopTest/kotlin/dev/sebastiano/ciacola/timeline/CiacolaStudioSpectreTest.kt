@@ -266,7 +266,9 @@ class CiacolaStudioSpectreTest {
                     animatic = animatic,
                     overridesStore = overridesStore,
                     loopClock = loopClock,
-                    reviewStore = reviewStore,
+                    bakeDispatcher = reviewStore.asBakeDispatcher(),
+                    bakeWorkspaceRoot = reviewStore.workspaceRoot,
+                    bakeGradleTaskHint = reviewStore.config.gradleTaskHint,
                     motionPathPreview = motionPathPreview,
                     stageSelection = stageSelection,
                 )

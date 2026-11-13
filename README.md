@@ -78,7 +78,13 @@ The current slide and build step survive a reload.
 
 | Path | Purpose |
 |---|---|
-| [`deck/`](deck/) | Desktop application, scenes, design system, mesh effect, and text-engine binding |
+| [`deck/`](deck/) | Desktop application root (`Main.kt`, `FoundationDeck.kt`, `HotReloadStoryboard.kt`), integration & Spectre tests |
+| [`deck-core/`](deck-core/) | Shared theme (`DeckTheme`, `DeckDesign`, `DesignSystemOverrides`), `StageElementContracts`, `ReducedMotion`, speaker notes, review/timeline contracts, and Jewel theme helpers |
+| [`deck-effects/`](deck-effects/) | Keynote effects kit, `AnimatedMeshBackdrop`, `DeckTextRenderer`, `DeckWarpCodeCard`, and Skia path trimming |
+| [`deck-presenter/`](deck-presenter/) | Jewel Presenter View window, talk timer, display routing, and live stage curtains/quick jump |
+| [`deck-review/`](deck-review/) | Ctrl+Click slide review overlay, capture store, anchored popups, and `agentapi` dispatch |
+| [`deck-timeline/`](deck-timeline/) | After Effects Timeline Studio, offscreen indexer, inspector, and `AgentBakeDispatcher` integration |
+| [`deck-inspector/`](deck-inspector/) | Live design system inspector, direct element editor, and deck linter module |
 | [`storyboard-text/`](storyboard-text/) | Upstream MagicText with focused hardening and tests |
 | [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) | Architecture, source notes, attribution, retained TODOs, and verification record |
 | [`docs/MAGIC-TEXT-V2-SEAM.md`](docs/MAGIC-TEXT-V2-SEAM.md) | Design boundary and fixtures for a future paragraph-layout renderer |

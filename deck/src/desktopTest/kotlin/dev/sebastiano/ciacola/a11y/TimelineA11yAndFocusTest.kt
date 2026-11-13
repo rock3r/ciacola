@@ -36,7 +36,7 @@ import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
 import dev.sebastiano.ciacola.timeline.TimelineStageSelection
 import dev.sebastiano.ciacola.timeline.TimelineStudioController
 import dev.sebastiano.ciacola.timeline.TimelineStudioPanel
-import dev.sebastiano.ciacola.timeline.accessibleFocusRingColor
+import dev.sebastiano.ciacola.ui.accessibleFocusRingColor
 import dev.sebastiano.ciacola.timeline.createSpaceResetWindowFocusListener
 import dev.sebastiano.ciacola.timeline.rememberTimelineStageDecorator
 import dev.sebastiano.ciacola.timeline.rememberTimelineStudioController
