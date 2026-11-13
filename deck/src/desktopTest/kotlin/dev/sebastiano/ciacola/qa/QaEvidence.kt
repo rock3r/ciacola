@@ -30,6 +30,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import dev.sebastiano.spectre.recording.AutoRecorder
+import dev.sebastiano.spectre.recording.RecordingOptions
+import dev.sebastiano.spectre.recording.screencapturekit.asTitledWindow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -208,21 +211,11 @@ internal suspend fun <T> runOnEdt(block: () -> T): T {
 internal fun captureSkiaWindowFrameOnEdt(window: ComposeWindow): BufferedImage? {
     check(EventQueue.isDispatchThread()) { "SkiaLayer capture must execute on the AWT EDT" }
     if (!window.isDisplayable || !window.isShowing) return null
-    window.repaint()
     val layer = findSkiaLayer(window) ?: return null
     val bitmap = layer.screenshot() ?: return null
     return try {
-        val raw = bitmap.toBufferedImage()
-        // Copy into a Java-heap ARGB image while the Skia bitmap is provably alive:
-        // toBufferedImage() wraps native pixels, and blitting after GC collects bitmap crashes.
-        BufferedImage(raw.width, raw.height, BufferedImage.TYPE_INT_ARGB).also { copy ->
-            val g = copy.createGraphics()
-            try {
-                g.drawImage(raw, 0, 0, null)
-            } finally {
-                g.dispose()
-            }
-        }
+        // Skiko's Bitmap.toBufferedImage() copies native pixels into a fresh heap int[] raster.
+        bitmap.toBufferedImage()
     } finally {
         Reference.reachabilityFence(bitmap)
         bitmap.close()
@@ -289,6 +282,26 @@ suspend fun record(
     evidenceDir.mkdirs()
     val mp4File = File(evidenceDir, "$stem.mp4")
     val gifFile = File(evidenceDir, "$stem.gif")
+
+    // Prefer Spectre's native ScreenCaptureKit AutoRecorder (zero AWT-EDT overhead, 60fps hardware
+    // window capture with the macOS purple semaphore indicator) whenever UIElement accessory mode is off.
+    if (!System.getProperty("apple.awt.UIElement").equals("true", ignoreCase = true)) {
+        val sckRecording = runCatching {
+            recordWithSpectreScreenCaptureKit(
+                window = window,
+                name = stem,
+                fps = fps,
+                mp4File = mp4File,
+                gifFile = gifFile,
+                worker = worker,
+                qaRoot = qaRoot,
+                maxGifWidthPx = maxGifWidthPx,
+                block = block,
+            )
+        }.getOrNull()
+        if (sckRecording != null) return sckRecording
+    }
+
     val tempDir = withContext(Dispatchers.IO) { Files.createTempDirectory("ciacola-qa-rec-") }
 
     try {
@@ -451,6 +464,67 @@ suspend fun record(
             runCatching { tempDir.toFile().deleteRecursively() }
         }
     }
+}
+
+private suspend fun recordWithSpectreScreenCaptureKit(
+    window: ComposeWindow,
+    name: String,
+    fps: Int,
+    mp4File: File,
+    gifFile: File,
+    worker: String,
+    qaRoot: File,
+    maxGifWidthPx: Int,
+    block: suspend () -> Unit,
+): QaRecording {
+    val recorder = AutoRecorder()
+    val options = RecordingOptions(frameRate = fps.coerceIn(1, 60))
+    val startNanos = System.nanoTime()
+    val handle = withContext(Dispatchers.IO) {
+        recorder.startWindow(
+            window = window.asTitledWindow(),
+            output = mp4File.toPath(),
+            options = options,
+        )
+    }
+    var blockFailure: Throwable? = null
+    try {
+        block()
+    } catch (t: Throwable) {
+        blockFailure = t
+    } finally {
+        withContext(Dispatchers.IO) {
+            runCatching { handle.stop() }
+        }
+    }
+    if (blockFailure != null) throw blockFailure
+
+    check(mp4File.isFile && mp4File.length() > 0L) {
+        "Spectre ScreenCaptureKit MP4 missing or empty: $mp4File"
+    }
+    withContext(Dispatchers.IO) {
+        runFfmpeg(
+            "-y",
+            "-i", mp4File.absolutePath,
+            "-vf", "fps=${fps.coerceAtMost(24)},scale='min($maxGifWidthPx,iw)':-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "-loop", "0",
+            gifFile.absolutePath,
+        )
+    }
+    check(gifFile.isFile && gifFile.length() > 0L) {
+        "GIF output missing or empty: $gifFile"
+    }
+    val elapsedSeconds = ((System.nanoTime() - startNanos) / 1_000_000_000.0).coerceAtLeast(0.1)
+    val approxFrames = (elapsedSeconds * fps).toInt().coerceAtLeast(1)
+    return QaRecording(
+        name = name,
+        mp4 = mp4File,
+        gif = gifFile,
+        mp4EvidencePath = QaPaths.toEvidenceRelativePath(mp4File, worker = worker, qaRoot = qaRoot),
+        gifEvidencePath = QaPaths.toEvidenceRelativePath(gifFile, worker = worker, qaRoot = qaRoot),
+        frameCount = approxFrames,
+        effectiveFps = fps.toDouble(),
+    )
 }
 
 private fun resolveFfmpegBinary(): String {

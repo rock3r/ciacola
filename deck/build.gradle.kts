@@ -57,8 +57,8 @@ kotlin {
                 implementation(compose.uiTest)
                 implementation(libs.spectre.core)
                 implementation(libs.spectre.testing)
+                implementation(libs.spectre.recording)
                 runtimeOnly(libs.junit.jupiter.api)
-                runtimeOnly(libs.spectre.recording)
                 runtimeOnly(libs.spectre.recording.macos)
             }
         }
@@ -91,6 +91,9 @@ tasks.named<Test>("desktopTest") {
     systemProperty("apple.awt.UIElement", "true")
 }
 
+val sckRecording = providers.gradleProperty("ciacola.sckRecording")
+    .map { it.equals("true", ignoreCase = true) }
+    .getOrElse(false)
 val desktopTestTask = tasks.named<Test>("desktopTest")
 tasks.register<Test>("spectreTest") {
     description = "Runs real-window Spectre 0.9.0 E2E tests on JetBrains Runtime 25."
@@ -99,9 +102,13 @@ tasks.register<Test>("spectreTest") {
     testClassesDirs = desktopTestTask.get().testClassesDirs
     classpath = desktopTestTask.get().classpath
     include("**/*SpectreTest.class")
-    jvmArgs("-Dapple.awt.UIElement=true")
     systemProperty("java.awt.headless", "false")
-    systemProperty("apple.awt.UIElement", "true")
+    if (!sckRecording) {
+        jvmArgs("-Dapple.awt.UIElement=true")
+        systemProperty("apple.awt.UIElement", "true")
+    } else {
+        systemProperty("apple.awt.UIElement", "false")
+    }
     listOf(
         "CIACOLA_QA_WORKER",
         "CIACOLA_QA_ROOT",

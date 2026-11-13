@@ -60,10 +60,15 @@ allprojects {
         targetCompatibility = javaVersion.toString()
     }
 
+    val sckRecording = providers.gradleProperty("ciacola.sckRecording")
+        .map { it.equals("true", ignoreCase = true) }
+        .getOrElse(false)
     tasks.withType(Test::class.java).configureEach {
-        // Prevent macOS AWT/Skiko test JVMs from registering a Dock icon or stealing focus.
-        jvmArgs("-Dapple.awt.UIElement=true")
-        systemProperty("apple.awt.UIElement", "true")
+        if (!sckRecording) {
+            // Prevent macOS AWT/Skiko test JVMs from registering a Dock icon or stealing focus.
+            jvmArgs("-Dapple.awt.UIElement=true")
+            systemProperty("apple.awt.UIElement", "true")
+        }
     }
 
     plugins.withId("com.vanniktech.maven.publish") {
