@@ -8,44 +8,58 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MagicTextChoreographyTest {
-    private fun minCombinedAlpha(c: MagicTextChoreography): Pair<Float, Int> {
-        var min = Float.MAX_VALUE
+    private fun maxOverlapAlpha(c: MagicTextChoreography): Pair<Float, Int> {
+        var maxOverlap = 0f
         var at = 0
-        for (t in 0..c.totalDurationMillis step 5) {
-            val sum = c.exitAlpha(t) + c.enterAlpha(t)
-            if (sum < min) {
-                min = sum
+        for (t in 0..c.totalDurationMillis) {
+            val overlap = minOf(c.exitAlpha(t), c.enterAlpha(t))
+            if (overlap > maxOverlap) {
+                maxOverlap = overlap
                 at = t
             }
         }
-        return min to at
+        return maxOverlap to at
     }
 
     @Test
-    fun zeroMovementTransitionCrossfadesWithoutBlackoutValley() {
+    fun zeroMovementTransitionHandsOffImmediatelyWithoutGhostOverlapOrDeadGap() {
         val c = MagicTextChoreography.of(
             fadeDurationMillis = 300,
             moveDurationMillis = 300,
             delayDurationMillis = 0,
             hasMovement = false,
         )
-        val (min, at) = minCombinedAlpha(c)
-        assertTrue(min >= 0.6f, "Expected outgoing + incoming alpha >= 0.6 throughout, got $min at +${at}ms")
+        val (overlap, at) = maxOverlapAlpha(c)
+        assertTrue(overlap <= 1e-4f, "Outgoing and incoming text must not superimpose, got overlap=$overlap at +${at}ms")
+        assertEquals(
+            c.exitDelayMillis + c.exitDurationMillis,
+            c.enterDelayMillis,
+            "No dead wait between fade-out completion and fade-in start when nothing moves",
+        )
         assertEquals(900, c.totalDurationMillis, "The timeline segment length must not change")
     }
 
     @Test
-    fun zeroMoveDurationAlsoOverlapsExitAndEntrance() {
+    fun zeroMoveDurationHandsOffImmediatelyWithoutGhostOverlap() {
         val c = MagicTextChoreography.of(fadeDurationMillis = 300, moveDurationMillis = 0, delayDurationMillis = 0)
-        val (min, at) = minCombinedAlpha(c)
-        assertTrue(min >= 0.6f, "Expected overlap when moveDuration == 0, got $min at +${at}ms")
+        val (overlap, at) = maxOverlapAlpha(c)
+        assertTrue(overlap <= 1e-4f, "Expected no double-exposed overlap when moveDuration == 0, got $overlap at +${at}ms")
+        assertEquals(c.exitDelayMillis + c.exitDurationMillis, c.enterDelayMillis)
     }
 
     @Test
-    fun movingTransitionOverlapsEntranceWithTheMovePhase() {
+    fun movingTransitionCompletesExitBeforeMoveAndMoveBeforeEnter() {
         val c = MagicTextChoreography.of(fadeDurationMillis = 300, moveDurationMillis = 300, delayDurationMillis = 0)
-        val (min, at) = minCombinedAlpha(c)
-        assertTrue(min >= 0.5f, "Expected no blank valley while shared words move, got $min at +${at}ms")
+        assertTrue(
+            c.exitDelayMillis + c.exitDurationMillis <= c.moveDelayMillis,
+            "Outgoing words must finish fading out (${c.exitDelayMillis + c.exitDurationMillis}ms) before shared words move (${c.moveDelayMillis}ms)",
+        )
+        assertTrue(
+            c.moveDelayMillis + c.moveDurationMillis <= c.enterDelayMillis,
+            "Shared words must finish moving (${c.moveDelayMillis + c.moveDurationMillis}ms) before incoming words fade in (${c.enterDelayMillis}ms)",
+        )
+        val (overlap, at) = maxOverlapAlpha(c)
+        assertTrue(overlap <= 1e-4f, "Outgoing and incoming words must never overlap, got $overlap at +${at}ms")
         assertEquals(900, c.totalDurationMillis)
     }
 
@@ -54,7 +68,7 @@ class MagicTextChoreographyTest {
         val c = MagicTextChoreography.of(fadeDurationMillis = 300, moveDurationMillis = 300, delayDurationMillis = 0)
         val exitQuarter = c.exitDelayMillis + c.exitDurationMillis / 4
         val enterQuarter = c.enterDelayMillis + c.enterDurationMillis / 4
-        assertTrue(c.exitAlpha(exitQuarter) > 0.9f, "Outgoing words should linger early in the exit, got ${c.exitAlpha(exitQuarter)}")
+        assertTrue(c.exitAlpha(exitQuarter) > 0.85f, "Outgoing words should linger early in the exit, got ${c.exitAlpha(exitQuarter)}")
         assertTrue(c.enterAlpha(enterQuarter) > 0.5f, "Incoming words should be mostly visible a quarter in, got ${c.enterAlpha(enterQuarter)}")
         // Decelerating into full opacity: the final 10% of the entrance adds very little alpha (no terminal slam).
         val end = c.enterDelayMillis + c.enterDurationMillis

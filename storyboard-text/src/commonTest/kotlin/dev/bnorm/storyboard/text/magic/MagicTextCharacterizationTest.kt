@@ -128,6 +128,50 @@ class MagicTextCharacterizationTest {
         assertEquals(listOf("before:5", "before:0", "before:1", "before:2", "before:3", "before:4"), result.map { it.key })
     }
 
+    @Test
+    fun unanchoredSentencePunctuationAndIsolatedArticlesDoNotFlyAcrossUnrelatedProse() {
+        fun words(s: String) = AnnotatedString(s).toWords()
+
+        // Slide 1 Beat 2 -> Beat 3: completely rewritten sentence that only happens to share "a" and ".".
+        val s1b2 = words("A scene advances to a deterministic next state.")
+        val s1b3 = words("The same path is reversible without inventing a second navigation model.")
+        val rewritten = MagicTextPlanner.plan(s1b2, s1b3)
+        val rewrittenSourceKeys = rewritten.source.mapNotNullTo(HashSet()) { it.key }
+        val sharedVisibleInRewritten = rewritten.target.filter {
+            it.value.text.isNotBlank() && it.key in rewrittenSourceKeys
+        }
+        assertTrue(
+            sharedVisibleInRewritten.isEmpty(),
+            "Expected no lone article or period to fly across unrelated prose, got ${sharedVisibleInRewritten.map { it.value.text }}",
+        )
+        assertFalse(rewritten.hasMovement)
+
+        // Slide 4 prose Beat 1 -> Beat 2: unrelated sentences ending with ".".
+        val s4Desc1 = words("Syntax highlighting is data carried by AnnotatedString.")
+        val s4Desc2 = words("Retained Kotlin tokens move while styles remain attached.")
+        val s4Plan = MagicTextPlanner.plan(s4Desc1, s4Desc2)
+        val s4SourceKeys = s4Plan.source.mapNotNullTo(HashSet()) { it.key }
+        assertTrue(s4Plan.target.none { it.value.text.isNotBlank() && it.key in s4SourceKeys })
+        assertFalse(s4Plan.hasMovement)
+
+        // Slide 1 Beat 1 -> Beat 2: anchored phrase "A scene" + content words "deterministic" + "state." DO match.
+        val s1b1 = words("A scene begins with one deterministic state.")
+        val anchored = MagicTextPlanner.plan(s1b1, s1b2)
+        val anchoredSourceKeys = anchored.source.mapNotNullTo(HashSet()) { it.key }
+        val matchedVisible = anchored.target.filter { it.value.text.isNotBlank() && it.key in anchoredSourceKeys }.map { it.value.text }
+        assertEquals(listOf("A", "scene", "deterministic", "state", "."), matchedVisible)
+        assertTrue(anchored.hasMovement)
+
+        // Slide 4 Kotlin code Beat 2 -> Beat 3: code delimiters "(", ")", "{", "}" still match and move cleanly.
+        val codeB2 = words("fun provisional() {\n    println(\"foundation\")\n}")
+        val codeB3 = words("fun provisional(message: String) {\n    println(message)\n}")
+        val codePlan = MagicTextPlanner.plan(codeB2, codeB3)
+        val codeSourceKeys = codePlan.source.mapNotNullTo(HashSet()) { it.key }
+        val matchedCode = codePlan.target.filter { it.value.text.isNotBlank() && it.key in codeSourceKeys }.map { it.value.text }
+        assertTrue(matchedCode.containsAll(listOf("fun", "provisional", "(", ")", "{", "println", "}")))
+        assertTrue(codePlan.hasMovement)
+    }
+
     @OptIn(ExperimentalAtomicApi::class)
     private fun plan(before: List<AnnotatedString>, after: List<AnnotatedString>): List<SharedText> {
         val previous = before.mapIndexed { index, value -> SharedText(value, "before:$index") }

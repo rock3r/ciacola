@@ -214,8 +214,21 @@ internal fun captureSkiaWindowFrameOnEdt(window: ComposeWindow): BufferedImage? 
     val layer = findSkiaLayer(window) ?: return null
     val bitmap = layer.screenshot() ?: return null
     return try {
-        // Skiko's Bitmap.toBufferedImage() copies native pixels into a fresh heap int[] raster.
-        bitmap.toBufferedImage()
+        // Normalize Skiko's custom ColorModel raster to standard TYPE_INT_ARGB so JBR's
+        // PNGImageWriter never hits ArrayIndexOutOfBoundsException on semi-transparent pixels.
+        val raw = bitmap.toBufferedImage()
+        if (raw.type == BufferedImage.TYPE_INT_ARGB) {
+            raw
+        } else {
+            BufferedImage(raw.width, raw.height, BufferedImage.TYPE_INT_ARGB).also { argb ->
+                val g = argb.createGraphics()
+                try {
+                    g.drawImage(raw, 0, 0, null)
+                } finally {
+                    g.dispose()
+                }
+            }
+        }
     } finally {
         Reference.reachabilityFence(bitmap)
         bitmap.close()
@@ -298,6 +311,8 @@ suspend fun record(
                 maxGifWidthPx = maxGifWidthPx,
                 block = block,
             )
+        }.onFailure { err ->
+            System.err.println("Spectre ScreenCaptureKit recording unavailable (${err.message}); falling back to SkiaLayer capture")
         }.getOrNull()
         if (sckRecording != null) return sckRecording
     }

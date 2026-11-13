@@ -58,6 +58,7 @@ import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.TrackOverride
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.coroutines.launch
 
 /** Regression tests for the Wave-2 motion / contrast fixes owned by `w-motion` (patches 70–74). */
 @OptIn(ExperimentalTestApi::class)
@@ -109,6 +110,58 @@ class MotionAndContrastFixesTest {
         assertEquals(200, timing.phaseMs)
         assertEquals(120, timing.delayMs)
         assertEquals(LinearEasing, timing.easing)
+    }
+
+    @Test
+    fun slide1MagicTextNeverFliesLonePeriodOrCollidesDuringNormalOrInterruptedAdvance() = runComposeUiTest {
+        mainClock.autoAdvance = false
+        val deck = createFoundationDeck()
+        lateinit var animatic: dev.bnorm.storyboard.easel.Animatic
+        lateinit var scope: kotlinx.coroutines.CoroutineScope
+        setContent {
+            scope = androidx.compose.runtime.rememberCoroutineScope()
+            Box(Modifier.size(960.dp, 540.dp)) {
+                animatic = dev.bnorm.storyboard.easel.rememberAnimatic(storyboard = { deck })
+                dev.bnorm.storyboard.easel.Easel(animatic)
+            }
+        }
+        mainClock.advanceTimeBy(200)
+
+        // Advance S1:B1 -> B2 partway (~640 ms) and interrupt directly into S1:B2 -> B3, matching
+        // the exact sequence that previously produced "stat[a]" and a detached "." on line 2.
+        lateinit var b1ToB2: kotlinx.coroutines.Job
+        runOnIdle { b1ToB2 = scope.launch { animatic.advance(dev.bnorm.storyboard.AdvanceDirection.Forward) } }
+        repeat(40) { mainClock.advanceTimeByFrame() }
+        lateinit var b2ToB3: kotlinx.coroutines.Job
+        runOnIdle { b2ToB3 = scope.launch { animatic.advance(dev.bnorm.storyboard.AdvanceDirection.Forward) } }
+
+        var observedEarlyB2ToB3 = false
+        var safety = 0
+        while (!b2ToB3.isCompleted && safety++ < 200) {
+            mainClock.advanceTimeByFrame()
+            val (settling, frac) = runOnIdle { animatic.scrubSettling to animatic.activeFraction }
+            if (!settling && frac in 0.05f..0.35f) {
+                observedEarlyB2ToB3 = true
+                // During the fade-out half of S1:B2 -> B3, "." must stay attached to "state." on line 1,
+                // never detached onto line 2 below "state".
+                val stateNodes = onAllNodes(androidx.compose.ui.test.hasText("state", substring = false)).fetchSemanticsNodes()
+                val periodNodes = onAllNodes(androidx.compose.ui.test.hasText(".", substring = false)).fetchSemanticsNodes()
+                if (stateNodes.isNotEmpty() && periodNodes.size == 1) {
+                    val stateBounds = stateNodes.single().boundsInRoot
+                    val periodBounds = periodNodes.single().boundsInRoot
+                    assertTrue(
+                        abs(periodBounds.bottom - stateBounds.bottom) < 8f,
+                        "Expected '.' to remain on the same baseline as 'state' (${stateBounds.bottom}), got ${periodBounds.bottom}",
+                    )
+                    assertTrue(
+                        abs(periodBounds.left - stateBounds.right) < 8f,
+                        "Expected '.' to remain attached to the right of 'state' (${stateBounds.right}), got ${periodBounds.left}",
+                    )
+                }
+            }
+        }
+        assertTrue(b2ToB3.isCompleted, "Advance to S1:B3 completed")
+        assertTrue(observedEarlyB2ToB3, "Observed early live frames of S1:B2 -> B3")
     }
 
     // --- 71: single-source trigger beat + spatial entrance offsets ------------------------------

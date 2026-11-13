@@ -83,6 +83,7 @@ internal fun findShared(
     }
 
     findSharedInternal(beforeNonBlank, afterNonBlank)
+    pruneUnanchoredProseMatches(beforeItems, afterItems)
 
     for (text in afterItems) {
         if (text.key == null) text.key = "stable:${key.addAndFetch(1)}"
@@ -92,6 +93,125 @@ internal fun findShared(
     // identify independently moving tokens. A paragraph-layout renderer can batch their drawing after
     // consuming the correspondence plan; v1 cannot merge them without changing transition geometry.
     return afterItems.map { it.toSharedItem() }
+}
+
+private const val PROSE_PUNCTUATION = ".,;:!?"
+
+private val PROSE_STOP_WORDS = setOf(
+    "a", "an", "the", "to", "of", "in", "on", "at", "by",
+    "for", "is", "are", "was", "be", "or", "and", "as", "it",
+)
+
+private fun MutableSharedText.isBlankToken(): Boolean =
+    value.text.isNotEmpty() && value.text != "\n" && value.text.all { it.isWhitespace() }
+
+private fun MutableSharedText.isWordToken(): Boolean =
+    value.text.any { it.isLetterOrDigit() }
+
+private fun MutableSharedText.isProsePunctuation(): Boolean =
+    value.text.isNotEmpty() && value.text.all { it in PROSE_PUNCTUATION }
+
+private fun MutableSharedText.isProseStopWord(): Boolean =
+    value.text.lowercase() in PROSE_STOP_WORDS
+
+private fun MutableSharedText.adjacentWordOnLine(direction: Move): MutableSharedText? {
+    var cursor = move(direction, stopOnLineBreaks = true)
+    while (cursor != null) {
+        if (cursor.isWordToken()) return cursor
+        if (!cursor.isBlankToken() && !cursor.isProsePunctuation()) return cursor
+        cursor = cursor.move(direction, stopOnLineBreaks = true)
+    }
+    return null
+}
+
+private fun MutableSharedText.unmatch(after: MutableSharedText) {
+    previousShared?.crossFade = false
+    key = null
+    crossFade = false
+    after.key = null
+    after.crossFade = false
+}
+
+/**
+ * Drops accidental matches that look broken in Magic Move typography:
+ * 1. Detached sentence punctuation (`.` / `,` / `;` / `:` / `!` / `?`) whose attached word did not match
+ *    (so periods never detach from `state.` and fly onto `model.` on another line).
+ * 2. Isolated short prose function words (`a`, `to`, `is`, `the`, ...) outside the common prefix when
+ *    neither neighboring word matched in a multi-word sentence.
+ * 3. Orphan whitespace tokens left without any adjacent matched non-blank token.
+ */
+private fun pruneUnanchoredProseMatches(
+    beforeItems: List<MutableSharedText>,
+    afterItems: List<MutableSharedText>,
+) {
+    val hasWords = beforeItems.any { it.isWordToken() } || afterItems.any { it.isWordToken() }
+    if (!hasWords) return
+
+    val afterByKey = HashMap<String, MutableSharedText>(afterItems.size)
+    for (item in afterItems) {
+        val k = item.key ?: continue
+        afterByKey[k] = item
+    }
+
+    var commonPrefix = 0
+    while (
+        commonPrefix < beforeItems.size &&
+        commonPrefix < afterItems.size &&
+        beforeItems[commonPrefix].key != null &&
+        beforeItems[commonPrefix].key == afterItems[commonPrefix].key
+    ) {
+        commonPrefix++
+    }
+
+    for (b in beforeItems) {
+        val k = b.key ?: continue
+        if (b.index < commonPrefix || !b.isProsePunctuation()) continue
+        val a = afterByKey[k] ?: continue
+        val leftAnchored = b.prev != null && a.prev != null &&
+            !b.prev!!.isBlankToken() && b.prev!!.key != null && b.prev!!.key == a.prev!!.key
+        val rightAnchored = b.next != null && a.next != null &&
+            !b.next!!.isBlankToken() && b.next!!.key != null && b.next!!.key == a.next!!.key
+        if (!leftAnchored && !rightAnchored) {
+            b.unmatch(a)
+            afterByKey.remove(k)
+        }
+    }
+
+    val beforeWordCount = beforeItems.count { it.isWordToken() }
+    val afterWordCount = afterItems.count { it.isWordToken() }
+    if (beforeWordCount >= 3 && afterWordCount >= 3) {
+        for (b in beforeItems) {
+            val k = b.key ?: continue
+            if (b.index < commonPrefix || !b.isProseStopWord()) continue
+            val a = afterByKey[k] ?: continue
+            val bPrevWord = b.adjacentWordOnLine(Move.Previous)
+            val aPrevWord = a.adjacentWordOnLine(Move.Previous)
+            val prevAnchored = bPrevWord != null && aPrevWord != null &&
+                bPrevWord.key != null && bPrevWord.key == aPrevWord.key
+            val bNextWord = b.adjacentWordOnLine(Move.Next)
+            val aNextWord = a.adjacentWordOnLine(Move.Next)
+            val nextAnchored = bNextWord != null && aNextWord != null &&
+                bNextWord.key != null && bNextWord.key == aNextWord.key
+            if (!prevAnchored && !nextAnchored) {
+                b.unmatch(a)
+                afterByKey.remove(k)
+            }
+        }
+    }
+
+    for (b in beforeItems) {
+        val k = b.key ?: continue
+        if (b.index < commonPrefix || !b.isBlankToken()) continue
+        val a = afterByKey[k] ?: continue
+        val leftMatched = b.prev != null && a.prev != null &&
+            !b.prev!!.isBlankToken() && b.prev!!.key != null && b.prev!!.key == a.prev!!.key
+        val rightMatched = b.next != null && a.next != null &&
+            !b.next!!.isBlankToken() && b.next!!.key != null && b.next!!.key == a.next!!.key
+        if (!leftMatched && !rightMatched) {
+            b.unmatch(a)
+            afterByKey.remove(k)
+        }
+    }
 }
 
 private enum class Move {

@@ -444,34 +444,36 @@ internal class MagicTextChoreography(
             val exitEasing = EaseInCubic
             val enterEasing = easing ?: EaseOutCubic
             return if (!hasMovement || move == 0) {
-                // Nothing travels: crossfade with overlapping phases instead of waiting out an empty move.
-                val overlapEnd = (total * 0.6f).roundToInt()
-                val overlapStart = total - overlapEnd
+                // Nothing travels: split the full budget cleanly into FadeOut -> FadeIn with zero dead
+                // wait and zero double-exposed glyph overlap on the same line.
+                val exitSpan = (total * 0.45f).roundToInt()
+                val enterSpan = total - exitSpan
                 MagicTextChoreography(
                     exitDelayMillis = start,
-                    exitDurationMillis = overlapEnd,
+                    exitDurationMillis = exitSpan,
                     exitEasing = exitEasing,
-                    moveDelayMillis = start + (total * 0.2f).roundToInt(),
-                    moveDurationMillis = (total * 0.6f).roundToInt(),
+                    moveDelayMillis = start,
+                    moveDurationMillis = total,
                     moveEasing = easing ?: EaseInOut,
-                    enterDelayMillis = start + overlapStart,
-                    enterDurationMillis = total - overlapStart,
+                    enterDelayMillis = start + exitSpan,
+                    enterDurationMillis = enterSpan,
                     enterEasing = enterEasing,
                 )
             } else {
-                // Shared words move between the phases; the exit tails into the first three quarters of
-                // the move and the entrance starts a quarter into it, so the stage never goes blank.
-                val exitDuration = fade + (move * 0.75f).roundToInt()
-                val enterDelay = 2 * gap + fade + (move * 0.25f).roundToInt()
+                // Sequential Keynote-style FadeOut -> Move -> FadeIn: outgoing words clear to 0 alpha
+                // before shared words travel, and shared words finish opening target slots before
+                // incoming words fade into them.
+                val moveDelay = gap + fade
+                val enterDelay = 2 * gap + fade + move
                 MagicTextChoreography(
                     exitDelayMillis = start,
-                    exitDurationMillis = exitDuration,
+                    exitDurationMillis = fade,
                     exitEasing = exitEasing,
-                    moveDelayMillis = start + gap + fade,
+                    moveDelayMillis = start + moveDelay,
                     moveDurationMillis = move,
                     moveEasing = easing ?: EaseInOut,
                     enterDelayMillis = start + enterDelay,
-                    enterDurationMillis = total - enterDelay,
+                    enterDurationMillis = fade,
                     enterEasing = enterEasing,
                 )
             }

@@ -462,7 +462,15 @@ class Animatic internal constructor(
         val startFraction = if (reverse || resume) {
             activeFraction
         } else {
-            if (ts.currentState != ts.targetState) ts.snapTo(ts.targetState)
+            if (ts.currentState != ts.targetState) {
+                // Complete the interrupted segment cleanly for a couple of frames first so canonical
+                // shared-bounds keys (e.g. MagicText tokens inserted in the intermediate beat) lay out
+                // and record their source bounds before the next segment mounts its target.
+                ts.snapTo(ts.targetState)
+                liveFramePresented = false
+                withFrameNanos { }
+                withFrameNanos { }
+            }
             // Compose the new segment at play time 0 and give nested content a few frames to
             // compose before seeking forward (late children are delayed by the play time at which
             // they are first composed; see seekInPlace). Those frames are not presentable (shared
@@ -540,29 +548,34 @@ class Animatic internal constructor(
             targetState = if (fromState.frame is Frame.Value) fromState else resolveForwardValueState(segment + 1)
             return
         }
-        if (transitionState.currentState != fromState) {
-            transitionState.snapTo(fromState)
-        }
-        currentState = resolveBackwardValueState(segment)
-        targetState = resolveForwardValueState(segment + 1)
-        if (transitionState.targetState != toState) {
-            // Compose the new segment at play time 0 first, exactly like animateTo does. Transition
-            // children that get (re)targeted while the play time is non-zero are delayed by that play
-            // time (see Transition.TransitionAnimationState.updateAnimation), so nested content that
-            // composes a frame or two after a direct seekTo(fraction) would be stuck at its start
-            // value and every late child would lag behind live playback. Those play-time-0 frames
-            // are not presentable (shared bounds have not started), so the last frame stays up.
+        if (transitionState.currentState != fromState || transitionState.targetState != toState) {
+            // Compose the new segment from a settled `fromState` at play time 0 first, exactly like
+            // animateTo does. Settling `fromState` records canonical shared-bounds anchors before
+            // `toState` mounts, and settling at play time 0 prevents late-composed children from being
+            // delayed by a non-zero play time (see Transition.TransitionAnimationState.updateAnimation).
+            // Those settle frames are not presentable, so the last presented frame stays up.
             withPresentedFrameFrozen {
-                transitionState.seekTo(0f, toState)
-                val settle = SettleTracker()
-                while (true) {
+                if (transitionState.currentState != fromState) {
+                    transitionState.snapTo(fromState)
                     withFrameNanos { }
-                    if (settle.isSettled(transition.totalDurationNanos)) break
+                    withFrameNanos { }
+                }
+                currentState = resolveBackwardValueState(segment)
+                targetState = resolveForwardValueState(segment + 1)
+                if (transitionState.targetState != toState) {
+                    transitionState.seekTo(0f, toState)
+                    val settle = SettleTracker()
+                    while (true) {
+                        withFrameNanos { }
+                        if (settle.isSettled(transition.totalDurationNanos)) break
+                    }
                 }
                 transitionState.seekTo(transitionFractionFor(fraction), toState)
             }
             return
         }
+        currentState = resolveBackwardValueState(segment)
+        targetState = resolveForwardValueState(segment + 1)
         transitionState.seekTo(transitionFractionFor(fraction), toState)
     }
 
@@ -655,9 +668,13 @@ class Animatic internal constructor(
         }
         if (currentDirection == null || currentDirection == direction) {
             if (currentDirection == direction) {
-                // Snap to the target and continue.
+                // Snap to the target and let it compose and lay out its settled anchors (e.g.
+                // canonical shared-bounds keys) before seeking the next segment.
                 transitionState.snapTo(targetState)
                 currentState = targetState
+                liveFramePresented = false
+                withFrameNanos { }
+                withFrameNanos { }
                 // Fall-through and continue with the next advancement.
             }
 
