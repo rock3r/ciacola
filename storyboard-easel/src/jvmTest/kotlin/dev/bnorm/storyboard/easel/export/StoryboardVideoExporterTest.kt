@@ -300,4 +300,23 @@ class StoryboardVideoExporterTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun sinkFactoryFailureSurfacesFailedStatusAndReleasesCoordinator() = runTest {
+        val dir = Files.createTempDirectory("video-export-sink-factory-fail")
+        try {
+            val exporter = StoryboardVideoExporter(
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> throw IOException("simulated sink spawn failure") },
+            )
+
+            exporter.exportAsMp4(animatedDeck, dir.resolve("never-created.mp4"))
+
+            val status = assertIs<ExportStatus.Failed>(exporter.status)
+            assertTrue(status.message.contains("simulated sink spawn failure"))
+            assertFalse(exporter.isExporting)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

@@ -23,8 +23,10 @@ import kotlin.io.path.readLines
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -154,10 +156,12 @@ class StoryboardVideoExporter(
 
         val rgbaInfo = ImageInfo(width, height, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
         val bitmap = Bitmap().apply { allocPixels(rgbaInfo) }
-        val sink = runInterruptible(Dispatchers.IO) { sinkFactory(path, width, height, fps) }
+        var sink: VideoFrameSink? = null
         var finishedCleanly = false
 
         try {
+            val activeSink = runInterruptible(Dispatchers.IO) { sinkFactory(path, width, height, fps) }
+            sink = activeSink
             var frameTick = 0L
             fun nextTimeNanos(): Long = (frameTick++) * 1_000_000_000L / fps
 
@@ -172,7 +176,7 @@ class StoryboardVideoExporter(
                 } finally {
                     image.close()
                 }
-                sink.writeFrame(bytes)
+                activeSink.writeFrame(bytes)
                 renderedFrames++
                 val totalDenom = maxOf(estimatedTotalFrames, renderedFrames)
                 updateStatus(
@@ -240,12 +244,15 @@ class StoryboardVideoExporter(
             }
 
             updateStatus(ExportStatus.Exporting(1.0f, "Encoding MP4\u2026"))
-            sink.finish()
+            activeSink.finish()
             finishedCleanly = true
             updateStatus(null)
         } finally {
-            if (!finishedCleanly) {
-                sink.abort()
+            val toAbort = sink
+            if (!finishedCleanly && toAbort != null) {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    runInterruptible { toAbort.abort() }
+                }
             }
             bitmap.close()
             scene.close()

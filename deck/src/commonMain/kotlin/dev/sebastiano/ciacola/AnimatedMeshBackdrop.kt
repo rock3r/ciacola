@@ -1,6 +1,7 @@
 package dev.sebastiano.ciacola
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -120,6 +121,7 @@ fun AnimatedMeshBackdrop(
     // The mesh choreography is authored over a 6 s cycle; scale the loop clock's position within
     // the (possibly overridden) period onto it so period overrides stay seamless at the wrap.
     val theme = LocalDeckTheme.current
+    var liveComputedElapsed: Long? = null
     val authoredElapsed = when {
         reducedMotion -> 0L
         isPaused -> frozenAuthoredElapsed
@@ -130,9 +132,15 @@ fun AnimatedMeshBackdrop(
                 periodMillis = periodMillis,
             )
             val effectivePeriod = LocalDeckLoopClock.current.effectivePeriodMillis(loopId, periodMillis)
-            ((elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong()).also {
-                frozenAuthoredElapsed = it
+            (elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong().also {
+                liveComputedElapsed = it
             }
+        }
+    }
+    if (liveComputedElapsed != null) {
+        val captured = liveComputedElapsed
+        SideEffect {
+            frozenAuthoredElapsed = captured
         }
     }
     val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), authoredElapsed, theme))

@@ -30,12 +30,6 @@ internal const val FRAME_LEVEL_DP_PER_MS = 0.72f
 internal const val MIN_DP_PER_MS = 0.01f
 internal const val MAX_DP_PER_MS = 3f
 
-// Compatibility aliases for callers/tests referencing the previous names.
-internal const val TIMELINE_LEFT_PAD_PX = TIMELINE_LEFT_PAD_DP
-internal const val FRAME_LEVEL_PX_PER_MS = FRAME_LEVEL_DP_PER_MS
-internal const val MIN_PX_PER_MS = MIN_DP_PER_MS
-internal const val MAX_PX_PER_MS = MAX_DP_PER_MS
-
 /**
  * Density-independent horizontal time zoom (`dpPerMs`) + 2D scroll position of the timeline canvas.
  * Viewport width and horizontal scroll are isolated per [TimelineSurface] so opening both docked
@@ -57,9 +51,6 @@ class TimelineViewportState {
     private val surfaceWidthsDp = mutableStateMapOf<TimelineSurface, Float>()
     private val surfaceScrollsDp = mutableStateMapOf<TimelineSurface, Float>()
     private val surfaceDensities = mutableStateMapOf<TimelineSurface, Float>()
-
-    private var fallbackWidthDp by mutableFloatStateOf(0f)
-    private var fallbackScrollDp by mutableFloatStateOf(0f)
 
     var activeSurface by mutableStateOf<TimelineSurface?>(null)
         private set
@@ -100,40 +91,21 @@ class TimelineViewportState {
     }
 
     fun viewportWidthDp(surface: TimelineSurface? = activeSurface): Float =
-        if (surface != null && surface in surfaceWidthsDp) {
-            surfaceWidthsDp.getValue(surface)
-        } else {
-            fallbackWidthDp
-        }
+        if (surface != null) surfaceWidthsDp[surface] ?: 0f else 0f
 
     fun viewportWidthPx(surface: TimelineSurface? = activeSurface): Float =
         viewportWidthDp(surface) * densityFor(surface)
 
-    var viewportWidthPx: Float
+    val viewportWidthPx: Float
         get() = viewportWidthPx(activeSurface)
-        set(value) {
-            val s = activeSurface
-            if (s != null) {
-                surfaceWidthsDp[s] = (value / densityFor(s)).coerceAtLeast(0f)
-            } else {
-                fallbackWidthDp = (value / density).coerceAtLeast(0f)
-            }
-        }
 
     fun scrollDp(surface: TimelineSurface? = activeSurface): Float =
-        if (surface != null && surface in surfaceWidthsDp) {
-            surfaceScrollsDp[surface] ?: 0f
-        } else {
-            fallbackScrollDp
-        }
+        if (surface != null) surfaceScrollsDp[surface] ?: 0f else 0f
 
     private fun setScrollDp(dp: Float, surface: TimelineSurface? = activeSurface) {
-        val clamped = dp.coerceIn(0f, maxScrollDp(surface))
-        if (surface != null && surface in surfaceWidthsDp) {
-            surfaceScrollsDp[surface] = clamped
-        } else {
-            fallbackScrollDp = clamped
-        }
+        val s = surface ?: TimelineSurface.Docked
+        val clamped = dp.coerceIn(0f, maxScrollDp(s))
+        surfaceScrollsDp[s] = clamped
     }
 
     val pxPerMs: Float get() = pxPerMs(activeSurface)
@@ -208,11 +180,6 @@ class TimelineViewportState {
         isFitLocked = false
         val newScrollDp = TIMELINE_LEFT_PAD_DP + anchorTime * dpPerMs - (anchorX / d)
         setScrollDp(newScrollDp, s)
-    }
-
-    /** Compatibility entry point for callers/tests setting zoom in dp/ms (equals px/ms at 1x). */
-    fun setZoom(newDpPerMs: Float, anchorX: Float, surface: TimelineSurface? = activeSurface) {
-        setZoomDpPerMs(newDpPerMs, anchorX, surface)
     }
 
     fun zoomToFit(surface: TimelineSurface? = activeSurface) {

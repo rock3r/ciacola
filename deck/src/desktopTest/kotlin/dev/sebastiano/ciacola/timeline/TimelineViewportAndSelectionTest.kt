@@ -9,14 +9,14 @@ import kotlin.test.assertTrue
 class TimelineViewportAndSelectionTest {
 
     private fun viewport(widthPx: Float = 1_000f, durationMs: Int = 10_000) = TimelineViewportState().apply {
-        viewportWidthPx = widthPx
+        updateSurfaceMetrics(TimelineSurface.Docked, widthPx, surfaceDensity = 1f)
         contentDurationMs = durationMs
     }
 
     @Test
     fun altWheelZoomKeepsTheTimeUnderTheCursorFixed() {
         val vp = viewport()
-        vp.setZoom(0.5f, anchorX = 0f)
+        vp.setZoomDpPerMs(0.5f, anchorX = 0f)
         vp.scrollHorizontallyTo(1_200f)
         val anchorX = 420f
         val timeUnderCursor = vp.timeForX(anchorX)
@@ -31,10 +31,10 @@ class TimelineViewportAndSelectionTest {
     fun zoomIsClampedAndScrollStaysInsideTheContent() {
         val vp = viewport()
         repeat(40) { vp.zoomBy(2f, 500f) }
-        assertEquals(MAX_PX_PER_MS, vp.pxPerMs)
+        assertEquals(MAX_DP_PER_MS, vp.pxPerMs)
         assertTrue(vp.scrollX in 0f..vp.maxScrollX)
         repeat(40) { vp.zoomBy(0.5f, 500f) }
-        assertTrue(vp.pxPerMs >= MIN_PX_PER_MS)
+        assertTrue(vp.pxPerMs >= MIN_DP_PER_MS)
         assertEquals(0f, vp.scrollX)
         assertEquals(0f, vp.scrollHorizontallyBy(-50f), "Cannot scroll before time 0")
     }
@@ -47,7 +47,7 @@ class TimelineViewportAndSelectionTest {
         assertTrue(vp.xForTime(10_000f) <= vp.viewportWidthPx, "Fit shows the whole composition")
 
         vp.toggleFitAndFrames(anchorTimeMs = 6_000f)
-        assertEquals(FRAME_LEVEL_PX_PER_MS, vp.pxPerMs)
+        assertEquals(FRAME_LEVEL_DP_PER_MS, vp.pxPerMs)
         val playheadX = vp.xForTime(6_000f)
         assertTrue(playheadX in 0f..vp.viewportWidthPx, "Playhead stays visible at frame level (x=$playheadX)")
 
@@ -59,7 +59,7 @@ class TimelineViewportAndSelectionTest {
     @Test
     fun ensureTimeVisibleScrollsOnlyWhenTheTimeIsOffscreen() {
         val vp = viewport()
-        vp.setZoom(0.5f, 0f)
+        vp.setZoomDpPerMs(0.5f, 0f)
         vp.ensureTimeVisible(500f)
         assertEquals(0f, vp.scrollX, "Already visible")
         vp.ensureTimeVisible(9_000f)

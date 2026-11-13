@@ -440,27 +440,6 @@ private fun sanitizeForFont(text: String, font: PDFont): String {
 }
 
 private fun loadUnicodeFont(doc: PDDocument): PDFont {
-    val classpathCandidates = listOf(
-        "composeResources/ciacola.deck.generated.resources/font/Inter-Regular.ttf",
-        "composeResources/ciacola.deck.generated.resources/font/JetBrainsMono-Regular.ttf",
-        "font/Inter-Regular.ttf",
-        "font/JetBrainsMono-Regular.ttf",
-        "fonts/Inter-Regular.ttf",
-        "fonts/JetBrainsMono-Regular.ttf",
-    )
-    var basicFallback: PDFont? = null
-    val classLoader = Thread.currentThread().contextClassLoader ?: StoryboardPdfExporter::class.java.classLoader
-    for (resource in classpathCandidates) {
-        val stream = classLoader?.getResourceAsStream(resource) ?: continue
-        val loaded = stream.use { input ->
-            runCatching { PDType0Font.load(doc, input) }.getOrNull()
-        } ?: continue
-        if (supportsUnicodeSample(loaded)) return loaded
-        if (basicFallback == null && supportsBasicAscii(loaded)) {
-            basicFallback = loaded
-        }
-    }
-
     val javaHome = System.getProperty("java.home")
     val fileCandidates = buildList {
         if (!javaHome.isNullOrBlank()) {
@@ -486,6 +465,7 @@ private fun loadUnicodeFont(doc: PDDocument): PDFont {
         add(Path.of(winDir, "Fonts", "arial.ttf"))
     }
 
+    var basicFallback: PDFont? = null
     for (fontPath in fileCandidates) {
         if (!Files.isRegularFile(fontPath) || !fontPath.exists()) continue
         val loaded = runCatching {

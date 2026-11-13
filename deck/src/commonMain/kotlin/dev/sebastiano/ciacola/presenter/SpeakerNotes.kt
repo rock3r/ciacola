@@ -1,7 +1,6 @@
 package dev.sebastiano.ciacola.presenter
 
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.staticCompositionLocalOf
 import dev.bnorm.storyboard.Storyboard
 import dev.sebastiano.ciacola.timeline.VirtualizedFrame
 
@@ -127,11 +126,6 @@ class DeckSpeakerNotesBuilder {
 
 fun buildDeckSpeakerNotes(block: DeckSpeakerNotesBuilder.() -> Unit): DeckSpeakerNotes =
     DeckSpeakerNotesBuilder().apply(block).build()
-
-/**
- * Composition local exposing the active [DeckSpeakerNotes] inside a decorated storyboard.
- */
-val LocalDeckSpeakerNotes = staticCompositionLocalOf { DeckSpeakerNotes.Empty }
 
 /**
  * Associates [DeckSpeakerNotes] with built [Storyboard] instances without altering Storyboard's

@@ -74,9 +74,7 @@ import dev.sebastiano.ciacola.effects.keynoteFromDarkness
 import dev.sebastiano.ciacola.effects.keynotePop
 import dev.sebastiano.ciacola.effects.keynoteSpotlight
 import dev.sebastiano.ciacola.effects.spatialEntranceOffset
-import dev.sebastiano.ciacola.presenter.DeckSpeakerNotes
 import dev.sebastiano.ciacola.presenter.DeckSpeakerNotesBuilder
-import dev.sebastiano.ciacola.presenter.LocalDeckSpeakerNotes
 import dev.sebastiano.ciacola.presenter.SceneSpeakerNotesBuilder
 import dev.sebastiano.ciacola.presenter.StoryboardSpeakerNotesRegistry
 import dev.sebastiano.ciacola.review.ReportSceneHeader
@@ -159,7 +157,6 @@ fun createFoundationDeck(
     reducedMotion: Boolean = false,
 ): Storyboard {
     val notesBuilder = DeckSpeakerNotesBuilder()
-    lateinit var speakerNotes: DeckSpeakerNotes
     val storyboard = Storyboard.build(
         title = "Ciacola",
         description = "Provisional scenes proving the presentation architecture; not talk narrative.",
@@ -169,7 +166,7 @@ fun createFoundationDeck(
             theme = theme,
             bundledPreset = bundledPreset,
             timelineOverrides = timelineOverrides,
-            speakerNotesProvider = { speakerNotes },
+            reducedMotion = reducedMotion,
         ) + stageDecorator,
     ) {
         beatsScene(theme, timelineOverrides, notesBuilder, reducedMotion)
@@ -180,8 +177,7 @@ fun createFoundationDeck(
             keynoteEffectsLabScene(theme, timelineOverrides, notesBuilder, reducedMotion)
         }
     }
-    speakerNotes = notesBuilder.build()
-    StoryboardSpeakerNotesRegistry.register(storyboard, speakerNotes)
+    StoryboardSpeakerNotesRegistry.register(storyboard, notesBuilder.build())
     return storyboard
 }
 
@@ -190,7 +186,7 @@ private fun deckDecorator(
     theme: DeckTheme,
     bundledPreset: DeckThemePreset? = null,
     timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
-    speakerNotesProvider: () -> DeckSpeakerNotes = { DeckSpeakerNotes.Empty },
+    reducedMotion: Boolean = false,
 ) = ContentDecorator { content ->
     val activeTheme = if (bundledPreset != null) {
         DeckThemes.rememberBundledDeckTheme(bundledPreset)
@@ -204,7 +200,7 @@ private fun deckDecorator(
     }
     CompositionLocalProvider(
         LocalTimelineOverrides provides effectiveOverrides,
-        LocalDeckSpeakerNotes provides speakerNotesProvider(),
+        LocalReducedMotion provides reducedMotion,
     ) {
         DeckTextRendererProvider(textRenderer) {
             DeckThemeProvider(activeTheme) {
@@ -308,7 +304,6 @@ private fun StoryboardBuilder.beatsScene(
     val prose = transition.createChildTransition("foundation-prose") { it.toValue().value.prose }
     val currentVf = transition.currentState.toValue()
     val targetVf = transition.targetState.toValue()
-    val reducedMotion = LocalReducedMotion.current
     val badgeProgress by transition.animateFloat(
         transitionSpec = {
             if (reducedMotion) {
@@ -380,7 +375,6 @@ private fun StoryboardBuilder.sharedMoveScene(
     },
 ) {
     val activeTheme = LocalDeckTheme.current
-    val reducedMotion = LocalReducedMotion.current
     val sceneVisibility: AnimatedVisibilityScope = contextOf<AnimatedVisibilityScope>()
     val targetVf = transition.targetState.toValue()
     val trackId = "shared:foundation-shared-card"

@@ -193,8 +193,11 @@ class AwtDisplayRouter(
     }
 
     private fun relocateCentered(window: ComposeWindow, targetBounds: Rectangle) {
-        val w = window.width.coerceIn(760, targetBounds.width.coerceAtLeast(760))
-        val h = window.height.coerceIn(500, targetBounds.height.coerceAtLeast(500))
+        val minSize = window.minimumSize
+        val minW = (minSize?.width ?: 640).coerceAtLeast(320)
+        val minH = (minSize?.height ?: 420).coerceAtLeast(240)
+        val w = window.width.coerceIn(minW, targetBounds.width.coerceAtLeast(minW))
+        val h = window.height.coerceIn(minH, targetBounds.height.coerceAtLeast(minH))
         val x = targetBounds.x + ((targetBounds.width - w) / 2).coerceAtLeast(0)
         val y = targetBounds.y + ((targetBounds.height - h) / 2).coerceAtLeast(0)
         window.setBounds(x, y, w, h)
@@ -318,7 +321,6 @@ class PresenterController(
     private val isInspectOpenProvider: () -> Boolean = { false },
     private val hasUnbakedOverridesProvider: () -> Boolean = { false },
     private val onEnterCleanShowModeAction: () -> Unit = {},
-    private val isOverviewOpenProvider: () -> Boolean = { false },
     private val isExternalTextInputActiveProvider: () -> Boolean = { false },
     private val onRestoreStageFocus: () -> Unit = {},
     private val displayRouter: DisplayRoutingAdapter = AwtDisplayRouter(),
@@ -342,13 +344,14 @@ class PresenterController(
     val jumpDialogOpen: Boolean
         get() = jumpDialogHost != null
 
-    internal var overviewOpenFromStage: Boolean by mutableStateOf(false)
-
-    val isOverviewOpen: Boolean
-        get() = overviewOpenFromStage || isOverviewOpenProvider()
+    var isOverviewOpen: Boolean by mutableStateOf(false)
+        internal set
 
     val isExternalTextInputActive: Boolean
         get() = isExternalTextInputActiveProvider()
+
+    var availableDisplays: List<DisplayScreenInfo> by mutableStateOf(displayRouter.screens())
+        private set
 
     internal var swallowNextEscapeKeyUp: Boolean by mutableStateOf(false)
 
@@ -436,7 +439,13 @@ class PresenterController(
             !isExternalTextInputActive &&
             !jumpDialogOpen
 
-    fun connectedDisplays(): List<DisplayScreenInfo> = displayRouter.screens()
+    fun refreshDisplays(): List<DisplayScreenInfo> {
+        val screens = displayRouter.screens()
+        availableDisplays = screens
+        return screens
+    }
+
+    fun connectedDisplays(): List<DisplayScreenInfo> = refreshDisplays()
 
     fun presentOnDisplay(screen: DisplayScreenInfo): Boolean =
         displayRouter.presentStoryOn(screen)
@@ -689,9 +698,6 @@ class PresenterController(
             else -> false
         }
     }
-
-    fun handlePresenterKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean =
-        handlePresenterPreviewKeyEvent(event) || handlePresenterBubbleKeyEvent(event, scope)
 
     companion object {
         const val DEFAULT_NOTES_FONT_SP = 20f

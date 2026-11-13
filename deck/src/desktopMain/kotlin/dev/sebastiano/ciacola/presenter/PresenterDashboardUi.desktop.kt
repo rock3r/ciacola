@@ -157,26 +157,49 @@ fun PresenterDashboard(
 
     var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var wallClock by remember { mutableStateOf(controller.wallClockText()) }
+    var displayPopupOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller) {
+        var tick = 0
         while (true) {
             nowMillis = System.currentTimeMillis()
             wallClock = controller.wallClockText()
+            if (tick % 8 == 0) {
+                controller.refreshDisplays()
+            }
+            tick++
             delay(250L)
         }
     }
 
     val readiness = controller.readinessStatus()
     LaunchedEffect(readiness.hasUnbakedOverrides) {
-        if (readiness.hasUnbakedOverrides) {
-            // Re-surface if new overrides appear after dismissal.
-        } else {
+        if (!readiness.hasUnbakedOverrides) {
             controller.unbakedNoticeDismissed = false
         }
     }
 
     val dashboardFocusRequester = remember { FocusRequester() }
+    var dashboardHadFocus by remember { mutableStateOf(false) }
+    var dashboardHasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         runCatching { dashboardFocusRequester.requestFocus() }
+    }
+    LaunchedEffect(
+        dashboardHasFocus,
+        controller.jumpDialogHost,
+        displayPopupOpen,
+        controller.canStepBackward,
+        controller.canStepForward,
+        controller.notesFontSizeSp,
+        controller.timer.targetDurationMinutes,
+    ) {
+        if (dashboardHadFocus &&
+            !dashboardHasFocus &&
+            controller.jumpDialogHost != JumpDialogHost.Presenter &&
+            !displayPopupOpen
+        ) {
+            runCatching { dashboardFocusRequester.requestFocus() }
+        }
     }
     var wasPresenterJumpOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.jumpDialogHost) {
@@ -191,6 +214,10 @@ fun PresenterDashboard(
         modifier = modifier
             .fillMaxSize()
             .background(globalColors.panelBackground)
+            .onFocusChanged { state ->
+                if (state.hasFocus) dashboardHadFocus = true
+                dashboardHasFocus = state.hasFocus
+            }
             .focusRequester(dashboardFocusRequester)
             .focusable()
             .onPreviewKeyEvent { ev -> controller.handlePresenterPreviewKeyEvent(ev) }
@@ -203,6 +230,11 @@ fun PresenterDashboard(
                 wallClock = wallClock,
                 elapsedSeconds = controller.timer.elapsedSeconds(nowMillis),
                 palette = palette,
+                displayPopupOpen = displayPopupOpen,
+                onDisplayPopupOpenChange = { open ->
+                    if (open) controller.refreshDisplays()
+                    displayPopupOpen = open
+                },
             )
 
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
@@ -259,12 +291,13 @@ private fun PresenterTopControlBar(
     wallClock: String,
     elapsedSeconds: Long,
     palette: PresenterStatusPalette,
+    displayPopupOpen: Boolean,
+    onDisplayPopupOpenChange: (Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
     val resolvedNotes = controller.resolvedCurrentNotes()
-    val displays = remember(controller.animatic) { controller.connectedDisplays() }
-    var displayPopupOpen by remember { mutableStateOf(false) }
+    val displays = controller.availableDisplays
 
     val slideLabel = "Slide ${controller.currentSceneIndex + 1} / ${controller.slideCount.coerceAtLeast(1)}" +
         " · Beat ${controller.currentBeatIndex + 1} / ${controller.currentBeatCount}"
@@ -399,7 +432,7 @@ private fun PresenterTopControlBar(
                     Box {
                         Tooltip(tooltip = { Text("Route audience stage to a display or swap screens") }) {
                             OutlinedButton(
-                                onClick = { displayPopupOpen = !displayPopupOpen },
+                                onClick = { onDisplayPopupOpenChange(!displayPopupOpen) },
                                 modifier = Modifier.testTag("ciacola-presenter-displays-button"),
                             ) {
                                 Text("Present on…", style = JewelTheme.typography.small)
@@ -410,14 +443,14 @@ private fun PresenterTopControlBar(
                             DisplayRoutingPopup(
                                 displays = displays,
                                 onSelectDisplay = { screen ->
-                                    displayPopupOpen = false
+                                    onDisplayPopupOpenChange(false)
                                     controller.presentOnDisplay(screen)
                                 },
                                 onSwapDisplays = {
-                                    displayPopupOpen = false
+                                    onDisplayPopupOpenChange(false)
                                     controller.swapAudienceAndPresenterDisplays()
                                 },
-                                onDismiss = { displayPopupOpen = false },
+                                onDismiss = { onDisplayPopupOpenChange(false) },
                             )
                         }
                     }
@@ -673,64 +706,71 @@ private fun DisplayRoutingPopup(
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             )
             displays.forEach { screen ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(role = Role.Button) { onSelectDisplay(screen) }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        key = AllIconsKeys.Actions.Preview,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        text = screen.label,
-                        style = JewelTheme.typography.regular,
-                        color = globalColors.text.normal,
-                    )
-                }
+                DisplayPopupRow(
+                    icon = AllIconsKeys.Actions.Preview,
+                    label = screen.label,
+                    enabled = true,
+                    onClick = { onSelectDisplay(screen) },
+                )
             }
 
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth().padding(vertical = 2.dp))
 
             val canSwap = displays.size >= 2
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
-                    .then(
-                        if (canSwap) {
-                            Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button) { onSwapDisplays() }
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                    .testTag("ciacola-presenter-swap-displays"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(
-                    key = AllIconsKeys.Actions.Refresh,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                )
-                Text(
-                    text = if (canSwap) {
-                        "Swap Audience & Presenter Displays"
-                    } else {
-                        "Swap Displays (needs 2+ monitors)"
-                    },
-                    style = JewelTheme.typography.regular,
-                    color = if (canSwap) globalColors.text.normal else globalColors.text.disabled,
-                )
-            }
+            DisplayPopupRow(
+                icon = AllIconsKeys.Actions.Refresh,
+                label = if (canSwap) {
+                    "Swap Audience & Presenter Displays"
+                } else {
+                    "Swap Displays (needs 2+ monitors)"
+                },
+                enabled = canSwap,
+                testTag = "ciacola-presenter-swap-displays",
+                onClick = onSwapDisplays,
+            )
         }
+    }
+}
+
+@Composable
+private fun DisplayPopupRow(
+    icon: IconKey,
+    label: String,
+    enabled: Boolean,
+    testTag: String? = null,
+    onClick: () -> Unit,
+) {
+    val globalColors = JewelTheme.globalColors
+    val focusRingColor = rememberAccessibleFocusRingColor()
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .onFocusChanged { focused = it.isFocused }
+            .accessibleFocusRing(focused = focused, ringColor = focusRingColor, cornerRadius = 4.dp)
+            .then(
+                if (enabled) {
+                    Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .let { if (testTag != null) it.testTag(testTag) else it },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            key = icon,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            text = label,
+            style = JewelTheme.typography.regular,
+            color = if (enabled) globalColors.text.normal else globalColors.text.disabled,
+        )
     }
 }
 
@@ -1039,7 +1079,7 @@ private fun PresenterSpeakerNotesPane(
                     onClick = { controller.decreaseNotesFontSize() },
                 )
                 Text(
-                    text = "${controller.notesFontSizeSp.toInt()} sp",
+                    text = "${controller.notesFontSizeSp.toInt()} pt",
                     style = JewelTheme.typography.small.copy(fontFamily = FontFamily.Monospace),
                     color = globalColors.text.info,
                     modifier = Modifier.testTag("ciacola-presenter-notes-font-size"),

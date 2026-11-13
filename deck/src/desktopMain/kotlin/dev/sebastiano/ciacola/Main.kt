@@ -39,7 +39,6 @@ import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
-import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.ReducedMotionMode
 import dev.sebastiano.ciacola.theme.parseReducedMotionEnv
 import dev.sebastiano.ciacola.theme.rememberSystemReducedMotion
@@ -89,7 +88,6 @@ fun main() = application {
     val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
 
     CompositionLocalProvider(
-        LocalReducedMotion provides effectiveReducedMotion,
         LocalAmbientLoopsPaused provides ambientLoopsPaused,
     ) {
     MaterialTheme(
@@ -177,9 +175,6 @@ fun main() = application {
                     reviewStageCoordinator.inspectModeEnabled = false
                     reviewStageCoordinator.dismissActivePopups()
                 },
-                isOverviewOpenProvider = {
-                    stageSelection.overviewPreviewMountCount > 0
-                },
                 isExternalTextInputActiveProvider = {
                     reviewStageCoordinator.pendingSelection != null ||
                         reviewStageCoordinator.selectedPinCommentId != null
@@ -235,10 +230,11 @@ fun main() = application {
                 ),
             )
         } else {
-            val storyboard = rememberHotReloadStoryboard(preset) {
+            val storyboard = rememberHotReloadStoryboard(preset, effectiveReducedMotion) {
                 createFoundationDeck(
                     theme = hostTheme,
                     bundledPreset = preset,
+                    reducedMotion = effectiveReducedMotion,
                 )
             }
             val animatic = rememberAnimatic(storyboard = { storyboard })

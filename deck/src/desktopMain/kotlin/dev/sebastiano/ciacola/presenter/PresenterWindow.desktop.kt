@@ -67,7 +67,14 @@ class PresenterWindow(
     @Composable
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
-        val displays = remember(visible, controller.animatic) { controller.connectedDisplays() }
+        LaunchedEffect(controller, visible) {
+            controller.refreshDisplays()
+            while (visible) {
+                delay(2_000L)
+                controller.refreshDisplays()
+            }
+        }
+        val displays = controller.availableDisplays
         val readiness = controller.readinessStatus()
 
         CheckboxItem(
@@ -166,7 +173,6 @@ fun rememberPresenterWindow(
     isInspectOpenProvider: () -> Boolean = { false },
     hasUnbakedOverridesProvider: () -> Boolean = { false },
     onEnterCleanShowMode: () -> Unit = {},
-    isOverviewOpenProvider: () -> Boolean = { false },
     isExternalTextInputActiveProvider: () -> Boolean = { false },
     onRestoreStageFocus: () -> Boolean = { false },
     displayRouter: DisplayRoutingAdapter = remember { AwtDisplayRouter() },
@@ -179,7 +185,6 @@ fun rememberPresenterWindow(
             isInspectOpenProvider = isInspectOpenProvider,
             hasUnbakedOverridesProvider = hasUnbakedOverridesProvider,
             onEnterCleanShowModeAction = onEnterCleanShowMode,
-            isOverviewOpenProvider = isOverviewOpenProvider,
             isExternalTextInputActiveProvider = isExternalTextInputActiveProvider,
             onRestoreStageFocus = { onRestoreStageFocus() },
             displayRouter = displayRouter,
@@ -208,10 +213,10 @@ private fun PresenterStageDecorator(
     val focusManager = LocalFocusManager.current
     val overviewOpen = LocalOverviewOpen.current
     SideEffect {
-        controller.overviewOpenFromStage = overviewOpen
+        controller.isOverviewOpen = overviewOpen
     }
     DisposableEffect(controller) {
-        onDispose { controller.overviewOpenFromStage = false }
+        onDispose { controller.isOverviewOpen = false }
     }
     var lastObservedIndex by remember { mutableStateOf(controller.animatic.targetIndex) }
 

@@ -28,7 +28,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -76,7 +75,6 @@ import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -124,8 +122,7 @@ fun TimelineStudioPanel(
     modifier: Modifier = Modifier,
     surface: TimelineSurface = TimelineSurface.Docked,
 ) {
-    val existingFocusState = LocalStudioA11yFocusState.current
-    val focusState = existingFocusState ?: remember { StudioA11yFocusState() }
+    val focusState = LocalStudioA11yFocusState.current ?: remember { StudioA11yFocusState() }
     val panelFocusRequester = remember { FocusRequester() }
     var panelHadFocus by remember { mutableStateOf(false) }
     val activeSubLoopId = controller.loopClock.activeSubCompLoopId
@@ -150,31 +147,6 @@ fun TimelineStudioPanel(
                         focusState.timelinePanelHasFocus = it.hasFocus
                     }
                     .focusable()
-                    .then(
-                        if (existingFocusState == null) {
-                            Modifier.onPreviewKeyEvent { ev ->
-                                if (ev.type == KeyEventType.KeyDown && ev.key == Key.Escape &&
-                                    !ev.isCtrlPressed && !ev.isMetaPressed && !ev.isAltPressed
-                                ) {
-                                    when {
-                                        controller.loopClock.activeSubCompLoopId != null -> {
-                                            controller.exitLoopSubComp()
-                                            true
-                                        }
-                                        controller.dockedInStoryWindow -> {
-                                            controller.dockedInStoryWindow = false
-                                            true
-                                        }
-                                        else -> false
-                                    }
-                                } else {
-                                    false
-                                }
-                            }
-                        } else {
-                            Modifier
-                        }
-                    )
                     .testTag("ciacola-timeline-studio"),
             ) {
                 TimelineTransportBar(controller = controller, surface = surface)
@@ -266,7 +238,7 @@ internal fun TimelineStudioController.handleStudioKey(
         return false
     }
 
-    if (event.type == KeyEventType.KeyDown && !event.isAltPressed && !focusState.textInputHasFocus) {
+    if (event.type == KeyEventType.KeyDown && !event.isAltPressed) {
         val primaryMod = event.isMetaPressed || event.isCtrlPressed
         if (primaryMod && event.key == Key.Z) {
             if (event.isShiftPressed) redo() else undo()
@@ -278,7 +250,6 @@ internal fun TimelineStudioController.handleStudioKey(
         }
     }
     if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed) return false
-    if (focusState.textInputHasFocus) return false
 
     if (event.key == Key.Spacebar) {
         if (event.type == KeyEventType.KeyUp && spaceHeld) {
@@ -342,15 +313,6 @@ internal fun createSpaceResetWindowFocusListener(
 
 @Composable
 private fun InstallSpaceResetOnWindowFocusLoss(controller: TimelineStudioController) {
-    val windowInfo = LocalWindowInfo.current
-    LaunchedEffect(controller, windowInfo) {
-        snapshotFlow { windowInfo.isWindowFocused }.collect { focused ->
-            if (!focused) {
-                controller.spaceHeld = false
-                controller.spaceUsedForPan = false
-            }
-        }
-    }
     DisposableEffect(controller) {
         val listener = createSpaceResetWindowFocusListener(controller)
         val attachedWindows = LinkedHashSet<AwtWindow>()

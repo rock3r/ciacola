@@ -24,12 +24,15 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Easel
+import dev.bnorm.storyboard.easel.ScenePreview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.AnimatedMeshBackdrop
 import dev.sebastiano.ciacola.DeckMagicText
@@ -56,6 +59,7 @@ import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TimelineSpatialSpec
 import dev.sebastiano.ciacola.timeline.TrackOverride
+import dev.sebastiano.ciacola.timeline.indexDeckTimeline
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.test.Test
@@ -63,6 +67,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
@@ -301,7 +306,7 @@ class ReducedMotionTest {
         var prose by mutableStateOf(AnnotatedString("First beat"))
         lateinit var animatic: dev.bnorm.storyboard.easel.Animatic
         lateinit var scope: CoroutineScope
-        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        val deck = createFoundationDeck(includeKeynoteEffectsLab = true, reducedMotion = true)
 
         setContent {
             scope = rememberCoroutineScope()
@@ -336,6 +341,47 @@ class ReducedMotionTest {
             waitForIdle()
         }
         assertEquals(Storyboard.Index(1, 0), animatic.currentIndex)
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Test
+    fun offscreenSceneAndTimelineMeasurementObserveReducedMotionFromDeckDecorator() {
+        var observedReduced = false
+        val probeDecorator = dev.bnorm.storyboard.ContentDecorator { content ->
+            observedReduced = LocalReducedMotion.current
+            content()
+        }
+        val reducedDeck = createFoundationDeck(
+            includeKeynoteEffectsLab = true,
+            stageDecorator = probeDecorator,
+            reducedMotion = true,
+        )
+        val fullDeck = createFoundationDeck(
+            includeKeynoteEffectsLab = true,
+            reducedMotion = false,
+        )
+
+        val scene = ImageComposeScene(
+            width = 320,
+            height = 180,
+            density = reducedDeck.format.density,
+            coroutineContext = Dispatchers.Unconfined,
+        ) {
+            ScenePreview(reducedDeck, Storyboard.Index(0, 0))
+        }
+        try {
+            scene.render(0L).close()
+        } finally {
+            scene.close()
+        }
+        assertTrue(observedReduced, "Offscreen ImageComposeScene must observe LocalReducedMotion == true from deckDecorator")
+
+        val fullSnapshot = indexDeckTimeline(fullDeck)
+        val reducedSnapshot = indexDeckTimeline(reducedDeck)
+        assertTrue(
+            reducedSnapshot.totalDurationMs < fullSnapshot.totalDurationMs,
+            "Offscreen timeline measurement must use shortened reduced-motion fades (${reducedSnapshot.totalDurationMs}ms vs ${fullSnapshot.totalDurationMs}ms)",
+        )
     }
 
     private fun pixelsMatch(

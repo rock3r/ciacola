@@ -27,13 +27,6 @@ class ExportCoordinator {
         if (status is ExportStatus.Failed) status = null
     }
 
-    /** Surfaces an immediate failure when no export is currently running. */
-    internal fun reportFailure(message: String) {
-        if (!running) {
-            status = ExportStatus.Failed(message)
-        }
-    }
-
     /** Requests cancellation of the currently running export, if any. */
     fun cancel() {
         activeJob?.cancel()

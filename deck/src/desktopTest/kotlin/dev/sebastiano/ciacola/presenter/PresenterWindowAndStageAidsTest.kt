@@ -2,6 +2,7 @@ package dev.sebastiano.ciacola.presenter
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -10,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.easel.rememberAnimatic
@@ -278,12 +281,13 @@ class PresenterWindowAndStageAidsTest {
                 animatic = animatic,
                 isStudioOpenProvider = { studioOpen },
                 isInspectOpenProvider = { inspectOpen },
-                isOverviewOpenProvider = { overviewVisibility.isVisible },
             )
             Box(Modifier.size(960.dp, 540.dp)) {
-                presenterWindow.decorator.decorate {
-                    EaselOverview(animatic, visibility = overviewVisibility) {
-                        Easel(animatic)
+                CompositionLocalProvider(LocalOverviewOpen provides overviewVisibility.isVisible) {
+                    presenterWindow.decorator.decorate {
+                        EaselOverview(animatic, visibility = overviewVisibility) {
+                            Easel(animatic)
+                        }
                     }
                 }
             }
@@ -415,5 +419,87 @@ class PresenterWindowAndStageAidsTest {
         waitForIdle()
         assertEquals(TimerRunState.Running, controller.timer.runState, "Space on focused timer button must start timer")
         assertEquals(Storyboard.Index(0, 0), animatic.currentIndex, "Space on focused button must not advance deck")
+    }
+
+    @Test
+    fun keyboardRemainsLiveWhenFocusedPresenterButtonDisablesAndDisplayListRefreshesLive() = runComposeUiTest {
+        var connectedScreens = listOf(
+            DisplayScreenInfo("d1", "Display 1 (1920×1080 · Primary)", Rectangle(0, 0, 1920, 1080), true),
+        )
+        var swapped = false
+        var presentedScreenId: String? = null
+        val router = object : DisplayRoutingAdapter {
+            override fun screens(): List<DisplayScreenInfo> = connectedScreens
+            override fun presentStoryOn(screen: DisplayScreenInfo): Boolean {
+                presentedScreenId = screen.id
+                return true
+            }
+            override fun swapAudienceAndPresenter(): Boolean {
+                swapped = true
+                return true
+            }
+        }
+
+        val twoBeatDeck = Storyboard.build(title = "BoundaryFocus") {
+            scene(frameCount = 2) {}
+        }
+        lateinit var animatic: Animatic
+        lateinit var controller: PresenterController
+
+        setContent {
+            animatic = rememberAnimatic(storyboard = { twoBeatDeck })
+            controller = remember(animatic) {
+                PresenterController(
+                    initialAnimatic = animatic,
+                    displayRouter = router,
+                    wallClockProvider = { "14:30" },
+                )
+            }
+            Box(Modifier.size(900.dp, 600.dp)) {
+                CiacolaJewelTheme(isDark = true) {
+                    PresenterDashboard(controller = controller)
+                }
+            }
+        }
+        waitForIdle()
+
+        // Focus "Next beat" button on beat 0/1, then activate it so we reach the final beat and "Next beat" disables!
+        val nextBtn = onNodeWithTag("ciacola-presenter-next-beat")
+        nextBtn.requestFocus()
+        waitForIdle()
+        nextBtn.performKeyInput { pressKey(Key.Spacebar) }
+        waitForIdle()
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+        assertEquals(Storyboard.Index(0, 1), animatic.currentIndex)
+        nextBtn.assertIsNotEnabled()
+
+        // Without clicking anything, keyboard shortcuts (T for timer, ← for previous beat) must still work!
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput { pressKey(Key.T) }
+        waitForIdle()
+        assertEquals(TimerRunState.Running, controller.timer.runState, "Keyboard shortcut T must work after focused button disables")
+
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput { pressKey(Key.DirectionLeft) }
+        waitForIdle()
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+        assertEquals(Storyboard.Index(0, 0), animatic.currentIndex, "Arrow navigation must work after focused button disables")
+
+        // Hot-plug a second projector AFTER launch without rebuilding Storyboard or Animatic!
+        connectedScreens = listOf(
+            DisplayScreenInfo("d1", "Display 1 (1920×1080 · Primary)", Rectangle(0, 0, 1920, 1080), true),
+            DisplayScreenInfo("d2", "Projector (1920×1080)", Rectangle(1920, 0, 1920, 1080), false),
+        )
+        onNodeWithTag("ciacola-presenter-displays-button").performClick()
+        waitForIdle()
+        onNodeWithText("Projector (1920×1080)").assertIsDisplayed().performClick()
+        waitForIdle()
+        assertEquals("d2", presentedScreenId, "Opening 'Present on…' must re-enumerate newly connected displays")
+
+        onNodeWithTag("ciacola-presenter-displays-button").performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-swap-displays").performClick()
+        waitForIdle()
+        assertTrue(swapped, "Swap Displays must enable as soon as a second display is detected")
     }
 }

@@ -33,7 +33,6 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 internal class StudioA11yFocusState {
     var timelinePanelHasFocus by mutableStateOf(false)
     var layerListHasFocus by mutableStateOf(false)
-    var textInputHasFocus by mutableStateOf(false)
     var swallowNextEscapeKeyUp by mutableStateOf(false)
 
     private val focusedActivatables = mutableStateMapOf<Any, Boolean>()
