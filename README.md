@@ -10,15 +10,21 @@ not the talk's narrative.
 
 ## What is here
 
-The sample deck has four scenes and nine states. Together they exercise:
+The desktop app presents five scenes with fourteen base states (beats). Together they exercise:
 
 - deterministic forward and backward navigation;
 - a shared-bounds, Magic-Move-style transition;
 - animation that keeps running without advancing the scene;
 - an animated mesh made from indexed Compose `Vertices`;
 - MagicText transitions for prose;
-- MagicText transitions for syntax-highlighted Kotlin; and
+- MagicText transitions for syntax-highlighted Kotlin;
+- a Keynote effects lab (builds, staggers, line draws, code morphs, and a magnifier loupe); and
 - a single 1920×1080 design system for type, colour, and spacing.
+
+Around the stage it adds an Easel overview grid, a presenter Assistant window, a Ctrl-click slide
+review flow, a live theme switcher (`Stage Dark` / `Keynote Light`), PDF export, and an After
+Effects-style Timeline Studio for scrubbing and tuning animations. See
+[`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) for how each piece works.
 
 All visible copy is marked provisional on purpose.
 
@@ -31,7 +37,36 @@ automatically when necessary:
 ./gradlew :deck:run
 ```
 
-Use the left and right arrow keys to move through the deck.
+The first launch opens a 16:9 1280×720 Story window; window sizes and the current slide are then
+remembered in `.storyboard/` at the repository root.
+
+### Shortcuts
+
+| Key | Action |
+|---|---|
+| `→` `↓` `PgDn` `Space` `Enter` | Next beat (presentation clickers send `PgDn`/`PgUp`) |
+| `←` `↑` `PgUp` `Backspace` | Previous beat |
+| `Esc` | Toggle the Overview grid (also **Easel ▸ Overview**); arrows move, `Enter` jumps |
+| `⌥⌘P` | Toggle fullscreen (**Easel ▸ Fullscreen**) |
+| `F2` | Show the Assistant (presenter) window |
+| `F3` or hold `Ctrl` | Inspect mode for slide review; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
+| `F4` | Show the Review window |
+| `F5` | Toggle the Timeline Studio docked in the Story window |
+| `F6` | Open the Timeline Studio in a detached window |
+
+The **Theme** menu switches between `Stage Dark` and `Keynote Light` live; **Export ▸ PDF** writes
+one page per beat.
+
+### Hot reload
+
+Run the deck with Compose Hot Reload and apply code edits without restarting:
+
+```shell
+./gradlew :deck:hotRunDesktopAsync   # launches in the background
+./gradlew :deck:reload               # applies the current source edits
+```
+
+The current slide and build step survive a reload.
 
 ## Project layout
 
@@ -68,7 +103,15 @@ rendering, or the unfinished gradual-entrance renderer. The intended boundary is
 Run the focused suites with:
 
 ```shell
-./gradlew :storyboard-text:jvmTest :deck:desktopTest
+./gradlew :storyboard-text:jvmTest :storyboard-easel:jvmTest :deck:desktopTest
+```
+
+Real-window end-to-end tests drive the app with Spectre's synthetic AWT input. They run as a
+background accessory app (`apple.awt.UIElement=true`, no auto focus), so they never steal focus
+from what you are doing:
+
+```shell
+./gradlew :deck:spectreTest
 ```
 
 The full non-browser gate is:

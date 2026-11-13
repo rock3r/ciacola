@@ -87,6 +87,8 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.named<Test>("desktopTest") {
     javaLauncher.set(jbr25)
     exclude("**/*SpectreTest.class")
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
 }
 
 val desktopTestTask = tasks.named<Test>("desktopTest")
@@ -97,7 +99,20 @@ tasks.register<Test>("spectreTest") {
     testClassesDirs = desktopTestTask.get().testClassesDirs
     classpath = desktopTestTask.get().classpath
     include("**/*SpectreTest.class")
+    jvmArgs("-Dapple.awt.UIElement=true")
     systemProperty("java.awt.headless", "false")
+    systemProperty("apple.awt.UIElement", "true")
+    listOf(
+        "CIACOLA_QA_WORKER",
+        "CIACOLA_QA_ROOT",
+        "CIACOLA_SPECTRE_CAPTURE_DIR",
+        "FFMPEG_BIN",
+    ).forEach { key ->
+        providers.environmentVariable(key).orNull?.let { environment(key, it) }
+    }
+    listOf("ciacola.qa.worker", "ciacola.qa.root").forEach { key ->
+        providers.systemProperty(key).orNull?.let { systemProperty(key, it) }
+    }
     outputs.upToDateWhen { false }
 }
 
@@ -110,5 +125,11 @@ compose.desktop {
             packageName = "Ciacola"
             packageVersion = "1.0.0"
         }
+    }
+}
+
+afterEvaluate {
+    tasks.withType<JavaExec>().configureEach {
+        workingDir = rootProject.projectDir
     }
 }

@@ -2,6 +2,10 @@ package dev.sebastiano.ciacola
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.lerp
+import dev.sebastiano.ciacola.theme.DeckTheme
+import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
 import dev.sebastiano.ciacola.timeline.rememberDeckLoopMillis
 import dev.sebastiano.ciacola.timeline.timelineTarget
@@ -25,28 +29,54 @@ data class MeshPlan(
 
 data class MeshLoopState(val sceneState: Int)
 
-fun animatedMeshPoints(state: MeshLoopState, elapsedMillis: Long): List<List<Pair<Offset, Color>>> {
+fun animatedMeshPoints(
+    state: MeshLoopState,
+    elapsedMillis: Long,
+    theme: DeckTheme = DeckThemes.stageDark(),
+): List<List<Pair<Offset, Color>>> {
     require(state.sceneState == 0) { "the foundation loop intentionally has exactly one scene state" }
     val phase = (elapsedMillis % 6_000L) / 6_000f * (2f * PI.toFloat())
     val drift = sin(phase) * 0.10f
     val counterDrift = sin(phase + PI.toFloat() / 2f) * 0.08f
-    return listOf(
+    return if (theme.isLight) {
+        val base = theme.colors.background
+        val surface = theme.colors.surface
         listOf(
-            Offset(0f, 0f) to Color(0xFF121726),
-            Offset(0.5f + drift, 0f) to Color(0xFF263B70),
-            Offset(1f, 0f) to Color(0xFF161522),
-        ),
+            listOf(
+                Offset(0f, 0f) to lerp(base, surface, 0.35f),
+                Offset(0.5f + drift, 0f) to Color(0xFFD6E2F5),
+                Offset(1f, 0f) to Color(0xFFECE6EE),
+            ),
+            listOf(
+                Offset(0f, 0.5f + counterDrift) to lerp(surface, theme.colors.accent, 0.22f),
+                Offset(0.5f - drift, 0.5f + drift) to lerp(surface, theme.colors.accent, 0.34f),
+                Offset(1f, 0.5f - counterDrift) to lerp(surface, theme.colors.secondary, 0.26f),
+            ),
+            listOf(
+                Offset(0f, 1f) to lerp(base, Color(0xFFDDE3EC), 0.55f),
+                Offset(0.5f + counterDrift, 1f) to lerp(surface, theme.colors.secondary, 0.32f),
+                Offset(1f, 1f) to lerp(base, surface, 0.50f),
+            ),
+        )
+    } else {
         listOf(
-            Offset(0f, 0.5f + counterDrift) to Color(0xFF4F2246),
-            Offset(0.5f - drift, 0.5f + drift) to DeckDesign.accent,
-            Offset(1f, 0.5f - counterDrift) to Color(0xFF174F50),
-        ),
-        listOf(
-            Offset(0f, 1f) to Color(0xFF11141D),
-            Offset(0.5f + counterDrift, 1f) to DeckDesign.secondary,
-            Offset(1f, 1f) to Color(0xFF12131A),
-        ),
-    )
+            listOf(
+                Offset(0f, 0f) to Color(0xFF121726),
+                Offset(0.5f + drift, 0f) to Color(0xFF263B70),
+                Offset(1f, 0f) to Color(0xFF161522),
+            ),
+            listOf(
+                Offset(0f, 0.5f + counterDrift) to Color(0xFF4F2246),
+                Offset(0.5f - drift, 0.5f + drift) to theme.colors.accent,
+                Offset(1f, 0.5f - counterDrift) to Color(0xFF174F50),
+            ),
+            listOf(
+                Offset(0f, 1f) to Color(0xFF11141D),
+                Offset(0.5f + counterDrift, 1f) to theme.colors.secondary,
+                Offset(1f, 1f) to Color(0xFF12131A),
+            ),
+        )
+    }
 }
 
 fun planMesh(points: List<List<Pair<Offset, Color>>>): MeshPlan {
@@ -83,9 +113,10 @@ fun AnimatedMeshBackdrop(
     )
     // The mesh choreography is authored over a 6 s cycle; scale the loop clock's position within
     // the (possibly overridden) period onto it so period overrides stay seamless at the wrap.
+    val theme = LocalDeckTheme.current
     val effectivePeriod = LocalDeckLoopClock.current.effectivePeriodMillis(loopId, periodMillis)
     val authoredElapsed = (elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong()
-    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), authoredElapsed))
+    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), authoredElapsed, theme))
     val paint = Paint()
 
     androidx.compose.foundation.layout.Box(

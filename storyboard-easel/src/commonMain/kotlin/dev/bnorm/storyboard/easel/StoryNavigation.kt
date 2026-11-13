@@ -17,10 +17,13 @@ fun Modifier.onStoryNavigation(animatic: Animatic): Modifier {
         when (event.type) {
             KeyEventType.KeyDown -> {
                 when (event.key) {
+                    // Presentation clickers send PageDown/PageUp (some send Space/Enter).
                     Key.DirectionRight,
-//                    Key.DirectionDown,
-//                    Key.Enter,
-//                    Key.Spacebar,
+                    Key.DirectionDown,
+                    Key.PageDown,
+                    Key.Enter,
+                    Key.NumPadEnter,
+                    Key.Spacebar,
                         -> {
                         job?.cancel()
                         job = coroutineScope.launch {
@@ -31,8 +34,9 @@ fun Modifier.onStoryNavigation(animatic: Animatic): Modifier {
                     }
 
                     Key.DirectionLeft,
-//                    Key.DirectionUp,
-//                    Key.Backspace,
+                    Key.DirectionUp,
+                    Key.PageUp,
+                    Key.Backspace,
                         -> {
                         job?.cancel()
                         job = coroutineScope.launch {

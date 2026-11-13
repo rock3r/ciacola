@@ -64,8 +64,8 @@ internal class OverviewState internal constructor(
                 return SceneColumn(
                     scene = scene,
                     index = sceneIndex,
-                    start = sceneIndex > 0,
-                    end = sceneIndex < lastSceneIndex,
+                    start = false,
+                    end = false,
                     items = scene.frames.mapIndexed { stateIndex, state ->
                         StateItem(
                             index = Storyboard.Index(sceneIndex, stateIndex),

@@ -13,7 +13,8 @@ internal fun MenuBarScope.ExportMenu(exporter: StoryboardPdfExporter, storyboard
     Menu("Export") {
         Item(
             text = "PDF",
-            enabled = exporter.status == null,
+            // Disabled for the whole export, file dialog included; the exporter also ignores re-entry.
+            enabled = !exporter.isExporting,
             onClick = {
                 coroutineScope.launch {
                     exporter.export(storyboard)

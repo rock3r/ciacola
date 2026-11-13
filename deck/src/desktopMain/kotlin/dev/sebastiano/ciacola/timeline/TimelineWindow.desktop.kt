@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -25,11 +27,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -47,6 +53,7 @@ import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -76,11 +83,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.MenuScope
+import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.EaselWindow
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.SceneMode
 import dev.sebastiano.ciacola.theme.DeckThemePreset
+import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import kotlin.math.exp
 import kotlin.math.hypot
@@ -108,6 +117,26 @@ fun TimelineStudioPanel(
         ) {
             TimelineTransportBar(controller = controller)
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+            controller.overridesStore.structuralRevision
+            if (controller.isPlayheadOnInjectedVirtualBeat()) {
+                val warnBg = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFF4D6)
+                val warnFg = if (isDark) Color(0xFFFFD87A) else Color(0xFF6B4C00)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(warnBg)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .testTag("ciacola-virtual-hold-banner"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "◆ HOLD · Virtual Hold Beat — assign build tracks here, or Bake to Kotlin to add new text/code state",
+                        style = JewelTheme.typography.small,
+                        color = warnFg,
+                    )
+                }
+                Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+            }
             Row(Modifier.fillMaxSize()) {
                 TimelineMultiTrackArea(
                     controller = controller,
@@ -138,6 +167,17 @@ internal fun TimelineStudioController.handleStudioKey(
         return true
     }
     if (!authoringActive) return false
+    if (event.type == KeyEventType.KeyDown && !event.isAltPressed) {
+        val primaryMod = event.isMetaPressed || event.isCtrlPressed
+        if (primaryMod && event.key == Key.Z) {
+            if (event.isShiftPressed) redo() else undo()
+            return true
+        }
+        if (event.isCtrlPressed && !event.isMetaPressed && !event.isShiftPressed && event.key == Key.Y) {
+            redo()
+            return true
+        }
+    }
     if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed) return false
 
     if (event.key == Key.Spacebar) {
@@ -156,19 +196,32 @@ internal fun TimelineStudioController.handleStudioKey(
         return true
     }
     if (event.type != KeyEventType.KeyDown) return false
+    // Presenting keys work from anywhere in the studio: a click on the transport, a layer row or a
+    // slider moves keyboard focus off the stage, which would otherwise swallow ←/→.
+    val direction = when (event.key) {
+        Key.DirectionRight, Key.DirectionDown, Key.PageDown -> AdvanceDirection.Forward
+        Key.DirectionLeft, Key.DirectionUp, Key.PageUp -> AdvanceDirection.Backward
+        else -> null
+    }
+    if (direction != null) {
+        advance(scope, direction)
+        return true
+    }
     val playheadX = viewport.xForTime(currentPlayheadTimeMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx)
     val previewCenter = Offset(preview.containerSize.width / 2f, preview.containerSize.height / 2f)
     when (event.key) {
         Key.Equals, Key.Plus, Key.NumPadAdd -> viewport.zoomBy(1.25f, playheadX)
         Key.Minus, Key.NumPadSubtract -> viewport.zoomBy(0.8f, playheadX)
         Key.Semicolon -> viewport.toggleFitAndFrames(currentPlayheadTimeMs.toFloat())
-        Key.Period -> preview.zoomBy(1.25f, previewCenter)
-        Key.Comma -> preview.zoomBy(0.8f, previewCenter)
-        Key.Slash -> preview.reset()
+        Key.Period -> if (stageSelection.isStoryStageMounted) preview.zoomBy(1.25f, previewCenter) else return false
+        Key.Comma -> if (stageSelection.isStoryStageMounted) preview.zoomBy(0.8f, previewCenter) else return false
+        Key.Slash -> if (stageSelection.isStoryStageMounted) preview.reset() else return false
         else -> return false
     }
     return true
 }
+
+private val LocalInsideStagePreviewViewport = staticCompositionLocalOf { false }
 
 /**
  * Story-window preview with After Effects composition-viewer navigation: mouse wheel zooms at
@@ -183,6 +236,8 @@ internal fun StagePreviewViewport(
     content: @Composable () -> Unit,
 ) {
     val preview = controller.preview
+    val storyMounted = controller.stageSelection.isStoryStageMounted
+    val previewActive = enabled && storyMounted
     LaunchedEffect(enabled) {
         if (!enabled) preview.reset()
     }
@@ -191,8 +246,8 @@ internal fun StagePreviewViewport(
             .fillMaxSize()
             .clipToBounds()
             .onSizeChanged { preview.containerSize = it.toSize() }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
+            .pointerInput(previewActive) {
+                if (!previewActive) return@pointerInput
                 awaitPointerEventScope {
                     var panning = false
                     var last = Offset.Zero
@@ -232,7 +287,7 @@ internal fun StagePreviewViewport(
                     }
                 }
             }
-            .then(if (enabled && controller.spaceHeld) Modifier.pointerHoverIcon(PointerIcon.Hand, overrideDescendants = true) else Modifier)
+            .then(if (previewActive && controller.spaceHeld) Modifier.pointerHoverIcon(PointerIcon.Hand, overrideDescendants = true) else Modifier)
             .testTag("ciacola-preview-viewport")
             .semantics {
                 contentDescription = "previewScale=${"%.3f".format(preview.scale)} " +
@@ -244,15 +299,17 @@ internal fun StagePreviewViewport(
                 .fillMaxSize()
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0f)
-                    scaleX = preview.scale
-                    scaleY = preview.scale
-                    translationX = preview.offset.x
-                    translationY = preview.offset.y
+                    scaleX = if (previewActive) preview.scale else 1f
+                    scaleY = if (previewActive) preview.scale else 1f
+                    translationX = if (previewActive) preview.offset.x else 0f
+                    translationY = if (previewActive) preview.offset.y else 0f
                 },
         ) {
-            content()
+            CompositionLocalProvider(LocalInsideStagePreviewViewport provides true) {
+                content()
+            }
         }
-        if (enabled && !preview.isIdentity) {
+        if (previewActive && !preview.isIdentity) {
             CiacolaJewelTheme(isDark = isDark) {
                 Box(
                     modifier = Modifier
@@ -305,11 +362,25 @@ class TimelineStudioWindow(
         val scope = rememberCoroutineScope()
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
         var totalHeightPx by remember { mutableStateOf(720f) }
+        val rootFocusRequester = remember { FocusRequester() }
+        var rootHadFocus by remember { mutableStateOf(false) }
+        var rootHasFocus by remember { mutableStateOf(false) }
+        LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
+            if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
+                runCatching { rootFocusRequester.requestFocus() }
+            }
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { totalHeightPx = it.height.toFloat().coerceAtLeast(240f) }
+                .onFocusChanged { state ->
+                    if (state.hasFocus) rootHadFocus = true
+                    rootHasFocus = state.hasFocus
+                }
+                .focusRequester(rootFocusRequester)
+                .focusable()
                 .onPreviewKeyEvent { ev -> controller.handleStudioKey(ev, scope, suppressShortcutsProvider()) },
         ) {
             if (controller.dockedInStoryWindow) {
@@ -390,9 +461,19 @@ class TimelineStudioWindow(
     override fun Content() {
         val scope = rememberCoroutineScope()
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
+        val rootFocusRequester = remember { FocusRequester() }
+        var rootHasFocus by remember { mutableStateOf(false) }
+        LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
+            if (!rootHasFocus && !suppressShortcutsProvider()) {
+                runCatching { rootFocusRequester.requestFocus() }
+            }
+        }
         Box(
             Modifier
                 .fillMaxSize()
+                .onFocusChanged { rootHasFocus = it.hasFocus }
+                .focusRequester(rootFocusRequester)
+                .focusable()
                 .onPreviewKeyEvent { ev -> controller.handleStudioKey(ev, scope, suppressShortcutsProvider()) },
         ) {
             TimelineStudioPanel(controller = controller, isDark = isDark)
@@ -430,12 +511,31 @@ fun createTimelineStageDecorator(
         LocalMotionPathPreviewState provides motionPathPreview,
         LocalTimelineStageSelection provides stageSelection,
     ) {
-        val isStory = LocalSceneMode.current == SceneMode.Story
-        Box(Modifier.fillMaxSize().then(if (isStory) Modifier.stagePicking(stageSelection) else Modifier)) {
+        val sceneMode = LocalSceneMode.current
+        val isStory = sceneMode == SceneMode.Story
+        val insidePreviewViewport = LocalInsideStagePreviewViewport.current
+        if (insidePreviewViewport) {
+            DisposableEffect(stageSelection, sceneMode) {
+                when (sceneMode) {
+                    SceneMode.Story -> stageSelection.storyStageMountCount++
+                    SceneMode.Preview -> stageSelection.overviewPreviewMountCount++
+                    null -> Unit
+                }
+                onDispose {
+                    when (sceneMode) {
+                        SceneMode.Story -> stageSelection.storyStageMountCount = (stageSelection.storyStageMountCount - 1).coerceAtLeast(0)
+                        SceneMode.Preview -> stageSelection.overviewPreviewMountCount = (stageSelection.overviewPreviewMountCount - 1).coerceAtLeast(0)
+                        null -> Unit
+                    }
+                }
+            }
+        }
+        val isPresentingStoryStage = isStory && stageSelection.overviewPreviewMountCount == 0
+        Box(Modifier.fillMaxSize().then(if (isPresentingStoryStage) Modifier.stagePicking(stageSelection) else Modifier)) {
             content()
-            if (isStory) {
+            if (isPresentingStoryStage) {
                 TimelineSelectionStageOverlay(stageSelection)
-                if (loopClock.activeSubCompLoopId == null) {
+                if (loopClock.activeSubCompLoopId == null && stageSelection.pickingEnabled) {
                     MotionArcStageOverlay(
                         motionPathPreview = motionPathPreview,
                         overridesStore = overridesStore,
@@ -490,7 +590,9 @@ private fun Modifier.stagePicking(selection: TimelineStageSelection): Modifier =
 /** Highlights every stage element animated by the selected track (After Effects layer bounds). */
 @Composable
 private fun TimelineSelectionStageOverlay(selection: TimelineStageSelection) {
-    val selected = selection.selectedTrackId
+    // Authoring-only: while presenting (studio closed) nothing is highlighted and no frame loop runs;
+    // the selection itself is kept for when the studio reopens.
+    val selected = if (selection.pickingEnabled) selection.selectedTrackId else null
     var overlayCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var frameTick by remember { mutableLongStateOf(0L) }
     val textMeasurer = rememberTextMeasurer()
@@ -567,6 +669,10 @@ private fun MotionArcStageOverlay(
     val activeScene = motionPathPreview.activeStageSceneIndex
     if (activeScene != null && arc.sceneIndex != null && activeScene != arc.sceneIndex) return
     val overrideBend = overridesStore.data().tracks[selId]?.spatial?.arcBend ?: arc.arcBend
+    val stageBg = LocalDeckTheme.current.colors.background
+    // The theme's motion-path token is contrast-checked against each preset's stage background.
+    val arcStrokeColor = LocalDeckTheme.current.colors.motionPathPreview
+    val isLightStage = wcagRelativeLuminance(stageBg) > 0.35f
 
     Canvas(Modifier.fillMaxSize()) {
         val s = arc.startBounds.center
@@ -585,10 +691,12 @@ private fun MotionArcStageOverlay(
         }
         drawPath(
             path = trajectory,
-            color = Color(0xFFD59BF6),
+            color = arcStrokeColor,
             style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)),
         )
-        drawCircle(color = Color(0xFFD59BF6), radius = 7f, center = s)
-        drawCircle(color = Color(0xFFD59BF6), radius = 7f, center = e)
+        drawCircle(color = if (isLightStage) Color.White else Color(0xFF0B0D12), radius = 8.5f, center = s)
+        drawCircle(color = arcStrokeColor, radius = 7f, center = s)
+        drawCircle(color = if (isLightStage) Color.White else Color(0xFF0B0D12), radius = 8.5f, center = e)
+        drawCircle(color = arcStrokeColor, radius = 7f, center = e)
     }
 }

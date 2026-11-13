@@ -60,6 +60,12 @@ allprojects {
         targetCompatibility = javaVersion.toString()
     }
 
+    tasks.withType(Test::class.java).configureEach {
+        // Prevent macOS AWT/Skiko test JVMs from registering a Dock icon or stealing focus.
+        jvmArgs("-Dapple.awt.UIElement=true")
+        systemProperty("apple.awt.UIElement", "true")
+    }
+
     plugins.withId("com.vanniktech.maven.publish") {
         apply(plugin = "org.jetbrains.dokka")
         configure<MavenPublishBaseExtension> {

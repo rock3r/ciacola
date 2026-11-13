@@ -14,17 +14,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.bnorm.storyboard.AdvanceDirection
+import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.DesktopEasel
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.EaselWindow
 import dev.bnorm.storyboard.easel.assist.rememberAssistantWindow
 import dev.bnorm.storyboard.easel.rememberAnimatic
+import dev.bnorm.storyboard.easel.resolveStoryboardWorkspaceRoot
 import dev.bnorm.storyboard.plus
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
@@ -42,6 +45,8 @@ import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Rectangle
 import java.awt.Robot
 import java.io.File
+import java.util.Collections
+import java.util.WeakHashMap
 import javax.imageio.ImageIO
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -71,8 +76,14 @@ fun main() = application {
     ) {
         val smokeDirectory = System.getenv("DECK_VISUAL_SMOKE_DIR")
         if (smokeDirectory == null) {
-            val reviewStore = remember { ReviewCommentStore() }
-            val timelineOverridesStore = remember { TimelineOverridesStore() }
+            val workspaceRoot = remember { resolveStoryboardWorkspaceRoot() }
+            val storyboardDir = remember(workspaceRoot) { workspaceRoot.resolve(".storyboard") }
+            val reviewStore = remember(storyboardDir, workspaceRoot) {
+                ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = workspaceRoot)
+            }
+            val timelineOverridesStore = remember(storyboardDir) {
+                TimelineOverridesStore(storyboardDir = storyboardDir)
+            }
             val deckLoopClock = remember { DeckLoopClock() }
             val motionPathPreview = remember { MotionPathPreviewState() }
             val stageSelection = remember { TimelineStageSelection() }
@@ -88,6 +99,7 @@ fun main() = application {
             }
 
             // Stage decorator provides loop clock + motion-path arc overlay + Ctrl-click review stage
+            val presetRegistry = remember { StoryboardPresetRegistry() }
             val stageLoopAndArcDecorator = rememberTimelineStageDecorator(
                 loopClock = deckLoopClock,
                 motionPathPreview = motionPathPreview,
@@ -106,7 +118,9 @@ fun main() = application {
                     includeKeynoteEffectsLab = true,
                     stageDecorator = stageLoopAndArcDecorator + reviewStageCoordinator.stageDecorator,
                     timelineOverrides = currentOverrides,
-                )
+                ).also { built ->
+                    presetRegistry.record(built, preset)
+                }
             }
             val animatic = rememberAnimatic(
                 fileName = "animatic",
@@ -122,7 +136,9 @@ fun main() = application {
             )
             val timelineWindow = rememberTimelineStudioWindow(
                 controller = timelineController,
-                currentPresetProvider = { preset },
+                currentPresetProvider = {
+                    presetRegistry.presetFor(timelineController.animatic.storyboard, fallback = preset)
+                },
                 suppressShortcutsProvider = {
                     reviewStageCoordinator.pendingSelection != null ||
                         reviewStageCoordinator.selectedPinCommentId != null
@@ -132,16 +148,20 @@ fun main() = application {
                 currentPreset = preset,
                 onSelectPreset = { preset = it },
             )
+            var reviewWindowHolder by remember { mutableStateOf<dev.sebastiano.ciacola.review.SlideReviewWindow?>(null) }
             val reviewWindow = rememberSlideReviewWindow(
                 animatic = animatic,
                 store = reviewStore,
                 stageCoordinator = reviewStageCoordinator,
-                currentPresetProvider = { preset },
+                currentPresetProvider = {
+                    val currentStoryboard = reviewWindowHolder?.animatic?.storyboard
+                    presetRegistry.presetFor(currentStoryboard, fallback = preset)
+                },
                 timelineDockedProvider = { timelineController.dockedInStoryWindow },
                 onToggleTimeline = {
                     timelineController.dockedInStoryWindow = !timelineController.dockedInStoryWindow
                 },
-            )
+            ).also { reviewWindowHolder = it }
             DesktopEasel(
                 animatic = animatic,
                 windows = listOf(
@@ -213,64 +233,89 @@ fun main() = application {
     }
 }
 
+internal class StoryboardPresetRegistry {
+    private val map = Collections.synchronizedMap(WeakHashMap<Storyboard, DeckThemePreset>())
+
+    fun record(storyboard: Storyboard, preset: DeckThemePreset) {
+        map[storyboard] = preset
+    }
+
+    fun presetFor(storyboard: Storyboard?, fallback: DeckThemePreset): DeckThemePreset =
+        storyboard?.let { map[it] } ?: fallback
+}
+
 @Composable
-private fun rememberThemeSwitcherWindow(
+internal fun rememberThemeSwitcherWindow(
     currentPreset: DeckThemePreset,
     onSelectPreset: (DeckThemePreset) -> Unit,
-): EaselWindow = remember(currentPreset, onSelectPreset) {
-    object : EaselWindow {
-        override val name: String = "Theme"
-        override var visible: Boolean by mutableStateOf(false)
+): EaselWindow = remember {
+    ThemeSwitcherWindow(currentPreset, onSelectPreset)
+}.also {
+    it.currentPreset = currentPreset
+    it.onSelectPreset = onSelectPreset
+}
 
-        @Composable
-        override fun MenuScope.Menu() {
-            RadioButtonItem(
-                text = "Stage Dark",
-                selected = currentPreset == DeckThemePreset.StageDark,
-                onClick = { onSelectPreset(DeckThemePreset.StageDark) },
-            )
-            RadioButtonItem(
-                text = "Keynote Light",
-                selected = currentPreset == DeckThemePreset.KeynoteLight,
-                onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
-            )
-            Separator()
-            CheckboxItem(
-                text = "Show Theme Inspector",
-                checked = visible,
-                onCheckedChange = { visible = it },
-            )
-        }
+private class ThemeSwitcherWindow(
+    initialPreset: DeckThemePreset,
+    initialOnSelectPreset: (DeckThemePreset) -> Unit,
+) : EaselWindow {
+    override val name: String = "Theme"
+    override var visible: Boolean by mutableStateOf(false)
 
-        @Composable
-        override fun Content() {
-            val isDark = currentPreset == DeckThemePreset.StageDark
-            CiacolaJewelTheme(isDark = isDark) {
+    // Two presets and a short description: keep the inspector compact instead of the roomy
+    // tool-window default meant for the timeline and review panels.
+    override val initialSize: DpSize get() = DpSize(420.dp, 360.dp)
+    var currentPreset: DeckThemePreset by mutableStateOf(initialPreset)
+    var onSelectPreset: (DeckThemePreset) -> Unit by mutableStateOf(initialOnSelectPreset)
+
+    @Composable
+    override fun MenuScope.Menu() {
+        RadioButtonItem(
+            text = "Stage Dark",
+            selected = currentPreset == DeckThemePreset.StageDark,
+            onClick = { onSelectPreset(DeckThemePreset.StageDark) },
+        )
+        RadioButtonItem(
+            text = "Keynote Light",
+            selected = currentPreset == DeckThemePreset.KeynoteLight,
+            onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
+        )
+        Separator()
+        CheckboxItem(
+            text = "Show Theme Inspector",
+            checked = visible,
+            onCheckedChange = { visible = it },
+        )
+    }
+
+    @Composable
+    override fun Content() {
+        val isDark = currentPreset == DeckThemePreset.StageDark
+        CiacolaJewelTheme(isDark = isDark) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(JewelTheme.globalColors.panelBackground)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                GroupHeader("Deck theme preset:")
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(JewelTheme.globalColors.panelBackground)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.selectableGroup(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    GroupHeader("Deck theme preset:")
-                    Column(
-                        modifier = Modifier.selectableGroup(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        RadioButtonRow(
-                            text = "Stage Dark",
-                            selected = currentPreset == DeckThemePreset.StageDark,
-                            onClick = { onSelectPreset(DeckThemePreset.StageDark) },
-                        )
-                        RadioButtonRow(
-                            text = "Keynote Light",
-                            selected = currentPreset == DeckThemePreset.KeynoteLight,
-                            onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
-                        )
-                    }
-                    InfoText("Switches slide stage, code cards, and Jewel chrome live without losing slide position.")
+                    RadioButtonRow(
+                        text = "Stage Dark",
+                        selected = currentPreset == DeckThemePreset.StageDark,
+                        onClick = { onSelectPreset(DeckThemePreset.StageDark) },
+                    )
+                    RadioButtonRow(
+                        text = "Keynote Light",
+                        selected = currentPreset == DeckThemePreset.KeynoteLight,
+                        onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
+                    )
                 }
+                InfoText("Switches slide stage, code cards, and Jewel chrome live without losing slide position.")
             }
         }
     }

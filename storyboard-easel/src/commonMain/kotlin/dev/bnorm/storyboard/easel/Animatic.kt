@@ -34,6 +34,13 @@ import kotlinx.coroutines.sync.withLock
 private const val SEGMENT_SETTLE_FRAMES = 3
 private const val SEGMENT_MAX_SETTLE_FRAMES = 12
 
+/**
+ * Upper bound on frames a freeze waits for the previously unfrozen frame to be drawn (see
+ * `Animatic.freezePresentedFrame`). One or two frames suffice when the stage is visible; the bound
+ * keeps navigation moving when nothing draws (e.g. a hidden window).
+ */
+private const val PRESENT_BEFORE_FREEZE_MAX_FRAMES = 4
+
 /** Frames [Animatic.measurePlaybackDurationsNanos] rests on each beat, like a presenter would. */
 private const val MEASURE_REST_FRAMES = 12
 
@@ -63,7 +70,14 @@ fun rememberAnimatic(
     val states = remember(builtStoryboard) { Animatic.buildStates(builtStoryboard) }
 
     val transitionState = remember(builtStoryboard) {
-        val desiredIndex = holder.current?.currentIndex ?: initialIndex
+        val prev = holder.current
+        // If an advance() was in flight when the storyboard rebuilt (e.g. a theme switch mid-slide),
+        // land on its destination beat rather than snapping back to the starting beat.
+        val desiredIndex = if (prev != null && !prev.isRestingMidSegment) {
+            prev.targetIndex
+        } else {
+            prev?.currentIndex ?: initialIndex
+        }
         val clampedIndex = clampStoryboardIndex(builtStoryboard.indices, desiredIndex)
         val initialState = states.find { it.index == clampedIndex } ?: states.first()
         SeekableTransitionState(initialState)
@@ -73,11 +87,19 @@ fun rememberAnimatic(
     // Ensure SeekableTransitionState's composition continuation always observes targetState changes
     // on CMP 1.13+ even when a caller has not yet mounted Easel(animatic).
     transition.targetState
-    return remember(builtStoryboard, states, transitionState, transition) {
-        Animatic(builtStoryboard, states, transitionState, transition).also {
-            holder.current = it
+    val animatic = remember(builtStoryboard, states, transitionState, transition) {
+        val prev = holder.current
+        Animatic(builtStoryboard, states, transitionState, transition).also { next ->
+            if (prev != null && prev.isRestingMidSegment) {
+                next.retainScrubPositionFrom(prev)
+            }
+            holder.current = next
         }
     }
+    LaunchedEffect(animatic) {
+        animatic.restoreRetainedScrubIfNeeded()
+    }
+    return animatic
 }
 
 internal fun clampStoryboardIndex(
@@ -144,8 +166,14 @@ class Animatic internal constructor(
         )
     }
 
-    val activeFromStateIndex: Int get() = transitionState.currentState.stateIndex
-    val activeToStateIndex: Int get() = transitionState.targetState.stateIndex
+    val activeFromStateIndex: Int
+        get() = if (retainedScrubSegment >= 0) retainedScrubSegment else transitionState.currentState.stateIndex
+    val activeToStateIndex: Int
+        get() = if (retainedScrubSegment >= 0) {
+            (retainedScrubSegment + 1).coerceAtMost(states.lastIndex)
+        } else {
+            transitionState.targetState.stateIndex
+        }
 
     /**
      * Progress through the active segment as a fraction of its [effective duration][effectiveDurationNanos]
@@ -153,6 +181,7 @@ class Animatic internal constructor(
      */
     val activeFraction: Float
         get() {
+            if (retainedScrubSegment >= 0) return retainedScrubFraction
             val total = transition.totalDurationNanos
             val effective = effectiveDurationNanos()
             if (total <= 0L || effective <= 0L) return 0f
@@ -212,8 +241,29 @@ class Animatic internal constructor(
      * `true` while a rebuilt scene subtree settles on its segment's `from` state. [Easel] keeps
      * presenting the previous frame during this window so the settle frames are never visible.
      */
-    var scrubSettling: Boolean by mutableStateOf(false)
-        private set
+    var scrubSettling: Boolean
+        get() = settlingState
+        private set(value) {
+            // Unfreezing means the frame the animatic now rests on has not reached the screen yet.
+            if (settlingState && !value) liveFramePresented = false
+            settlingState = value
+        }
+    private var settlingState by mutableStateOf(false)
+
+    /**
+     * Whether [Easel] has recorded a live (non-settling) frame since the presented frame was last
+     * unfrozen. A freeze snapshots the last recorded frame, so freezing again before a live frame
+     * was recorded would snapshot a stale one (e.g. back-to-back scrub steps while dragging).
+     */
+    private var liveFramePresented = true
+
+    /** Whether [Easel] recorded a live frame since the presented frame was last unfrozen. */
+    internal val livePresentedSinceUnfreeze: Boolean get() = liveFramePresented
+
+    /** Called by [Easel] whenever it records a live frame into its presented-frame layer. */
+    internal fun onLiveFramePresented() {
+        liveFramePresented = true
+    }
 
     private val seekMutex = Mutex()
 
@@ -223,16 +273,33 @@ class Animatic internal constructor(
      */
     internal var renderFrameClock: MonotonicFrameClock? = null
 
-    /** Snapshots the currently presented frame ([Easel] registers it); see [freezePresentedFrame]. */
-    internal var freezeCapture: (suspend () -> Unit)? = null
+    /**
+     * Snapshots the currently presented frame ([Easel] registers it); see [freezePresentedFrame].
+     * Returns `true` if a fresh snapshot of the presented frame was taken, `false` if the stage
+     * kept an older snapshot (or none) because the presented frame could not be snapshotted safely.
+     */
+    internal var freezeCapture: (suspend () -> Boolean)? = null
 
     /**
      * Starts presenting a snapshot of the current frame instead of live content ([scrubSettling]).
      * No-op if already frozen, so nested freezes keep the outermost snapshot.
+     *
+     * If the previous freeze ended but its result has not been drawn yet, waits (up to
+     * [PRESENT_BEFORE_FREEZE_MAX_FRAMES]) for [Easel] to present it first, so every completed step
+     * is on screen for at least one frame and the snapshot is never a stale earlier frame.
      */
     private suspend fun freezePresentedFrame() {
         if (scrubSettling) return
-        freezeCapture?.invoke()
+        val capture = freezeCapture ?: run {
+            scrubSettling = true
+            return
+        }
+        var waited = 0
+        while (!liveFramePresented && waited++ < PRESENT_BEFORE_FREEZE_MAX_FRAMES) {
+            withFrameNanos { }
+        }
+        if (scrubSettling) return // a nested navigation froze meanwhile
+        capture()
         scrubSettling = true
     }
 
@@ -277,6 +344,7 @@ class Animatic internal constructor(
 
     private suspend fun seekToSegmentLocked(fromStateIndex: Int, fraction: Float, rebuildScene: Boolean) {
         if (states.isEmpty()) return
+        restingMidSegment = false
         var segment = fromStateIndex.coerceIn(0, states.lastIndex)
         var clampedFraction = fraction.coerceIn(0f, 1f)
         // Normalize the end of a segment to the start of the next one.
@@ -285,9 +353,14 @@ class Animatic internal constructor(
             clampedFraction = 0f
         }
         if (segment == states.lastIndex) clampedFraction = 0f
+        if (retainedScrubSegment >= 0 && (retainedScrubSegment != segment || abs(retainedScrubFraction - clampedFraction) > 1e-4f)) {
+            retainedScrubSegment = -1
+        }
 
         if (!rebuildScene) {
             seekInPlace(segment, clampedFraction)
+            retainedScrubSegment = -1
+            restingMidSegment = clampedFraction > 0f
             return
         }
 
@@ -303,10 +376,50 @@ class Animatic internal constructor(
             withFrameNanos { } // let its SideEffects observe the settled state
             // 2. Seek the freshly composed subtree straight to the requested position.
             seekInPlace(segment, clampedFraction)
+            retainedScrubSegment = -1
             withFrameNanos { } // make sure the seeked frame is composed before unfreezing
+            restingMidSegment = clampedFraction > 0f
         } finally {
             scrubSettling = false
         }
+    }
+
+    /**
+     * `true` while a scrub left the stage paused inside a segment (not animating). An advance in the
+     * segment's direction then finishes that segment instead of treating it as an in-flight advance
+     * (which snaps to the target and continues to the next beat).
+     */
+    private var restingMidSegment = false
+
+    internal val isRestingMidSegment: Boolean
+        get() = restingMidSegment && activeFromStateIndex != activeToStateIndex && activeFraction > 0f
+
+    private var retainedScrubSegment by mutableIntStateOf(-1)
+    private var retainedScrubFraction by mutableFloatStateOf(0f)
+
+    internal fun retainScrubPositionFrom(previous: Animatic) {
+        val prevFrom = previous.stateDescriptors.getOrNull(previous.activeFromStateIndex) ?: return
+        val prevFrac = previous.activeFraction.coerceIn(0f, 1f)
+        if (prevFrac <= 0f) return
+        val matched = stateDescriptors.firstOrNull {
+            it.sceneIndex == prevFrom.sceneIndex &&
+                it.frameIndex == prevFrom.frameIndex &&
+                it.isBoundaryStart == prevFrom.isBoundaryStart &&
+                it.isBoundaryEnd == prevFrom.isBoundaryEnd
+        } ?: return
+        if (matched.stateIndex >= states.lastIndex) return
+        retainedScrubSegment = matched.stateIndex
+        retainedScrubFraction = prevFrac
+        restingMidSegment = true
+        currentState = resolveBackwardValueState(matched.stateIndex)
+        targetState = resolveForwardValueState(matched.stateIndex + 1)
+    }
+
+    internal suspend fun restoreRetainedScrubIfNeeded() {
+        val segment = retainedScrubSegment
+        val fraction = retainedScrubFraction
+        if (segment < 0) return
+        seekToSegment(segment, fraction, rebuildScene = true)
     }
 
     /**
@@ -338,6 +451,8 @@ class Animatic internal constructor(
      * interrupted segment back to [to]. Returns the segment's total duration in nanoseconds.
      */
     private suspend fun runSegmentBySeeking(to: LinkedState<*>, measureOnly: Boolean = false): Long {
+        restingMidSegment = false
+        retainedScrubSegment = -1
         val ts = transitionState
         if (ts.currentState == to && ts.targetState == to) return 0L
         val reverse = ts.currentState == to
@@ -372,16 +487,20 @@ class Animatic internal constructor(
                 val now = withFrameNanos { it }
                 val total = transition.totalDurationNanos
                 effective = effectiveDurationNanos()
+                if (settling) {
+                    // The stage stays frozen on the resting frame while the segment settles, so
+                    // play time is held at the start: the first live frame then begins at fraction
+                    // 0 instead of lurching ahead by the frozen settle time.
+                    lastFrame = -1L
+                    if (!settle.isSettled(total)) continue
+                    settling = false
+                }
                 if (lastFrame < 0L) {
                     played = startFraction.toDouble() * effective
                 } else {
                     played += if (reverse) -(now - lastFrame).toDouble() else (now - lastFrame).toDouble()
                 }
                 lastFrame = now
-                if (settling) {
-                    if (!settle.isSettled(total)) continue
-                    settling = false
-                }
                 // Measuring only needs the settled segment's duration, not real-time playback.
                 if (measureOnly) break
                 if (effective <= 0L || total <= 0L) break
@@ -517,7 +636,23 @@ class Animatic internal constructor(
     } ?: true
 
     private suspend fun advanceLocked(direction: AdvanceDirection): Boolean {
-        val currentDirection = toDirection(transitionState.currentState.index, transitionState.targetState.index)
+        val currentDirection = if (!restingMidSegment && currentState != targetState) {
+            toDirection(currentState.index, targetState.index)
+        } else {
+            toDirection(transitionState.currentState.index, transitionState.targetState.index)
+        }
+        if (currentDirection == direction && restingMidSegment) {
+            // Paused inside a segment by a scrub: finish the segment the stage shows (and any
+            // boundary segments up to the next resting beat) instead of skipping its beat.
+            var iterState = transitionState.targetState
+            runSegmentBySeeking(iterState)
+            while (iterState != targetState) {
+                iterState = iterState.advance(direction) ?: error("internal error")
+                runSegmentBySeeking(iterState)
+            }
+            currentState = targetState
+            return true
+        }
         if (currentDirection == null || currentDirection == direction) {
             if (currentDirection == direction) {
                 // Snap to the target and continue.
@@ -535,7 +670,14 @@ class Animatic internal constructor(
             currentState = targetState
             targetState = tmp
 
-            runSegmentBySeeking(transitionState.currentState)
+            val segmentRevertTarget = if (
+                toDirection(transitionState.currentState.index, transitionState.targetState.index) == direction
+            ) {
+                transitionState.targetState
+            } else {
+                transitionState.currentState
+            }
+            runSegmentBySeeking(segmentRevertTarget)
         }
 
         // Animate to the target frame.
@@ -550,6 +692,8 @@ class Animatic internal constructor(
     }
 
     suspend fun jumpTo(index: Storyboard.Index): Boolean = exclusive {
+        restingMidSegment = false
+        retainedScrubSegment = -1
         // TODO a little inefficient?
         var jumpIndex = states.binarySearchBy(index) { it.index }
         if (jumpIndex < 0) return@exclusive false

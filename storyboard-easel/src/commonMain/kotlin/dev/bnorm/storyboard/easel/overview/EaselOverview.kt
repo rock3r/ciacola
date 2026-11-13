@@ -12,14 +12,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.*
 import dev.bnorm.storyboard.easel.Animatic
+import dev.bnorm.storyboard.easel.clampStoryboardIndex
 import dev.bnorm.storyboard.easel.onStoryNavigation
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+
+/** Whether [EaselOverview] shows the grid; hoist it to toggle the overview from outside (e.g. a menu). */
+@Stable
+class OverviewVisibility(initiallyVisible: Boolean = false) {
+    var isVisible: Boolean by mutableStateOf(initiallyVisible)
+
+    fun toggle() {
+        isVisible = !isVisible
+    }
+}
+
+@Composable
+fun rememberOverviewVisibility(initiallyVisible: Boolean = false): OverviewVisibility =
+    remember { OverviewVisibility(initiallyVisible) }
 
 @Composable
 fun EaselOverview(
     animatic: Animatic,
     modifier: Modifier = Modifier,
+    visibility: OverviewVisibility = rememberOverviewVisibility(),
     content: @Composable () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -28,12 +44,35 @@ fun EaselOverview(
     val holder = rememberSaveableStateHolder()
 
     val storyboard = animatic.storyboard
-    val overviewState = remember(storyboard) { OverviewState.of(storyboard) }
-    var overviewVisible by remember { mutableStateOf(false) } // TODO support initial visibility?
+    DisposableEffect(holder, storyboard) {
+        onDispose {
+            holder.removeState(storyboard)
+        }
+    }
+    val overviewState = remember(storyboard) {
+        OverviewState.of(storyboard).apply {
+            if (storyboard.indices.isNotEmpty()) {
+                jumpToIndex(clampStoryboardIndex(storyboard.indices, animatic.currentIndex))
+            }
+        }
+    }
+    var overviewVisible by visibility::isVisible
+
+    // Track the animatic in the overview's selection: a timeline scrub or step (overview open or
+    // closed) and opening the overview from any entry point (Esc, menu) highlight the current beat,
+    // so Enter never jumps back to a stale selection. The overview's own selection changes move the
+    // animatic to the same index, so this converges instead of looping.
+    LaunchedEffect(animatic, overviewState, visibility) {
+        snapshotFlow { animatic.currentIndex to visibility.isVisible }.collect { (index, _) ->
+            if (storyboard.indices.isNotEmpty()) {
+                overviewState.jumpToIndex(clampStoryboardIndex(storyboard.indices, index))
+            }
+        }
+    }
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
         if (event.type == KeyEventType.KeyUp && event.key == Key.Escape) {
-            overviewState.jumpToIndex(animatic.currentIndex)
+            overviewState.jumpToIndex(clampStoryboardIndex(storyboard.indices, animatic.currentIndex))
             overviewVisible = true
             return true
         }
@@ -66,6 +105,7 @@ fun EaselOverview(
                                 overviewVisible = false
                             }
                         },
+                        onDismiss = { overviewVisible = false },
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {

@@ -44,6 +44,7 @@ internal fun EaselOverviewInternal(
     isVisible: Boolean,
     onExitOverview: (Storyboard.Index) -> Unit,
     modifier: Modifier = Modifier,
+    onDismiss: () -> Unit = {},
 ) {
     fun onClick(columnIndex: Int, itemIndex: Int, item: OverviewState.StateItem<*>) {
         if (item == overviewState.currentItem) {
@@ -52,7 +53,7 @@ internal fun EaselOverviewInternal(
         overviewState.jumpTo(columnIndex, itemIndex)
     }
 
-    BoxWithConstraints(modifier = modifier.onOverviewNavigation(overviewState, onExitOverview)) {
+    BoxWithConstraints(modifier = modifier.onOverviewNavigation(overviewState, onExitOverview, onDismiss)) {
         val viewSize = DpSize(maxWidth, maxHeight)
         val itemSize = calculateItemSize(
             viewSize = viewSize,
@@ -92,15 +93,17 @@ internal fun EaselOverviewInternal(
         }
 
         val currentIndex = overviewState.currentItem.index
+        val slideCount = overviewState.columns.size
+        val beatCount = overviewState.columns[overviewState.currentColumnIndex].items.size
         Surface(
-            modifier = Modifier.align(Alignment.BottomStart).alpha(0.75f).padding(32.dp),
+            modifier = Modifier.align(Alignment.BottomStart).alpha(0.90f).padding(32.dp),
             elevation = 4.dp,
             shape = RoundedCornerShape(8.dp),
         ) {
             Text(
-                text = currentIndex.toString(),
-                style = MaterialTheme.typography.h6,
-                modifier = Modifier.padding(8.dp),
+                text = "Slide ${currentIndex.sceneIndex + 1} / $slideCount · Beat ${currentIndex.frameIndex + 1} / $beatCount",
+                style = MaterialTheme.typography.subtitle2,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
 
@@ -187,10 +190,11 @@ private fun OverviewLazyColumn(
 
         itemsIndexed(column.items) { itemIndex, item ->
             val isCurrentIndex = isCurrentColumn && column.currentItemIndex == itemIndex
+            val idleBorder = MaterialTheme.colors.onBackground.copy(alpha = 0.22f)
             val currentColor by animateColorAsState(
                 when {
                     isCurrentIndex -> MaterialTheme.colors.secondary
-                    else -> Color.Transparent
+                    else -> idleBorder
                 }
             )
 
@@ -297,10 +301,17 @@ context(animatedVisibilityScope: AnimatedVisibilityScope)
 private fun Modifier.onOverviewNavigation(
     overview: OverviewState,
     onExitOverview: (Storyboard.Index) -> Unit,
+    onDismiss: () -> Unit,
 ): Modifier {
     fun handle(event: KeyEvent): Boolean {
         // Disable navigation until enter/exit animation is complete.
         if (animatedVisibilityScope.transition.isRunning) return false
+
+        // Esc toggles: it opens the overview on KeyUp, so a second Esc closes it (without jumping).
+        if (event.type == KeyEventType.KeyUp && event.key == Key.Escape) {
+            onDismiss()
+            return true
+        }
 
         if (event.type == KeyEventType.KeyDown) {
             val currentColumnIndex = overview.currentColumnIndex

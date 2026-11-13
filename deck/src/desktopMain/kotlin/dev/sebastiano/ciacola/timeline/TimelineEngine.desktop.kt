@@ -2,9 +2,12 @@ package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.renderComposeScene
@@ -118,9 +121,13 @@ data class TimelineBlockBar(
     val delayMs: Int = 0,
     val staggerIndex: Int? = null,
     val staggerCount: Int? = null,
+    val staggerStepMs: Int? = null,
+    val morphDurationMs: Int? = null,
     val loopId: String? = null,
     val loopPeriodMs: Long? = null,
     val sharedKey: String? = null,
+    val defaultOffsetXDp: Float = 0f,
+    val defaultOffsetYDp: Float = 0f,
 )
 
 data class TimelineTrackRow(
@@ -188,7 +195,13 @@ data class DeckTimelineSnapshot(
 
 class TimelineOverridesStore(
     val storyboardDir: Path = Path.of(".storyboard"),
+    private val clockMillis: () -> Long = System::currentTimeMillis,
 ) {
+    companion object {
+        private const val MAX_UNDO_HISTORY = 64
+        private const val COALESCE_WINDOW_MS = 250L
+    }
+
     private val json = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
@@ -198,6 +211,21 @@ class TimelineOverridesStore(
     val overridesFile: Path = storyboardDir.resolve("timeline-overrides.json")
 
     private var currentData: DeckTimelineOverridesFile = DeckTimelineOverridesFile()
+    private var lastObservedModifiedMillis: Long = -1L
+    private var lastObservedFileSize: Long = -1L
+
+    private val undoStack = ArrayDeque<DeckTimelineOverridesFile>()
+    private val redoStack = ArrayDeque<DeckTimelineOverridesFile>()
+    private var activeGestureDepth = 0
+    private var gestureSnapshotRecorded = false
+    private var lastCoalesceKey: String? = null
+    private var lastMutationMillis: Long = Long.MIN_VALUE
+
+    var canUndo by mutableStateOf(false)
+        private set
+
+    var canRedo by mutableStateOf(false)
+        private set
 
     var structuralRevision by mutableIntStateOf(0)
         private set
@@ -206,15 +234,156 @@ class TimelineOverridesStore(
         private set
 
     init {
-        currentData = readFromDisk()
+        reloadFromDiskIfChanged(notifyRevisions = false)
     }
 
-    fun data(): DeckTimelineOverridesFile = currentData
+    private fun syncUndoFlags() {
+        canUndo = undoStack.isNotEmpty()
+        canRedo = redoStack.isNotEmpty()
+    }
+
+    private fun recordUndoSnapshotBeforeMutation(coalesceKey: String?, coalesce: Boolean) {
+        val now = clockMillis()
+        redoStack.clear()
+        val shouldCoalesce = when {
+            activeGestureDepth > 0 -> gestureSnapshotRecorded
+            coalesce && coalesceKey != null && coalesceKey == lastCoalesceKey &&
+                lastMutationMillis != Long.MIN_VALUE && (now - lastMutationMillis) in 0..COALESCE_WINDOW_MS -> true
+            else -> false
+        }
+        if (!shouldCoalesce) {
+            if (undoStack.size >= MAX_UNDO_HISTORY) {
+                undoStack.removeFirst()
+            }
+            undoStack.addLast(currentData)
+            if (activeGestureDepth > 0) {
+                gestureSnapshotRecorded = true
+            }
+        }
+        lastCoalesceKey = if (coalesce) coalesceKey else null
+        lastMutationMillis = now
+        syncUndoFlags()
+    }
 
     @Synchronized
-    fun updateTrack(trackId: String, transform: (TrackOverride) -> TrackOverride) {
+    fun beginEditGesture() {
+        if (activeGestureDepth == 0) {
+            gestureSnapshotRecorded = false
+        }
+        activeGestureDepth++
+    }
+
+    @Synchronized
+    fun endEditGesture() {
+        if (activeGestureDepth > 0) {
+            activeGestureDepth--
+            if (activeGestureDepth == 0) {
+                gestureSnapshotRecorded = false
+                lastCoalesceKey = null
+            }
+        }
+    }
+
+    @Synchronized
+    fun undo(): Boolean {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        if (undoStack.isEmpty()) return false
+        activeGestureDepth = 0
+        gestureSnapshotRecorded = false
+        lastCoalesceKey = null
+        if (redoStack.size >= MAX_UNDO_HISTORY) {
+            redoStack.removeFirst()
+        }
+        redoStack.addLast(currentData)
+        val restored = undoStack.removeLast()
+        val structuralChanged = restored.sceneBeats != currentData.sceneBeats
+        val paramsChanged = restored.tracks != currentData.tracks || restored.loopPeriodsMs != currentData.loopPeriodsMs
+        currentData = restored
+        persist()
+        syncUndoFlags()
+        if (structuralChanged) structuralRevision++
+        if (paramsChanged) parameterRevision++
+        return true
+    }
+
+    @Synchronized
+    fun redo(): Boolean {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        if (redoStack.isEmpty()) return false
+        activeGestureDepth = 0
+        gestureSnapshotRecorded = false
+        lastCoalesceKey = null
+        if (undoStack.size >= MAX_UNDO_HISTORY) {
+            undoStack.removeFirst()
+        }
+        undoStack.addLast(currentData)
+        val restored = redoStack.removeLast()
+        val structuralChanged = restored.sceneBeats != currentData.sceneBeats
+        val paramsChanged = restored.tracks != currentData.tracks || restored.loopPeriodsMs != currentData.loopPeriodsMs
+        currentData = restored
+        persist()
+        syncUndoFlags()
+        if (structuralChanged) structuralRevision++
+        if (paramsChanged) parameterRevision++
+        return true
+    }
+
+    @Synchronized
+    fun data(): DeckTimelineOverridesFile {
+        reloadFromDiskIfChanged(notifyRevisions = true)
+        return currentData
+    }
+
+    @Synchronized
+    fun reloadFromDiskIfChanged(notifyRevisions: Boolean = true): Boolean {
+        if (!overridesFile.exists()) {
+            lastObservedModifiedMillis = -1L
+            lastObservedFileSize = -1L
+            return false
+        }
+        val modified = runCatching { Files.getLastModifiedTime(overridesFile).toMillis() }.getOrDefault(-1L)
+        val size = runCatching { Files.size(overridesFile) }.getOrDefault(-1L)
+        if (modified == lastObservedModifiedMillis && size == lastObservedFileSize) {
+            return false
+        }
+        lastObservedModifiedMillis = modified
+        lastObservedFileSize = size
+        val text = runCatching { overridesFile.readText() }.getOrNull() ?: return false
+        if (text.isBlank()) return false
+        val parsed = runCatching {
+            json.decodeFromString<DeckTimelineOverridesFile>(text)
+        }.getOrNull()
+        if (parsed == null) {
+            if (size > 0L) {
+                runCatching {
+                    val backup = overridesFile.resolveSibling("timeline-overrides.corrupt.json")
+                    Files.copy(overridesFile, backup, StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+            return false
+        }
+        if (parsed == currentData) return false
+        val structuralChanged = parsed.sceneBeats != currentData.sceneBeats
+        val paramsChanged = parsed.tracks != currentData.tracks || parsed.loopPeriodsMs != currentData.loopPeriodsMs
+        currentData = parsed
+        if (notifyRevisions) {
+            if (structuralChanged) structuralRevision++
+            if (paramsChanged) parameterRevision++
+        }
+        return true
+    }
+
+    @Synchronized
+    fun updateTrack(
+        trackId: String,
+        coalesce: Boolean = false,
+        transform: (TrackOverride) -> TrackOverride,
+    ) {
+        reloadFromDiskIfChanged(notifyRevisions = false)
         val prev = currentData.tracks[trackId] ?: TrackOverride(trackId = trackId)
         val updated = transform(prev)
+        if (currentData.tracks[trackId] == updated) return
+        recordUndoSnapshotBeforeMutation(coalesceKey = "track:$trackId", coalesce = coalesce)
         currentData = currentData.copy(tracks = currentData.tracks + (trackId to updated))
         persist()
         parameterRevision++
@@ -222,16 +391,42 @@ class TimelineOverridesStore(
 
     @Synchronized
     fun resetTrack(trackId: String) {
+        reloadFromDiskIfChanged(notifyRevisions = false)
         if (trackId !in currentData.tracks) return
+        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
         currentData = currentData.copy(tracks = currentData.tracks - trackId)
         persist()
         parameterRevision++
     }
 
     @Synchronized
+    fun updateLoopPeriod(loopId: String, periodMs: Long, coalesce: Boolean = false) {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        val clamped = periodMs.coerceIn(200L, 60_000L)
+        if (currentData.loopPeriodsMs[loopId] == clamped) return
+        recordUndoSnapshotBeforeMutation(coalesceKey = "loop:$loopId", coalesce = coalesce)
+        currentData = currentData.copy(loopPeriodsMs = currentData.loopPeriodsMs + (loopId to clamped))
+        persist()
+        parameterRevision++
+    }
+
+    @Synchronized
+    fun resetLoopPeriod(loopId: String) {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        if (loopId !in currentData.loopPeriodsMs) return
+        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
+        currentData = currentData.copy(loopPeriodsMs = currentData.loopPeriodsMs - loopId)
+        persist()
+        parameterRevision++
+    }
+
+    @Synchronized
     fun insertBeatAfter(sceneIndex: Int, beatIndex: Int) {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
         val prev = currentData.sceneBeats[sceneIndex] ?: SceneBeatOverride(sceneIndex = sceneIndex)
-        val updated = prev.copy(injectedAfterBeats = prev.injectedAfterBeats + beatIndex.coerceAtLeast(0))
+        val (baseBeatIndex, _) = resolveVirtualBeatToBaseBeat(prev, beatIndex)
+        val updated = prev.copy(injectedAfterBeats = prev.injectedAfterBeats + baseBeatIndex.coerceAtLeast(0))
         currentData = currentData.copy(sceneBeats = currentData.sceneBeats + (sceneIndex to updated))
         persist()
         structuralRevision++
@@ -239,14 +434,17 @@ class TimelineOverridesStore(
 
     @Synchronized
     fun removeInjectedBeat(sceneIndex: Int, beatIndex: Int) {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
         val prev = currentData.sceneBeats[sceneIndex] ?: SceneBeatOverride(sceneIndex = sceneIndex)
-        val updated = if (prev.injectedAfterBeats.isNotEmpty()) {
+        val (baseBeatIndex, isInjected) = resolveVirtualBeatToBaseBeat(prev, beatIndex)
+        val updated = if (isInjected || baseBeatIndex in prev.injectedAfterBeats) {
             val mutable = prev.injectedAfterBeats.toMutableList()
-            val removePos = mutable.indexOfLast { it <= beatIndex }.takeIf { it >= 0 } ?: mutable.lastIndex
+            val removePos = mutable.lastIndexOf(baseBeatIndex).takeIf { it >= 0 } ?: mutable.lastIndex
             mutable.removeAt(removePos)
             prev.copy(injectedAfterBeats = mutable)
         } else {
-            prev.copy(deletedBeats = (prev.deletedBeats + beatIndex).distinct())
+            prev.copy(deletedBeats = (prev.deletedBeats + baseBeatIndex).distinct())
         }
         currentData = currentData.copy(sceneBeats = currentData.sceneBeats + (sceneIndex to updated))
         persist()
@@ -255,6 +453,9 @@ class TimelineOverridesStore(
 
     @Synchronized
     fun resetAll() {
+        reloadFromDiskIfChanged(notifyRevisions = false)
+        if (!currentData.hasOverrides) return
+        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
         val hadStructural = currentData.sceneBeats.isNotEmpty()
         currentData = DeckTimelineOverridesFile()
         persist()
@@ -262,8 +463,22 @@ class TimelineOverridesStore(
         if (hadStructural) structuralRevision++
     }
 
-    fun formatOverridesForAgentBake(workspaceRoot: Path): String = buildString {
-        appendLine("Please fold the following live Ciacola After Effects timeline overrides into the Kotlin scene definitions in `$workspaceRoot`, then run `:deck:reload`:")
+    fun formatOverridesForAgentBake(
+        workspaceRoot: Path,
+        gradleTaskHint: String = ":deck:reload",
+    ): String = buildString {
+        val absWorkspace = workspaceRoot.toAbsolutePath()
+        val absOverridesFile = overridesFile.toAbsolutePath()
+        val isolatedGradleHome = absWorkspace.resolve(".gradle-agent-home")
+        val reloadCommand = if (isolatedGradleHome.exists()) {
+            "./gradlew --gradle-user-home \"$isolatedGradleHome\" " +
+                "\"-Dkotlin.daemon.options=runFilesPath=$isolatedGradleHome/kotlin-daemon\" " +
+                gradleTaskHint
+        } else {
+            "./gradlew $gradleTaskHint"
+        }
+
+        appendLine("Live Ciacola Timeline Studio overrides ready to bake into Kotlin source (`$absWorkspace`):")
         appendLine()
         if (currentData.sceneBeats.isNotEmpty()) {
             appendLine("### Scene Beat Count Changes")
@@ -277,21 +492,111 @@ class TimelineOverridesStore(
             for ((id, tr) in currentData.tracks) {
                 appendLine("- Track `$id`: enterBeat=${tr.enterBeat}, exitBeat=${tr.exitBeat}, delayMs=${tr.delayMs}, durationMs=${tr.durationMs}, staggerStepMs=${tr.staggerStepMs}, curve=${tr.curve}, spatial=${tr.spatial}")
             }
+            appendLine()
         }
+        if (currentData.loopPeriodsMs.isNotEmpty()) {
+            appendLine("### Loop Cycle Period Overrides")
+            for ((loopId, periodMs) in currentData.loopPeriodsMs) {
+                appendLine("- Loop `$loopId`: periodMillis=${periodMs}L")
+            }
+            appendLine()
+        }
+        appendLine("Please:")
+        appendLine("1. Fold the listed track, loop-period, and structural beat overrides into the Kotlin slide source files in `$absWorkspace`.")
+        appendLine("2. Remove the baked entries from `$absOverridesFile` (or reset `.storyboard/timeline-overrides.json` to `{}` when all overrides are baked) so baked beats and timings are never applied twice.")
+        appendLine("3. Run `$reloadCommand` to hot-reload the updated Kotlin source.")
     }
 
-    private fun readFromDisk(): DeckTimelineOverridesFile {
-        if (!overridesFile.exists()) return DeckTimelineOverridesFile()
-        return runCatching {
-            json.decodeFromString<DeckTimelineOverridesFile>(overridesFile.readText())
-        }.getOrDefault(DeckTimelineOverridesFile())
+    @Synchronized
+    fun formatOverridesAsKotlinSnippet(): String = buildString {
+        val snapshotData = data()
+        appendLine("// --- Ciacola Timeline Studio Overrides (Kotlin Snippets) ---")
+        for ((trackId, tr) in snapshotData.tracks) {
+            if (trackId.startsWith("shared:")) {
+                val sharedKey = trackId.removePrefix("shared:")
+                val params = buildList {
+                    add("sharedKey = \"$sharedKey\"")
+                    tr.durationMs?.let { add("defaultDurationMs = $it") }
+                }
+                appendLine("Modifier.deckSharedBounds(${params.joinToString(", ")})")
+            } else {
+                val params = buildList {
+                    add("trackId = \"$trackId\"")
+                    tr.enterBeat?.let { add("defaultTriggerBeat = $it") }
+                    tr.durationMs?.let { add("durationMillis = $it") }
+                    tr.staggerStepMs?.let { add("staggerStepMs = $it") }
+                    tr.delayMs?.let { add("/* delayMillis = $it */") }
+                    tr.curve?.let { c ->
+                        if (c.isSpring) {
+                            add("/* spring(dampingRatio = ${"%.2f".format(c.dampingRatio)}f, stiffness = ${c.stiffness.toInt()}f) */")
+                        } else {
+                            add("easing = CubicBezierEasing(${"%.2f".format(c.x1)}f, ${"%.2f".format(c.y1)}f, ${"%.2f".format(c.x2)}f, ${"%.2f".format(c.y2)}f)")
+                        }
+                    }
+                }
+                appendLine("transition.animateBuildProgress(${params.joinToString(", ")})")
+                tr.spatial?.let { sp ->
+                    appendLine("// Spatial ($trackId): offsetXDp = ${sp.offsetXDp}f, offsetYDp = ${sp.offsetYDp}f, arcBend = ${sp.arcBend}f")
+                }
+            }
+        }
+        for ((loopId, periodMs) in snapshotData.loopPeriodsMs) {
+            appendLine("rememberDeckLoopMillis(loopId = \"$loopId\", periodMillis = ${periodMs}L)")
+        }
+        for ((sceneIdx, sb) in snapshotData.sceneBeats) {
+            appendLine("// Scene $sceneIdx beats: injectedAfterBeats = ${sb.injectedAfterBeats}, deletedBeats = ${sb.deletedBeats}")
+        }
+        appendLine()
+        appendLine("/* .storyboard/timeline-overrides.json:")
+        appendLine(json.encodeToString(snapshotData))
+        appendLine("*/")
     }
 
     private fun persist() {
-        Files.createDirectories(storyboardDir)
-        val tmp = overridesFile.resolveSibling("${overridesFile.fileName}.tmp")
-        tmp.writeText(json.encodeToString(currentData) + "\n")
-        Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING)
+        runCatching {
+            Files.createDirectories(storyboardDir)
+            val tmp = overridesFile.resolveSibling("${overridesFile.fileName}.tmp")
+            tmp.writeText(json.encodeToString(currentData) + "\n")
+            Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING)
+            lastObservedModifiedMillis = Files.getLastModifiedTime(overridesFile).toMillis()
+            lastObservedFileSize = Files.size(overridesFile)
+        }
+    }
+}
+
+/**
+ * Composes every storyboard index once in a single reused offscreen scene, so tracks, shared
+ * sightings and loops register into [collector].
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun harvestIntoCollector(
+    storyboard: Storyboard,
+    overrides: DeckTimelineOverridesFile,
+    collector: TimelineHarvestCollector,
+    loopClock: DeckLoopClock,
+) {
+    val current = mutableStateOf(storyboard.indices.firstOrNull())
+    val scene = ImageComposeScene(width = 64, height = 36, density = storyboard.format.density) {
+        CompositionLocalProvider(
+            LocalTimelineOffscreen provides true,
+            LocalTimelineHarvestCollector provides collector,
+            LocalTimelineOverrides provides overrides,
+            LocalDeckLoopClock provides loopClock,
+        ) {
+            val index = current.value
+            if (index != null) key(index) { ScenePreview(storyboard, index) }
+        }
+    }
+    try {
+        for (index in storyboard.indices) {
+            runCatching {
+                current.value = index
+                Snapshot.sendApplyNotifications()
+                scene.render().close()
+            }
+        }
+    } finally {
+        scene.close()
     }
 }
 
@@ -308,21 +613,9 @@ fun indexDeckTimeline(
     val harvestLoopClock = DeckLoopClock()
 
     // Dry-run every (sceneIndex, frameIndex) in a tiny offscreen Compose scene so lazy scenes
-    // register all tracks, sharedBounds sightings, and loops across the whole deck!
-    for (index in storyboard.indices) {
-        runCatching {
-            renderComposeScene(width = 64, height = 36, density = storyboard.format.density) {
-                CompositionLocalProvider(
-                    LocalTimelineOffscreen provides true,
-                    LocalTimelineHarvestCollector provides collector,
-                    LocalTimelineOverrides provides overrides,
-                    LocalDeckLoopClock provides harvestLoopClock,
-                ) {
-                    ScenePreview(storyboard, index)
-                }
-            }
-        }
-    }
+    // register all tracks, sharedBounds sightings, and loops across the whole deck! One scene is
+    // reused (re-keyed per index): same records as a fresh scene per index, ~5x cheaper.
+    harvestIntoCollector(storyboard, overrides, collector, harvestLoopClock)
 
     // Build exact Animatic state sequence matching Animatic.buildStates(storyboard):
     // Scene 0: Value(0)..Value(n-1), End
@@ -387,16 +680,35 @@ fun indexDeckTimeline(
         val duration = segmentDurationMs[i]
         segmentStart[i] = cursorMs
         if (isValue) {
-            val injectedSet = overrides.sceneBeats[st.sceneIndex]?.injectedAfterBeats.orEmpty()
+            val sceneFrames = storyboard.scenes.getOrNull(st.sceneIndex)?.frames
+            val currentVf = sceneFrames?.getOrNull(st.frameIndex) as? VirtualizedFrame<*>
+            val nextVf = if (!next.isEnd) sceneFrames?.getOrNull(next.frameIndex) as? VirtualizedFrame<*> else null
+            val isInjectedBeatLine = if (currentVf != null || nextVf != null) {
+                (currentVf?.isInjected == true) || (!next.isEnd && nextVf?.isInjected == true)
+            } else {
+                val injectedSet = overrides.sceneBeats[st.sceneIndex]?.injectedAfterBeats.orEmpty()
+                !next.isEnd && (st.frameIndex + 1) in injectedSet.map { it + 1 }
+            }
+            val beatSegmentDuration = if (next.isEnd) {
+                var total = duration
+                var boundaryIdx = i + 1
+                while (boundaryIdx < rawStates.lastIndex && (rawStates[boundaryIdx].isEnd || rawStates[boundaryIdx].isStart)) {
+                    total += segmentDurationMs[boundaryIdx]
+                    boundaryIdx++
+                }
+                total
+            } else {
+                duration
+            }
             eventBeats += EventBeatLine(
                 beatGlobalIndex = beatCounter++,
                 stateIndex = i,
                 sceneIndex = st.sceneIndex,
                 frameIndex = st.frameIndex,
                 timeMs = cursorMs,
-                segmentDurationMs = duration,
+                segmentDurationMs = beatSegmentDuration,
                 isSlideBoundary = next.isEnd,
-                isInjected = !next.isEnd && (st.frameIndex + 1) in injectedSet.map { it + 1 },
+                isInjected = isInjectedBeatLine,
             )
         }
         if (st.isEnd) {
@@ -473,6 +785,7 @@ fun indexDeckTimeline(
                     triggerBeatInScene = firstSighting.second,
                     startMs = startMs,
                     durationMs = (spanEnd - startMs).coerceAtLeast(1),
+                    morphDurationMs = collector.sharedDurations[sharedKey] ?: 550,
                     sharedKey = sharedKey,
                 )
             ),
@@ -486,6 +799,7 @@ fun indexDeckTimeline(
         val blocks = entries.sortedBy { it.triggerBeat }.map { rec ->
             // Beat `b > 0` plays during the Frame `b - 1` -> Frame `b` segment.
             val segmentStartMs = beatSegmentStartMs(rec.sceneIndex, rec.triggerBeat)
+            val springOverrideMs = overrides.tracks[rec.trackId]?.curve?.takeIf { it.isSpring }?.estimatedSpringDurationMs()
             TimelineBlockBar(
                 id = "${rec.trackId}@b${rec.triggerBeat}",
                 trackId = rec.trackId,
@@ -494,9 +808,12 @@ fun indexDeckTimeline(
                 sceneIndex = rec.sceneIndex,
                 triggerBeatInScene = rec.triggerBeat,
                 startMs = segmentStartMs + rec.delayMs,
-                durationMs = rec.durationMs,
+                durationMs = springOverrideMs ?: rec.durationMs,
                 delayMs = rec.delayMs,
                 staggerCount = rec.staggerCount,
+                staggerStepMs = rec.staggerStepMs,
+                defaultOffsetXDp = rec.defaultOffsetXDp,
+                defaultOffsetYDp = rec.defaultOffsetYDp,
             )
         }
 
@@ -529,6 +846,9 @@ fun indexDeckTimeline(
                         delayMs = parentBlock.delayMs + itemIdx * staggerStep,
                         staggerIndex = itemIdx,
                         staggerCount = staggerCount,
+                        staggerStepMs = staggerStep,
+                        defaultOffsetXDp = representative.defaultOffsetXDp,
+                        defaultOffsetYDp = representative.defaultOffsetYDp,
                     )
                 }
                 trackRows += TimelineTrackRow(
@@ -558,23 +878,24 @@ fun indexDeckTimeline(
         val startMs = slideBar?.startMs ?: 0
         val spanMs = ((slideBar?.endMs ?: 600) - startMs).coerceAtLeast(DEFAULT_BEAT_FLOOR_MS)
         val trackId = "loop:$loopId"
+        val effectivePeriodMs = (overrides.loopPeriodsMs[loopId] ?: loopDesc.defaultPeriodMillis).coerceAtLeast(200L)
         trackRows += TimelineTrackRow(
             trackId = trackId,
-            label = "⟳ S${loopSceneIdx + 1} · ${loopDesc.label}",
+            label = "⟳ S${loopSceneIdx + 1} · ${loopDesc.label} · ${effectivePeriodMs}ms",
             category = TrackCategory.LoopSubComp,
             sceneIndex = loopSceneIdx,
             blocks = listOf(
                 TimelineBlockBar(
                     id = "$trackId-subcomp",
                     trackId = trackId,
-                    label = "⟳ ${loopDesc.label} · ${loopDesc.defaultPeriodMillis}ms ▸",
+                    label = "⟳ ${loopDesc.label} · ${effectivePeriodMs}ms ▸",
                     category = TrackCategory.LoopSubComp,
                     sceneIndex = loopSceneIdx,
                     triggerBeatInScene = 0,
                     startMs = startMs,
                     durationMs = spanMs,
                     loopId = loopId,
-                    loopPeriodMs = loopDesc.defaultPeriodMillis,
+                    loopPeriodMs = effectivePeriodMs,
                 )
             ),
         )

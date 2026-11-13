@@ -2,7 +2,9 @@ package dev.sebastiano.ciacola
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.IntSize
+import dev.sebastiano.ciacola.theme.DeckThemes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -58,5 +60,25 @@ class FoundationDeckTest {
 
         assertEquals(0, state.sceneState)
         assertNotEquals(first, later)
+    }
+
+    @Test
+    fun meshPaletteAdaptsLuminanceToLightAndDarkThemes() {
+        val state = MeshLoopState(sceneState = 0)
+        val darkColors = animatedMeshPoints(state, elapsedMillis = 500, theme = DeckThemes.stageDark())
+            .flatten()
+            .map { it.second }
+        val lightColors = animatedMeshPoints(state, elapsedMillis = 500, theme = DeckThemes.keynoteLight())
+            .flatten()
+            .map { it.second }
+
+        assertTrue(
+            lightColors.all { it.luminance() > 0.45f },
+            "Expected all Keynote Light mesh vertices to stay light (luminance > 0.45), got ${lightColors.map { it.luminance() }}",
+        )
+        assertTrue(
+            lightColors.map { it.luminance() }.average() > darkColors.map { it.luminance() }.average() + 0.40,
+            "Expected Keynote Light mesh average luminance to substantially exceed Stage Dark",
+        )
     }
 }

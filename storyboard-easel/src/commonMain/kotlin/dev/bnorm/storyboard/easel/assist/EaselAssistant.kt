@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
+import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.easel.*
 import dev.bnorm.storyboard.easel.internal.QuarteredBox
 import kotlinx.coroutines.Job
@@ -79,7 +80,7 @@ private fun NextFramePreview(animatic: Animatic, modifier: Modifier = Modifier) 
         Text("Next Frame", style = MaterialTheme.typography.h5)
         Spacer(Modifier.size(8.dp))
         val nextIndex by derivedStateOf {
-            val i = animatic.storyboard.indices.binarySearch(animatic.currentIndex)
+            val i = animatic.storyboard.indices.binarySearch(animatic.targetIndex)
             require(i >= 0) { "targetIndex not found in storyboard" }
             animatic.storyboard.indices.getOrNull(i + 1)
         }
@@ -101,7 +102,7 @@ private fun NextFramePreview(animatic: Animatic, modifier: Modifier = Modifier) 
                             onClick = {
                                 job?.cancel()
                                 job = coroutineScope.launch {
-                                    animatic.jumpTo(it)
+                                    animatic.advance(AdvanceDirection.Forward)
                                     job = null
                                 }
                             }

@@ -294,6 +294,7 @@ class CiacolaStudioSpectreTest {
                         title = "Ciacola - Story",
                         state = rememberWindowState(position = WindowPosition(80.dp, 60.dp), size = DpSize(1360.dp, 900.dp)),
                     ) {
+                        window.isAutoRequestFocus = false
                         uiScopeRef.set(rememberCoroutineScope())
                         if (windowRef.compareAndSet(null, window)) readyLatch.countDown()
                         Box(Modifier.fillMaxSize()) {
@@ -317,7 +318,7 @@ class CiacolaStudioSpectreTest {
 
     private suspend fun Studio.openTimeline(): AutomatorNode {
         val toggle = automator.waitForNode(tag = "ciacola-hud-toggle-timeline", timeout = 10.seconds)
-        automator.waitForVisualIdle()
+        settle()
         automator.click(toggle)
         val canvas = automator.waitForNode(tag = "ciacola-timeline-canvas", timeout = 5.seconds)
         settle()
@@ -434,6 +435,122 @@ class CiacolaStudioSpectreTest {
                 val paused = controller.currentPlayheadTimeMs
                 delay(400)
                 assertEquals(paused, controller.currentPlayheadTimeMs, "Paused playhead stays put")
+            }
+        }
+
+    @Test
+    fun draggingThePlayheadAcrossSlidesUpdatesTheStageDuringTheDrag(): Unit =
+        runSpectreTest(timeout = 120.seconds) {
+            val studio = launchStudio()
+            with(studio) {
+                val canvas = openTimeline()
+                val spans = controller.snapshot.stateSpans
+                // From slide 2 resting on the expanded "shared" card, across slide 3, into slide 4.
+                val startMs = spans.last { it.sceneIndex == 1 && it.isHold }.startMs + 40
+                val slide4 = spans.first { it.sceneIndex == 3 && it.isHold }
+                val slide4Ms = slide4.startMs..(slide4.startMs + slide4.durationMs)
+                val endMs = slide4.startMs + slide4.durationMs / 2
+                val y = rulerPoint(canvas, 0).y
+                val from = rulerPoint(canvas, startMs)
+                val to = rulerPoint(canvas, endMs)
+                val studioTop = checkNotNull(automator.findOneByTestTag("ciacola-timeline-studio")).boundsInWindow.top.toInt()
+
+                robot.mouseMove(from.x, y)
+                delay(30)
+                robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
+                // A held press on the ruler keeps the UI fingerprint busy, so wait instead of settle().
+                delay(600)
+                val slide2 = screenshot().crop(studioTop)
+
+                // Keep the pointer moving for the whole capture, so the conflated scrub worker never
+                // idles (stopping the pointer would let the last seek unfreeze the stage).
+                val dragging = java.util.concurrent.atomic.AtomicBoolean(true)
+                val mover = thread(name = "spectre-playhead-drag", isDaemon = true) {
+                    val steps = 40
+                    for (i in 1..steps) {
+                        robot.mouseMove(from.x + (to.x - from.x) * i / steps, y)
+                        Thread.sleep(16)
+                    }
+                    var i = 0
+                    while (dragging.get()) {
+                        robot.mouseMove(to.x + if (i++ % 2 == 0) 6 else -6, y)
+                        Thread.sleep(16)
+                    }
+                }
+                try {
+                    automator.waitUntil(description = "playhead in slide 4 mid-drag", timeout = 5.seconds) {
+                        controller.currentPlayheadTimeMs in slide4Ms
+                    }
+                    delay(400)
+                    val midDrag = screenshot().crop(studioTop)
+                    assertTrue(controller.currentPlayheadTimeMs in slide4Ms, "Still dragging inside slide 4")
+                    captureDir?.let { ImageIO.write(midDrag, "png", File(it, "11-mid-drag-slide-4.png")) }
+                    val diff = differingFraction(midDrag, slide2)
+                    assertTrue(diff > 0.05, "Stage still shows the slide-2 frame mid-drag (only ${"%.4f".format(diff)} of pixels changed)")
+                } finally {
+                    dragging.set(false)
+                    mover.join(2_000)
+                    robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                }
+                delay(300)
+            }
+        }
+
+    @Test
+    fun longBackAndForthScrubAcrossEverySlideWithScreenshotsStaysAliveAndLandsOnTheRightFrame(): Unit =
+        runSpectreTest(timeout = 180.seconds) {
+            // Stress for the scrub freeze: every step rebuilds the scene subtree, and the freeze
+            // snapshots the presented frame. Snapshotting a layer that still referenced a disposed
+            // subtree crashed the JVM (SIGBUS in Skia) once in a long session like this one.
+            val studio = launchStudio()
+            with(studio) {
+                val canvas = openTimeline()
+                val total = controller.snapshot.totalDurationMs
+                val y = rulerPoint(canvas, 0).y
+                val left = rulerPoint(canvas, 0).x
+                val right = rulerPoint(canvas, total).x
+                val shots = java.util.concurrent.atomic.AtomicInteger()
+                val dragging = java.util.concurrent.atomic.AtomicBoolean(true)
+                val shooter = launch {
+                    while (dragging.get()) {
+                        screenshot()
+                        shots.incrementAndGet()
+                    }
+                }
+                robot.mouseMove(left, y)
+                delay(30)
+                robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
+                try {
+                    val deadline = System.currentTimeMillis() + 40_000
+                    var i = 0
+                    while (System.currentTimeMillis() < deadline) {
+                        // Triangle wave over the whole deck with a little jitter, 16 ms per step.
+                        val phase = (i % 120).let { if (it < 60) it else 120 - it }
+                        val jitter = if (i % 7 == 0) -9 else 0
+                        robot.mouseMove(left + (right - left) * phase / 60 + jitter, y)
+                        delay(16)
+                        i++
+                    }
+                } finally {
+                    robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                    dragging.set(false)
+                    shooter.join()
+                }
+                automator.moveTo(left, y - 200)
+                settle()
+                delay(300)
+                assertTrue(shots.get() > 50, "Screenshots kept running during the drag (${shots.get()})")
+                val studioTop = checkNotNull(automator.findOneByTestTag("ciacola-timeline-studio")).boundsInWindow.top.toInt()
+                val landed = controller.currentPlayheadTimeMs
+                val viaDrag = screenshot().crop(studioTop)
+                onUi { controller.scrubToTimeMs(if (landed > total / 2) 0 else total) }
+                settle()
+                onUi { controller.scrubToTimeMs(landed) }
+                settle()
+                delay(300)
+                val viaJump = screenshot().crop(studioTop)
+                val diff = differingFraction(viaDrag, viaJump)
+                assertTrue(diff < 0.002, "Stage after a long scrub differs from a direct scrub to ${landed}ms: ${"%.4f".format(diff)}")
             }
         }
 

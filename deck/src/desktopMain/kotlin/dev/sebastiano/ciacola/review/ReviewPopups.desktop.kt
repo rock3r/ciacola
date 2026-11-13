@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +80,7 @@ internal fun BoxScope.ReviewHudToolbar(
     inspectActive: Boolean,
     inspectPinned: Boolean,
     timelineDocked: Boolean = false,
+    agentConfigured: Boolean = true,
     queuedCount: Int,
     applyingCount: Int,
     appliedCount: Int,
@@ -180,9 +183,27 @@ internal fun BoxScope.ReviewHudToolbar(
         }
 
         if (queuedCount > 0) {
-            Tooltip(tooltip = { Text("Dispatch $queuedCount queued comment(s) to agent") }) {
-                DefaultButton(onClick = onFlushQueued) {
-                    Text("Send $queuedCount", style = JewelTheme.typography.small)
+            if (agentConfigured) {
+                Tooltip(tooltip = { Text("Dispatch $queuedCount queued comment(s) to agent") }) {
+                    DefaultButton(
+                        onClick = onFlushQueued,
+                        modifier = Modifier.testTag("ciacola-hud-send-queued"),
+                    ) {
+                        Text("Send $queuedCount", style = JewelTheme.typography.small)
+                    }
+                }
+            } else {
+                Tooltip(
+                    tooltip = {
+                        Text("No Conversation ID configured — open Review panel (F4) to connect an agent for $queuedCount queued comment(s)")
+                    },
+                ) {
+                    OutlinedButton(
+                        onClick = onOpenReviewPanel,
+                        modifier = Modifier.testTag("ciacola-hud-send-queued"),
+                    ) {
+                        Text("Set Agent ($queuedCount)", style = JewelTheme.typography.small)
+                    }
                 }
             }
         }
@@ -204,6 +225,10 @@ internal fun AnchoredCommentComposerPopup(
     themePresetName: String,
     outerBoundsInRoot: Rect?,
     stageBoundsInRoot: Rect?,
+    noteState: TextFieldState = rememberTextFieldState(),
+    draftRestored: Boolean = false,
+    restoredFromTarget: ReviewTargetHit? = null,
+    onClearDraft: () -> Unit = {},
     onDismiss: (fromEscapeKey: Boolean) -> Unit,
     onSubmit: (SlideReviewComment, Boolean, ByteArray) -> Unit,
 ) {
@@ -215,11 +240,11 @@ internal fun AnchoredCommentComposerPopup(
         stageBoundsInRoot = stageBoundsInRoot,
     )
 
-    val noteState = rememberTextFieldState()
     val convIdState = rememberTextFieldState(initialText = store.effectiveConversationId())
     var submitting by remember(pending) { mutableStateOf(false) }
     var validationError by remember(pending) { mutableStateOf<String?>(null) }
     val noteFocusRequester = remember(pending) { FocusRequester() }
+    val convIdFocusRequester = remember(pending) { FocusRequester() }
 
     LaunchedEffect(pending) {
         withFrameNanos {}
@@ -232,11 +257,17 @@ internal fun AnchoredCommentComposerPopup(
             validationError = "Enter feedback before sending."
             return
         }
+        val enteredConv = convIdState.text.toString().trim()
+        val effectiveConv = enteredConv.ifEmpty { store.effectiveConversationId() }
+        if (dispatchImmediate && effectiveConv.isBlank()) {
+            validationError = "Enter a Target Agent Conversation ID to send now, or click Queue to save for later."
+            runCatching { convIdFocusRequester.requestFocus() }
+            return
+        }
         if (submitting) return
         submitting = true
         validationError = null
 
-        val enteredConv = convIdState.text.toString().trim()
         if (enteredConv.isNotEmpty() && enteredConv != store.config.conversationId) {
             store.saveConfig(store.config.copy(conversationId = enteredConv))
         }
@@ -330,6 +361,44 @@ internal fun AnchoredCommentComposerPopup(
                     QuotedTargetPreview(quotePreview)
                 }
 
+                if (draftRestored && noteState.text.isNotBlank()) {
+                    val hintLabel = if (
+                        restoredFromTarget != null &&
+                        restoredFromTarget.label.isNotBlank() &&
+                        restoredFromTarget.label != pending.target.label
+                    ) {
+                        "Draft restored · from ${restoredFromTarget.label}"
+                    } else {
+                        "Draft restored"
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = hintLabel,
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.info,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                                .testTag("ciacola-review-draft-restored-hint"),
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                onClearDraft()
+                                runCatching { noteFocusRequester.requestFocus() }
+                            },
+                            modifier = Modifier.testTag("ciacola-review-clear-draft-button"),
+                        ) {
+                            Text("Clear", style = JewelTheme.typography.small)
+                        }
+                    }
+                }
+
                 TextArea(
                     state = noteState,
                     placeholder = {
@@ -361,7 +430,10 @@ internal fun AnchoredCommentComposerPopup(
                         TextField(
                             state = convIdState,
                             placeholder = { Text("Target Agent Conversation ID") },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(convIdFocusRequester)
+                                .testTag("ciacola-review-conv-id-input"),
                         )
                         InfoText("Saved to .storyboard/review-config.json for live agentapi push.")
                     }
@@ -476,9 +548,11 @@ internal fun AnchoredSelectedPinPopup(
     outerBoundsInRoot: Rect?,
     stageBoundsInRoot: Rect?,
     stageFormatSize: IntSize,
+    agentConfigured: Boolean = true,
     onClose: (fromEscapeKey: Boolean) -> Unit,
     onDelete: () -> Unit,
     onRetry: () -> Unit,
+    onConfigureAgent: () -> Unit = {},
 ) {
     val anchorPx = stagePointToOuterOffsetPx(
         stageX = comment.stageX,
@@ -489,6 +563,12 @@ internal fun AnchoredSelectedPinPopup(
     )
     val statusPalette: ReviewStatusPalette = rememberReviewStatusPalette()
     val globalColors = JewelTheme.globalColors
+    val pinPopupFocusRequester = remember(comment.id) { FocusRequester() }
+
+    LaunchedEffect(comment.id) {
+        withFrameNanos {}
+        runCatching { pinPopupFocusRequester.requestFocus() }
+    }
 
     Box(
         modifier = Modifier.offset {
@@ -505,6 +585,9 @@ internal fun AnchoredSelectedPinPopup(
             ),
             modifier = Modifier
                 .width(320.dp)
+                .testTag("ciacola-review-pin-popup")
+                .focusRequester(pinPopupFocusRequester)
+                .focusable()
                 .onPreviewKeyEvent { ev ->
                     if (ev.key == Key.Escape) {
                         if (ev.type == KeyEventType.KeyDown) onClose(true)
@@ -600,8 +683,14 @@ internal fun AnchoredSelectedPinPopup(
                         if (comment.status == ReviewCommentStatus.Failed ||
                             comment.status == ReviewCommentStatus.Queued
                         ) {
-                            DefaultButton(onClick = onRetry) {
-                                Text("Send Now")
+                            if (agentConfigured) {
+                                DefaultButton(onClick = onRetry) {
+                                    Text("Send Now")
+                                }
+                            } else {
+                                OutlinedButton(onClick = onConfigureAgent) {
+                                    Text("Set Agent…")
+                                }
                             }
                         }
                     }

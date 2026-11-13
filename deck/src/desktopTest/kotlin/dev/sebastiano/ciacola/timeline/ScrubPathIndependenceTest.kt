@@ -105,6 +105,7 @@ class ScrubPathIndependenceTest {
         pathTimes: List<Int>,
         checkpoints: Set<Int>,
         rapidFire: Boolean,
+        inSegmentInPlace: Boolean = false,
     ) = runComposeUiTest {
         val deck = frozenLoopDeck()
         val snapshot = indexDeckTimeline(deck)
@@ -149,7 +150,11 @@ class ScrubPathIndependenceTest {
                 runOnIdle { scope.launch { pathAnimatic.seekToSegment(stateIdx, frac) } }
                 continue
             }
-            runOnUi(scope) { pathAnimatic.seekToSegment(stateIdx, frac) }
+            // With the timeline's in-segment policy, a step inside the segment the stage already
+            // shows seeks in place; anything else rebuilds the scene subtree.
+            val inPlace = inSegmentInPlace &&
+                scrubStepIsInPlace(pathAnimatic.activeFromStateIndex, pathAnimatic.activeToStateIndex, stateIdx, frac)
+            runOnUi(scope) { pathAnimatic.seekToSegment(stateIdx, frac, rebuildScene = !inPlace) }
             if (i !in checkpointIndices) continue
 
             // Independent oracle: a fresh composition settled on the segment's resting state, then a
@@ -246,6 +251,37 @@ class ScrubPathIndependenceTest {
     }
 
     @Test
+    fun fullDeckScrubWithInPlaceStepsInsideASegmentIsPathIndependent() {
+        // A drag only rebuilds on segment changes (TimelineStudioController.runScrubWorker); steps
+        // inside a segment seek in place and must still render the frame a fresh jump renders.
+        val deck = frozenLoopDeck()
+        val total = indexDeckTimeline(deck).totalDurationMs
+        val range = 0..total
+        val checkpoints = midpointsOfSegments(range)
+        val ordered = buildList {
+            val fwd = (range.first..range.last step 15).toMutableSet().apply { addAll(checkpoints) }.sorted()
+            addAll(fwd)
+            addAll(fwd.reversed())
+        }
+        assertPathIndependent(ordered, checkpoints, rapidFire = false, inSegmentInPlace = true)
+    }
+
+    @Test
+    fun jitteringInsideEverySegmentWithInPlaceStepsIsPathIndependent() {
+        val deck = frozenLoopDeck()
+        val snapshot = indexDeckTimeline(deck)
+        val checkpoints = mutableSetOf<Int>()
+        val ordered = buildList {
+            for (span in snapshot.stateSpans.filter { it.durationMs > 40 }) {
+                val at = { f: Float -> span.startMs + (span.durationMs * f).toInt() }
+                add(at(0.2f)); add(at(0.85f)); add(at(0.1f)); add(at(0.95f)); add(at(0.05f)); add(at(0.6f))
+                checkpoints += at(0.6f)
+            }
+        }
+        assertPathIndependent(ordered + ordered, checkpoints, rapidFire = false, inSegmentInPlace = true)
+    }
+
+    @Test
     fun scrubbedFramesMatchLiveArrowKeyPlaybackWithinTwoFramesOfJitter() = runComposeUiTest {
         // Ground truth is what the audience sees: arrow-key playback. For every played frame, a scrub
         // to the same (segment, fraction) must render the same picture. Both are driven by seeking
@@ -325,6 +361,69 @@ class ScrubPathIndependenceTest {
         println("live frames per segment: $liveFrames; timeline: $measured")
         if (failures.isNotEmpty()) {
             fail("Scrubbed frames diverge from live playback (images in deck/build/scrub-qa):\n" + failures.joinToString("\n"))
+        }
+    }
+
+    @Test
+    fun backToBackScrubStepsAcrossSlidesPresentEachStepInsteadOfTheFirstFrozenFrame() = runComposeUiTest {
+        // The timeline's conflated scrub worker runs seeks back to back from one coroutine while
+        // the playhead is dragged. Every completed step must reach the screen: the stage may lag a
+        // step behind the pointer, but it must not stay frozen on the frame the drag started from.
+        mainClock.autoAdvance = false
+        val deck = frozenLoopDeck()
+        val snapshot = indexDeckTimeline(deck)
+        lateinit var animatic: Animatic
+        lateinit var scope: CoroutineScope
+        setContent {
+            scope = rememberCoroutineScope()
+            Box(Modifier.size(480.dp, 270.dp).testTag("stage")) {
+                animatic = rememberAnimatic(storyboard = { deck })
+                Easel(animatic)
+            }
+        }
+        mainClock.advanceTimeBy(500)
+
+        // Slide 2 resting on its last beat (the expanded shared card), across slide 3 (ambient
+        // loop), into the middle of slide 4.
+        val startMs = snapshot.stateSpans.last { it.sceneIndex == 1 && it.isHold }.startMs
+        val slide3RestMs = snapshot.stateSpans.first { it.sceneIndex == 2 && it.isHold }.startMs
+        val slide4Rest = snapshot.stateSpans.first { it.sceneIndex == 3 && it.isHold }
+        val endMs = slide4Rest.startMs + slide4Rest.durationMs / 2
+        val (startState, startFrac) = snapshot.stateFractionForTimeMs(startMs)
+        runOnUi(scope) { animatic.seekToSegment(startState, startFrac) }
+        mainClock.advanceTimeBy(300)
+        val slide2 = onNodeWithTag("stage").captureToImage()
+
+        var completedMs = startMs
+        lateinit var worker: Job
+        runOnIdle {
+            worker = scope.launch {
+                for (t in (startMs..endMs step 40) + endMs) {
+                    val (state, frac) = snapshot.stateFractionForTimeMs(t)
+                    animatic.seekToSegment(state, frac)
+                    completedMs = t
+                }
+            }
+        }
+        class Capture(val completedMs: Int, val image: ImageBitmap)
+        val captures = mutableListOf<Capture>()
+        var frame = 0
+        while (!worker.isCompleted && frame++ < 2_000) {
+            mainClock.advanceTimeByFrame()
+            if (frame % 3 == 0 && completedMs >= slide3RestMs) {
+                captures += Capture(completedMs, onNodeWithTag("stage").captureToImage())
+            }
+        }
+        if (!worker.isCompleted) fail("Scrub worker did not finish")
+        if (captures.size < 5) fail("Too few mid-sequence captures: ${captures.size}")
+        val stale = captures.filter { diff(it.image, slide2).differingPixels < it.image.width * it.image.height / 100 }
+        if (stale.isNotEmpty()) {
+            stale.take(3).forEach { dump("stale-scrub-${it.completedMs}ms", it.image) }
+            dump("stale-scrub-slide2", slide2)
+            fail(
+                "Stage still showed the slide-2 frame in ${stale.size}/${captures.size} captures taken after " +
+                    "scrub steps in slide 3/4 completed (at ${stale.map { it.completedMs }.take(10)} ms; images in deck/build/scrub-qa)",
+            )
         }
     }
 

@@ -28,7 +28,7 @@ class AnimaticHotReloadPersistenceTest {
     @Test
     fun rebuildingStoryboardRetainsAndClampsCurrentIndexWithoutClobberingSavedFile() = runComposeUiTest {
         val fileKey = "hot-reload-test-${UUID.randomUUID()}"
-        val savedPath = Paths.get(".storyboard", "${fileKey.lowercase()}.json")
+        val savedPath = resolveDefaultStoryboardDir().resolve("${fileKey.lowercase()}.json")
         try {
             var reloadVersion by mutableIntStateOf(0)
             lateinit var latestAnimatic: Animatic

@@ -13,6 +13,7 @@ import dev.bnorm.storyboard.easel.overlay.EaselOverlay
 import dev.bnorm.storyboard.easel.overlay.EaselOverlayScope
 import dev.bnorm.storyboard.easel.overlay.OverlayNavigation
 import dev.bnorm.storyboard.easel.overview.EaselOverview
+import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.plus
 
 @Composable
@@ -37,15 +38,18 @@ fun ApplicationScope.DesktopEasel(
         rememberAssistantWindow(animatic)
     ),
 ) {
-    val exporter = remember(animatic.storyboard) { StoryboardPdfExporter() }
+    // One exporter for the app's lifetime: the storyboard is rebuilt on every override or theme
+    // change, and a new exporter would drop a running export's status and re-enable the menu.
+    val exporter = remember { StoryboardPdfExporter() }
 
-    val storyWindowState = rememberWindowState(fileName = "Story")
+    val storyWindowState = rememberWindowState(fileName = "Story", defaultSize = DefaultStoryWindowSize)
     var storyWindow by remember { mutableStateOf<ComposeWindow?>(null) }
+    val overviewVisibility = rememberOverviewVisibility()
 
     @Composable
     fun FrameWindowScope.Toolbar() {
         MenuBar {
-            DesktopMenu(animatic.storyboard, storyWindowState, storyWindow)
+            DesktopMenu(animatic.storyboard, storyWindowState, storyWindow, overviewVisibility)
             ExportMenu(exporter, animatic.storyboard)
             for (window in windows) {
                 key(window.name) {
@@ -77,27 +81,36 @@ fun ApplicationScope.DesktopEasel(
             windows.fold(ContentDecorator.None) { acc, sidecar -> acc + sidecar.decorator }
         }
 
-        decorator.decorate {
-            EaselOverview(animatic) {
-                EaselOverlay(
-                    overlay = {
-                        // Only display overlay navigation when *not* fullscreen.
-                        if (storyWindowState.placement != WindowPlacement.Fullscreen) {
-                            overlay()
+        CompositionLocalProvider(
+            LocalPresentingFullscreen provides (storyWindowState.placement == WindowPlacement.Fullscreen),
+        ) {
+            decorator.decorate {
+                EaselOverview(animatic, visibility = overviewVisibility) {
+                    EaselOverlay(
+                        overlay = {
+                            // Only display overlay navigation when *not* fullscreen.
+                            if (storyWindowState.placement != WindowPlacement.Fullscreen) {
+                                overlay()
+                            }
                         }
+                    ) {
+                        Easel(animatic)
                     }
-                ) {
-                    Easel(animatic)
                 }
             }
         }
 
-        exporter.status?.let { ExportProgressPopup(it) }
+        exporter.status?.let { ExportProgressPopup(it, onDismiss = exporter::dismissFailure) }
     }
 
     for (window in windows) {
         key(window.name) {
-            val state = rememberWindowState(fileName = window.name)
+            // Never-opened windows do not write `.storyboard/<name>.json`; they persist once shown.
+            val state = rememberWindowState(
+                fileName = window.name,
+                defaultSize = window.initialSize,
+                persist = window.visible,
+            )
             if (state != null && window.visible) {
                 Window(
                     title = "${animatic.storyboard.title} - ${window.name}",

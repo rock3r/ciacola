@@ -13,6 +13,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +49,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -113,11 +122,59 @@ class ReviewStageCoordinator : ReviewStageBridge {
 
     var pendingSelection by mutableStateOf<PendingReviewSelection?>(null)
     var selectedPinCommentId by mutableStateOf<String?>(null)
+    var composerDraftText by mutableStateOf("")
+    var composerDraftTarget by mutableStateOf<ReviewTargetHit?>(null)
+
+    fun clearComposerDraft() {
+        composerDraftText = ""
+        composerDraftTarget = null
+    }
+
+    /**
+     * Focus target on the stage: review popups own their own focus, so when one closes the
+     * keyboard is handed back here (key events bubble from the stage to the story navigation).
+     */
+    internal val stageFocusRequester = FocusRequester()
 
     internal var currentSlideCommentsProvider: () -> List<SlideReviewComment> = { emptyList() }
     internal var isDarkThemeProvider: () -> Boolean = { true }
+    internal var stagePinsVisible by mutableStateOf(false)
+    internal var stagePinRadiusPx: Float = 12f
 
     private val entries = mutableStateMapOf<Any, RegisteredEntry>()
+    private val pinCoordinates = mutableStateMapOf<String, LayoutCoordinates>()
+
+    internal fun registerPinCoordinates(commentId: String, coordinates: LayoutCoordinates) {
+        pinCoordinates[commentId] = coordinates
+    }
+
+    internal fun unregisterPinCoordinates(commentId: String) {
+        pinCoordinates.remove(commentId)
+    }
+
+    internal fun clearPinCoordinates() {
+        pinCoordinates.clear()
+    }
+
+    internal fun findVisiblePinAt(stagePoint: Offset): SlideReviewComment? {
+        if (!showStageBadges || !stagePinsVisible) return null
+        val root = stageRootCoordinates?.takeIf { it.isAttached }
+        val fallbackRadius = stagePinRadiusPx.coerceAtLeast(1f)
+        return currentSlideCommentsProvider().asReversed().firstOrNull { comment ->
+            val coords = pinCoordinates[comment.id]?.takeIf { it.isAttached }
+            val bounds = if (root != null && coords != null) {
+                runCatching { root.localBoundingBoxOf(coords, clipBounds = false) }.getOrNull()
+            } else {
+                null
+            }
+            if (bounds != null && bounds.width > 0f && bounds.height > 0f) {
+                val radius = minOf(bounds.width, bounds.height) / 2f
+                (stagePoint - bounds.center).getDistance() <= radius
+            } else {
+                (stagePoint - Offset(comment.stageX, comment.stageY)).getDistance() <= fallbackRadius
+            }
+        }
+    }
 
     fun dismissActivePopups(fromEscapeKey: Boolean = false) {
         if (fromEscapeKey && (pendingSelection != null || selectedPinCommentId != null)) {
@@ -184,32 +241,63 @@ class ReviewStageCoordinator : ReviewStageBridge {
         val storyWin = composeWindows.firstOrNull { it.title.endsWith("- Story") } ?: composeWindows.first()
         val hits = mutableListOf<ReviewTargetHit>()
 
+        fun findReviewStageRoot(node: SemanticsNode): SemanticsNode? {
+            if (node.config.getOrNull(SemanticsProperties.TestTag) == "ciacola-review-stage") {
+                return node
+            }
+            for (child in node.children) {
+                findReviewStageRoot(child)?.let { return it }
+            }
+            return null
+        }
+
+        fun isInternalDebugDescription(text: String): Boolean =
+            text.startsWith("selected=") ||
+                text.startsWith("previewScale=") ||
+                text.startsWith("zoom=")
+
         fun walk(node: SemanticsNode) {
             val tag = node.config.getOrNull(SemanticsProperties.TestTag).orEmpty()
-            if (tag.startsWith("ciacola-review-")) return
+            if (
+                (tag.startsWith("ciacola-review-") && tag != "ciacola-review-stage") ||
+                tag.startsWith("ciacola-hud-") ||
+                tag.startsWith("ciacola-timeline-") ||
+                tag == "ciacola-stage-selection-overlay" ||
+                tag == "ciacola-preview-zoom-reset" ||
+                tag == "ciacola-inspector-vscrollbar"
+            ) {
+                return
+            }
 
-            val textList = node.config.getOrNull(SemanticsProperties.Text)
-            val joinedText = textList?.joinToString("") { it.text }?.trim().orEmpty()
-            val desc = node.config.getOrNull(SemanticsProperties.ContentDescription)
-                ?.joinToString(" ")
-                ?.trim()
-                .orEmpty()
-            val snippet = joinedText.ifBlank { desc }
-            if (snippet.isNotBlank()) {
-                val b = node.boundsInRoot
-                if (b.overlaps(rootBox) && b.width > 1f && b.height > 1f) {
-                    val stageRect = StageRectDto(
-                        left = ((b.left - rootBox.left) / rootBox.width) * formatW,
-                        top = ((b.top - rootBox.top) / rootBox.height) * formatH,
-                        right = ((b.right - rootBox.left) / rootBox.width) * formatW,
-                        bottom = ((b.bottom - rootBox.top) / rootBox.height) * formatH,
-                    )
-                    hits += ReviewTargetHit(
-                        kind = "Text",
-                        label = snippet.take(48),
-                        textSnippet = snippet,
-                        bounds = stageRect,
-                    )
+            if (tag != "ciacola-review-stage" && tag != "ciacola-preview-viewport") {
+                val textList = node.config.getOrNull(SemanticsProperties.Text)
+                val joinedText = textList?.joinToString("") { it.text }?.trim().orEmpty()
+                val desc = if (tag.startsWith("ciacola-")) {
+                    ""
+                } else {
+                    node.config.getOrNull(SemanticsProperties.ContentDescription)
+                        ?.joinToString(" ")
+                        ?.trim()
+                        ?.takeUnless(::isInternalDebugDescription)
+                        .orEmpty()
+                }
+                val snippet = joinedText.ifBlank { desc }
+                if (snippet.isNotBlank()) {
+                    val b = node.boundsInRoot
+                    if (b.overlaps(rootBox) && b.width > 1f && b.height > 1f) {
+                        val stageRect = StageRectDto(
+                            left = ((b.left - rootBox.left) / rootBox.width) * formatW,
+                            top = ((b.top - rootBox.top) / rootBox.height) * formatH,
+                            right = ((b.right - rootBox.left) / rootBox.width) * formatW,
+                            bottom = ((b.bottom - rootBox.top) / rootBox.height) * formatH,
+                        )
+                        hits += ReviewTargetHit(
+                            kind = "Text",
+                            label = snippet.take(48),
+                            textSnippet = snippet,
+                            bounds = stageRect,
+                        )
+                    }
                 }
             }
             node.children.forEach(::walk)
@@ -221,7 +309,10 @@ class ReviewStageCoordinator : ReviewStageBridge {
                 .getMethod("getSemanticsOwners")
                 .invoke(storyWin) as? Collection<SemanticsOwner>
             owners?.forEach { owner ->
-                walk(owner.unmergedRootSemanticsNode)
+                val stageNode = findReviewStageRoot(owner.unmergedRootSemanticsNode)
+                if (stageNode != null) {
+                    walk(stageNode)
+                }
             }
         }
         return hits
@@ -274,7 +365,29 @@ private fun ReviewStageLayer(
             coordinator.hoverStagePoint = null
             coordinator.dragStartStagePoint = null
             coordinator.dragCurrentStagePoint = null
+            coordinator.stagePinsVisible = false
+            coordinator.clearPinCoordinates()
             coordinator.dismissActivePopups()
+        }
+    }
+
+    // When a popup (composer or pin) closes, give the keyboard back to the stage so ←/→ and Esc
+    // keep working without clicking the slide first.
+    val popupOpen = coordinator.pendingSelection != null || coordinator.selectedPinCommentId != null
+    var popupWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(popupOpen) {
+        if (!popupOpen && popupWasOpen) {
+            withFrameNanos { }
+            runCatching { coordinator.stageFocusRequester.requestFocus() }
+        }
+        popupWasOpen = popupOpen
+    }
+    // The Esc that closed a popup may release while focus is still in transit and never reach the
+    // window; don't let that stale guard eat the presenter's next Esc.
+    LaunchedEffect(coordinator.swallowNextEscapeKeyUp) {
+        if (coordinator.swallowNextEscapeKeyUp) {
+            delay(500)
+            coordinator.swallowNextEscapeKeyUp = false
         }
     }
 
@@ -282,6 +395,8 @@ private fun ReviewStageLayer(
         modifier = Modifier
             .fillMaxSize()
             .testTag("ciacola-review-stage")
+            .focusRequester(coordinator.stageFocusRequester)
+            .focusable()
             .onPlaced { coords ->
                 coordinator.stageRootCoordinates = coords
                 if (coords.isAttached) {
@@ -316,10 +431,14 @@ private fun ReviewStageLayer(
                         when (event.type) {
                             PointerEventType.Move -> {
                                 if (pos != null) {
-                                    coordinator.hoverStagePoint = pos
                                     if (coordinator.dragStartStagePoint != null) {
+                                        coordinator.hoverStagePoint = pos
                                         coordinator.dragCurrentStagePoint = pos
                                         event.changes.forEach { it.consume() }
+                                    } else if (coordinator.findVisiblePinAt(pos) != null) {
+                                        coordinator.hoverStagePoint = null
+                                    } else {
+                                        coordinator.hoverStagePoint = pos
                                     }
                                 }
                             }
@@ -332,6 +451,17 @@ private fun ReviewStageLayer(
 
                             PointerEventType.Press -> {
                                 if (pos != null && ctrlNow) {
+                                    val hitPin = coordinator.findVisiblePinAt(pos)
+                                    if (hitPin != null) {
+                                        coordinator.hoverStagePoint = null
+                                        if (event.buttons.isSecondaryPressed) {
+                                            event.changes.forEach { it.consume() }
+                                            coordinator.pendingSelection = null
+                                            coordinator.selectedPinCommentId =
+                                                if (coordinator.selectedPinCommentId == hitPin.id) null else hitPin.id
+                                        }
+                                        continue
+                                    }
                                     event.changes.forEach { it.consume() }
                                     coordinator.selectedPinCommentId = null
                                     coordinator.dragStartStagePoint = pos
@@ -482,39 +612,58 @@ private fun ReviewStageHighlightsAndPins(
         }
     }
 
-    if (coordinator.showStageBadges) {
+    // Pins stay off the audience-facing fullscreen stage unless the presenter is reviewing.
+    val hidePinsForAudience = LocalPresentingFullscreen.current && !coordinator.inspectModeEnabled &&
+        coordinator.selectedPinCommentId == null
+    val pinsVisible = coordinator.showStageBadges && !hidePinsForAudience
+    coordinator.stagePinsVisible = pinsVisible
+    if (pinsVisible) {
         val slideComments = coordinator.currentSlideCommentsProvider()
         val density = LocalDensity.current
+        val pinSizeDp = 24.dp
+        val pinHalfPx = with(density) { (pinSizeDp / 2).roundToPx() }
+        coordinator.stagePinRadiusPx = with(density) { (pinSizeDp / 2).toPx() }
         slideComments.forEachIndexed { idx, comment ->
-            val pinColor = statusPalette.colorFor(comment.status)
-            val pinSizeDp = 24.dp
-            val pinHalfPx = with(density) { (pinSizeDp / 2).roundToPx() }
-            Box(
-                modifier = Modifier
-                    .offset {
-                        IntOffset(
-                            x = comment.stageX.roundToInt() - pinHalfPx,
-                            y = comment.stageY.roundToInt() - pinHalfPx,
-                        )
+            key(comment.id) {
+                DisposableEffect(coordinator, comment.id) {
+                    onDispose {
+                        coordinator.unregisterPinCoordinates(comment.id)
                     }
-                    .size(pinSizeDp)
-                    .clip(CircleShape)
-                    .background(pinColor)
-                    .border(1.5.dp, borderOutline, CircleShape)
-                    .clickable {
-                        coordinator.pendingSelection = null
-                        coordinator.selectedPinCommentId =
-                            if (coordinator.selectedPinCommentId == comment.id) null else comment.id
-                    }
-                    .testTag("ciacola-review-pin-${idx + 1}"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = (idx + 1).toString(),
-                    color = statusPalette.pinBadgeForeground,
-                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
-                )
+                }
+                val pinColor = statusPalette.colorFor(comment.status)
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                x = comment.stageX.roundToInt() - pinHalfPx,
+                                y = comment.stageY.roundToInt() - pinHalfPx,
+                            )
+                        }
+                        .size(pinSizeDp)
+                        .onPlaced { coords ->
+                            coordinator.registerPinCoordinates(comment.id, coords)
+                        }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clip(CircleShape)
+                        .background(pinColor)
+                        .border(1.5.dp, borderOutline, CircleShape)
+                        .clickable {
+                            coordinator.pendingSelection = null
+                            coordinator.selectedPinCommentId =
+                                if (coordinator.selectedPinCommentId == comment.id) null else comment.id
+                        }
+                        .testTag("ciacola-review-pin-${idx + 1}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = (idx + 1).toString(),
+                        color = statusPalette.pinBadgeForeground,
+                        style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
+                    )
+                }
             }
         }
+    } else {
+        coordinator.clearPinCoordinates()
     }
 }

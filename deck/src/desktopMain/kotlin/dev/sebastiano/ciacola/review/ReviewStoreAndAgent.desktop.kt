@@ -32,9 +32,33 @@ import org.jetbrains.skia.Surface
 
 const val ReviewCommentHitForBake = "TIMELINE OVERRIDES BAKE"
 
+enum class ConversationIdSource {
+    None,
+    Config,
+    Environment,
+}
+
+data class ResolvedConversationId(
+    val id: String,
+    val source: ConversationIdSource,
+    val sourceName: String = "",
+) {
+    val isConfigured: Boolean get() = id.isNotBlank()
+    val isAutoDetected: Boolean get() = source == ConversationIdSource.Environment && id.isNotBlank()
+}
+
+internal val CONVERSATION_ID_ENV_VARS = listOf(
+    "CIACOLA_CONVERSATION_ID",
+    "AGENT_CONVERSATION_ID",
+    "ANTIGRAVITY_CONVERSATION_ID",
+    "CONVERSATION_ID",
+)
+
 class ReviewCommentStore(
     val storyboardDir: Path = Path.of(".storyboard"),
     val workspaceRoot: Path = Path.of("").toAbsolutePath(),
+    private val envProvider: (String) -> String? = System::getenv,
+    private val systemPropertyProvider: (String) -> String? = System::getProperty,
 ) {
     private val json = Json {
         prettyPrint = true
@@ -52,6 +76,8 @@ class ReviewCommentStore(
 
     private var lastObservedModifiedMillis: Long = -1L
     private var lastObservedFileSize: Long = -1L
+    private var lastConfigModifiedMillis: Long = -1L
+    private var lastConfigFileSize: Long = -1L
 
     init {
         config = readConfigInternal()
@@ -59,34 +85,58 @@ class ReviewCommentStore(
     }
 
     fun loadConfig(): ReviewConfig {
-        config = readConfigInternal()
+        config = readConfigInternal(force = true)
         return config
     }
 
     fun saveConfig(newConfig: ReviewConfig) {
-        Files.createDirectories(storyboardDir)
-        writeAtomically(configFile, json.encodeToString(newConfig) + "\n")
+        runCatching {
+            Files.createDirectories(storyboardDir)
+            writeAtomically(configFile, json.encodeToString(newConfig) + "\n")
+            lastConfigModifiedMillis = configFile.getLastModifiedTime().toMillis()
+            lastConfigFileSize = configFile.fileSize()
+        }
         config = newConfig
     }
 
-    fun effectiveConversationId(): String {
+    fun resolveConversationId(): ResolvedConversationId {
         val fromConfig = config.conversationId.trim()
-        if (fromConfig.isNotEmpty()) return fromConfig
-        return sequenceOf(
-            System.getenv("CIACOLA_CONVERSATION_ID"),
-            System.getenv("CONVERSATION_ID"),
-            System.getProperty("ciacola.conversationId"),
-        ).mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
-            .firstOrNull()
-            .orEmpty()
+        if (fromConfig.isNotEmpty()) {
+            return ResolvedConversationId(
+                id = fromConfig,
+                source = ConversationIdSource.Config,
+                sourceName = "review-config.json",
+            )
+        }
+        for (envKey in CONVERSATION_ID_ENV_VARS) {
+            val candidate = envProvider(envKey)?.trim()?.takeIf(String::isNotEmpty)
+            if (candidate != null) {
+                return ResolvedConversationId(
+                    id = candidate,
+                    source = ConversationIdSource.Environment,
+                    sourceName = envKey,
+                )
+            }
+        }
+        val sysProp = systemPropertyProvider("ciacola.conversationId")?.trim()?.takeIf(String::isNotEmpty)
+        if (sysProp != null) {
+            return ResolvedConversationId(
+                id = sysProp,
+                source = ConversationIdSource.Environment,
+                sourceName = "ciacola.conversationId",
+            )
+        }
+        return ResolvedConversationId(id = "", source = ConversationIdSource.None)
     }
+
+    fun effectiveConversationId(): String = resolveConversationId().id
 
     fun effectiveAgentApiBin(): String {
         val fromConfig = config.agentApiBin.trim()
         if (fromConfig.isNotEmpty()) return fromConfig
         val fromEnv = sequenceOf(
-            System.getenv("CIACOLA_AGENTAPI_BIN"),
-            System.getenv("AGENTAPI_BIN"),
+            envProvider("CIACOLA_AGENTAPI_BIN"),
+            envProvider("AGENTAPI_BIN"),
         ).mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
             .firstOrNull()
         if (fromEnv != null) return fromEnv
@@ -108,18 +158,32 @@ class ReviewCommentStore(
     @Synchronized
     fun reloadFromDisk(): Boolean {
         config = readConfigInternal()
-        if (!commentsFile.exists()) return false
+        if (!commentsFile.exists()) {
+            lastObservedModifiedMillis = -1L
+            lastObservedFileSize = -1L
+            return false
+        }
         val modified = runCatching { commentsFile.getLastModifiedTime().toMillis() }.getOrDefault(-1L)
         val size = runCatching { commentsFile.fileSize() }.getOrDefault(-1L)
         if (modified == lastObservedModifiedMillis && size == lastObservedFileSize) {
             return false
         }
-        val parsed = runCatching {
-            json.decodeFromString<List<SlideReviewComment>>(commentsFile.readText())
-        }.getOrNull() ?: return false
-
         lastObservedModifiedMillis = modified
         lastObservedFileSize = size
+        val text = runCatching { commentsFile.readText() }.getOrNull() ?: return false
+        if (text.isBlank()) return false
+        val parsed = runCatching {
+            json.decodeFromString<List<SlideReviewComment>>(text)
+        }.getOrNull()
+        if (parsed == null) {
+            if (size > 0L) {
+                runCatching {
+                    val backup = commentsFile.resolveSibling("review-comments.corrupt.json")
+                    Files.copy(commentsFile, backup, StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+            return false
+        }
         if (comments.toList() == parsed) return false
 
         comments.clear()
@@ -129,10 +193,12 @@ class ReviewCommentStore(
 
     @Synchronized
     private fun persistCommentsInternal(updated: List<SlideReviewComment>) {
-        Files.createDirectories(storyboardDir)
-        writeAtomically(commentsFile, json.encodeToString(updated) + "\n")
-        lastObservedModifiedMillis = runCatching { commentsFile.getLastModifiedTime().toMillis() }.getOrDefault(-1L)
-        lastObservedFileSize = runCatching { commentsFile.fileSize() }.getOrDefault(-1L)
+        runCatching {
+            Files.createDirectories(storyboardDir)
+            writeAtomically(commentsFile, json.encodeToString(updated) + "\n")
+            lastObservedModifiedMillis = commentsFile.getLastModifiedTime().toMillis()
+            lastObservedFileSize = commentsFile.fileSize()
+        }
         comments.clear()
         comments.addAll(updated)
     }
@@ -333,8 +399,19 @@ class ReviewCommentStore(
         }
     }
 
-    private fun readConfigInternal(): ReviewConfig {
-        if (!configFile.exists()) return config
+    private fun readConfigInternal(force: Boolean = false): ReviewConfig {
+        if (!configFile.exists()) {
+            lastConfigModifiedMillis = -1L
+            lastConfigFileSize = -1L
+            return config
+        }
+        val modified = runCatching { configFile.getLastModifiedTime().toMillis() }.getOrDefault(-1L)
+        val size = runCatching { configFile.fileSize() }.getOrDefault(-1L)
+        if (!force && modified == lastConfigModifiedMillis && size == lastConfigFileSize) {
+            return config
+        }
+        lastConfigModifiedMillis = modified
+        lastConfigFileSize = size
         return runCatching {
             json.decodeFromString<ReviewConfig>(configFile.readText())
         }.getOrDefault(config)

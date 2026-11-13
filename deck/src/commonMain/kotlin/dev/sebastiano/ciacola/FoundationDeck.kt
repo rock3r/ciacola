@@ -2,17 +2,21 @@ package dev.sebastiano.ciacola
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.ExperimentalTransitionApi
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.createChildTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,14 +26,22 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import dev.bnorm.storyboard.ContentDecorator
@@ -61,6 +73,7 @@ import dev.sebastiano.ciacola.effects.keynoteFadeMoveTracked
 import dev.sebastiano.ciacola.effects.keynoteFromDarkness
 import dev.sebastiano.ciacola.effects.keynotePop
 import dev.sebastiano.ciacola.effects.keynoteSpotlight
+import dev.sebastiano.ciacola.effects.spatialEntranceOffset
 import dev.sebastiano.ciacola.review.ReportSceneHeader
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckTheme
@@ -68,13 +81,17 @@ import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.timeline.ActiveMotionArcPreview
 import dev.sebastiano.ciacola.timeline.ActiveSceneTimelineContext
 import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
+import dev.sebastiano.ciacola.timeline.LocalMotionPathPreviewState
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
+import dev.sebastiano.ciacola.timeline.TimelineCurveSpec
 import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.VirtualizedFrame
 import dev.sebastiano.ciacola.timeline.buildVirtualizedFrames
+import dev.sebastiano.ciacola.timeline.computeArcInterpolatedRect
 import dev.sebastiano.ciacola.timeline.deckSharedBounds
 import dev.sebastiano.ciacola.timeline.timelineTarget
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -158,7 +175,12 @@ private fun deckDecorator(
     } else {
         theme
     }
-    CompositionLocalProvider(LocalTimelineOverrides provides timelineOverrides) {
+    val effectiveOverrides = if (dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen.current) {
+        LocalTimelineOverrides.current
+    } else {
+        timelineOverrides
+    }
+    CompositionLocalProvider(LocalTimelineOverrides provides effectiveOverrides) {
         DeckTextRendererProvider(textRenderer) {
             DeckThemeProvider(activeTheme) {
                 Surface(Modifier.fillMaxSize(), color = activeTheme.colors.background) { content() }
@@ -231,22 +253,41 @@ private fun StoryboardBuilder.beatsScene(
     val prose = transition.createChildTransition("foundation-prose") { it.toValue().value.prose }
     val currentVf = transition.currentState.toValue()
     val targetVf = transition.targetState.toValue()
+    val badgeProgress by transition.animateFloat(
+        transitionSpec = {
+            tween(
+                durationMillis = theme.motion.fadeMoveDurationMs,
+                easing = theme.motion.standardEasing,
+            )
+        },
+        label = "shared-badge-progress",
+    ) { frame ->
+        if (frame.toValue().baseBeatIndex >= 2) 1f else 0f
+    }
 
     FoundationFrame(currentVf.value.eyebrow) {
         DeckMagicText(prose, Modifier.fillMaxSize())
-        if (targetVf.baseBeatIndex >= 2) {
+        if (currentVf.baseBeatIndex >= 2 || targetVf.baseBeatIndex >= 2) {
+            val badgeShape = RoundedCornerShape(8.dp)
             Surface(
                 color = theme.colors.accent,
-                shape = RoundedCornerShape(8.dp),
+                shape = badgeShape,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .size(28.dp)
                     .deckSharedBounds(
                         sharedKey = "foundation-shared-card",
                         label = "Shared Card",
                         defaultDurationMs = theme.motion.sharedBoundsDurationMs,
-                        currentBeatInScene = targetVf.virtualBeatIndex,
+                        currentBeatInScene = maxOf(currentVf.virtualBeatIndex, targetVf.virtualBeatIndex),
                     )
-                    .size(28.dp),
+                    .graphicsLayer {
+                        val p = badgeProgress.coerceIn(0f, 1f)
+                        alpha = p
+                        val s = 0.72f + 0.28f * p
+                        scaleX = s
+                        scaleY = s
+                    },
             ) {}
         }
     }
@@ -265,45 +306,99 @@ private fun StoryboardBuilder.sharedMoveScene(
     overrides = overrides,
 ) {
     val activeTheme = LocalDeckTheme.current
-    // Scene-level visibility scope: the card entering from Slide 1 must morph against this scope
-    // (the inner expanded/collapsed host is idle during the slide transition).
     val sceneVisibility: AnimatedVisibilityScope = contextOf<AnimatedVisibilityScope>()
-    val innerMorphing = transition.currentState.toValue().value.expanded != transition.targetState.toValue().value.expanded
+    val targetVf = transition.targetState.toValue()
+    val trackId = "shared:foundation-shared-card"
+    val trackOverride = LocalTimelineOverrides.current.tracks[trackId]
+    val effectiveDuration = trackOverride?.durationMs ?: activeTheme.motion.sharedBoundsDurationMs
+    val effectiveDelay = trackOverride?.delayMs ?: 0
+    val effectiveCurve = trackOverride?.curve ?: TimelineCurveSpec()
+    val effectiveArcBend = trackOverride?.spatial?.arcBend ?: 0f
+    val previewState = LocalMotionPathPreviewState.current
+
+    val expandFraction by transition.animateFloat(
+        transitionSpec = {
+            effectiveCurve.toAnimationSpec(effectiveDuration, effectiveDelay)
+        },
+        label = "shared-card-expand",
+    ) { frame ->
+        if (frame.toValue().value.expanded) 1f else 0f
+    }
+
+    val cornerDp = (24f + (40f - 24f) * expandFraction.coerceIn(0f, 1f)).dp
+    val cardShape = RoundedCornerShape(cornerDp)
+
     FoundationFrame("SHARED ELEMENT / PROVISIONAL") {
-        transition.DeterministicStateHost(
+        Layout(
             modifier = Modifier.fillMaxSize(),
-            enter = { _, _ -> fadeIn(tween(activeTheme.motion.dissolveDurationMs)) },
-            exit = { _, _ -> fadeOut(tween(activeTheme.motion.dissolveDurationMs)) },
-            contentKey = { it.toValue().value.expanded },
-        ) { frame ->
-            val vf = frame.toValue()
-            val expanded = vf.value.expanded
-            val sharedScope = if (innerMorphing) this else sceneVisibility
-            Box(Modifier.fillMaxSize()) {
+            content = {
                 Surface(
                     color = activeTheme.colors.accent,
-                    shape = RoundedCornerShape(if (expanded) 40.dp else 24.dp),
-                    modifier = Modifier
-                        .align(if (expanded) Alignment.Center else Alignment.TopStart)
-                        .then(
-                            with(sharedScope) {
-                                Modifier.deckSharedBounds(
-                                    sharedKey = "foundation-shared-card",
-                                    label = "Shared Card",
-                                    defaultDurationMs = activeTheme.motion.sharedBoundsDurationMs,
-                                    currentBeatInScene = vf.virtualBeatIndex,
-                                )
-                            }
+                    shape = cardShape,
+                    modifier = with(sceneVisibility) {
+                        Modifier.deckSharedBounds(
+                            sharedKey = "foundation-shared-card",
+                            label = "Shared Card",
+                            defaultDurationMs = activeTheme.motion.sharedBoundsDurationMs,
+                            currentBeatInScene = targetVf.virtualBeatIndex,
                         )
-                        .size(if (expanded) 520.dp else 240.dp),
+                    },
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("shared", style = activeTheme.typography.heading, color = activeTheme.colors.background)
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("shared", style = activeTheme.typography.heading, color = activeTheme.colors.onAccent)
                     }
                 }
+            },
+        ) { measurables, constraints ->
+            val maxW = constraints.maxWidth.toFloat()
+            val maxH = constraints.maxHeight.toFloat()
+            val collapsedPx = 240.dp.toPx()
+            val expandedPx = 520.dp.toPx()
+            val startRect = Rect(0f, 0f, collapsedPx, collapsedPx)
+            val endRect = Rect(
+                left = (maxW - expandedPx) / 2f,
+                top = (maxH - expandedPx) / 2f,
+                right = (maxW + expandedPx) / 2f,
+                bottom = (maxH + expandedPx) / 2f,
+            )
+            val stageOffset = Offset(
+                x = activeTheme.styles.slidePadding.toPx(),
+                y = activeTheme.styles.slidePadding.toPx() + 56.dp.toPx(),
+            )
+            if (previewState != null && previewState.selectedTrackId == trackId) {
+                previewState.latestArc = ActiveMotionArcPreview(
+                    sharedKey = "foundation-shared-card",
+                    startBounds = startRect.translate(stageOffset),
+                    endBounds = endRect.translate(stageOffset),
+                    arcBend = effectiveArcBend,
+                    sceneIndex = 1,
+                )
+            }
+            val currentRect = sharedCardRect(
+                start = startRect,
+                end = endRect,
+                fraction = expandFraction.coerceIn(0f, 1f),
+                arcBend = effectiveArcBend,
+                minTop = 0f,
+            )
+            val cardW = currentRect.width.roundToInt().coerceAtLeast(1)
+            val cardH = currentRect.height.roundToInt().coerceAtLeast(1)
+            val placeable = measurables.single().measure(Constraints.fixed(cardW, cardH))
+            layout(constraints.maxWidth, constraints.maxHeight) {
+                placeable.place(currentRect.left.roundToInt(), currentRect.top.roundToInt())
             }
         }
     }
+}
+
+/**
+ * Slide 2's shared card rect at [fraction] along its (optionally arced) path from [start] to [end],
+ * never rising above [minTop] (the content top, just below the eyebrow).
+ */
+internal fun sharedCardRect(start: Rect, end: Rect, fraction: Float, arcBend: Float, minTop: Float): Rect {
+    val rect = computeArcInterpolatedRect(start, end, fraction, arcBend)
+    // An upward arc bend may carry the growing card over the eyebrow mid-morph: keep it below.
+    return if (rect.top < minTop) rect.translate(0f, minTop - rect.top) else rect
 }
 
 private fun StoryboardBuilder.ambientLoopScene(
@@ -317,17 +412,25 @@ private fun StoryboardBuilder.ambientLoopScene(
     overrides = overrides,
 ) {
     val activeTheme = LocalDeckTheme.current
-    FoundationFrame("CONTINUOUS COMPOSE / PROVISIONAL", contentPadding = 0) {
+    val cardShape = RoundedCornerShape(activeTheme.styles.codeCard.cornerRadius)
+    Box(Modifier.fillMaxSize()) {
         AnimatedMeshBackdrop(Modifier.fillMaxSize())
-        Column(
-            Modifier
-                .align(Alignment.Center)
-                .background(activeTheme.colors.background.copy(alpha = 0.78f))
-                .padding(48.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("one stable scene state", style = activeTheme.typography.heading, color = activeTheme.colors.foreground)
-            Text("the visual keeps moving", style = activeTheme.typography.body, color = activeTheme.colors.muted)
+        FoundationFrame("CONTINUOUS COMPOSE / PROVISIONAL") {
+            Surface(
+                color = activeTheme.colors.surface.copy(alpha = 0.90f),
+                shape = cardShape,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .border(activeTheme.styles.codeCard.borderWidth, activeTheme.colors.border, cardShape),
+            ) {
+                Column(
+                    Modifier.padding(48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("one stable scene state", style = activeTheme.typography.heading, color = activeTheme.colors.foreground)
+                    Text("the visual keeps moving", style = activeTheme.typography.body, color = activeTheme.colors.muted)
+                }
+            }
         }
     }
 }
@@ -406,31 +509,35 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     @OptIn(ExperimentalTransitionApi::class)
     val stepTransition = transition.createChildTransition("keynote-lab-step") { it.toValue().virtualBeatIndex }
 
+    // Each build's beat is declared once (defaultTriggerBeat); visibility is derived from the scene's
+    // beat index, so the timeline block, the stage, and Inspector enterBeat overrides always agree.
     val staggerRows = transition.animateStaggerGroup(
         count = 2,
         label = "Leader Rows Stagger",
         trackId = "lab-leader-stagger",
         defaultTriggerBeat = 1,
-    ) { it.toValue().virtualBeatIndex >= 1 }
+    )
     val stampBuild by transition.animateBuildProgress(
         label = "IMMUTABLE Stamp + Arrow",
         trackId = "lab-immutable-stamp",
         defaultTriggerBeat = 2,
-    ) { it.toValue().virtualBeatIndex >= 2 }
+    )
     val calloutBuild by transition.animateBuildProgress(
         label = "Warp Callout Outline",
         trackId = "lab-warp-callout",
         category = TrackCategory.LineDraw,
         defaultTriggerBeat = 3,
         durationMillis = theme.motion.lineDrawDurationMs,
-    ) { it.toValue().virtualBeatIndex >= 3 }
+    )
     val reversalBuild by transition.animateBuildProgress(
         label = "Strikeout & Zoom Loupe",
         trackId = "lab-strikeout-loupe",
         category = TrackCategory.LineDraw,
         defaultTriggerBeat = 4,
         durationMillis = theme.motion.loupeDurationMs,
-    ) { it.toValue().virtualBeatIndex >= 4 }
+    )
+    val stampEntrance = spatialEntranceOffset("lab-immutable-stamp")
+    val cardEntrance = spatialEntranceOffset("lab-leader-stagger")
 
     val warpSnippets = remember {
         listOf(
@@ -443,11 +550,17 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     @OptIn(ExperimentalTransitionApi::class)
     val warpStep = stepTransition.createChildTransition("warp-idx") { if (it >= 3) 1 else 0 }
 
+    // The eyebrow still sits at the shared (64 dp, 64 dp) origin of Slides 1–4 (no jump during the
+    // dissolve); only the dense two-column content uses the tighter 40 dp frame.
     FoundationFrame("KEYNOTE EFFECTS LAB / PROVISIONAL", contentPadding = 40) {
         MagnifierLoupeStage(
             targetKey = "compose-target",
             progress = { reversalBuild },
             modifier = Modifier.fillMaxSize(),
+            loupeAlignment = Alignment.BottomEnd,
+            loupeDiameter = 164.dp,
+            loupePadding = PaddingValues(end = 12.dp),
+            zoom = 2.4f,
             decorations = listOf(
                 AnimatedLine(
                     startKey = "immutable-stamp",
@@ -486,8 +599,16 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                         color = theme.colors.foreground,
                         modifier = Modifier
                             .decorate("optimistic-claim")
+                            .reviewTarget(
+                                kind = "Heading",
+                                label = "Fix with SpanStyle(alpha)!",
+                                textSnippet = "Fix with SpanStyle(alpha)!",
+                            )
                             .timelineTarget("lab-strikeout-loupe")
-                            .keynoteSpotlight(dimProgress = { calloutBuild * (1f - reversalBuild) }),
+                            .keynoteSpotlight(
+                                dimProgress = { calloutBuild * (1f - reversalBuild) },
+                                dimmedAlpha = theme.colors.spotlightDimAlpha,
+                            ),
                     )
                     DottedLeaderRow(
                         leading = "Web",
@@ -499,13 +620,13 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                                 progress = { staggerRows.progressFor(0) },
                                 itemIndex = 0,
                             )
-                            .keynoteSpotlight(dimProgress = { calloutBuild }),
+                            .keynoteSpotlight(dimProgress = { calloutBuild }, dimmedAlpha = theme.colors.spotlightDimAlpha),
                     )
                     DottedLeaderRow(
                         leading = "Compose",
                         trailing = "BasicText(AnnotatedString)",
                         trailingStyle = labCode,
-                        highlightTrailing = stampBuild > 0.2f,
+                        highlightProgress = { stampBuild },
                         trailingModifier = Modifier.decorate("compose-target"),
                         modifier = Modifier.keynoteFadeMoveTracked(
                             trackId = "lab-leader-stagger",
@@ -519,7 +640,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                             modifier = Modifier
                                 .decorate("immutable-stamp")
                                 .timelineTarget("lab-immutable-stamp")
-                                .keynotePop(progress = { stampBuild }),
+                                .keynotePop(progress = { stampBuild }, entranceOffset = stampEntrance),
                         )
                     }
                 }
@@ -527,17 +648,25 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                 Box(
                     modifier = Modifier
                         .weight(0.96f)
-                        .decorate("warp-card")
-                        // The card fades in with stagger item 2 and is outlined by the callout build.
-                        .timelineTarget("lab-warp-callout", "lab-leader-stagger", "lab-leader-stagger#item1")
-                        .keynoteFromDarkness(progress = { staggerRows.progressFor(1) }),
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.TopCenter,
                 ) {
-                    DeckWarpCodeCard(
-                        codeStates = warpSnippets,
-                        stateTransition = warpStep,
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = labCode.copy(fontSize = 18.sp, lineHeight = 26.sp),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ciacola-lab-warp-card")
+                            .decorate("warp-card")
+                            // The card fades in with stagger item 2 and is outlined by the callout build.
+                            .timelineTarget("lab-warp-callout", "lab-leader-stagger", "lab-leader-stagger#item1")
+                            .keynoteFromDarkness(progress = { staggerRows.progressFor(1) }, entranceOffset = cardEntrance),
+                    ) {
+                        DeckWarpCodeCard(
+                            codeStates = warpSnippets,
+                            stateTransition = warpStep,
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = labCode.copy(fontSize = 18.sp, lineHeight = 26.sp),
+                        )
+                    }
                 }
             }
         }
@@ -552,6 +681,9 @@ private fun FoundationFrame(
 ) {
     ReportSceneHeader(eyebrow)
     val theme = LocalDeckTheme.current
+    // The eyebrow is always anchored at the theme's slide padding, so every slide shares one eyebrow
+    // origin even when its content uses a tighter frame.
+    val eyebrowInset = (theme.styles.slidePadding.value - contentPadding).coerceAtLeast(0f).dp
     Box(
         Modifier
             .fillMaxSize()
@@ -564,8 +696,11 @@ private fun FoundationFrame(
             style = theme.typography.eyebrow,
             modifier = Modifier
                 .align(Alignment.TopStart)
+                .padding(start = eyebrowInset, top = eyebrowInset)
                 .reviewTarget(kind = "Eyebrow", label = eyebrow, textSnippet = eyebrow),
         )
+        // Content keeps its own frame: on tighter slides the 56 dp header band still clears the
+        // inset eyebrow (eyebrow line height 22 dp).
         Box(Modifier.fillMaxSize().padding(top = 56.dp), content = content)
     }
 }

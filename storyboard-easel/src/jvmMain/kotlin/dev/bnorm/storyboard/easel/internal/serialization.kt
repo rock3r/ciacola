@@ -2,11 +2,13 @@
 
 package dev.bnorm.storyboard.easel.internal
 
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
+import java.awt.GraphicsEnvironment
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.buildClassSerialDescriptor
@@ -56,8 +58,8 @@ internal object WindowPositionSerializer : KSerializer<WindowPosition> {
     }
 
     override fun deserialize(decoder: Decoder): WindowPosition = decoder.decodeStructure(descriptor) {
-        var x = -1.0f
-        var y = -1.0f
+        var x = Float.NaN
+        var y = Float.NaN
         if (decodeSequentially()) {
             x = decodeFloatElement(descriptor, 0)
             y = decodeFloatElement(descriptor, 1)
@@ -69,9 +71,64 @@ internal object WindowPositionSerializer : KSerializer<WindowPosition> {
                 else -> error("Unexpected index: $index")
             }
         }
-        require(x >= 0.0f && y >= 0.0f)
+        require(x.isFinite() && y.isFinite())
         WindowPosition(x.dp, y.dp)
     }
+}
+
+internal fun clampWindowPositionToScreens(
+    position: WindowPosition,
+    size: DpSize,
+    screenBounds: List<Rect>,
+): WindowPosition {
+    if (position !is WindowPosition.Absolute || screenBounds.isEmpty()) return position
+    val x = position.x.value
+    val y = position.y.value
+    val w = size.width.value.coerceAtLeast(64f)
+    val h = size.height.value.coerceAtLeast(48f)
+    val winRect = Rect(x, y, x + w, y + h)
+    val minVisibleW = 64f
+    val minVisibleH = 40f
+
+    val visibleOnAnyScreen = screenBounds.any { screen ->
+        val overlapW = minOf(winRect.right, screen.right) - maxOf(winRect.left, screen.left)
+        val overlapH = minOf(winRect.bottom, screen.bottom) - maxOf(winRect.top, screen.top)
+        overlapW >= minVisibleW && overlapH >= minVisibleH
+    }
+    if (visibleOnAnyScreen) return position
+
+    val targetScreen = screenBounds.minBy { screen ->
+        val dx = when {
+            x < screen.left -> screen.left - x
+            x > screen.right -> x - screen.right
+            else -> 0f
+        }
+        val dy = when {
+            y < screen.top -> screen.top - y
+            y > screen.bottom -> y - screen.bottom
+            else -> 0f
+        }
+        dx * dx + dy * dy
+    }
+    val maxLeft = (targetScreen.right - w.coerceAtMost(targetScreen.width)).coerceAtLeast(targetScreen.left)
+    val maxTop = (targetScreen.bottom - h.coerceAtMost(targetScreen.height)).coerceAtLeast(targetScreen.top)
+    val clampedX = x.coerceIn(targetScreen.left, maxLeft)
+    val clampedY = y.coerceIn(targetScreen.top, maxTop)
+    return WindowPosition(clampedX.dp, clampedY.dp)
+}
+
+private fun connectedScreenBounds(): List<Rect> {
+    if (GraphicsEnvironment.isHeadless()) return emptyList()
+    return runCatching {
+        GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.mapNotNull { device ->
+            val b = device.defaultConfiguration?.bounds ?: return@mapNotNull null
+            if (b.width > 0 && b.height > 0) {
+                Rect(b.x.toFloat(), b.y.toFloat(), (b.x + b.width).toFloat(), (b.y + b.height).toFloat())
+            } else {
+                null
+            }
+        }
+    }.getOrDefault(emptyList())
 }
 
 internal object WindowStateSerializer : KSerializer<WindowState> {
@@ -111,6 +168,7 @@ internal object WindowStateSerializer : KSerializer<WindowState> {
                 else -> error("Unexpected index: $index")
             }
         }
-        WindowState(placement, isMinimized, position, size)
+        val safePosition = clampWindowPositionToScreens(position, size, connectedScreenBounds())
+        WindowState(placement, isMinimized, safePosition, size)
     }
 }

@@ -1,7 +1,7 @@
 package dev.sebastiano.ciacola.effects
 
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -122,6 +123,12 @@ class StaggerGroupState internal constructor(
     )
 }
 
+/**
+ * Eased 0→1 progress of a build that fires on [defaultTriggerBeat] (or the track's `enterBeat`
+ * override). Inside a choreographed scene the beat is the single source of truth: visibility is
+ * derived from the scene's beat index, so the timeline block and the stage always agree. [visible]
+ * is only consulted outside a scene (previews, plain transitions without a timeline context).
+ */
 @Composable
 fun <S> Transition<S>.animateBuildProgress(
     label: String = "keynote-build",
@@ -130,16 +137,19 @@ fun <S> Transition<S>.animateBuildProgress(
     defaultTriggerBeat: Int = 1,
     durationMillis: Int = LocalDeckTheme.current.motion.fadeMoveDurationMs,
     easing: Easing = LocalDeckTheme.current.motion.standardEasing,
-    visible: (S) -> Boolean,
+    visible: ((S) -> Boolean)? = null,
 ): State<Float> {
     val sceneCtx = LocalActiveSceneTimeline.current
     val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
     val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
     val collector = LocalTimelineHarvestCollector.current
 
+    val maxBeat = ((sceneCtx?.totalBeats ?: 1) - 1).coerceAtLeast(0)
     val effectiveDuration = override?.durationMs ?: durationMillis
     val effectiveDelay = override?.delayMs ?: 0
-    val effectiveTriggerBeat = override?.enterBeat ?: defaultTriggerBeat
+    val effectiveTriggerBeat = (override?.enterBeat ?: defaultTriggerBeat).let {
+        if (sceneCtx != null) it.coerceIn(0, maxBeat) else it
+    }
     val effectiveExitBeat = override?.exitBeat
 
     SideEffect {
@@ -172,17 +182,20 @@ fun <S> Transition<S>.animateBuildProgress(
         },
         label = label,
     ) { state ->
-        val isVisible = if (sceneCtx != null && (override?.enterBeat != null || effectiveExitBeat != null)) {
+        val isVisible = if (sceneCtx != null) {
             val beatIdx = sceneCtx.frameBeatIndexOf(state)
             val afterEnter = beatIdx >= effectiveTriggerBeat
             val beforeExit = effectiveExitBeat == null || beatIdx < effectiveExitBeat
             afterEnter && beforeExit
         } else {
-            visible(state)
+            visible?.invoke(state) ?: fallbackBeatIndexOf(state)?.let { it >= effectiveTriggerBeat } ?: false
         }
         if (isVisible) 1f else 0f
     }
 }
+
+/** Beat index of a plain `Int` state, for builds used outside a choreographed scene. */
+private fun fallbackBeatIndexOf(state: Any?): Int? = state as? Int
 
 @Composable
 fun <S> Transition<S>.animateStaggerGroup(
@@ -193,7 +206,7 @@ fun <S> Transition<S>.animateStaggerGroup(
     itemDurationMs: Int = LocalDeckTheme.current.motion.fadeMoveDurationMs,
     staggerStepMs: Int = LocalDeckTheme.current.motion.staggerStepMs,
     easing: Easing = LocalDeckTheme.current.motion.standardEasing,
-    visible: (S) -> Boolean,
+    visible: ((S) -> Boolean)? = null,
 ): StaggerGroupState {
     val safeCount = count.coerceAtLeast(1)
     val sceneCtx = LocalActiveSceneTimeline.current
@@ -201,10 +214,13 @@ fun <S> Transition<S>.animateStaggerGroup(
     val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
     val collector = LocalTimelineHarvestCollector.current
 
+    val maxBeat = ((sceneCtx?.totalBeats ?: 1) - 1).coerceAtLeast(0)
     val effectiveItemDuration = override?.durationMs ?: itemDurationMs
     val effectiveStep = override?.staggerStepMs ?: staggerStepMs
     val effectiveDelay = override?.delayMs ?: 0
-    val effectiveTriggerBeat = override?.enterBeat ?: defaultTriggerBeat
+    val effectiveTriggerBeat = (override?.enterBeat ?: defaultTriggerBeat).let {
+        if (sceneCtx != null) it.coerceIn(0, maxBeat) else it
+    }
     val totalDurationMs = effectiveItemDuration + (safeCount - 1) * effectiveStep
 
     SideEffect {
@@ -226,10 +242,10 @@ fun <S> Transition<S>.animateStaggerGroup(
     }
 
     fun isVisibleAt(state: S): Boolean {
-        return if (sceneCtx != null && override?.enterBeat != null) {
+        return if (sceneCtx != null) {
             sceneCtx.frameBeatIndexOf(state) >= effectiveTriggerBeat
         } else {
-            visible(state)
+            visible?.invoke(state) ?: fallbackBeatIndexOf(state)?.let { it >= effectiveTriggerBeat } ?: false
         }
     }
 
@@ -270,16 +286,41 @@ fun Modifier.keynoteDissolve(progress: () -> Float): Modifier = graphicsLayer {
     alpha = progress().coerceIn(0f, 1f)
 }
 
+/**
+ * Entrance start offset for [trackId] from the Inspector's spatial override, or [DpOffset.Zero] when
+ * the track has none (so untouched slides stay pixel-identical).
+ */
+@Composable
+fun spatialEntranceOffset(trackId: String): DpOffset {
+    val spatial = LocalTimelineOverrides.current.tracks[trackId]?.spatial ?: return DpOffset.Zero
+    return DpOffset(spatial.offsetXDp.dp, spatial.offsetYDp.dp)
+}
+
 @Composable
 fun Modifier.keynoteFadeMoveTracked(
     trackId: String,
     progress: () -> Float,
     direction: SlideDirection = SlideDirection.Up,
     distance: Dp = 24.dp,
-    easing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+    // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
+    // the default here is linear; pass an easing only when driving the modifier with raw progress.
+    easing: Easing = LinearEasing,
     itemIndex: Int? = null,
 ): Modifier {
     val spatial = LocalTimelineOverrides.current.tracks[trackId]?.spatial
+    // Report the built-in entrance offset so the Inspector's Offset X/Y start from it (24 dp below
+    // for the default upward fade-move) instead of 0 dp.
+    val collector = LocalTimelineHarvestCollector.current
+    val inScene = LocalActiveSceneTimeline.current != null
+    if (collector != null && inScene) {
+        val defaultOffset = when (direction) {
+            SlideDirection.Up -> 0f to distance.value
+            SlideDirection.Down -> 0f to -distance.value
+            SlideDirection.Left -> distance.value to 0f
+            SlideDirection.Right -> -distance.value to 0f
+        }
+        SideEffect { collector.recordDefaultOffset(trackId, defaultOffset.first, defaultOffset.second) }
+    }
     val tagged = if (itemIndex != null) {
         timelineTarget(trackId, "$trackId#item$itemIndex")
     } else {
@@ -288,12 +329,13 @@ fun Modifier.keynoteFadeMoveTracked(
     return if (spatial == null) {
         tagged.keynoteFadeMove(progress, direction, distance, easing)
     } else {
+        val offset = DpOffset(spatial.offsetXDp.dp, spatial.offsetYDp.dp)
         tagged.graphicsLayer {
             val raw = progress().coerceIn(0f, 1f)
             val eased = easing.transform(raw)
             alpha = raw
-            translationX = (1f - eased) * spatial.offsetXDp.dp.toPx()
-            translationY = (1f - eased) * spatial.offsetYDp.dp.toPx()
+            translationX = (1f - eased) * offset.x.toPx()
+            translationY = (1f - eased) * offset.y.toPx()
         }
     }
 }
@@ -302,7 +344,9 @@ fun Modifier.keynoteFadeMove(
     progress: () -> Float,
     direction: SlideDirection = SlideDirection.Up,
     distance: Dp = 24.dp,
-    easing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+    // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
+    // the default here is linear; pass an easing only when driving the modifier with raw progress.
+    easing: Easing = LinearEasing,
 ): Modifier = graphicsLayer {
     val raw = progress().coerceIn(0f, 1f)
     val eased = easing.transform(raw)
@@ -320,7 +364,10 @@ fun Modifier.keynoteFromDarkness(
     progress: () -> Float,
     initialScale: Float = 0.88f,
     transformOrigin: TransformOrigin = TransformOrigin.Center,
-    easing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+    // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
+    // the default here is linear; pass an easing only when driving the modifier with raw progress.
+    easing: Easing = LinearEasing,
+    entranceOffset: DpOffset = DpOffset.Zero,
 ): Modifier = graphicsLayer {
     val raw = progress().coerceIn(0f, 1f)
     val eased = easing.transform(raw)
@@ -328,6 +375,8 @@ fun Modifier.keynoteFromDarkness(
     alpha = raw
     scaleX = s
     scaleY = s
+    translationX = (1f - eased) * entranceOffset.x.toPx()
+    translationY = (1f - eased) * entranceOffset.y.toPx()
     this.transformOrigin = transformOrigin
 }
 
@@ -335,24 +384,48 @@ fun Modifier.keynotePop(
     progress: () -> Float,
     initialScale: Float = 0.72f,
     overshootScale: Float = 1.06f,
+    entranceOffset: DpOffset = DpOffset.Zero,
 ): Modifier = graphicsLayer {
-    val p = progress().coerceIn(0f, 1.25f)
-    val scale = when {
-        p <= 0f -> initialScale
-        p < 0.72f -> {
-            val t = p / 0.72f
-            initialScale + (overshootScale - initialScale) * t
-        }
-        p <= 1f -> {
-            val t = (p - 0.72f) / 0.28f
-            overshootScale + (1f - overshootScale) * t
-        }
-        else -> 1f
-    }
-    alpha = (p / 0.35f).coerceIn(0f, 1f)
+    val p = progress()
+    val scale = keynotePopScale(p, initialScale, overshootScale)
+    alpha = keynotePopAlpha(p)
     scaleX = scale
     scaleY = scale
+    val remaining = 1f - p.coerceIn(0f, 1f)
+    translationX = remaining * entranceOffset.x.toPx()
+    translationY = remaining * entranceOffset.y.toPx()
 }
+
+internal fun keynotePopScale(progress: Float, initialScale: Float, overshootScale: Float): Float {
+    // C1-continuous "back" ease-out: rises from initialScale, overshoots once to overshootScale, and
+    // lands on 1 with zero velocity, so the pop has no velocity kink (and plays back cleanly in reverse).
+    val p = progress.coerceIn(0f, 1f)
+    val span = 1f - initialScale
+    val u = p - 1f
+    if (span <= 0f || overshootScale <= 1f) return initialScale + span * (1f + u * u * u)
+    val c = backOvershootFor((overshootScale - 1f) / span)
+    return initialScale + span * (1f + (c + 1f) * u * u * u + c * u * u)
+}
+
+/** Solves the back-ease constant whose peak overshoot (4c³ / 27(c+1)²) equals [peak]. */
+private fun backOvershootFor(peak: Float): Float {
+    var lo = 0f
+    var hi = 50f
+    repeat(40) {
+        val mid = (lo + hi) / 2f
+        val value = 4f * mid * mid * mid / (27f * (mid + 1f) * (mid + 1f))
+        if (value < peak) lo = mid else hi = mid
+    }
+    return (lo + hi) / 2f
+}
+
+internal fun keynotePopAlpha(progress: Float): Float = smoothstep((progress / 0.35f).coerceIn(0f, 1f))
+
+private fun smoothstep(t: Float): Float = t * t * (3f - 2f * t)
+
+/** Arrowhead length for a leader trimmed to [progress]: the head grows in with the shaft. */
+internal fun arrowHeadLength(fullLengthPx: Float, progress: Float): Float =
+    fullLengthPx * smoothstep((progress / 0.3f).coerceIn(0f, 1f))
 
 fun Modifier.keynoteWipe(
     progress: () -> Float,
@@ -570,12 +643,14 @@ private fun DrawScope.drawTrimmedDecorationPath(
 ) {
     val trimmed = Path()
     val tip = trimPath(fullPath, progress, trimmed) ?: return
+    val edgeAlpha = (progress / 0.08f).coerceIn(0f, 1f)
+    val effectiveColor = color.copy(alpha = color.alpha * edgeAlpha)
     val pathEffect = dashPattern?.let { (on, off) ->
         PathEffect.dashPathEffect(floatArrayOf(on.toPx(), off.toPx()), 0f)
     }
     drawPath(
         path = trimmed,
-        color = color,
+        color = effectiveColor,
         style = Stroke(
             width = strokeWidthPx,
             cap = StrokeCap.Round,
@@ -584,7 +659,7 @@ private fun DrawScope.drawTrimmedDecorationPath(
         ),
     )
     if (arrowHead != ArrowHead.None && headLengthPx > 0f && tip.tangent.getDistance() > 0.001f) {
-        drawArrowHead(tip, color, strokeWidthPx, arrowHead, headLengthPx, headAngleDegrees)
+        drawArrowHead(tip, effectiveColor, strokeWidthPx, arrowHead, arrowHeadLength(headLengthPx, progress), headAngleDegrees)
     }
 }
 

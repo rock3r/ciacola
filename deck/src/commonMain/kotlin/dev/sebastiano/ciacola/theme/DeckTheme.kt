@@ -114,6 +114,10 @@ data class DeckColors(
     val chipBackground: Color,
     val spotlightDimAlpha: Float,
     val code: DeckCodePalette,
+    /** Text/icons placed on [accent] fills (e.g. the Shared Card label). */
+    val onAccent: Color = background,
+    /** Stage overlay colour for the motion-path (arc) preview drawn by the timeline studio. */
+    val motionPathPreview: Color = Color(0xFFD59BF6),
 )
 
 @Immutable
@@ -240,7 +244,7 @@ data class DeckTheme(
             secondary = colors.secondary,
             background = colors.background,
             surface = colors.surface,
-            onPrimary = Color.White,
+            onPrimary = colors.onAccent,
             onSecondary = Color(0xFF101318),
             onBackground = colors.foreground,
             onSurface = colors.foreground,
@@ -252,7 +256,7 @@ data class DeckTheme(
             secondary = colors.secondary,
             background = colors.background,
             surface = colors.surface,
-            onPrimary = colors.background,
+            onPrimary = colors.onAccent,
             onSecondary = colors.background,
             onBackground = colors.foreground,
             onSurface = colors.foreground,
@@ -319,8 +323,11 @@ object DeckThemes {
         danger = Color(0xFFFF6B6B),
         border = Color(0xFF2B3345),
         chipBackground = Color(0xFF232A3A),
-        spotlightDimAlpha = 0.25f,
+        // Dimmed comparison text keeps >= 3:1 (large text) against the stage.
+        spotlightDimAlpha = 0.4f,
         code = DarkCodeCardPalette,
+        onAccent = Color(0xFF0B0D12),
+        motionPathPreview = Color(0xFFD59BF6),
     )
 
     val KeynoteLightColors = DeckColors(
@@ -330,15 +337,21 @@ object DeckThemes {
         foreground = Color(0xFF242124),
         muted = Color(0xFF6B666B),
         subtle = Color(0xFF9A949A),
-        accent = Color(0xFFD15322),
+        // Slightly deeper terracotta than #D15322: white on accent reaches 4.9:1 (was 4.2:1) and the
+        // stamp's accent-on-14%-tint text 3.4:1 (was 3.0:1).
+        accent = Color(0xFFC24A1C),
         secondary = Color(0xFF1BA890),
         positive = Color(0xFF267D4D),
         warning = Color(0xFFD99B16),
         danger = Color(0xFFC93838),
         border = Color(0xFFD2CED2),
         chipBackground = Color(0xFFDEDADE),
-        spotlightDimAlpha = 0.25f,
+        // Dimmed comparison text keeps >= 3:1 (large text) instead of washing out to ~1.4:1.
+        spotlightDimAlpha = 0.55f,
         code = KeynoteCodeCardPalette,
+        onAccent = Color.White,
+        // A deep violet instead of pastel #D59BF6 (1.8:1), legible on the light stage (5.9:1).
+        motionPathPreview = Color(0xFF7B2FBE),
     )
 
     fun buildTypography(

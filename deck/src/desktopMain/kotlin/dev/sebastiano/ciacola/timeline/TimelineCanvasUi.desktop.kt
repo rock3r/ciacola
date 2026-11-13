@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +34,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +77,7 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -141,12 +144,16 @@ internal fun TimelineTransportBar(
 ) {
     val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
+    val isDark = JewelTheme.isDark
+    val secondaryCaptionColor = studioSecondaryTextColor(isDark)
     val activeSubLoopId = controller.loopClock.activeSubCompLoopId
     val nowMs = controller.currentPlayheadTimeMs
     val idx = controller.animatic.targetIndex
     val sceneBeatsCount = controller.animatic.storyboard.scenes.getOrNull(idx.sceneIndex)?.frames?.size ?: 1
+    controller.overridesStore.parameterRevision
+    controller.overridesStore.structuralRevision
     val overridesData = controller.overridesStore.data()
-    val hasOverrides = overridesData.tracks.isNotEmpty() || overridesData.sceneBeats.isNotEmpty()
+    val hasOverrides = overridesData.hasOverrides
     val viewport = controller.viewport
 
     Row(
@@ -208,9 +215,24 @@ internal fun TimelineTransportBar(
                     enabled = sceneBeatsCount > 1,
                 ) { controller.removeEventBeatAtPlayhead() }
             }
+            TransportIconButton(
+                icon = AllIconsKeys.Actions.Undo,
+                contentDescription = "Undo",
+                tooltip = "Undo timeline edit (Cmd/Ctrl+Z)",
+                testTag = "ciacola-timeline-undo",
+                enabled = controller.overridesStore.canUndo,
+            ) { controller.undo() }
+            TransportIconButton(
+                icon = AllIconsKeys.Actions.Redo,
+                contentDescription = "Redo",
+                tooltip = "Redo timeline edit (Cmd/Ctrl+Shift+Z)",
+                testTag = "ciacola-timeline-redo",
+                enabled = controller.overridesStore.canRedo,
+            ) { controller.redo() }
         }
 
         Row(
+            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -220,19 +242,23 @@ internal fun TimelineTransportBar(
                     onClick = { controller.exitLoopSubComp() },
                     modifier = Modifier.testTag("ciacola-timeline-exit-subcomp"),
                 ) {
-                    Text("← Master Deck", style = JewelTheme.typography.small)
+                    Text("← Master Deck", style = JewelTheme.typography.small, maxLines = 1)
                 }
                 Text(
                     text = "▸ Sub-Comp: $loopLabel",
                     style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                     color = globalColors.text.normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.testTag("ciacola-timeline-subcomp-title"),
                 )
             } else {
                 Text(
                     text = "Master Deck (${controller.snapshot.slides.size} slides · ${controller.snapshot.tracks.size} tracks)",
                     style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
+                    color = secondaryCaptionColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.testTag("ciacola-timeline-master-summary"),
                 )
             }
@@ -256,7 +282,7 @@ internal fun TimelineTransportBar(
                         val anchor = viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx)
                         viewport.setZoom(exp(logMin + v * (logMax - logMin)), anchor)
                     },
-                    modifier = Modifier.width(110.dp).testTag("ciacola-timeline-zoom-slider"),
+                    modifier = Modifier.width(84.dp).testTag("ciacola-timeline-zoom-slider"),
                 )
                 TransportIconButton(AllIconsKeys.General.ZoomIn, "Zoom in", "Zoom in (=, or Alt+wheel)", "ciacola-timeline-zoom-in") {
                     viewport.zoomBy(1.25f, viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx))
@@ -265,19 +291,65 @@ internal fun TimelineTransportBar(
                     viewport.toggleFitAndFrames(nowMs.toFloat())
                 }
             }
-            if (hasOverrides) {
-                Tooltip(tooltip = { Text("Discard live timeline overrides") }) {
+            if (controller.bakeStatus != TimelineBakeStatus.Idle) {
+                val palette = JewelTheme.colorPalette
+                val isDark = JewelTheme.isDark
+                val pillColor = when (controller.bakeStatus) {
+                    TimelineBakeStatus.Sending -> palette.blueOrNull(if (isDark) 6 else 5) ?: Color(0xFF4C8BF5)
+                    TimelineBakeStatus.Sent -> palette.greenOrNull(if (isDark) 6 else 5) ?: Color(0xFF4AB57D)
+                    TimelineBakeStatus.Error -> palette.redOrNull(if (isDark) 6 else 5) ?: Color(0xFFE5534B)
+                    TimelineBakeStatus.Idle -> globalColors.borders.normal
+                }
+                val fullMessage = controller.bakeStatusMessage ?: controller.bakeStatus.name
+                Tooltip(tooltip = { Text(fullMessage) }) {
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 156.dp)
+                            .background(pillColor.copy(alpha = 0.16f), RoundedCornerShape(4.dp))
+                            .border(1.dp, pillColor.copy(alpha = 0.70f), RoundedCornerShape(4.dp))
+                            .clickable(enabled = controller.bakeStatus != TimelineBakeStatus.Sending) {
+                                controller.clearBakeStatus()
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("ciacola-timeline-bake-status"),
+                    ) {
+                        Text(
+                            text = fullMessage,
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            if (hasOverrides || controller.copiedConfirmationVisible) {
+                Tooltip(tooltip = { Text("Copy active overrides as Kotlin modifier/parameter snippets + JSON") }) {
                     OutlinedButton(
-                        onClick = { controller.overridesStore.resetAll() },
+                        onClick = { controller.copyOverridesAsKotlinSnippet(scope) },
+                        modifier = Modifier.testTag("ciacola-timeline-copy-kotlin"),
+                    ) {
+                        Text(
+                            text = if (controller.copiedConfirmationVisible) "Copied!" else "Copy Kotlin",
+                            style = JewelTheme.typography.small,
+                        )
+                    }
+                }
+            }
+            if (hasOverrides) {
+                Tooltip(tooltip = { Text("Discard all live timeline overrides across the deck") }) {
+                    OutlinedButton(
+                        onClick = { controller.resetAllOverrides() },
                         modifier = Modifier.testTag("ciacola-timeline-reset"),
                     ) {
-                        Text("Reset", style = JewelTheme.typography.small)
+                        Text("Reset All", style = JewelTheme.typography.small)
                     }
                 }
                 if (controller.reviewStore != null) {
                     Tooltip(tooltip = { Text("Send live overrides to agent to fold into Kotlin source") }) {
                         DefaultButton(
                             onClick = { controller.bakeOverridesViaAgent(scope) },
+                            enabled = controller.bakeStatus != TimelineBakeStatus.Sending,
                             modifier = Modifier.testTag("ciacola-timeline-bake"),
                         ) {
                             Text("Bake to Kotlin", style = JewelTheme.typography.small)
@@ -310,6 +382,12 @@ internal fun TimelineMultiTrackArea(
     val snapshot = controller.snapshot
     val viewport = controller.viewport
     val globalColors = JewelTheme.globalColors
+    val palette = JewelTheme.colorPalette
+    val isDark = JewelTheme.isDark
+    val secondaryLayerColor = studioSecondaryTextColor(isDark)
+    controller.overridesStore.parameterRevision
+    val overridesData = controller.overridesStore.data()
+    val overrideBadgeColor = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFE0A82E)
 
     Row(modifier = modifier.fillMaxSize()) {
         Column(
@@ -328,12 +406,12 @@ internal fun TimelineMultiTrackArea(
                 Text(
                     text = "SLIDES & OVERLAPS",
                     style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
-                    color = globalColors.text.info,
+                    color = secondaryLayerColor,
                 )
                 Text(
                     text = "EVENT BEATS / LAYERS",
                     style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
+                    color = secondaryLayerColor,
                 )
             }
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
@@ -347,12 +425,28 @@ internal fun TimelineMultiTrackArea(
                 for (track in snapshot.tracks) {
                     val isSelected = controller.isTrackRowSelected(track.trackId)
                     val loopBlock = track.blocks.firstOrNull { it.loopId != null }
+                    val isRowOverridden = if (loopBlock?.loopId != null) {
+                        loopBlock.loopId in overridesData.loopPeriodsMs
+                    } else {
+                        track.trackId in overridesData.tracks
+                    }
+                    val displayRowLabel = if (loopBlock?.loopId != null) {
+                        val livePeriod = overridesData.loopPeriodsMs[loopBlock.loopId] ?: loopBlock.loopPeriodMs ?: 6_000L
+                        val prefix = track.label.substringBeforeLast(" · ")
+                        "$prefix · ${livePeriod}ms"
+                    } else {
+                        track.label
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(TRACK_ROW_HEIGHT)
                             .background(
-                                if (isSelected) globalColors.outlines.focused.copy(alpha = 0.16f) else Color.Transparent
+                                when {
+                                    isSelected -> globalColors.outlines.focused.copy(alpha = 0.16f)
+                                    isRowOverridden -> overrideBadgeColor.copy(alpha = 0.08f)
+                                    else -> Color.Transparent
+                                }
                             )
                             .clickable { controller.selectTrack(track.trackId) }
                             .padding(start = (10 + track.indentLevel * 14).dp, end = 6.dp)
@@ -360,14 +454,29 @@ internal fun TimelineMultiTrackArea(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(
-                            text = track.label,
-                            style = JewelTheme.typography.small,
-                            color = if (isSelected) globalColors.text.normal else globalColors.text.info,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        Row(
                             modifier = Modifier.weight(1f),
-                        )
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            if (isRowOverridden) {
+                                Text(
+                                    text = "●",
+                                    style = JewelTheme.typography.small,
+                                    color = overrideBadgeColor,
+                                    modifier = Modifier
+                                        .testTag("ciacola-override-badge-${track.trackId}")
+                                        .semantics { contentDescription = "overridden" },
+                                )
+                            }
+                            Text(
+                                text = displayRowLabel,
+                                style = JewelTheme.typography.small,
+                                color = if (isSelected || isRowOverridden) globalColors.text.normal else secondaryLayerColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         if (loopBlock?.loopId != null) {
                             Tooltip(tooltip = { Text("Enter Loop Sub-Composition") }) {
                                 Box(
@@ -456,6 +565,11 @@ private fun MasterDeckTimelineCanvas(
     val palette = JewelTheme.colorPalette
     val isDark = JewelTheme.isDark
     val viewport = controller.viewport
+    val latestSnapshot by rememberUpdatedState(snapshot)
+    controller.overridesStore.parameterRevision
+    val overridesFile = controller.overridesStore.data()
+    val liveOverrides = overridesFile.tracks
+    val liveLoopPeriods = overridesFile.loopPeriodsMs
 
     val slideRibbonPx = with(density) { SLIDE_RIBBON_HEIGHT.toPx() }
     val rulerHeightPx = with(density) { TIME_RULER_HEIGHT.toPx() }
@@ -465,35 +579,19 @@ private fun MasterDeckTimelineCanvas(
     var didInitialFit by remember { mutableStateOf(false) }
 
     val colors = remember(JewelTheme.instanceUuid, isDark) {
-        TimelineCanvasPalette(
-            bg = globalColors.panelBackground,
-            headerBg = if (isDark) Color(0xFF1A1E27) else Color(0xFFEBEEF4),
-            gridLine = globalColors.borders.normal.copy(alpha = 0.45f),
-            beatLine = if (isDark) Color(0xFF8A95AC) else Color(0xFF687387),
+        buildStudioCanvasPaletteForTheme(
+            isDark = isDark,
+            panelBg = globalColors.panelBackground,
+            borderNormal = globalColors.borders.normal,
+            textPrimary = globalColors.text.normal,
+            focusedOutline = globalColors.outlines.focused,
             injectedBeatLine = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFE0A82E),
             boundaryLine = palette.tealOrNull(if (isDark) 6 else 5) ?: Color(0xFF2FA896),
             playhead = palette.redOrNull(if (isDark) 6 else 5) ?: Color(0xFFE5534B),
-            textPrimary = globalColors.text.normal,
-            textSecondary = globalColors.text.info,
-            selectedBorder = globalColors.outlines.focused,
-            sharedBar = palette.purpleOrNull(if (isDark) 6 else 5) ?: Color(0xFF9B6EF3),
-            magicTextBar = palette.blueOrNull(if (isDark) 6 else 5) ?: Color(0xFF4C8BF5),
-            warpBar = palette.tealOrNull(if (isDark) 5 else 4) ?: Color(0xFF35B5AC),
-            staggerBar = palette.greenOrNull(if (isDark) 6 else 5) ?: Color(0xFF4AB57D),
-            buildBar = palette.orangeOrNull(if (isDark) 6 else 5) ?: Color(0xFFE57C4E),
-            lineDrawBar = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFD9A33A),
-            loopBar = palette.tealOrNull(if (isDark) 7 else 6) ?: Color(0xFF289E8F),
-            slideColors = listOf(
-                Color(0xFF334466),
-                Color(0xFF4A3861),
-                Color(0xFF2B5450),
-                Color(0xFF5A3F37),
-                Color(0xFF3B4F3B),
-            ),
         )
     }
 
-    val labelTextStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White)
+    val slideLabelTextStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White)
     val rulerTextStyle = TextStyle(fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = colors.textSecondary)
 
     val playheadMs = controller.currentPlayheadTimeMs
@@ -592,7 +690,9 @@ private fun MasterDeckTimelineCanvas(
                 contentDescription = "zoom=${"%.4f".format(viewport.pxPerMs)} scrollX=${viewport.scrollX.roundToInt()} " +
                     "scrollY=${viewport.verticalScroll.value}"
             }
-            .pointerInput(snapshot) {
+            // Keyed on stable controller/viewport (and reading latestSnapshot) so in-flight block
+            // edge/body drags are never cancelled when an override edit refreshes the snapshot.
+            .pointerInput(controller, viewport) {
                 var lastClickBlockId: String? = null
                 var lastClickMillis = 0L
 
@@ -600,6 +700,7 @@ private fun MasterDeckTimelineCanvas(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val buttons = currentEvent.buttons
                     val startPos = down.position
+                    val currentSnapshot = latestSnapshot
                     // Panning (middle button / Space held) is handled by the Initial-pass handler.
                     if (down.isConsumed || buttons.isTertiaryPressed || controller.spaceHeld) return@awaitEachGesture
                     if (!buttons.isPrimaryPressed) return@awaitEachGesture
@@ -628,7 +729,7 @@ private fun MasterDeckTimelineCanvas(
                     }
 
                     val trackIdx = ((startPos.y - headerTotalPx + viewport.verticalScroll.value) / rowHeightPx).toInt()
-                    val hitRow = snapshot.tracks.getOrNull(trackIdx)
+                    val hitRow = currentSnapshot.tracks.getOrNull(trackIdx)
                     val hitBlock = hitRow?.blocks?.firstOrNull { blk ->
                         val bx0 = viewport.xForTime(blk.startMs.toFloat())
                         val bx1 = bx0 + max(18f, blk.durationMs * viewport.pxPerMs)
@@ -665,45 +766,67 @@ private fun MasterDeckTimelineCanvas(
                         hitBlock.category == TrackCategory.LoopSubComp -> DragMode.ScrubPlayhead
                         abs(startPos.x - bx1) <= 9f -> DragMode.ResizeRightDuration
                         abs(startPos.x - bx0) <= 9f -> DragMode.ResizeLeftDelay
+                        hitBlock.category == TrackCategory.SharedElement || hitBlock.category == TrackCategory.WarpCode -> DragMode.ScrubPlayhead
                         else -> DragMode.MoveBlockBeat
                     }
-                    val origDuration = hitBlock.durationMs
+                    val staggerSpreadOnHit = if (hitBlock.category == TrackCategory.StaggerGroup && (hitBlock.staggerCount ?: 1) > 1) {
+                        val step = liveOverrides[hitBlock.trackId]?.staggerStepMs ?: hitBlock.staggerStepMs ?: 55
+                        ((hitBlock.staggerCount ?: 1) - 1) * step
+                    } else {
+                        0
+                    }
+                    val origDuration = ((hitBlock.morphDurationMs ?: hitBlock.durationMs) - staggerSpreadOnHit).coerceAtLeast(60)
                     val origDelay = hitBlock.delayMs
+                    var lastDuration = origDuration
+                    var lastDelay = origDelay
+                    var lastTriggerBeat = hitBlock.triggerBeatInScene
 
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
-                        if (!change.pressed) break
-                        change.consume()
-                        val dxPx = change.position.x - startPos.x
-                        if (abs(dxPx) < 3f) continue
-                        val deltaMs = (dxPx / viewport.pxPerMs).roundToInt()
+                    controller.overridesStore.beginEditGesture()
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+                            if (!change.pressed) break
+                            change.consume()
+                            val dxPx = change.position.x - startPos.x
+                            if (abs(dxPx) < 3f) continue
+                            val deltaMs = (dxPx / viewport.pxPerMs).roundToInt()
 
-                        when (dragMode) {
-                            DragMode.ResizeRightDuration -> {
-                                val newDur = (origDuration + deltaMs).coerceIn(60, 4_000)
-                                controller.overridesStore.updateTrack(hitBlock.trackId) { it.copy(durationMs = newDur) }
-                            }
-                            DragMode.ResizeLeftDelay -> {
-                                val newDelay = (origDelay + deltaMs).coerceIn(0, 2_000)
-                                controller.overridesStore.updateTrack(hitBlock.trackId) { it.copy(delayMs = newDelay) }
-                            }
-                            DragMode.MoveBlockBeat -> {
-                                val cursorTimeMs = timeAt(change.position.x)
-                                val sameSlideBeats = snapshot.eventBeats.filter {
-                                    it.sceneIndex == hitBlock.sceneIndex && !it.isSlideBoundary
-                                }
-                                val nearest = sameSlideBeats.minByOrNull { abs(it.timeMs - cursorTimeMs) }
-                                if (nearest != null) {
-                                    val targetTrigger = (nearest.frameIndex + 1).coerceIn(1, sameSlideBeats.size)
-                                    if (targetTrigger != hitBlock.triggerBeatInScene) {
-                                        controller.overridesStore.updateTrack(hitBlock.trackId) { it.copy(enterBeat = targetTrigger) }
+                            when (dragMode) {
+                                DragMode.ResizeRightDuration -> {
+                                    val newDur = (origDuration + deltaMs).coerceIn(60, 4_000)
+                                    if (newDur != lastDuration) {
+                                        lastDuration = newDur
+                                        controller.overridesStore.updateTrack(hitBlock.trackId, coalesce = true) { it.copy(durationMs = newDur) }
                                     }
                                 }
+                                DragMode.ResizeLeftDelay -> {
+                                    val newDelay = (origDelay + deltaMs).coerceIn(0, 2_000)
+                                    if (newDelay != lastDelay) {
+                                        lastDelay = newDelay
+                                        controller.overridesStore.updateTrack(hitBlock.trackId, coalesce = true) { it.copy(delayMs = newDelay) }
+                                    }
+                                }
+                                DragMode.MoveBlockBeat -> {
+                                    val cursorTimeMs = timeAt(change.position.x)
+                                    val sameSlideBeats = currentSnapshot.eventBeats.filter {
+                                        it.sceneIndex == hitBlock.sceneIndex && !it.isSlideBoundary
+                                    }
+                                    val nearest = sameSlideBeats.minByOrNull { abs(it.timeMs - cursorTimeMs) }
+                                    if (nearest != null) {
+                                        val targetTrigger = (nearest.frameIndex + 1).coerceIn(1, sameSlideBeats.size)
+                                        if (targetTrigger != lastTriggerBeat) {
+                                            lastTriggerBeat = targetTrigger
+                                            controller.overridesStore.updateTrack(hitBlock.trackId, coalesce = true) { it.copy(enterBeat = targetTrigger) }
+                                        }
+                                    }
+                                }
+                                DragMode.ScrubPlayhead -> controller.scrubToTimeMs(timeAt(change.position.x))
+                                DragMode.Pan -> Unit
                             }
-                            DragMode.ScrubPlayhead -> controller.scrubToTimeMs(timeAt(change.position.x))
-                            DragMode.Pan -> Unit
                         }
+                    } finally {
+                        controller.overridesStore.endEditGesture()
                     }
                 }
             },
@@ -764,38 +887,90 @@ private fun MasterDeckTimelineCanvas(
                 val isSelected = controller.isTrackRowSelected(row.trackId)
                 val fill = colors.colorForCategory(row.category)
                 for (blk in row.blocks) {
-                    if (blk.startMs + blk.durationMs < visibleStartMs || blk.startMs > visibleEndMs) continue
-                    val x0 = xOf(blk.startMs)
-                    val w = max(6f, blk.durationMs * pxPerMs)
+                    val liveOvr = liveOverrides[blk.trackId]
+                    val isBarOverridden = if (blk.loopId != null) {
+                        blk.loopId in liveLoopPeriods
+                    } else {
+                        liveOvr != null
+                    }
+                    val drawStartMs = if (row.category != TrackCategory.SharedElement && row.category != TrackCategory.LoopSubComp && liveOvr?.delayMs != null) {
+                        val stepOffset = (blk.staggerIndex ?: 0) * (liveOvr.staggerStepMs ?: 55)
+                        (blk.startMs - blk.delayMs) + liveOvr.delayMs + stepOffset
+                    } else {
+                        blk.startMs
+                    }
+                    val drawDurationMs = when {
+                        row.category == TrackCategory.SharedElement || row.category == TrackCategory.LoopSubComp -> blk.durationMs
+                        liveOvr?.curve?.isSpring == true -> liveOvr.curve.estimatedSpringDurationMs()
+                        row.category == TrackCategory.StaggerGroup && liveOvr?.durationMs != null -> {
+                            val count = (blk.staggerCount ?: 1).coerceAtLeast(1)
+                            val step = liveOvr.staggerStepMs ?: 55
+                            liveOvr.durationMs + (count - 1) * step
+                        }
+                        liveOvr?.durationMs != null -> liveOvr.durationMs
+                        else -> blk.durationMs
+                    }
+                    if (drawStartMs + drawDurationMs < visibleStartMs || drawStartMs > visibleEndMs) continue
+                    val x0 = xOf(drawStartMs)
+                    val w = max(6f, drawDurationMs * pxPerMs)
+                    val barAlpha = if (row.category == TrackCategory.StaggerItem) 0.74f else 0.90f
+                    val paintedFill = fill.copy(alpha = barAlpha)
+                    val compositedFill = compositeColorOver(paintedFill, colors.bg)
+                    val barLabelInk = barLabelInkForFill(compositedFill)
                     drawRoundRect(
-                        color = fill.copy(alpha = if (row.category == TrackCategory.StaggerItem) 0.74f else 0.90f),
+                        color = paintedFill,
                         topLeft = Offset(x0, yTop),
                         size = Size(w, barH),
                         cornerRadius = CornerRadius(5f, 5f),
                     )
+                    if (isBarOverridden && w > 18f) {
+                        val dotCenter = Offset(x0 + w - 7f, yTop + 6f)
+                        drawCircle(color = barLabelInk.copy(alpha = 0.85f), radius = 4.2f, center = dotCenter)
+                        drawCircle(color = Color(0xFFFFD54F), radius = 2.8f, center = dotCenter)
+                    }
                     if (isSelected) {
+                        // Crisp high-contrast double-ring selection border (>= 4.5:1 against both light & dark canvas).
                         drawRoundRect(
-                            color = Color.White,
-                            topLeft = Offset(x0, yTop),
-                            size = Size(w, barH),
-                            cornerRadius = CornerRadius(5f, 5f),
-                            style = Stroke(width = 2f),
+                            color = colors.selectedBarInnerRing,
+                            topLeft = Offset(x0 + 1f, yTop + 1f),
+                            size = Size(max(2f, w - 2f), max(2f, barH - 2f)),
+                            cornerRadius = CornerRadius(4f, 4f),
+                            style = Stroke(width = 1.4f),
+                        )
+                        drawRoundRect(
+                            color = colors.selectedBarOuterRing,
+                            topLeft = Offset(x0 - 0.5f, yTop - 0.5f),
+                            size = Size(w + 1f, barH + 1f),
+                            cornerRadius = CornerRadius(5.5f, 5.5f),
+                            style = Stroke(width = 2.2f),
                         )
                     }
                     if (row.category != TrackCategory.LoopSubComp && w > 28f) {
-                        drawLine(Color.White.copy(alpha = 0.65f), Offset(x0 + 3f, yTop + 4f), Offset(x0 + 3f, yTop + barH - 4f), 1.5f)
-                        drawLine(Color.White.copy(alpha = 0.65f), Offset(x0 + w - 3f, yTop + 4f), Offset(x0 + w - 3f, yTop + barH - 4f), 1.5f)
+                        val gripColor = barLabelInk.copy(alpha = 0.62f)
+                        drawLine(gripColor, Offset(x0 + 3f, yTop + 4f), Offset(x0 + 3f, yTop + barH - 4f), 1.5f)
+                        drawLine(gripColor, Offset(x0 + w - 3f, yTop + 4f), Offset(x0 + w - 3f, yTop + barH - 4f), 1.5f)
                     }
                     if (w > 42f) {
-                        clipRect(left = x0 + 6f, top = yTop, right = x0 + w - 6f, bottom = yTop + barH) {
-                            drawText(
-                                textMeasurer = textMeasurer,
-                                text = blk.label,
-                                topLeft = Offset(x0 + 7f, yTop + 2f),
-                                style = labelTextStyle,
-                                maxLines = 1,
-                                overflow = TextOverflow.Clip,
-                            )
+                        val barText = if (blk.loopId != null && blk.loopId in liveLoopPeriods) {
+                            val liveP = liveLoopPeriods.getValue(blk.loopId)
+                            "${blk.label.substringBeforeLast(" · ")} · ${liveP}ms ▸"
+                        } else {
+                            blk.label
+                        }
+                        val rightClip = x0 + w - (if (isBarOverridden) 13f else 6f)
+                        if (rightClip > x0 + 8f) {
+                            clipRect(left = x0 + 6f, top = yTop, right = rightClip, bottom = yTop + barH) {
+                                drawText(
+                                    textMeasurer = textMeasurer,
+                                    text = barText,
+                                    topLeft = Offset(x0 + 7f, yTop + 2f),
+                                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = barLabelInk),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                    size = Size(rightClip - (x0 + 7f), barH),
+                                )
+                            }
                         }
                     }
                 }
@@ -833,7 +1008,7 @@ private fun MasterDeckTimelineCanvas(
                         textMeasurer = textMeasurer,
                         text = slide.label,
                         topLeft = Offset(labelLeft, 5f),
-                        style = labelTextStyle,
+                        style = slideLabelTextStyle,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         size = Size(labelRight - labelLeft, slideRibbonPx - 4f),
@@ -856,11 +1031,16 @@ private fun MasterDeckTimelineCanvas(
                 strokeWidth = 1f,
             )
             if (isMajor) {
-                drawText(
-                    textMeasurer = textMeasurer,
+                val tickMeasured = textMeasurer.measure(
                     text = formatTick(tickMs, majorStep),
-                    topLeft = Offset(tx + 3f, slideRibbonPx + 2f),
                     style = rulerTextStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                val tickLeft = (tx + 3f).coerceAtMost((size.width - tickMeasured.size.width - 2f).coerceAtLeast(0f))
+                drawText(
+                    textLayoutResult = tickMeasured,
+                    topLeft = Offset(tickLeft, slideRibbonPx + 2f),
                 )
             }
             tickMs += minorStep
@@ -883,6 +1063,30 @@ private fun MasterDeckTimelineCanvas(
                 close()
             }
             drawPath(diamond, color = dColor)
+            if (beat.isInjected) {
+                val holdMeasured = textMeasurer.measure(
+                    text = "HOLD",
+                    style = TextStyle(
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1A1404),
+                    ),
+                    maxLines = 1,
+                )
+                val tagW = holdMeasured.size.width + 6f
+                val tagH = holdMeasured.size.height + 2f
+                val tagTop = (cy - tagH / 2f).coerceAtLeast(slideRibbonPx + 1f)
+                drawRoundRect(
+                    color = colors.injectedBeatLine,
+                    topLeft = Offset(bx + 6f, tagTop),
+                    size = Size(tagW, tagH),
+                    cornerRadius = CornerRadius(3f, 3f),
+                )
+                drawText(
+                    textLayoutResult = holdMeasured,
+                    topLeft = Offset(bx + 9f, tagTop + 1f),
+                )
+            }
         }
 
         drawLine(colors.gridLine, Offset(0f, headerTotalPx), Offset(size.width, headerTotalPx), 1.5f)
@@ -947,7 +1151,7 @@ private fun LoopSubCompTimelineView(
                     modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 12.dp),
                     contentAlignment = Alignment.CenterStart,
                 ) {
-                    Text(text = "${idx + 1}. $ch", style = JewelTheme.typography.small, color = globalColors.text.info)
+                    Text(text = "${idx + 1}. $ch", style = JewelTheme.typography.small, color = studioSecondaryTextColor(isDark))
                 }
             }
         }
@@ -983,7 +1187,7 @@ private fun LoopSubCompTimelineView(
             drawRect(color = globalColors.panelBackground)
 
             val steps = 6
-            val tickStyle = TextStyle(fontSize = 10.sp, color = globalColors.text.info, fontFamily = FontFamily.Monospace)
+            val tickStyle = TextStyle(fontSize = 10.sp, color = studioSecondaryTextColor(isDark), fontFamily = FontFamily.Monospace)
             for (s in 0..steps) {
                 val frac = s.toFloat() / steps.toFloat()
                 val x = leftPad + frac * usableW
@@ -1050,7 +1254,7 @@ private fun DrawScope.drawHatchedOverlapZone(
     }
 }
 
-private data class TimelineCanvasPalette(
+internal data class TimelineCanvasPalette(
     val bg: Color,
     val headerBg: Color,
     val gridLine: Color,
@@ -1061,6 +1265,8 @@ private data class TimelineCanvasPalette(
     val textPrimary: Color,
     val textSecondary: Color,
     val selectedBorder: Color,
+    val selectedBarOuterRing: Color,
+    val selectedBarInnerRing: Color,
     val sharedBar: Color,
     val magicTextBar: Color,
     val warpBar: Color,
@@ -1078,5 +1284,84 @@ private data class TimelineCanvasPalette(
         TrackCategory.Build -> buildBar
         TrackCategory.LineDraw -> lineDrawBar
         TrackCategory.LoopSubComp -> loopBar
+    }
+}
+
+internal fun studioSecondaryTextColor(isDark: Boolean): Color =
+    if (isDark) Color(0xFFB4BCC8) else Color(0xFF475061)
+
+internal fun buildStudioCanvasPaletteForTheme(
+    isDark: Boolean,
+    panelBg: Color = if (isDark) Color(0xFF2B2D30) else Color(0xFFF7F8FA),
+    borderNormal: Color = if (isDark) Color(0xFF393B40) else Color(0xFFD3D5DB),
+    textPrimary: Color = if (isDark) Color(0xFFDFE1E5) else Color(0xFF1E1F22),
+    focusedOutline: Color = if (isDark) Color(0xFF3574F0) else Color(0xFF2563EB),
+    injectedBeatLine: Color = Color(0xFFE0A82E),
+    boundaryLine: Color = Color(0xFF2FA896),
+    playhead: Color = Color(0xFFE5534B),
+): TimelineCanvasPalette = TimelineCanvasPalette(
+    bg = panelBg,
+    headerBg = if (isDark) Color(0xFF1A1E27) else Color(0xFFEBEEF4),
+    gridLine = borderNormal.copy(alpha = 0.45f),
+    beatLine = if (isDark) Color(0xFF94A0B8) else Color(0xFF5A6578),
+    injectedBeatLine = injectedBeatLine,
+    boundaryLine = boundaryLine,
+    playhead = playhead,
+    textPrimary = textPrimary,
+    textSecondary = studioSecondaryTextColor(isDark),
+    selectedBorder = focusedOutline,
+    selectedBarOuterRing = if (isDark) Color.White else Color(0xFF1B3A7A),
+    selectedBarInnerRing = if (isDark) Color(0xFF141820) else Color.White,
+    sharedBar = if (isDark) Color(0xFF6D44B8) else Color(0xFF5B21B6),
+    magicTextBar = if (isDark) Color(0xFF2356C2) else Color(0xFF1D4ED8),
+    warpBar = if (isDark) Color(0xFF45C4BA) else Color(0xFF52C7BE),
+    staggerBar = if (isDark) Color(0xFF1F7A4C) else Color(0xFF6BD19A),
+    buildBar = if (isDark) Color(0xFFEB8A44) else Color(0xFFF59E56),
+    lineDrawBar = if (isDark) Color(0xFFE5B546) else Color(0xFFF4C552),
+    loopBar = if (isDark) Color(0xFF1B746B) else Color(0xFF68C9BF),
+    slideColors = listOf(
+        Color(0xFF334466),
+        Color(0xFF4A3861),
+        Color(0xFF2B5450),
+        Color(0xFF5A3F37),
+        Color(0xFF3B4F3B),
+    ),
+)
+
+internal fun wcagRelativeLuminance(color: Color): Float {
+    fun linearize(channel: Float): Float {
+        val c = channel.coerceIn(0f, 1f)
+        return if (c <= 0.03928f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
+    }
+    return 0.2126f * linearize(color.red) +
+        0.7152f * linearize(color.green) +
+        0.0722f * linearize(color.blue)
+}
+
+internal fun wcagContrastRatio(fg: Color, bg: Color): Float {
+    val l1 = wcagRelativeLuminance(fg)
+    val l2 = wcagRelativeLuminance(bg)
+    val lighter = maxOf(l1, l2)
+    val darker = minOf(l1, l2)
+    return (lighter + 0.05f) / (darker + 0.05f)
+}
+
+internal fun compositeColorOver(fg: Color, bg: Color): Color {
+    val a = fg.alpha.coerceIn(0f, 1f)
+    return Color(
+        red = fg.red * a + bg.red * (1f - a),
+        green = fg.green * a + bg.green * (1f - a),
+        blue = fg.blue * a + bg.blue * (1f - a),
+        alpha = 1f,
+    )
+}
+
+internal fun barLabelInkForFill(compositedBarFill: Color): Color {
+    val darkInk = Color(0xFF101318)
+    val lightInk = Color.White
+    return if (wcagContrastRatio(darkInk, compositedBarFill) >= wcagContrastRatio(lightInk, compositedBarFill)) {
+        darkInk
+    } else {
+        lightInk
     }
 }

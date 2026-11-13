@@ -25,10 +25,16 @@ import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
+/**
+ * Default format for persisted animatic state: tolerant of keys written by newer versions (e.g. a
+ * `schemaVersion`), which a strict decoder would reject and so reset the saved position to (0, 0).
+ */
+internal val AnimaticStateJson: Json = Json { ignoreUnknownKeys = true }
+
 @Composable
 fun rememberAnimatic(
     fileName: String,
-    format: StringFormat = Json,
+    format: StringFormat = AnimaticStateJson,
     storyboard: () -> Storyboard,
 ): Animatic {
     val animatic = rememberAnimatic(storyboard = storyboard)
@@ -40,20 +46,31 @@ fun rememberAnimatic(
 fun AnimaticPersistenceEffect(
     animatic: Animatic,
     fileName: String,
-    format: StringFormat = Json,
+    format: StringFormat = AnimaticStateJson,
 ) {
-    val path = Paths.get(".storyboard", "${fileName.lowercase()}.json")
+    val explicitStoryboardDir = LocalStoryboardDir.current
+    val path = remember(fileName, explicitStoryboardDir) {
+        (explicitStoryboardDir ?: resolveDefaultStoryboardDir()).resolve("${fileName.lowercase()}.json")
+    }
     var loaded by remember(fileName) { mutableStateOf(false) }
-    LaunchedEffect(fileName, format) {
-        val index = runInterruptible(Dispatchers.IO) {
-            if (path.exists()) {
-                val text = path.readText()
-                runCatching { format.decodeFromString(StoryboardIndexSerializer, text) }
-                    .getOrNull()
-            } else {
-                path.createParentDirectories()
-                null
+    LaunchedEffect(fileName, format, path) {
+        val index = try {
+            runInterruptible(Dispatchers.IO) {
+                if (path.exists()) {
+                    val text = path.readText()
+                    runCatching { format.decodeFromString(StoryboardIndexSerializer, text) }
+                        .getOrNull()
+                } else {
+                    path.createParentDirectories()
+                    null
+                }
             }
+        } catch (e: IOException) {
+            System.err.println("Storyboard: unable to initialize animatic state at $path: ${e.message}")
+            null
+        } catch (e: SecurityException) {
+            System.err.println("Storyboard: permission denied reading animatic state at $path: ${e.message}")
+            null
         }
 
         if (index != null) {
@@ -79,7 +96,10 @@ private fun LaunchedStoryboardIndexWriter(animatic: Animatic, path: Path, format
                 val text = format.encodeToString(StoryboardIndexSerializer, index)
                 path.writeText(text, options = arrayOf(WRITE, CREATE, TRUNCATE_EXISTING))
             }
-        } catch (_: IOException) {
+        } catch (e: IOException) {
+            System.err.println("Storyboard: unable to persist animatic state to $path: ${e.message}")
+        } catch (e: SecurityException) {
+            System.err.println("Storyboard: permission denied persisting animatic state to $path: ${e.message}")
         }
     }
 }

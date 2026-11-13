@@ -8,8 +8,9 @@ or a generic slide editor.
 
 `createFoundationDeck()` is the composition root. Storyboard owns scene/state ordering, forward and
 backward navigation, scene transitions, shared-transition scopes, and the fixed 1920×1080 render
-space. `DeckDesign` owns the palette, type roles, spacing conventions, and `SceneFormat`. Four scenes
-form the executable spike:
+space. `DeckDesign` owns the palette, type roles, spacing conventions, and `SceneFormat`. Five scenes
+with fourteen base states form the executable spike (`Main.kt` passes
+`includeKeynoteEffectsLab = true`; `createFoundationDeck()` alone builds the first four):
 
 | Scene | States | Evidence |
 |---|---:|---|
@@ -17,6 +18,9 @@ form the executable spike:
 | `SharedMove` | 2 | a Storyboard-provided `sharedBounds` Magic-Move-style transition |
 | `AmbientLoop` | 1 | an infinite Compose animation that does not mutate scene state, plus the adapted mesh visual |
 | `KotlinCode` | 3 | syntax-highlighted `AnnotatedString` values animated by MagicText |
+| `KeynoteEffectsLab` | 5 | every Keynote build effect, `DeckWarpCodeCard` morphs, and the `MagnifierLoupeStage` |
+
+Timeline `+ Beat` overrides add virtual beats on top of these base states.
 
 `DeckTextRenderer` is the only deck-to-text-engine dependency. Its implementation is installed once
 by the storyboard decorator. Scenes call `DeckMagicText`; they neither select nor know an engine.
@@ -26,10 +30,28 @@ Run the desktop deck (or launch with Compose Hot Reload on JetBrains Runtime 25)
 
 ```shell
 ./gradlew :deck:run
-./gradlew :deck:hotRunDesktop        # explicit reload via `./gradlew :deck:reload`
-CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
-./gradlew :deck:spectreTest          # real-window Spectre 0.9.0 E2E suite on JBR 25
+./gradlew :deck:hotRunDesktopAsync   # background launch; apply edits with `./gradlew :deck:reload`
+CIACOLA_THEME=light ./gradlew :deck:hotRunDesktopAsync
+CIACOLA_TIMELINE_OPEN=true ./gradlew :deck:hotRunDesktopAsync   # opens with the timeline docked
+./gradlew :deck:spectreTest          # real-window Spectre 0.9.0 E2E suites on JBR 25 (focus-free)
 ```
+
+The first launch opens a 16:9 1280×720 Story window. Secondary windows (Timeline, Review,
+Assistant, Theme) only write `.storyboard/<window>.json` once they have been opened.
+
+### Shortcuts
+
+| Key | Action |
+|---|---|
+| `→` `↓` `PgDn` `Space` `Enter` | Next beat |
+| `←` `↑` `PgUp` `Backspace` | Previous beat |
+| `Esc` | Toggle the Overview grid (also **Easel ▸ Overview (Esc)**); it tracks timeline scrubs |
+| `⌥⌘P` | Toggle fullscreen |
+| `F2` | Assistant (presenter) window |
+| `F3` / hold `Ctrl` | Review Inspect mode; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
+| `F4` | Review window |
+| `F5` | Timeline Studio docked in the Story window |
+| `F6` | Timeline Studio in a detached window |
 
 ## Theme system, Keynote effects kit, timeline studio, and hot reload
 
@@ -121,8 +143,9 @@ CIACOLA_THEME=light ./gradlew :deck:hotRunDesktop --auto
   space; `Ctrl+Click` or `Ctrl+Drag` captures a clean annotated `GraphicsLayer` PNG
   (`.storyboard/review-captures/`), opens an anchored Jewel `PopupContainer` (`IntUiTheme` +
   `TextArea`), persists `.storyboard/review-comments.json`, and dispatches feedback via
-  `agentapi send-message` so edits hot-reload in place via `:deck:reload` and flip numbered stage
-  pins green (`Applied`).
+  `agentapi send-message` so edits hot-reload in place via `:deck:reload`. Each comment is shown
+  as a numbered stage pin; its status (queued, applying, applied, failed) is tracked in the Review
+  window.
 
 ## Source orientation and attribution
 
@@ -193,11 +216,13 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
 - `:deck:desktopTest`: passed (adds `ScrubPathIndependenceTest`, `TimelineViewportAndSelectionTest`,
   and `TimelineOffscreenIsolationTest` to `FoundationDeckTest`, `DeckThemeTest`, `KeynoteEffectsTest`,
   `SlideReviewSystemTest`, `TimelineModelAndOverridesTest`, and `DeterministicEaselScrubAndLoopTest`).
-- `:deck:spectreTest`: passed (four real-window Spectre `0.9.0` tests: mouse scrubbing across a beat
-  and back, compared pixel-for-pixel with a direct scrub; After Effects zoom/pan/scroll gestures in
-  the timeline and the preview, including Ctrl-click review on a zoomed preview; selection in both
-  directions with compact Inspector steppers; beats, loop sub-composition, and the review composer
-  with the timeline open).
+- `:deck:spectreTest`: runs every `*SpectreTest` class (`CiacolaStudioSpectreTest` with six
+  real-window Spectre `0.9.0` tests, plus the `qa/` suites). `CiacolaStudioSpectreTest` covers mouse
+  scrubbing across a beat and back, compared pixel-for-pixel with a direct scrub; After Effects
+  zoom/pan/scroll gestures in the timeline and the preview, including Ctrl-click review on a zoomed
+  preview; selection in both directions with compact Inspector steppers; beats, loop
+  sub-composition, and the review composer with the timeline open. The task runs on JBR 25 with
+  `apple.awt.UIElement=true` and synthetic AWT input, so it never steals focus.
 - `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passed, including
   all JVM suites, Wasm compilation, and API checks. The unmodified upstream browser task cannot run
   in this image because it requests ChromeHeadless and only Firefox is installed; a literal `check`

@@ -238,4 +238,70 @@ class KeynoteEffectsTest {
             assertEquals(Storyboard.Index(4, expectedFrame), animatic.currentIndex)
         }
     }
+
+    @Test
+    fun magnifierLoupeExcludesDecorationsFromLensAndFadesNearZeroProgress() = runComposeUiTest {
+        var progress by mutableFloatStateOf(1f)
+        val darkTheme = DeckThemes.stageDark()
+
+        setContent {
+            dev.sebastiano.ciacola.theme.DeckThemeProvider(darkTheme) {
+                Box(Modifier.size(640.dp, 360.dp).testTag("loupe-stage")) {
+                    MagnifierLoupeStage(
+                        targetKey = "target",
+                        progress = { progress },
+                        modifier = Modifier.fillMaxSize(),
+                        decorations = listOf(
+                            AnimatedLine(
+                                startKey = "origin",
+                                startAlignment = Alignment.TopCenter,
+                                endKey = "target",
+                                endAlignment = Alignment.BottomCenter,
+                                progress = { 1f },
+                                color = Color.Green,
+                                gap = 0.dp,
+                            ),
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier.align(Alignment.CenterStart),
+                            verticalArrangement = Arrangement.spacedBy(28.dp),
+                        ) {
+                            Text("BasicText(AnnotatedString)", color = Color.White, modifier = Modifier.decorate("target"))
+                            Text("IMMUTABLE", color = Color.White, modifier = Modifier.decorate("origin"))
+                        }
+                    }
+                }
+            }
+        }
+
+        waitForIdle()
+        val fullPixels = onNodeWithTag("loupe-stage").captureToImage().toPixelMap()
+        // Right side holds the loupe lens; green AnimatedLine is on the left column only.
+        var greenInLoupeHalf = 0
+        for (y in 0 until fullPixels.height) {
+            for (x in (fullPixels.width / 2) until fullPixels.width) {
+                val c = fullPixels[x, y]
+                if (c.green > 0.75f && c.red < 0.25f && c.blue < 0.25f) greenInLoupeHalf++
+            }
+        }
+        assertEquals(
+            0,
+            greenInLoupeHalf,
+            "MagnifierLoupeStage lens must not magnify stage decorations (found $greenInLoupeHalf green pixels in lens half)",
+        )
+
+        // At near-zero progress (p = 0.01f), the collapsing loupe ring must fade out rather than paint a bright pinhole dot.
+        runOnIdle { progress = 0.01f }
+        waitForIdle()
+        val tinyPixels = onNodeWithTag("loupe-stage").captureToImage().toPixelMap()
+        var brightAccentPinhole = 0
+        for (y in 0 until tinyPixels.height) {
+            for (x in (tinyPixels.width / 2) until tinyPixels.width) {
+                val c = tinyPixels[x, y]
+                if (c.red > 0.65f && c.blue < 0.55f) brightAccentPinhole++
+            }
+        }
+        assertEquals(0, brightAccentPinhole, "Collapsing loupe at p=0.01f must fade cleanly without leaving a bright pinhole")
+    }
 }

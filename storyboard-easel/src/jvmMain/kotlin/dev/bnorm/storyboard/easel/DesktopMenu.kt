@@ -10,14 +10,21 @@ import androidx.compose.ui.window.MenuBarScope
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.overview.OverviewVisibility
 
 @Composable
 internal fun MenuBarScope.DesktopMenu(
     storyboard: Storyboard,
     windowState: WindowState?,
     window: ComposeWindow?,
+    overview: OverviewVisibility? = null,
 ) {
     Menu("Easel") {
+        if (overview != null) {
+            // No accelerator: Esc is handled by the stage itself, and a menu accelerator would
+            // fire on key press in addition to the stage's key-release toggle.
+            CheckboxItem("Overview (Esc)", checked = overview.isVisible) { overview.isVisible = it }
+        }
         if (windowState != null && window != null) {
             Item("Fullscreen", shortcut = KeyShortcut(Key.P, alt = true, meta = true)) {
                 // TODO keynote seems to create a new window which fades in over the entire screen

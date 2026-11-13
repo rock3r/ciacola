@@ -1,6 +1,8 @@
 package dev.bnorm.storyboard.easel
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuScope
 import dev.bnorm.storyboard.ContentDecorator
 
@@ -11,6 +13,13 @@ interface EaselWindow {
     var visible: Boolean
 
     val decorator: ContentDecorator get() = ContentDecorator.None
+
+    /**
+     * Size of the window the first time it is opened (before it has persisted state). Roomy by
+     * default so tool windows such as a timeline or review panel are not cramped; compact
+     * windows should override it.
+     */
+    val initialSize: DpSize get() = DpSize(1280.dp, 800.dp)
 
     @Composable
     fun MenuScope.Menu()

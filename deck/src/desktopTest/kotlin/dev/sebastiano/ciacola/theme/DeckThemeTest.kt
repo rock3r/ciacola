@@ -54,7 +54,7 @@ class DeckThemeTest {
             assertTrue(theme.motion.fadeMoveDurationMs in 250..450)
             assertTrue(theme.motion.lineDrawDurationMs in 250..450)
             assertTrue(theme.motion.staggerStepMs in 25..120)
-            assertTrue(theme.colors.spotlightDimAlpha in 0.1f..0.5f)
+            assertTrue(theme.colors.spotlightDimAlpha in 0.1f..0.6f)
         }
     }
 

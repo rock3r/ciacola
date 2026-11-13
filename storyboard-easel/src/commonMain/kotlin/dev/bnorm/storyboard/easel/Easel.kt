@@ -35,23 +35,38 @@ fun Easel(
     mode: SceneMode = SceneMode.Story,
     modifier: Modifier = Modifier,
 ) {
+    // Only the presenting (Story) Easel owns the animatic's frame clock and freeze capture; preview
+    // Easels on the same animatic (e.g. an assistant's "current frame") must not take them over or
+    // clear them when they go away.
+    val ownsHooks = mode == SceneMode.Story
     // Navigation must count frames on *this* window's clock (see Animatic.renderFrameClock).
     val renderScope = rememberCoroutineScope()
-    DisposableEffect(animatic, renderScope) {
-        val clock = renderScope.coroutineContext[MonotonicFrameClock]
-        animatic.renderFrameClock = clock
-        onDispose { if (animatic.renderFrameClock === clock) animatic.renderFrameClock = null }
+    if (ownsHooks) {
+        DisposableEffect(animatic, renderScope) {
+            val clock = renderScope.coroutineContext[MonotonicFrameClock]
+            animatic.renderFrameClock = clock
+            onDispose { if (animatic.renderFrameClock === clock) animatic.renderFrameClock = null }
+        }
     }
     // While the animatic settles a segment (see Animatic.scrubSettling), keep presenting a pixel
     // snapshot of the last frame so the play-time-0 settle frames never reach the screen. A pixel
     // snapshot is required: a recorded layer still references its children's live layers.
     val presentedFrame = rememberGraphicsLayer()
+    val recording = remember { PresentedFrameRecording() }
     var frozenFrame by remember { mutableStateOf<ImageBitmap?>(null) }
-    DisposableEffect(animatic, presentedFrame) {
-        animatic.freezeCapture = {
-            frozenFrame = runCatching { presentedFrame.toImageBitmap() }.getOrNull()
+    if (ownsHooks) {
+        DisposableEffect(animatic, presentedFrame) {
+            val capture: suspend () -> Boolean = {
+                // Only snapshot a layer whose children are still alive: one recorded under the current
+                // scrub epoch (each step disposes the scene subtree) and since the last unfreeze.
+                // Otherwise the layer references freed render nodes, so show live content instead.
+                val safe = recording.epoch == animatic.scrubEpoch && animatic.livePresentedSinceUnfreeze
+                frozenFrame = if (safe) runCatching { presentedFrame.toImageBitmap() }.getOrNull() else null
+                frozenFrame != null
+            }
+            animatic.freezeCapture = capture
+            onDispose { if (animatic.freezeCapture === capture) animatic.freezeCapture = null }
         }
-        onDispose { animatic.freezeCapture = null }
     }
     val settling = animatic.scrubSettling
     LaunchedEffect(settling) {
@@ -60,12 +75,18 @@ fun Easel(
     Box(
         modifier = modifier.drawWithContent {
             val frozen = frozenFrame
-            if (animatic.scrubSettling && frozen != null) {
-                drawImage(frozen, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()))
-            } else {
-                if (!animatic.scrubSettling) {
-                    presentedFrame.record { this@drawWithContent.drawContent() }
+            if (animatic.scrubSettling) {
+                // Never draw presentedFrame here: it is not re-recorded while settling, so it may
+                // reference a subtree that has been disposed since.
+                if (frozen != null) {
+                    drawImage(frozen, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()))
+                } else {
+                    drawContent()
                 }
+            } else {
+                presentedFrame.record { this@drawWithContent.drawContent() }
+                recording.epoch = animatic.scrubEpoch
+                if (ownsHooks) animatic.onLiveFramePresented()
                 drawLayer(presentedFrame)
             }
         },
@@ -82,6 +103,9 @@ fun Easel(
         }
     }
 }
+
+/** Which [Animatic.scrubEpoch] the presented-frame layer was last recorded under (not state). */
+private class PresentedFrameRecording(var epoch: Int = -1)
 
 /**
  * Deterministic, seek-safe replacement for `Transition.AnimatedContent`.

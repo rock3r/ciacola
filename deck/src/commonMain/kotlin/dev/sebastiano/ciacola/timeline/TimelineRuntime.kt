@@ -4,10 +4,14 @@ import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.core.AnimationVector
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.FloatSpringSpec
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.TwoWayConverter
+import androidx.compose.animation.core.VectorizedFiniteAnimationSpec
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -18,6 +22,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,12 +75,26 @@ data class TimelineCurveSpec(
         )
     }
 
+    fun estimatedSpringDurationMs(): Int {
+        val spec = FloatSpringSpec(
+            dampingRatio = dampingRatio.coerceIn(0.2f, 1.5f),
+            stiffness = stiffness.coerceIn(50f, 4_000f),
+        )
+        return (spec.getDurationNanos(0f, 1f, 0f) / 1_000_000L).toInt().coerceIn(60, 6_000)
+    }
+
     fun <T> toAnimationSpec(durationMillis: Int, delayMillis: Int = 0): FiniteAnimationSpec<T> {
         return if (isSpring) {
-            spring(
+            val baseSpring = spring<T>(
                 dampingRatio = dampingRatio.coerceIn(0.2f, 1.5f),
                 stiffness = stiffness.coerceIn(50f, 4_000f),
             )
+            val safeDelay = delayMillis.coerceAtLeast(0)
+            if (safeDelay == 0) {
+                baseSpring
+            } else {
+                DelayedFiniteAnimationSpec(baseSpring, safeDelay)
+            }
         } else {
             tween(
                 durationMillis = durationMillis.coerceAtLeast(16),
@@ -84,6 +103,52 @@ data class TimelineCurveSpec(
             )
         }
     }
+}
+
+private class DelayedFiniteAnimationSpec<T>(
+    private val delegate: FiniteAnimationSpec<T>,
+    private val delayMillis: Int,
+) : FiniteAnimationSpec<T> {
+    override fun <V : AnimationVector> vectorize(
+        converter: TwoWayConverter<T, V>,
+    ): VectorizedFiniteAnimationSpec<V> {
+        val inner = delegate.vectorize(converter)
+        val delayNanos = delayMillis.coerceAtLeast(0).toLong() * 1_000_000L
+        return object : VectorizedFiniteAnimationSpec<V> {
+            override fun getDurationNanos(
+                initialValue: V,
+                targetValue: V,
+                initialVelocity: V,
+            ): Long = delayNanos + inner.getDurationNanos(initialValue, targetValue, initialVelocity)
+
+            override fun getValueFromNanos(
+                playTimeNanos: Long,
+                initialValue: V,
+                targetValue: V,
+                initialVelocity: V,
+            ): V = if (playTimeNanos <= delayNanos) {
+                initialValue
+            } else {
+                inner.getValueFromNanos(playTimeNanos - delayNanos, initialValue, targetValue, initialVelocity)
+            }
+
+            override fun getVelocityFromNanos(
+                playTimeNanos: Long,
+                initialValue: V,
+                targetValue: V,
+                initialVelocity: V,
+            ): V = if (playTimeNanos <= delayNanos) {
+                initialVelocity
+            } else {
+                inner.getVelocityFromNanos(playTimeNanos - delayNanos, initialValue, targetValue, initialVelocity)
+            }
+        }
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is DelayedFiniteAnimationSpec<*> && delegate == other.delegate && delayMillis == other.delayMillis
+
+    override fun hashCode(): Int = 31 * delegate.hashCode() + delayMillis
 }
 
 @Serializable
@@ -117,7 +182,11 @@ data class SceneBeatOverride(
 data class DeckTimelineOverridesFile(
     val tracks: Map<String, TrackOverride> = emptyMap(),
     val sceneBeats: Map<Int, SceneBeatOverride> = emptyMap(),
-)
+    val loopPeriodsMs: Map<String, Long> = emptyMap(),
+) {
+    val hasOverrides: Boolean
+        get() = tracks.isNotEmpty() || sceneBeats.isNotEmpty() || loopPeriodsMs.isNotEmpty()
+}
 
 data class ActiveSceneTimelineContext(
     val sceneIndex: Int,
@@ -139,21 +208,50 @@ data class HarvestedTrackRecord(
     val sharedKey: String? = null,
     val loopId: String? = null,
     val loopPeriodMs: Long? = null,
+    val defaultOffsetXDp: Float = 0f,
+    val defaultOffsetYDp: Float = 0f,
 )
 
 class TimelineHarvestCollector {
     val records = LinkedHashMap<String, HarvestedTrackRecord>()
     val sharedSightings = mutableListOf<Triple<String, Int, Int>>() // sharedKey, sceneIndex, beatIndex
     val sharedLabels = mutableMapOf<String, String>()
+    val sharedDurations = mutableMapOf<String, Int>()
     val loopRecords = linkedMapOf<String, Pair<LoopSubCompDescriptor, Int>>()
+
+    /** Default entrance offsets reported by the effect modifier that animates each track. */
+    private val defaultOffsets = mutableMapOf<String, Pair<Float, Float>>()
 
     fun record(entry: HarvestedTrackRecord) {
         val key = "${entry.trackId}@s${entry.sceneIndex}:b${entry.triggerBeat}"
-        records[key] = entry
+        records[key] = defaultOffsets[entry.trackId]?.let { (x, y) ->
+            entry.copy(defaultOffsetXDp = x, defaultOffsetYDp = y)
+        } ?: entry
     }
 
-    fun recordSharedSighting(sharedKey: String, label: String, sceneIndex: Int, beatIndex: Int) {
+    /**
+     * Records the entrance offset a track's effect starts from (e.g. a fade-move rising 24 dp), so
+     * the Inspector seeds its Offset X/Y from what the stage actually plays. Either call order
+     * with [record] works: the build progress and the effect modifier compose independently.
+     */
+    fun recordDefaultOffset(trackId: String, offsetXDp: Float, offsetYDp: Float) {
+        defaultOffsets[trackId] = offsetXDp to offsetYDp
+        for (slot in records.entries) {
+            if (slot.value.trackId == trackId) {
+                slot.setValue(slot.value.copy(defaultOffsetXDp = offsetXDp, defaultOffsetYDp = offsetYDp))
+            }
+        }
+    }
+
+    fun recordSharedSighting(
+        sharedKey: String,
+        label: String,
+        sceneIndex: Int,
+        beatIndex: Int,
+        durationMs: Int = 420,
+    ) {
         sharedLabels[sharedKey] = label
+        sharedDurations[sharedKey] = durationMs
         val triple = Triple(sharedKey, sceneIndex, beatIndex)
         if (triple !in sharedSightings) {
             sharedSightings += triple
@@ -201,6 +299,13 @@ class TimelineStageSelection {
     var pickingEnabled by mutableStateOf(false)
     var pickingSuppressed: () -> Boolean = { false }
     var onPick: (String?) -> Unit = {}
+
+    var storyStageMountCount by mutableIntStateOf(0)
+    var overviewPreviewMountCount by mutableIntStateOf(0)
+    var storyStageFillsViewport by mutableStateOf(true)
+
+    val isStoryStageMounted: Boolean
+        get() = storyStageMountCount > 0 && overviewPreviewMountCount == 0 && storyStageFillsViewport
 
     val targets = mutableStateMapOf<Any, TimelineTargetEntry>()
 
@@ -258,9 +363,9 @@ fun computeArcInterpolatedRect(
     fraction: Float,
     arcBend: Float,
 ): Rect {
-    val t = fraction.coerceIn(0f, 1f)
-    val width = start.width + (end.width - start.width) * t
-    val height = start.height + (end.height - start.height) * t
+    val t = fraction.coerceIn(-0.5f, 1.5f)
+    val width = (start.width + (end.width - start.width) * t).coerceAtLeast(0f)
+    val height = (start.height + (end.height - start.height) * t).coerceAtLeast(0f)
 
     val sx = start.center.x
     val sy = start.center.y
@@ -299,24 +404,51 @@ fun createArcBoundsTransform(
 ): BoundsTransform = BoundsTransform { initialBounds, targetBounds ->
     onBoundsObserved?.invoke(initialBounds, targetBounds)
     val safeDuration = durationMillis.coerceAtLeast(32)
-    if (kotlin.math.abs(arcBend) < 0.001f && delayMillis == 0 && !curve.isSpring) {
+    val safeDelay = delayMillis.coerceAtLeast(0)
+    if (curve.isSpring) {
+        val floatSpring = FloatSpringSpec(
+            dampingRatio = curve.dampingRatio.coerceIn(0.2f, 1.5f),
+            stiffness = curve.stiffness.coerceIn(50f, 4_000f),
+        )
+        val springDuration = curve.estimatedSpringDurationMs()
+        val steps = 32
+        keyframes {
+            this.durationMillis = safeDelay + springDuration
+            initialBounds at 0
+            if (safeDelay > 0) {
+                initialBounds at safeDelay
+            }
+            for (step in 1 until steps) {
+                val rawFrac = step.toFloat() / steps.toFloat()
+                val elapsedMs = (rawFrac * springDuration).toInt()
+                val springFrac = floatSpring.getValueFromNanos(
+                    playTimeNanos = elapsedMs.toLong() * 1_000_000L,
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    initialVelocity = 0f,
+                )
+                computeArcInterpolatedRect(initialBounds, targetBounds, springFrac, arcBend) at (safeDelay + elapsedMs)
+            }
+            targetBounds at (safeDelay + springDuration)
+        }
+    } else if (kotlin.math.abs(arcBend) < 0.001f && safeDelay == 0) {
         tween(durationMillis = safeDuration, easing = curve.toEasing())
     } else {
         val easing = curve.toEasing()
         val steps = 16
         keyframes {
-            this.durationMillis = safeDuration + delayMillis.coerceAtLeast(0)
+            this.durationMillis = safeDuration + safeDelay
             initialBounds at 0
-            if (delayMillis > 0) {
-                initialBounds at delayMillis
+            if (safeDelay > 0) {
+                initialBounds at safeDelay
             }
             for (step in 1 until steps) {
                 val rawFrac = step.toFloat() / steps.toFloat()
                 val easedFrac = easing.transform(rawFrac)
-                val timeAt = delayMillis + (rawFrac * safeDuration).toInt()
+                val timeAt = safeDelay + (rawFrac * safeDuration).toInt()
                 computeArcInterpolatedRect(initialBounds, targetBounds, easedFrac, arcBend) at timeAt
             }
-            targetBounds at (delayMillis + safeDuration)
+            targetBounds at (safeDelay + safeDuration)
         }
     }
 }
@@ -340,9 +472,13 @@ fun Modifier.deckSharedBounds(
     val collector = LocalTimelineHarvestCollector.current
     val previewState = LocalMotionPathPreviewState.current
 
-    val effectiveDuration = overrides?.durationMs ?: defaultDurationMs
-    val effectiveDelay = overrides?.delayMs ?: 0
     val effectiveCurve = overrides?.curve ?: TimelineCurveSpec()
+    val effectiveDuration = if (effectiveCurve.isSpring) {
+        effectiveCurve.estimatedSpringDurationMs()
+    } else {
+        overrides?.durationMs ?: defaultDurationMs
+    }
+    val effectiveDelay = overrides?.delayMs ?: 0
     val effectiveArcBend = overrides?.spatial?.arcBend ?: 0f
 
     SideEffect {
@@ -352,6 +488,7 @@ fun Modifier.deckSharedBounds(
                 label = label,
                 sceneIndex = sceneCtx.sceneIndex,
                 beatIndex = currentBeatInScene,
+                durationMs = effectiveDuration,
             )
         }
     }
@@ -393,6 +530,38 @@ data class VirtualizedFrame<T>(
     val baseBeatIndex: Int,
     val isInjected: Boolean,
 )
+
+/**
+ * Maps a 0-based [virtualBeatIndex] in a scene's virtualized frame sequence back to its
+ * `(baseBeatIndex, isInjected)` pair using [beatOverride], matching [buildVirtualizedFrames].
+ */
+fun resolveVirtualBeatToBaseBeat(
+    beatOverride: SceneBeatOverride?,
+    virtualBeatIndex: Int,
+): Pair<Int, Boolean> {
+    val safeVirtual = virtualBeatIndex.coerceAtLeast(0)
+    if (beatOverride == null ||
+        (beatOverride.injectedAfterBeats.isEmpty() && beatOverride.deletedBeats.isEmpty())
+    ) {
+        return safeVirtual to false
+    }
+    val deleted = beatOverride.deletedBeats.toSet()
+    val injectionCounts = beatOverride.injectedAfterBeats.groupingBy { it }.eachCount()
+    var vCursor = 0
+    var baseIdx = 0
+    while (true) {
+        if (baseIdx !in deleted) {
+            if (vCursor == safeVirtual) return baseIdx to false
+            vCursor++
+        }
+        val extraAfter = injectionCounts[baseIdx] ?: 0
+        repeat(extraAfter) {
+            if (vCursor == safeVirtual) return baseIdx to true
+            vCursor++
+        }
+        baseIdx++
+    }
+}
 
 fun <T> buildVirtualizedFrames(
     baseFrames: List<T>,
