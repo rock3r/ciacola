@@ -94,9 +94,11 @@ import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.DesignSystemOverrides
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
+import dev.sebastiano.ciacola.theme.withOverrides
 import dev.sebastiano.ciacola.timeline.ActiveMotionArcPreview
 import dev.sebastiano.ciacola.timeline.ActiveSceneTimelineContext
 import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
@@ -148,7 +150,9 @@ fun createFoundationDeck(
     timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
     reducedMotion: Boolean = false,
     elementOverrides: DeckElementOverridesFile = DeckElementOverridesFile(),
+    designOverrides: DesignSystemOverrides = DesignSystemOverrides(),
 ): Storyboard {
+    val effectiveTheme = theme.withOverrides(designOverrides)
     val notesBuilder = DeckSpeakerNotesBuilder()
     val storyboard = Storyboard.build(
         title = "Ciacola",
@@ -156,19 +160,20 @@ fun createFoundationDeck(
         format = DeckDesign.format,
         decorator = deckDecorator(
             textRenderer = textRenderer,
-            theme = theme,
+            theme = effectiveTheme,
             bundledPreset = bundledPreset,
             timelineOverrides = timelineOverrides,
             reducedMotion = reducedMotion,
             elementOverrides = elementOverrides,
+            designOverrides = designOverrides,
         ) + stageDecorator,
     ) {
-        beatsScene(theme, timelineOverrides, notesBuilder, reducedMotion)
-        sharedMoveScene(theme, timelineOverrides, notesBuilder, reducedMotion)
-        ambientLoopScene(theme, timelineOverrides, notesBuilder, reducedMotion)
-        kotlinCodeScene(theme, theme.colors.code.toCodeStyle(), timelineOverrides, notesBuilder, reducedMotion)
+        beatsScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
+        sharedMoveScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
+        ambientLoopScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
+        kotlinCodeScene(effectiveTheme, effectiveTheme.colors.code.toCodeStyle(), timelineOverrides, notesBuilder, reducedMotion)
         if (includeKeynoteEffectsLab) {
-            keynoteEffectsLabScene(theme, timelineOverrides, notesBuilder, reducedMotion)
+            keynoteEffectsLabScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
         }
     }
     StoryboardSpeakerNotesRegistry.register(storyboard, notesBuilder.build())
@@ -182,11 +187,15 @@ private fun deckDecorator(
     timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
     reducedMotion: Boolean = false,
     elementOverrides: DeckElementOverridesFile = DeckElementOverridesFile(),
+    designOverrides: DesignSystemOverrides = DesignSystemOverrides(),
 ) = ContentDecorator { content ->
-    val activeTheme = if (bundledPreset != null) {
+    val baseActiveTheme = if (bundledPreset != null) {
         DeckThemes.rememberBundledDeckTheme(bundledPreset)
     } else {
         theme
+    }
+    val activeTheme = remember(baseActiveTheme, designOverrides) {
+        baseActiveTheme.withOverrides(designOverrides)
     }
     val effectiveOverrides = if (dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen.current) {
         LocalTimelineOverrides.current
@@ -411,8 +420,8 @@ private fun StoryboardBuilder.sharedMoveScene(
                 contentKey = { it.toValue().value.expanded },
             ) { frame ->
                 val expanded = frame.toValue().value.expanded
-                val cardSize = if (expanded) 520.dp else 240.dp
-                val cornerDp = if (expanded) 40.dp else 24.dp
+                val cardSize = if (expanded) 336.dp else 240.dp
+                val cornerDp = if (expanded) 36.dp else 24.dp
                 val alignment = if (expanded) Alignment.Center else Alignment.TopStart
                 Box(Modifier.fillMaxSize(), contentAlignment = alignment) {
                     DeckSurfaceCard(
@@ -451,7 +460,7 @@ private fun StoryboardBuilder.sharedMoveScene(
         if (frame.toValue().value.expanded) 1f else 0f
     }
 
-    val cornerDp = (24f + (40f - 24f) * expandFraction.coerceIn(0f, 1f)).dp
+    val cornerDp = (24f + (36f - 24f) * expandFraction.coerceIn(0f, 1f)).dp
     val cardShape = RoundedCornerShape(cornerDp)
 
     FoundationFrame("SHARED ELEMENT / PROVISIONAL") {
@@ -489,7 +498,7 @@ private fun StoryboardBuilder.sharedMoveScene(
             val maxW = constraints.maxWidth.toFloat()
             val maxH = constraints.maxHeight.toFloat()
             val collapsedPx = 240.dp.toPx()
-            val expandedPx = 520.dp.toPx()
+            val expandedPx = minOf(336.dp.toPx(), (maxH - 16.dp.toPx()).coerceAtLeast(collapsedPx))
             val startRect = Rect(0f, 0f, collapsedPx, collapsedPx)
             val endRect = Rect(
                 left = (maxW - expandedPx) / 2f,
@@ -639,14 +648,15 @@ private fun StoryboardBuilder.kotlinCodeScene(
                 kind = "CodeCard",
                 fillColor = theme.colors.code.background,
                 borderColor = theme.colors.border,
-                borderWidth = 0.dp,
+                borderWidth = theme.styles.codeCard.borderWidth,
                 cornerRadius = theme.styles.codeCard.cornerRadius,
                 contentPadding = theme.styles.codeCard.padding,
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 DeckMagicText(
                     code,
-                    Modifier.fillMaxSize(),
-                    theme.typography.code,
+                    Modifier.fillMaxWidth(),
+                    theme.typography.code.copy(color = theme.colors.code.foreground),
                     elementId = "s4:code",
                     label = "Kotlin Code",
                     kind = "Code",
@@ -749,16 +759,19 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     val warpStep = stepTransition.createChildTransition("warp-idx") { if (it >= 3) 1 else 0 }
 
     // The eyebrow still sits at the shared (64 dp, 64 dp) origin of Slides 1–4 (no jump during the
-    // dissolve); only the dense two-column content uses the tighter 40 dp frame.
-    FoundationFrame("KEYNOTE EFFECTS LAB / PROVISIONAL", contentPadding = 40) {
+    // dissolve); only the dense two-column content uses the tighter 40 dp frame (scaled by slidePadding).
+    val labContentPadding = (theme.styles.slidePadding.value * (40f / 64f)).roundToInt().coerceAtLeast(16)
+    val labLoupeDiameter = theme.styles.loupe.diameter * (164f / 260f)
+    val labLoupeZoom = theme.styles.loupe.defaultZoom * (2.4f / 3.2f)
+    FoundationFrame("KEYNOTE EFFECTS LAB / PROVISIONAL", contentPadding = labContentPadding) {
         MagnifierLoupeStage(
             targetKey = "compose-target",
             progress = { reversalBuild },
             modifier = Modifier.fillMaxSize(),
             loupeAlignment = Alignment.BottomEnd,
-            loupeDiameter = 164.dp,
+            loupeDiameter = labLoupeDiameter,
             loupePadding = PaddingValues(end = 12.dp),
-            zoom = 2.4f,
+            zoom = labLoupeZoom,
             decorations = listOf(
                 AnimatedLine(
                     startKey = "immutable-stamp",
@@ -768,27 +781,36 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
                     progress = { stampBuild },
                     color = theme.colors.accent,
                     strokeWidth = theme.styles.leaderArrow.strokeWidth,
+                    headLength = theme.styles.leaderArrow.headLength,
+                    headAngleDegrees = theme.styles.leaderArrow.headAngleDegrees,
                     gap = theme.styles.leaderArrow.gap,
                 ),
                 AnimatedCalloutOutline(
                     targetKey = "warp-card",
                     progress = { calloutBuild },
                     color = theme.colors.secondary,
+                    cornerRadius = theme.styles.calloutBox.cornerRadius,
+                    strokeWidth = theme.styles.calloutBox.strokeWidth,
+                    dashPattern = theme.styles.calloutBox.dashOn to theme.styles.calloutBox.dashOff,
+                    inset = theme.styles.calloutBox.inset,
                 ),
                 AnimatedStrikeout(
                     targetKey = "optimistic-claim",
                     progress = { reversalBuild },
                     color = theme.colors.danger,
+                    strokeWidth = theme.styles.strikeout.strokeWidth,
+                    horizontalOverhang = theme.styles.strikeout.horizontalOverhang,
+                    verticalTiltFraction = theme.styles.strikeout.verticalTiltFraction,
                 ),
             ),
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(36.dp),
+                horizontalArrangement = Arrangement.spacedBy(32.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(
-                    modifier = Modifier.weight(1.04f),
+                    modifier = Modifier.weight(1.12f),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     DeckEditableText(
@@ -846,7 +868,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
 
                 Box(
                     modifier = Modifier
-                        .weight(0.96f)
+                        .weight(0.88f)
                         .fillMaxHeight(),
                     contentAlignment = Alignment.TopCenter,
                 ) {

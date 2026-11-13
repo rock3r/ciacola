@@ -77,6 +77,7 @@ import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.inspector.StageRootCoordinatesHolder
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.DefaultButton
@@ -135,11 +136,16 @@ internal fun StageDirectEditLayer(
     var lastClickPos by remember { mutableStateOf(Offset.Zero) }
     var pressStartPos by remember { mutableStateOf<Offset?>(null) }
     var inlineEditorBounds by remember { mutableStateOf<Rect?>(null) }
+    var swallowNextEscapeKeyUp by remember { mutableStateOf(false) }
 
     fun handleStageKeyEvent(ev: KeyEvent): Boolean {
+        if (ev.key == Key.Escape && ev.type == KeyEventType.KeyUp && swallowNextEscapeKeyUp) {
+            swallowNextEscapeKeyUp = false
+            return true
+        }
         if (!active || controller.inlineEditingElementId != null) return false
         if (controller.isExternalTextInputActive()) return false
-        val selectedId = controller.selectedElementId ?: return false
+        if (controller.selectedElementId == null) return false
         if (ev.type != KeyEventType.KeyDown) return false
 
         val step = if (ev.isShiftPressed) 10f else 1f
@@ -161,6 +167,7 @@ internal fun StageDirectEditLayer(
                 true
             }
             ev.key == Key.Escape -> {
+                swallowNextEscapeKeyUp = true
                 controller.selectElement(null)
                 true
             }
@@ -296,6 +303,7 @@ internal fun StageDirectEditLayer(
                     stageWidthPx = formatSize.width.toFloat(),
                     stageHeightPx = formatSize.height.toFloat(),
                     onInlineBoundsChanged = { inlineEditorBounds = it },
+                    onEscapeKeyDownHandled = { swallowNextEscapeKeyUp = true },
                 )
             }
         } else {
@@ -312,6 +320,7 @@ private fun StageSelectionAndInlineOverlay(
     stageWidthPx: Float,
     stageHeightPx: Float,
     onInlineBoundsChanged: (Rect?) -> Unit,
+    onEscapeKeyDownHandled: () -> Unit = {},
 ) {
     val slideNodes = controller.slidesNodesForCurrentSlide()
     val hoveredNode = controller.hoveredElementId?.let { id ->
@@ -427,6 +436,7 @@ private fun StageSelectionAndInlineOverlay(
             stageWidthPx = stageWidthPx,
             stageHeightPx = stageHeightPx,
             onBoundsChanged = onInlineBoundsChanged,
+            onEscapeKeyDownHandled = onEscapeKeyDownHandled,
         )
     }
 }
@@ -441,6 +451,7 @@ private fun InlineStageTextEditor(
     stageWidthPx: Float,
     stageHeightPx: Float,
     onBoundsChanged: (Rect?) -> Unit,
+    onEscapeKeyDownHandled: () -> Unit = {},
 ) {
     val density = LocalDensity.current
     val globalColors = JewelTheme.globalColors
@@ -475,6 +486,7 @@ private fun InlineStageTextEditor(
     fun handleInlineKey(ev: KeyEvent): Boolean {
         if (ev.type != KeyEventType.KeyDown) return false
         if (ev.key == Key.Escape) {
+            onEscapeKeyDownHandled()
             controller.cancelInlineEdit(restoreStageFocus = true)
             return true
         }
@@ -535,6 +547,7 @@ private fun InlineStageTextEditor(
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
+                .trackAuthoringTextInputFocus()
                 .onFocusChanged { if (it.isFocused) editorFocused = true }
                 .testTag("ciacola-inline-stage-editor-input"),
         )

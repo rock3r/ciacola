@@ -3,7 +3,9 @@ package dev.sebastiano.ciacola.qa
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +19,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.overlay.EaselOverlay
@@ -25,14 +28,27 @@ import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.plus
 import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.design.DesignSystemStore
+import dev.sebastiano.ciacola.inspector.element.ElementEditorController
+import dev.sebastiano.ciacola.inspector.element.ElementOverridesStore
+import dev.sebastiano.ciacola.inspector.element.rememberElementEditorController
+import dev.sebastiano.ciacola.inspector.lint.DeckLintController
+import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintController
+import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintStageDecorator
 import dev.sebastiano.ciacola.rememberHotReloadStoryboard
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.ReviewStageCoordinator
 import dev.sebastiano.ciacola.review.SlideReviewWindow
 import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
+import dev.sebastiano.ciacola.studio.StudioInspectorTab
+import dev.sebastiano.ciacola.studio.StudioUnifiedInspectorPane
+import dev.sebastiano.ciacola.studio.StudioWorkspaceController
+import dev.sebastiano.ciacola.studio.StudioWorkspaceSyncEffects
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.withOverrides
 import dev.sebastiano.ciacola.timeline.DeckLoopClock
 import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
 import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
@@ -42,6 +58,8 @@ import dev.sebastiano.ciacola.timeline.TimelineStudioWindow
 import dev.sebastiano.ciacola.timeline.rememberTimelineStageDecorator
 import dev.sebastiano.ciacola.timeline.rememberTimelineStudioController
 import dev.sebastiano.ciacola.timeline.rememberTimelineStudioWindow
+import dev.sebastiano.ciacola.ui.AuthoringTextInputFocusTracker
+import dev.sebastiano.ciacola.ui.LocalAuthoringTextInputTracker
 import dev.sebastiano.spectre.core.AutomatorNode
 import dev.sebastiano.spectre.core.ComposeAutomator
 import dev.sebastiano.spectre.core.RobotDriver
@@ -177,6 +195,12 @@ class QaStudio internal constructor(
     val window: ComposeWindow,
     val controller: TimelineStudioController,
     val overridesStore: TimelineOverridesStore,
+    val designStore: DesignSystemStore,
+    val elementStore: ElementOverridesStore,
+    val stageInspectionRegistry: StageInspectionRegistry,
+    val elementController: ElementEditorController,
+    val lintController: DeckLintController,
+    val studioWorkspace: StudioWorkspaceController,
     val review: ReviewStageCoordinator,
     val reviewStore: ReviewCommentStore,
     val timelineWindow: TimelineStudioWindow,
@@ -664,15 +688,22 @@ fun launchStudio(
     val loopClockRef = AtomicReference<DeckLoopClock?>(null)
     val motionPathRef = AtomicReference<MotionPathPreviewState?>(null)
     val stageSelectionRef = AtomicReference<TimelineStageSelection?>(null)
+    val inspectionRegistryRef = AtomicReference<StageInspectionRegistry?>(null)
+    val elementControllerRef = AtomicReference<ElementEditorController?>(null)
+    val lintControllerRef = AtomicReference<DeckLintController?>(null)
+    val workspaceRef = AtomicReference<StudioWorkspaceController?>(null)
     val presetHolder = AtomicReference(preset)
     val presetSetterRef = AtomicReference<((DeckThemePreset) -> Unit)?>(null)
 
     val overridesStore = TimelineOverridesStore(storyboardDir = storyboardDir)
+    val designStore = DesignSystemStore(storyboardDir = storyboardDir)
+    val elementStore = ElementOverridesStore(storyboardDir = storyboardDir)
     val reviewStore = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
 
     val hostThread = thread(name = "ciacola-qa-studio-host", isDaemon = true) {
         application(exitProcessOnExit = false) {
             exitAppRef.set(::exitApplication)
+            val appScope = rememberCoroutineScope()
             var activePreset by remember { mutableStateOf(preset) }
             presetHolder.set(activePreset)
             presetSetterRef.set { next ->
@@ -680,20 +711,33 @@ fun launchStudio(
                 activePreset = next
             }
 
-            val hostTheme = remember(activePreset) { DeckThemes.forPreset(activePreset) }
+            val textInputTracker = remember { AuthoringTextInputFocusTracker() }
+            val stageInspectionRegistry = remember { StageInspectionRegistry() }.also(inspectionRegistryRef::set)
+            val elementController = rememberElementEditorController(
+                overridesStore = elementStore,
+                inspectionRegistry = stageInspectionRegistry,
+            ).also(elementControllerRef::set)
+            val lintController = rememberDeckLintController().also(lintControllerRef::set)
+
+            val designRev = designStore.revision
+            val designOverrides = remember(activePreset, designRev) { designStore.overridesFor(activePreset) }
+            val hostTheme = remember(activePreset, designOverrides) {
+                DeckThemes.forPreset(activePreset).withOverrides(designOverrides)
+            }
             val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
+            val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
             val loopClock = remember { DeckLoopClock() }.also(loopClockRef::set)
             val motionPathPreview = remember { MotionPathPreviewState() }.also(motionPathRef::set)
             val stageSelection = remember { TimelineStageSelection() }.also(stageSelectionRef::set)
             val reviewStageCoordinator = rememberReviewStageCoordinator().also(reviewRef::set)
 
-            stageSelection.pickingSuppressed = {
-                reviewStageCoordinator.inspectModeEnabled || reviewStageCoordinator.pendingSelection != null
-            }
-
             val structuralRev = overridesStore.structuralRevision
             val paramRev = overridesStore.parameterRevision
             val currentOverrides = remember(structuralRev, paramRev) { overridesStore.data() }
+            val elementRev = elementStore.revision
+            val currentElementOverrides = remember(elementRev) { elementStore.data() }
+
+            var workspaceHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
 
             val presetRegistry = remember { dev.sebastiano.ciacola.StoryboardPresetRegistry() }
             val timelineStageDecorator = rememberTimelineStageDecorator(
@@ -702,20 +746,48 @@ fun launchStudio(
                 overridesStore = overridesStore,
                 stageSelection = stageSelection,
             )
+            val lintStageDecorator = rememberDeckLintStageDecorator(
+                controller = lintController,
+                isInspectionVisible = { workspaceHolder?.isLinterVisible == true },
+            )
             val storyboard = rememberHotReloadStoryboard(
                 activePreset,
                 reviewStageCoordinator,
                 structuralRev,
                 paramRev,
+                designRev,
+                elementRev,
             ) {
                 createFoundationDeck(
                     theme = hostTheme,
                     bundledPreset = activePreset,
                     includeKeynoteEffectsLab = includeKeynoteEffectsLab,
-                    stageDecorator = timelineStageDecorator + reviewStageCoordinator.stageDecorator,
+                    stageDecorator = timelineStageDecorator +
+                        reviewStageCoordinator.stageDecorator +
+                        elementController.stageDecorator +
+                        lintStageDecorator,
                     timelineOverrides = currentOverrides,
+                    elementOverrides = currentElementOverrides,
+                    designOverrides = designOverrides,
                 ).also { built ->
                     presetRegistry.record(built, activePreset)
+                }
+            }
+            val buildAuditStoryboardForPreset: (DeckThemePreset) -> Storyboard = remember(
+                overridesStore,
+                elementStore,
+                designStore,
+            ) {
+                { targetPreset ->
+                    val targetDesignOverrides = designStore.overridesFor(targetPreset)
+                    createFoundationDeck(
+                        theme = DeckThemes.forPreset(targetPreset).withOverrides(targetDesignOverrides),
+                        bundledPreset = targetPreset,
+                        includeKeynoteEffectsLab = includeKeynoteEffectsLab,
+                        timelineOverrides = overridesStore.data(),
+                        elementOverrides = elementStore.data(),
+                        designOverrides = targetDesignOverrides,
+                    )
                 }
             }
             val animatic = rememberAnimatic(storyboard = { storyboard }).also(animaticRef::set)
@@ -734,14 +806,84 @@ fun launchStudio(
                     ctrl.detachedWindowVisible = timelineDetached
                 }
             }
+            val studioWorkspace = remember(timelineController) {
+                StudioWorkspaceController(
+                    timelineController = timelineController,
+                    timelineOverridesStore = overridesStore,
+                    designSystemStore = designStore,
+                    elementOverridesStore = elementStore,
+                    elementController = elementController,
+                    lintController = lintController,
+                    stageInspectionRegistry = stageInspectionRegistry,
+                )
+            }.also {
+                workspaceHolder = it
+                workspaceRef.set(it)
+            }
+
+            val isAnyTextInputActive = {
+                textInputTracker.hasFocusedTextInput ||
+                    elementController.inlineEditingElementId != null ||
+                    reviewStageCoordinator.pendingSelection != null ||
+                    reviewStageCoordinator.selectedPinCommentId != null
+            }
+            studioWorkspace.isTextInputActiveProvider = isAnyTextInputActive
+
+            val reviewOwnsStageClick = {
+                reviewStageCoordinator.inspectModeEnabled ||
+                    reviewStageCoordinator.pendingSelection != null ||
+                    reviewStageCoordinator.selectedPinCommentId != null
+            }
+            stageSelection.pickingSuppressed = {
+                reviewOwnsStageClick() ||
+                    timelineController.spaceHeld ||
+                    elementController.inlineEditingElementId != null ||
+                    (studioWorkspace.isStudioOpen && studioWorkspace.activeTab == StudioInspectorTab.Element)
+            }
+
+            remember(elementController, reviewStageCoordinator) {
+                elementController.onReturnFocusToStage = {
+                    runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
+                }
+            }
+
+            SideEffect {
+                elementController.suppressPicking = {
+                    reviewOwnsStageClick() || timelineController.spaceHeld
+                }
+                elementController.isStagePointOverHud = reviewStageCoordinator::isStagePointOverHud
+                elementController.isExternalTextInputActive = isAnyTextInputActive
+                elementController.currentSceneIndexProvider = { animatic.targetIndex.sceneIndex }
+                elementController.currentBeatIndexProvider = { animatic.targetIndex.frameIndex }
+                elementController.isDarkThemeProvider = { activePreset == DeckThemePreset.StageDark }
+            }
+            StudioWorkspaceSyncEffects(studioWorkspace)
+
             val studioWindow = rememberTimelineStudioWindow(
                 controller = timelineController,
                 currentPresetProvider = {
                     presetRegistry.presetFor(timelineController.animatic.storyboard, fallback = activePreset)
                 },
-                suppressShortcutsProvider = {
-                    reviewStageCoordinator.pendingSelection != null ||
-                        reviewStageCoordinator.selectedPinCommentId != null
+                suppressShortcutsProvider = isAnyTextInputActive,
+                onReturnFocusToStage = {
+                    runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
+                },
+                inspectorSlot = {
+                    StudioUnifiedInspectorPane(
+                        workspace = studioWorkspace,
+                        animatic = animatic,
+                        currentPreset = activePreset,
+                        onSelectPreset = { next ->
+                            presetHolder.set(next)
+                            activePreset = next
+                        },
+                        baseThemeProvider = { DeckThemes.forPreset(it) },
+                        storyboardForPreset = buildAuditStoryboardForPreset,
+                        scope = appScope,
+                    )
+                },
+                extraPreviewKeyHandler = { ev, _ ->
+                    studioWorkspace.handleStudioPreviewKey(ev)
                 },
             ).also(timelineWindowRef::set)
             var reviewWinHolder by remember { mutableStateOf<SlideReviewWindow?>(null) }
@@ -761,68 +903,72 @@ fun launchStudio(
                 reviewWindowRef.set(it)
             }
 
-            val fullDecorator = slideReviewWindow.decorator + studioWindow.decorator
+            val fullDecorator = slideReviewWindow.decorator +
+                studioWindow.decorator +
+                studioWorkspace.storyShortcutDecorator
 
-            MaterialTheme(colors = materialColors) {
-                Window(
-                    onCloseRequest = ::exitApplication,
-                    title = "Ciacola - Story",
-                    state = rememberWindowState(position = windowPosition, size = windowSize),
-                ) {
-                    window.isAutoRequestFocus = false
-                    uiScopeRef.set(rememberCoroutineScope())
-                    if (storyWindowRef.compareAndSet(null, window)) {
-                        readyLatch.countDown()
-                    }
-                    Box(Modifier.fillMaxSize()) {
-                        fullDecorator.decorate {
-                            EaselOverview(animatic) {
-                                if (includeOverlayNavigation) {
-                                    EaselOverlay(overlay = { OverlayNavigation(animatic) }) {
+            CompositionLocalProvider(LocalAuthoringTextInputTracker provides textInputTracker) {
+                MaterialTheme(colors = materialColors, typography = materialTypography) {
+                    Window(
+                        onCloseRequest = ::exitApplication,
+                        title = "Ciacola - Story",
+                        state = rememberWindowState(position = windowPosition, size = windowSize),
+                    ) {
+                        window.isAutoRequestFocus = false
+                        uiScopeRef.set(rememberCoroutineScope())
+                        if (storyWindowRef.compareAndSet(null, window)) {
+                            readyLatch.countDown()
+                        }
+                        Box(Modifier.fillMaxSize()) {
+                            fullDecorator.decorate {
+                                EaselOverview(animatic) {
+                                    if (includeOverlayNavigation) {
+                                        EaselOverlay(overlay = { OverlayNavigation(animatic) }) {
+                                            Easel(animatic)
+                                        }
+                                    } else {
                                         Easel(animatic)
                                     }
-                                } else {
-                                    Easel(animatic)
                                 }
                             }
                         }
                     }
-                }
 
-                if (studioWindow.visible) {
-                    Window(
-                        onCloseRequest = { studioWindow.visible = false },
-                        title = "Ciacola - Timeline",
-                        state = rememberWindowState(
-                            position = detachedWindowPosition,
-                            size = detachedWindowSize,
-                        ),
-                    ) {
-                        window.isAutoRequestFocus = false
-                        DisposableEffect(window) {
-                            detachedTimelineWindowRef.set(window)
-                            detachedReadyLatch.countDown()
-                            onDispose { detachedTimelineWindowRef.compareAndSet(window, null) }
+                    if (studioWindow.visible) {
+                        Window(
+                            onCloseRequest = { studioWindow.visible = false },
+                            title = "Ciacola - Timeline",
+                            state = rememberWindowState(
+                                position = detachedWindowPosition,
+                                size = detachedWindowSize,
+                            ),
+                        ) {
+                            window.isAutoRequestFocus = false
+                            DisposableEffect(window) {
+                                detachedTimelineWindowRef.set(window)
+                                detachedReadyLatch.countDown()
+                                onDispose { detachedTimelineWindowRef.compareAndSet(window, null) }
+                            }
+                            studioWindow.Content()
                         }
-                        studioWindow.Content()
                     }
-                }
 
-                if (slideReviewWindow.visible) {
-                    Window(
-                        onCloseRequest = { slideReviewWindow.visible = false },
-                        title = "Ciacola - Review",
-                        state = rememberWindowState(
-                            position = WindowPosition(940.dp, 80.dp),
-                            size = DpSize(460.dp, 680.dp),
-                        ),
-                    ) {
-                        window.isAutoRequestFocus = false
-                        DisposableEffect(window) {
-                            reviewPanelWindowRef.set(window)
-                            onDispose { reviewPanelWindowRef.compareAndSet(window, null) }
+                    if (slideReviewWindow.visible) {
+                        Window(
+                            onCloseRequest = { slideReviewWindow.visible = false },
+                            title = "Ciacola - Review",
+                            state = rememberWindowState(
+                                position = WindowPosition(940.dp, 80.dp),
+                                size = DpSize(460.dp, 680.dp),
+                            ),
+                        ) {
+                            window.isAutoRequestFocus = false
+                            DisposableEffect(window) {
+                                reviewPanelWindowRef.set(window)
+                                onDispose { reviewPanelWindowRef.compareAndSet(window, null) }
+                            }
+                            slideReviewWindow.Content()
                         }
-                        slideReviewWindow.Content()
                     }
                 }
             }
@@ -841,6 +987,12 @@ fun launchStudio(
         window = checkNotNull(storyWindowRef.get()),
         controller = checkNotNull(controllerRef.get()),
         overridesStore = overridesStore,
+        designStore = designStore,
+        elementStore = elementStore,
+        stageInspectionRegistry = checkNotNull(inspectionRegistryRef.get()),
+        elementController = checkNotNull(elementControllerRef.get()),
+        lintController = checkNotNull(lintControllerRef.get()),
+        studioWorkspace = checkNotNull(workspaceRef.get()),
         review = checkNotNull(reviewRef.get()),
         reviewStore = reviewStore,
         timelineWindow = checkNotNull(timelineWindowRef.get()),

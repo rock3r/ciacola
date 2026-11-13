@@ -51,6 +51,7 @@ import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -509,6 +510,7 @@ private fun TextCopySection(
         modifier = Modifier
             .fillMaxWidth()
             .height(84.dp)
+            .trackAuthoringTextInputFocus()
             .testTag("ciacola-element-text-input"),
     )
 }

@@ -123,6 +123,7 @@ class TimelineStudioController(
     /** Canonical selected track (stagger items resolve to their group) for the Inspector. */
     var selectedTrackId by mutableStateOf<String?>(null)
         private set
+    var onTrackSelected: ((String?) -> Unit)? = null
 
     /** Exact selected track id, including a stagger item's `#itemN` suffix. */
     var selectedExactTrackId by mutableStateOf<String?>(null)
@@ -313,6 +314,7 @@ class TimelineStudioController(
                 parent ?: id
             }
         }
+        onTrackSelected?.invoke(trackId)
     }
 
     /**

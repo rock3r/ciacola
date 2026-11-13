@@ -68,8 +68,11 @@ window state is normalized on save/load so relaunching never starts hidden in th
 | `F2` | Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
 | `F3` / hold `Ctrl` | Review Inspect mode; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
 | `F4` | Review window |
-| `F5` | Timeline Studio docked in the Story window |
-| `F6` | Timeline Studio in a detached window |
+| `F5` | Studio (`Motion \| Element \| Theme \| Lint`) docked in the Story window |
+| `F6` | Studio in a detached window |
+| `F7` | Focus `Theme` Design System tab in Studio (or toggle Theme sidecar window) |
+| `F8` | Focus `Lint` tab in Studio (or toggle Deck Linter sidecar window) |
+| `⌘Z` / `⇧⌘Z` | Context-aware Undo / Redo for the active Studio editor (`Motion`, `Element`, or `Theme`) |
 
 ## Theme system, Keynote effects kit, timeline studio, and hot reload
 
@@ -166,6 +169,38 @@ window state is normalized on save/load so relaunching never starts hidden in th
     timeline row or block outlines the element(s) it animates on the slide; with the timeline open,
     a plain click on a slide element selects its most specific track and scrolls its row into view
     (disabled while review Inspect mode or a pending review selection is active).
+- **Unified Studio Inspector (`dev.sebastiano.ciacola.studio` + `:deck-inspector`):**
+  When Timeline Studio is docked (`F5`) or detached (`F6`), its resizable right-hand Inspector hosts
+  four segmented tabs (`Motion | Element | Theme | Lint`), folding standalone `F7`/`F8` sidecar
+  windows into tabs automatically to prevent window sprawl. `createFoundationDeck()` receives
+  `DesignSystemOverrides` and `DeckElementOverridesFile` inside `deckDecorator`, ensuring live Stage,
+  Presenter previews, Overview thumbnails, offscreen Timeline indexing, PDF/MP4 export, and offscreen
+  Lint sweeps all share one source of truth:
+  - **Live Design System Editor (`dev.sebastiano.ciacola.inspector.design`, `F7`):** `DesignSystemStore`
+    persists independent `StageDark` and `KeynoteLight` token overrides to `.storyboard/design-system.json`
+    with 64-step gesture-coalesced Undo/Redo, granular resets, Kotlin snippet export (`Copy Kotlin`),
+    live WCAG 2.1 contrast badges + 1-click `Fix AA`, typography scale/roles, surface/effect geometry,
+    and motion tokens with an interactive preview box.
+  - **Direct Element & Inline Stage Editor (`dev.sebastiano.ciacola.inspector.element` + `:deck-effects`):**
+    `ElementOverridesStore` persists per-element patches (`.storyboard/element-overrides.json`) with
+    64-step Undo/Redo and Kotlin export. `DeckEditableText`, `Modifier.editableBox`, `DeckSurfaceCard`,
+    `DeckMagicText`, `KeynoteStamp`, `DottedLeaderRow`, and `DeckWarpCodeCard` apply overrides live
+    while publishing `StageNodeSnapshot`s and `LocalEffectiveBackgroundColor` (plus `ModifierLocalStageAlpha`
+    visibility propagation). In Authoring mode, clicking elements on the `Element` tab shows corner
+    handles and `Arrow` / `Shift+Arrow` nudges, while double-clicking editable text opens an anchored
+    inline stage text editor (`Enter` / `⌘Enter` saves, `Esc` cancels). Strictly bypassed in Show Mode
+    and Fullscreen.
+  - **Live Slide & Full-Deck Linter (`dev.sebastiano.ciacola.inspector.lint`, `F8`):** `DeckLintController`
+    combines `StageInspectionRegistry` snapshots with Compose `SemanticsOwner` text layout inspection
+    and rendered Skia pixel sampling (reusing a single UI-thread `ImageComposeScene` with `yield()`
+    between beats across both `StageDark` and `KeynoteLight`). Checks `TEXT_CLIPPED_OR_OVERFLOW`,
+    `STAGE_OUT_OF_BOUNDS`, `SAFE_AREA_BLEED`, `LOW_CONTRAST` (dark-card and spotlight-dimming aware),
+    `TINY_STAGE_TEXT`, and `TEXT_OVERLAP`, offering click-to-jump navigation, stage diagnostic callouts,
+    and 1-click `ElementPatch` quick-fixes (`Fix Contrast`, `Shrink Font -2sp`, `Bump to 16sp`,
+    `Edit Element…`).
+- **Static Architecture Gate (`:ciacolaStaticCheck`):** Wired into `check`, enforcing the acyclic
+  7-module `:deck*` dependency DAG, reverse-import bans, main source file size caps (`<= 1,100` lines),
+  structured concurrency (`GlobalScope` / raw `Thread(...)` ban), and repository hygiene checks.
 - **Hot-reload state retention:** `Main.kt` drives the desktop app through
   `rememberHotReloadStoryboard` (`AfterHotReloadEffect`, with Compose Hot Reload instrumenting
   window UI compositions automatically), while `rememberAnimatic` and `AnimaticPersistenceEffect`
@@ -246,11 +281,13 @@ See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and f
 - `:storyboard-text:jvmTest --tests '*MagicText*Test'`: passed (12 focused tests).
 - `:storyboard-easel:jvmTest --tests '*AnimaticHotReloadPersistenceTest'`: passed (hot-reload slide
   and build retention + clamping without clobbering disk state).
-- `:deck:desktopTest`: passed (adds `ScrubPathIndependenceTest`, `TimelineViewportAndSelectionTest`,
-  and `TimelineOffscreenIsolationTest` to `FoundationDeckTest`, `DeckThemeTest`, `KeynoteEffectsTest`,
+- `:ciacolaStaticCheck`, `:deck-core:desktopTest`, `:deck-inspector:desktopTest`, and `:deck:desktopTest`:
+  passed (covering design-system token stores & WCAG contrast, direct element patching & overlays,
+  live/offscreen deck linting, `EditorOverhaulIntegrationTest`, `ScrubPathIndependenceTest`,
+  `TimelineViewportAndSelectionTest`, `TimelineOffscreenIsolationTest`, `KeynoteEffectsTest`,
   `SlideReviewSystemTest`, `TimelineModelAndOverridesTest`, and `DeterministicEaselScrubAndLoopTest`).
-- `:deck:spectreTest`: runs every `*SpectreTest` class (`CiacolaStudioSpectreTest` with six
-  real-window Spectre `0.9.0` tests, plus the `qa/` suites). `CiacolaStudioSpectreTest` covers mouse
+- `:deck:spectreTest`: runs every `*SpectreTest` class (`CiacolaStudioSpectreTest`,
+  `EditorOverhaulSpectreTest`, and the `qa/` suites). `CiacolaStudioSpectreTest` covers mouse
   scrubbing across a beat and back, compared pixel-for-pixel with a direct scrub; After Effects
   zoom/pan/scroll gestures in the timeline and the preview, including Ctrl-click review on a zoomed
   preview; selection in both directions with compact Inspector steppers; beats, loop

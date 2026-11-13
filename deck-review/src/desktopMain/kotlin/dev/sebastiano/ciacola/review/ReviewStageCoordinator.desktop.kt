@@ -162,7 +162,7 @@ class ReviewStageCoordinator : ReviewStageBridge {
     internal var stagePinsVisible by mutableStateOf(false)
     internal var stagePinRadiusPx: Float = 12f
 
-    internal fun isStagePointOverHud(stagePoint: Offset): Boolean {
+    fun isStagePointOverHud(stagePoint: Offset): Boolean {
         val hud = hudBoundsInRoot ?: return false
         val root = stageRootCoordinates?.takeIf { it.isAttached } ?: return false
         val rootPoint = runCatching { root.localToRoot(stagePoint) }.getOrNull() ?: return false

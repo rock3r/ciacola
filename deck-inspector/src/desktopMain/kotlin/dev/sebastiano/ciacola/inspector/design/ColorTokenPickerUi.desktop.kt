@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import java.util.Locale
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
@@ -427,6 +428,7 @@ private fun InlineHsvColorEditor(
                         placeholder = { Text(if (supportsAlpha) "#AARRGGBB" else "#RRGGBB") },
                         modifier = Modifier
                             .width(124.dp)
+                            .trackAuthoringTextInputFocus()
                             .designActivatableFocus(focusRingColor) { focused ->
                                 hexHasFocus = focused
                                 onTextInputFocusChanged(focused)

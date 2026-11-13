@@ -53,11 +53,13 @@ import dev.sebastiano.ciacola.theme.contrastRatio
 import dev.sebastiano.ciacola.theme.relativeLuminance
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Outline
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
+import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
@@ -236,13 +238,16 @@ internal fun ElementColorControlRow(
                 )
             }
 
-            TextField(
-                state = hexState,
-                outline = if (hexValid) Outline.None else Outline.Error,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("$testTagPrefix-hex"),
-            )
+            Tooltip(tooltip = { Text("Enter #RRGGBB or #AARRGGBB hex color") }) {
+                TextField(
+                    state = hexState,
+                    outline = if (hexValid) Outline.None else Outline.Error,
+                    modifier = Modifier
+                        .weight(1f)
+                        .trackAuthoringTextInputFocus()
+                        .testTag("$testTagPrefix-hex"),
+                )
+            }
 
             if (allowClearFill) {
                 Tooltip(tooltip = { Text("Clear fill (transparent)") }) {
@@ -275,6 +280,14 @@ internal fun ElementColorControlRow(
                     )
                 }
             }
+        }
+
+        if (!hexValid) {
+            InfoText(
+                text = "Expected #RRGGBB or #AARRGGBB",
+                color = globalColors.outlines.error,
+                modifier = Modifier.testTag("$testTagPrefix-hex-error"),
+            )
         }
 
         if (contrastAgainst != null) {

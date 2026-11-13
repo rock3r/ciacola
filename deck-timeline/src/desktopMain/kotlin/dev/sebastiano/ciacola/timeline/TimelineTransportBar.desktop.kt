@@ -250,14 +250,14 @@ internal fun TimelineTransportBar(
             TransportIconButton(
                 icon = AllIconsKeys.Actions.Undo,
                 contentDescription = "Undo",
-                tooltip = "Undo (⌘Z)",
+                tooltip = "Undo motion edit (⌘Z)",
                 testTag = "ciacola-timeline-undo",
                 enabled = controller.overridesStore.canUndo,
             ) { controller.undo() }
             TransportIconButton(
                 icon = AllIconsKeys.Actions.Redo,
                 contentDescription = "Redo",
-                tooltip = "Redo (⇧⌘Z)",
+                tooltip = "Redo motion edit (⇧⌘Z)",
                 testTag = "ciacola-timeline-redo",
                 enabled = controller.overridesStore.canRedo,
             ) { controller.redo() }

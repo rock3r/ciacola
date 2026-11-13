@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 
 /**
  * Tracks focus ownership inside Timeline Studio so global shortcuts (`Space`, `Up`/`Down`, `Esc`)
@@ -114,7 +115,7 @@ internal fun Modifier.studioTextInputFocus(): Modifier = composed {
 
     onFocusChanged { state ->
         focusState?.setTextInputFocused(key, state.isFocused)
-    }
+    }.trackAuthoringTextInputFocus()
 }
 
 internal fun TrackCategory.accessibleLabel(): String = when (this) {

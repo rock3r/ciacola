@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.BasicCode
 import dev.bnorm.storyboard.DiffContents
@@ -53,6 +54,7 @@ import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
+import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.review.reviewTarget
@@ -63,7 +65,6 @@ import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
-import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.timelineTarget
@@ -161,16 +162,19 @@ fun DeckWarpCodeCard(
     val registry = LocalStageInspectionRegistry.current
     val beatIndex = LocalActiveBeatIndex.current
     val rootHolder = LocalStageRootCoordinates.current
-    val shouldInspect = elementId != null && registry != null && !LocalOverviewOpen.current && !LocalTimelineOffscreen.current
+    val shouldInspect = elementId != null && registry != null && !LocalOverviewOpen.current
     val ownerToken = remember { Any() }
     var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
     if (shouldInspect && elementId != null) {
         DisposableEffect(registry, elementId) {
             onDispose { registry?.remove(elementId, ownerToken) }
         }
         val coordsNow = cardCoords
+        val stageRootNow = rootHolder?.coordinates
         SideEffect {
+            stageRootNow
             registry?.recordMetadata(
                 meta = StageElementMetadata(
                     elementId = elementId,
@@ -200,6 +204,9 @@ fun DeckWarpCodeCard(
                         isEditable = true,
                     ),
                     owner = ownerToken,
+                    alphaProvider = { stageAlphaProvider() },
+                    coordinatesProvider = { cardCoords },
+                    stageRootProvider = { rootHolder?.coordinates },
                 )
             }
         }
@@ -210,6 +217,7 @@ fun DeckWarpCodeCard(
     CompositionLocalProvider(LocalEffectiveBackgroundColor provides effectiveFill) {
     Box(
         modifier = modifier
+            .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
             .then(offsetMod)
             .onPlaced { cardCoords = it }
             .reviewTarget(

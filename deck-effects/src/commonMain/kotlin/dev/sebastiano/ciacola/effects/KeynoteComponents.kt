@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -61,6 +62,7 @@ import dev.bnorm.storyboard.layout.decorated.DecorationLayout
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
+import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 
@@ -91,6 +93,7 @@ fun DottedLeaderRow(
     val trailingOverrideColor = trailingPatch?.textColorArgb?.let(::Color)
     var trailingCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var trailingLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var trailingAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
     val rowBoxModifier = if (elementId != null) {
         modifier.editableBox(
@@ -133,10 +136,13 @@ fun DottedLeaderRow(
         defaultFontWeight = trailingStyle.fontWeight?.weight ?: 400,
         coords = trailingCoords,
         layoutResult = trailingLayout,
+        alphaProvider = { trailingAlphaProvider() },
     )
 
     Layout(
-        modifier = rowBoxModifier.fillMaxWidth(),
+        modifier = rowBoxModifier
+            .modifierLocalConsumer { trailingAlphaProvider = ModifierLocalStageAlpha.current }
+            .fillMaxWidth(),
         content = {
             if (elementId != null) {
                 DeckEditableText(

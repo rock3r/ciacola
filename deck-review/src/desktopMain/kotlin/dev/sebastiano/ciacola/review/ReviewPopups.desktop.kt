@@ -230,7 +230,9 @@ internal fun AnchoredCommentComposerPopup(
             modifier = Modifier
                 .width(336.dp)
                 .onSizeChanged { sz ->
-                    if (sz.width > 0 && sz.height > 0) {
+                    if (sz.width > 0 && sz.height > 0 &&
+                        (kotlin.math.abs(popupSizePx.width - sz.width) > 1f || kotlin.math.abs(popupSizePx.height - sz.height) > 1f)
+                    ) {
                         popupSizePx = Size(sz.width.toFloat(), sz.height.toFloat())
                     }
                 }
@@ -542,7 +544,9 @@ internal fun AnchoredSelectedPinPopup(
             modifier = Modifier
                 .width(336.dp)
                 .onSizeChanged { sz ->
-                    if (sz.width > 0 && sz.height > 0) {
+                    if (sz.width > 0 && sz.height > 0 &&
+                        (kotlin.math.abs(popupSizePx.width - sz.width) > 1f || kotlin.math.abs(popupSizePx.height - sz.height) > 1f)
+                    ) {
                         popupSizePx = Size(sz.width.toFloat(), sz.height.toFloat())
                     }
                 }

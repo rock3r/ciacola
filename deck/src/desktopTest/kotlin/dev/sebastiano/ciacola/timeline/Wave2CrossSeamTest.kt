@@ -16,11 +16,12 @@ import kotlin.test.assertEquals
 class Wave2CrossSeamTest {
 
     @Test
-    fun themeInspectorOpensAtACompactSizeInsteadOfTheRoomyToolWindowDefault() = runComposeUiTest {
+    fun themeInspectorOpensAtDesignSystemEditorSizeWithMinimumBounds() = runComposeUiTest {
         lateinit var window: EaselWindow
         setContent { window = rememberThemeSwitcherWindow(DeckThemePreset.StageDark) {} }
         waitForIdle()
-        assertEquals(DpSize(420.dp, 360.dp), window.initialSize)
+        assertEquals(DpSize(540.dp, 680.dp), window.initialSize)
+        assertEquals(DpSize(520.dp, 560.dp), window.minimumSize)
     }
 
     @Test

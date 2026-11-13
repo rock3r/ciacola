@@ -1,5 +1,6 @@
 package dev.sebastiano.ciacola.presenter
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +62,7 @@ import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.TextField
+import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
 import org.jetbrains.jewel.ui.typography
@@ -118,6 +120,7 @@ fun rememberPresenterStatusPalette(): PresenterStatusPalette {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PreShowReadinessBanner(
     readiness: ReadinessStatus,
@@ -126,9 +129,19 @@ internal fun PreShowReadinessBanner(
     onDismissUnbakedNotice: () -> Unit,
 ) {
     val activeItems = buildList {
-        if (readiness.studioOpen) add("Timeline Studio is open (F5/F6)")
-        if (readiness.inspectOpen) add("Review Inspect mode is active (F3)")
-        if (readiness.hasUnbakedOverrides) add("Unbaked timeline overrides are active")
+        if (readiness.openAuthoringTools.isNotEmpty()) {
+            addAll(readiness.openAuthoringTools)
+        } else {
+            if (readiness.studioOpen) add("Timeline Studio is open (F5/F6)")
+            if (readiness.inspectOpen) add("Review Inspect mode is active (F3)")
+        }
+        if (readiness.hasUnbakedOverrides) {
+            if (readiness.unbakedDomains.isNotEmpty()) {
+                add("Live session overrides active (${readiness.unbakedDomains.joinToString(", ")})")
+            } else {
+                add("Unbaked timeline overrides are active")
+            }
+        }
     }
     val summary = activeItems.joinToString(" · ")
 
@@ -161,18 +174,22 @@ internal fun PreShowReadinessBanner(
         }
 
         if (readiness.hasClosableAuthoringTools) {
-            DefaultButton(
-                onClick = onEnterCleanShowMode,
-                modifier = Modifier.testTag("ciacola-presenter-clean-show-button"),
-            ) {
-                Text("Enter Clean Show Mode", style = JewelTheme.typography.small)
+            Tooltip(tooltip = { Text("Close all open Studio, Design System, Linter, and Inspect panels") }) {
+                DefaultButton(
+                    onClick = onEnterCleanShowMode,
+                    modifier = Modifier.testTag("ciacola-presenter-clean-show-button"),
+                ) {
+                    Text("Enter Clean Show Mode", style = JewelTheme.typography.small)
+                }
             }
         } else {
-            OutlinedButton(
-                onClick = onDismissUnbakedNotice,
-                modifier = Modifier.testTag("ciacola-presenter-dismiss-readiness"),
-            ) {
-                Text("Dismiss", style = JewelTheme.typography.small)
+            Tooltip(tooltip = { Text("Keep live overrides active and hide this notice") }) {
+                OutlinedButton(
+                    onClick = onDismissUnbakedNotice,
+                    modifier = Modifier.testTag("ciacola-presenter-dismiss-readiness"),
+                ) {
+                    Text("Dismiss", style = JewelTheme.typography.small)
+                }
             }
         }
     }

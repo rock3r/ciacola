@@ -184,7 +184,7 @@ fun DesignSystemEditorPanel(
                         DesignTooltipIconButton(
                             icon = AllIconsKeys.Actions.Undo,
                             contentDescription = "Undo design token edit",
-                            tooltip = "Undo (⌘Z)",
+                            tooltip = "Undo theme token edit (⌘Z)",
                             testTag = "design-editor-undo",
                             enabled = store.canUndo,
                             onClick = { store.undo() },
@@ -192,7 +192,7 @@ fun DesignSystemEditorPanel(
                         DesignTooltipIconButton(
                             icon = AllIconsKeys.Actions.Redo,
                             contentDescription = "Redo design token edit",
-                            tooltip = "Redo (⇧⌘Z)",
+                            tooltip = "Redo theme token edit (⇧⌘Z)",
                             testTag = "design-editor-redo",
                             enabled = store.canRedo,
                             onClick = { store.redo() },
@@ -328,6 +328,8 @@ class DesignSystemWindow(
     initialOnToggleAmbientLoopsPaused: ((Boolean) -> Unit)? = null,
     initialBaseThemeProvider: (DeckThemePreset) -> DeckTheme = { DeckThemes.forPreset(it) },
     var clipboardWriter: (String) -> Unit = DefaultClipboardWriter,
+    var isEditorShownProvider: (() -> Boolean)? = null,
+    var onToggleEditor: (() -> Unit)? = null,
 ) : EaselWindow {
     override val name: String = "Theme"
     override val initialSize: DpSize get() = DpSize(540.dp, 680.dp)
@@ -388,12 +390,23 @@ class DesignSystemWindow(
             }
         }
         Separator()
-        CheckboxItem(
-            text = "Show Design System Editor",
-            checked = visible,
-            shortcut = KeyShortcut(Key.F7),
-            onCheckedChange = { visible = it },
-        )
+        val customToggle = onToggleEditor
+        if (customToggle != null) {
+            // No Swing menu accelerator when F7 is handled by unified preview key routing,
+            // preventing Swing + Compose double-toggle on a single F7 press.
+            CheckboxItem(
+                text = "Show Design System Editor (F7)",
+                checked = isEditorShownProvider?.invoke() ?: visible,
+                onCheckedChange = { customToggle() },
+            )
+        } else {
+            CheckboxItem(
+                text = "Show Design System Editor",
+                checked = visible,
+                shortcut = KeyShortcut(Key.F7),
+                onCheckedChange = { visible = it },
+            )
+        }
     }
 
     @Composable
@@ -424,6 +437,8 @@ fun rememberDesignSystemWindow(
     onSelectMotionMode: ((ReducedMotionMode) -> Unit)? = null,
     onToggleAmbientLoopsPaused: ((Boolean) -> Unit)? = null,
     baseThemeProvider: (DeckThemePreset) -> DeckTheme = { DeckThemes.forPreset(it) },
+    isEditorShownProvider: (() -> Boolean)? = null,
+    onToggleEditor: (() -> Unit)? = null,
 ): DesignSystemWindow = remember(store) {
     DesignSystemWindow(
         store = store,
@@ -435,6 +450,8 @@ fun rememberDesignSystemWindow(
         initialOnSelectMotionMode = onSelectMotionMode,
         initialOnToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused,
         initialBaseThemeProvider = baseThemeProvider,
+        isEditorShownProvider = isEditorShownProvider,
+        onToggleEditor = onToggleEditor,
     )
 }.also {
     it.currentPreset = currentPreset
@@ -445,4 +462,6 @@ fun rememberDesignSystemWindow(
     it.onSelectMotionMode = onSelectMotionMode
     it.onToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused
     it.baseThemeProvider = baseThemeProvider
+    it.isEditorShownProvider = isEditorShownProvider
+    it.onToggleEditor = onToggleEditor
 }

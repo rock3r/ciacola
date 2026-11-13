@@ -90,6 +90,7 @@ fun DeckLintPanel(
     stageInspectionRegistry: StageInspectionRegistry? = LocalStageInspectionRegistry.current,
     onApplyElementPatch: ((ElementPatch) -> Unit)? = null,
     onEditElement: ((elementId: String, sceneIndex: Int, beatIndex: Int) -> Unit)? = null,
+    onOpenThemeEditor: (() -> Unit)? = null,
     onJumpToIssue: ((DeckLintIssue) -> Unit)? = null,
     isActive: Boolean = true,
     modifier: Modifier = Modifier,
@@ -172,6 +173,9 @@ fun DeckLintPanel(
             fix.opensElementEditor && issue.elementId != null -> {
                 onEditElement?.invoke(issue.elementId, issue.sceneIndex, issue.beatIndex)
             }
+            fix.opensThemeEditor -> {
+                onOpenThemeEditor?.invoke()
+            }
         }
     }
 
@@ -235,6 +239,7 @@ fun DeckLintPanel(
                             focusRingColor = focusRingColor,
                             canApplyPatch = onApplyElementPatch != null,
                             canOpenEditor = onEditElement != null,
+                            canOpenThemeEditor = onOpenThemeEditor != null,
                             onSelectAndJump = { jumpToIssueAction(issue) },
                             onHoverChanged = { hovered ->
                                 controller.hoveredIssueId = if (hovered) issue.id else {
@@ -515,6 +520,7 @@ private fun LintIssueCard(
     focusRingColor: Color,
     canApplyPatch: Boolean,
     canOpenEditor: Boolean,
+    canOpenThemeEditor: Boolean = false,
     onSelectAndJump: () -> Unit,
     onHoverChanged: (Boolean) -> Unit,
     onQuickFix: (LintQuickFix) -> Unit,
@@ -622,7 +628,9 @@ private fun LintIssueCard(
         }
 
         val actionableFixes = issue.quickFixes.filter { fix ->
-            (fix.patch != null && canApplyPatch) || (fix.opensElementEditor && canOpenEditor)
+            (fix.patch != null && canApplyPatch) ||
+                (fix.opensElementEditor && canOpenEditor) ||
+                (fix.opensThemeEditor && canOpenThemeEditor)
         }
         if (actionableFixes.isNotEmpty()) {
             FlowRow(

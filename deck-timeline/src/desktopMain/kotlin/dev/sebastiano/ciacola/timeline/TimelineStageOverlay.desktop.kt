@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
+import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.SceneMode
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
@@ -139,10 +140,10 @@ fun createTimelineStageDecorator(
         LocalMotionPathPreviewState provides motionPathPreview,
         LocalTimelineStageSelection provides stageSelection,
     ) {
-        val isPresentingStoryStage = stageSelection.overviewPreviewMountCount == 0
+        val isPresentingStoryStage = stageSelection.overviewPreviewMountCount == 0 && !LocalPresentingFullscreen.current
         Box(Modifier.fillMaxSize().then(if (isPresentingStoryStage) Modifier.stagePicking(stageSelection) else Modifier)) {
             content()
-            if (isPresentingStoryStage) {
+            if (isPresentingStoryStage && !stageSelection.pickingSuppressed()) {
                 TimelineSelectionStageOverlay(stageSelection)
                 if (loopClock.activeSubCompLoopId == null && stageSelection.pickingEnabled) {
                     MotionArcStageOverlay(

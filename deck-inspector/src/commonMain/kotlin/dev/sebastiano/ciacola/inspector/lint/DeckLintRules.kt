@@ -33,8 +33,12 @@ object DeckLintRules {
         val textSnapshots = mutableListOf<StageNodeSnapshot>()
 
         for (snapshot in stageSnapshots) {
+            if (snapshot.effectiveAlpha <= INVISIBLE_ALPHA_THRESHOLD) continue
             val isFullBleed = isFullBleedBounds(snapshot.stageBounds, stageWidth, stageHeight)
             val isSurfaceKind = snapshot.kind.equals("Surface", ignoreCase = true) ||
+                snapshot.kind.equals("SurfaceCard", ignoreCase = true) ||
+                snapshot.kind.equals("CodeCard", ignoreCase = true) ||
+                snapshot.kind.equals("Box", ignoreCase = true) ||
                 snapshot.kind.equals("Frame", ignoreCase = true) ||
                 snapshot.kind.equals("Backdrop", ignoreCase = true) ||
                 snapshot.kind.equals("Canvas", ignoreCase = true) ||
@@ -48,7 +52,7 @@ object DeckLintRules {
                     label = snapshot.label.ifBlank { snapshot.kind },
                     stageBounds = snapshot.stageBounds,
                     effectiveBackground = snapshot.effectiveBackground,
-                    effectiveAlpha = 1f,
+                    effectiveAlpha = snapshot.effectiveAlpha,
                     isInteractive = !isSurfaceKind && snapshot.isEditable,
                     isEditable = snapshot.isEditable,
                     isFullBleedSurface = isFullBleed,
@@ -320,6 +324,14 @@ object DeckLintRules {
                     ),
                 )
                 add(editElementFix(node.elementId, node.label))
+            } else {
+                add(
+                    LintQuickFix(
+                        label = "Theme Tokens…",
+                        tooltip = "Open Design System Colors editor to fix theme contrast (F7)",
+                        opensThemeEditor = true,
+                    ),
+                )
             }
         }
 
@@ -513,6 +525,7 @@ object DeckLintRules {
                     hasVisualOverflow = snap.hasVisualOverflow,
                     hasEllipsis = snap.hasEllipsis,
                     fontSizeSp = snap.effectiveFontSizeSp ?: 0f,
+                    effectiveAlpha = snap.effectiveAlpha,
                     effectiveForeground = snap.effectiveForeground,
                     opaqueForeground = snap.effectiveForeground,
                     effectiveBackground = bg,
@@ -541,6 +554,7 @@ object DeckLintRules {
                     hasVisualOverflow = sem.hasVisualOverflow || snap.hasVisualOverflow,
                     hasEllipsis = sem.hasEllipsis || snap.hasEllipsis,
                     fontSizeSp = snap.effectiveFontSizeSp ?: sem.fontSizeSp,
+                    effectiveAlpha = minOf(sem.effectiveAlpha, snap.effectiveAlpha),
                     effectiveForeground = snap.effectiveForeground ?: sem.effectiveForeground,
                     opaqueForeground = snap.effectiveForeground ?: sem.opaqueForeground,
                     effectiveBackground = snap.effectiveBackground ?: sem.effectiveBackground ?: snapBg,
@@ -557,6 +571,7 @@ object DeckLintRules {
                     hasVisualOverflow = snap.hasVisualOverflow,
                     hasEllipsis = snap.hasEllipsis,
                     fontSizeSp = snap.effectiveFontSizeSp ?: 0f,
+                    effectiveAlpha = snap.effectiveAlpha,
                     effectiveForeground = snap.effectiveForeground,
                     opaqueForeground = snap.effectiveForeground,
                     effectiveBackground = snapBg,

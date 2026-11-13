@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +46,7 @@ import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
+import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
@@ -52,7 +54,6 @@ import dev.sebastiano.ciacola.inspector.StageRootCoordinatesHolder
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
-import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 
 /**
  * Resolves the effective background colour for the current composition subtree, falling back to the
@@ -69,12 +70,11 @@ internal fun resolveStageBounds(
     rootHolder: StageRootCoordinatesHolder?,
 ): Rect? {
     val c = coords?.takeIf { it.isAttached } ?: return null
-    val stageRoot = rootHolder?.coordinates?.takeIf { it.isAttached }
-    return if (stageRoot != null) {
-        runCatching { stageRoot.localBoundingBoxOf(c, clipBounds = false) }.getOrNull()
-    } else {
-        runCatching { c.boundsInRoot() }.getOrNull()
+    if (rootHolder != null) {
+        val stageRoot = rootHolder.coordinates?.takeIf { it.isAttached } ?: return null
+        return runCatching { stageRoot.localBoundingBoxOf(c, clipBounds = false) }.getOrNull()
     }
+    return runCatching { c.boundsInRoot() }.getOrNull()
 }
 
 internal fun compositeBackgroundOver(fill: Color, parentBackground: Color): Color = when {
@@ -148,7 +148,6 @@ fun DeckEditableText(
     val sceneCtx = LocalActiveSceneTimeline.current
     val beatIndex = LocalActiveBeatIndex.current
     val overviewOpen = LocalOverviewOpen.current
-    val offscreen = LocalTimelineOffscreen.current
     val rootHolder = LocalStageRootCoordinates.current
     val parentBg = effectiveBackgroundColor()
 
@@ -175,10 +174,11 @@ fun DeckEditableText(
         parentBg
     }
 
-    val shouldInspect = recordSnapshot && registry != null && !overviewOpen && !offscreen
+    val shouldInspect = recordSnapshot && registry != null && !overviewOpen
     val ownerToken = remember { Any() }
     var lastCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var lastLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
     if (shouldInspect && !mergeWithExistingBox) {
         DisposableEffect(registry, elementId, shouldInspect) {
@@ -228,16 +228,29 @@ fun DeckEditableText(
             isEditable = true,
         )
         if (mergeWithExistingBox) {
-            registry.record(snapshot)
+            registry.record(
+                snapshot = snapshot,
+                alphaProvider = { stageAlphaProvider() },
+            )
         } else {
-            registry.record(snapshot, ownerToken)
+            registry.record(
+                snapshot = snapshot,
+                owner = ownerToken,
+                alphaProvider = { stageAlphaProvider() },
+                coordinatesProvider = { lastCoords },
+                stageRootProvider = { rootHolder?.coordinates },
+            )
         }
     }
 
     if (shouldInspect) {
         val coordsNow = lastCoords
         val layoutNow = lastLayoutResult
-        SideEffect { publishSnapshot(coordsNow, layoutNow) }
+        val stageRootNow = rootHolder?.coordinates
+        SideEffect {
+            stageRootNow
+            publishSnapshot(coordsNow, layoutNow)
+        }
     }
 
     val offsetModifier = if (!mergeWithExistingBox && (patch?.offsetXDp != null || patch?.offsetYDp != null)) {
@@ -285,6 +298,7 @@ fun DeckEditableText(
             publishSnapshot(lastCoords, result)
         },
         modifier = modifier
+            .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
             .then(offsetModifier)
             .then(boxDecoModifier)
             .onPlaced { coords ->
@@ -318,7 +332,6 @@ fun Modifier.editableBox(
     val sceneCtx = LocalActiveSceneTimeline.current
     val beatIndex = LocalActiveBeatIndex.current
     val overviewOpen = LocalOverviewOpen.current
-    val offscreen = LocalTimelineOffscreen.current
     val rootHolder = LocalStageRootCoordinates.current
     val parentBg = LocalEffectiveBackgroundColor.current.takeOrElse { theme.colors.background }
 
@@ -331,9 +344,10 @@ fun Modifier.editableBox(
     val offsetY = (patch?.offsetYDp ?: 0f).dp
 
     val effectiveBg = compositeBackgroundOver(fillColor, parentBg)
-    val shouldInspect = recordSnapshot && registry != null && !overviewOpen && !offscreen
+    val shouldInspect = recordSnapshot && registry != null && !overviewOpen
     val ownerToken = remember { Any() }
     var lastCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
     if (shouldInspect) {
         DisposableEffect(registry, elementId, shouldInspect) {
@@ -374,12 +388,22 @@ fun Modifier.editableBox(
             effectiveFontSizeSp = existing?.effectiveFontSizeSp,
             isEditable = true,
         )
-        registry.record(snapshot, ownerToken)
+        registry.record(
+            snapshot = snapshot,
+            owner = ownerToken,
+            alphaProvider = { stageAlphaProvider() },
+            coordinatesProvider = { lastCoords },
+            stageRootProvider = { rootHolder?.coordinates },
+        )
     }
 
     if (shouldInspect) {
         val coordsNow = lastCoords
-        SideEffect { publishBoxSnapshot(coordsNow) }
+        val stageRootNow = rootHolder?.coordinates
+        SideEffect {
+            stageRootNow
+            publishBoxSnapshot(coordsNow)
+        }
     }
 
     val shape = RoundedCornerShape(cornerRadius)
@@ -388,6 +412,7 @@ fun Modifier.editableBox(
         (borderWidth > 0.dp && borderColor != Color.Unspecified && borderColor.alpha > 0f)
 
     this
+        .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
         .let { if (offsetX != 0.dp || offsetY != 0.dp) it.offset(x = offsetX, y = offsetY) else it }
         .onPlaced { coords ->
             lastCoords = coords
@@ -521,16 +546,17 @@ internal fun RecordStageTextInspection(
     defaultFontWeight: Int,
     coords: LayoutCoordinates?,
     layoutResult: TextLayoutResult?,
+    alphaProvider: (() -> Float)? = null,
 ) {
     if (elementId == null) return
     val registry = LocalStageInspectionRegistry.current ?: return
     val overviewOpen = LocalOverviewOpen.current
-    val offscreen = LocalTimelineOffscreen.current
-    if (overviewOpen || offscreen) return
+    if (overviewOpen) return
 
     val sceneCtx = LocalActiveSceneTimeline.current
     val beatIndex = LocalActiveBeatIndex.current
     val rootHolder = LocalStageRootCoordinates.current
+    val stageRootNow = rootHolder?.coordinates
     val ownerToken = remember { Any() }
 
     DisposableEffect(registry, elementId) {
@@ -538,6 +564,7 @@ internal fun RecordStageTextInspection(
     }
 
     SideEffect {
+        stageRootNow
         registry.recordMetadata(
             meta = StageElementMetadata(
                 elementId = elementId,
@@ -568,6 +595,9 @@ internal fun RecordStageTextInspection(
                 isEditable = true,
             ),
             owner = ownerToken,
+            alphaProvider = alphaProvider,
+            coordinatesProvider = { coords },
+            stageRootProvider = { rootHolder?.coordinates },
         )
     }
 }

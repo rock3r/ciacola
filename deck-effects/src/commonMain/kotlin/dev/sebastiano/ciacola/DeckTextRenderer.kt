@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -54,6 +55,7 @@ import dev.sebastiano.ciacola.inspector.LocalActiveBeatIndex
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
+import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.inspector.beatElementId
@@ -64,7 +66,6 @@ import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
-import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.TrackOverride
@@ -269,12 +270,12 @@ fun DeckMagicText(
 
     val registry = LocalStageInspectionRegistry.current
     val overviewOpen = LocalOverviewOpen.current
-    val offscreen = LocalTimelineOffscreen.current
     val rootHolder = LocalStageRootCoordinates.current
-    val shouldInspect = snapshotElementId != null && registry != null && !overviewOpen && !offscreen
+    val shouldInspect = snapshotElementId != null && registry != null && !overviewOpen
     val ownerToken = remember { Any() }
     var outerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var innerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
     if (shouldInspect && snapshotElementId != null) {
         DisposableEffect(registry, snapshotElementId) {
@@ -282,7 +283,9 @@ fun DeckMagicText(
         }
         val coordsNow = innerCoords
         val outerNow = outerCoords
+        val stageRootNow = rootHolder?.coordinates
         SideEffect {
+            stageRootNow
             val baseFontSizeSp = if (style.fontSize.isSp) style.fontSize.value else 16f
             registry?.recordMetadata(
                 meta = StageElementMetadata(
@@ -316,6 +319,9 @@ fun DeckMagicText(
                         isEditable = true,
                     ),
                     owner = ownerToken,
+                    alphaProvider = { stageAlphaProvider() },
+                    coordinatesProvider = { innerCoords },
+                    stageRootProvider = { rootHolder?.coordinates },
                 )
             }
         }
@@ -347,6 +353,7 @@ fun DeckMagicText(
     }
 
     val taggedModifier = modifier
+        .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
         .onPlaced { outerCoords = it }
         .reviewTarget(
             kind = kind,

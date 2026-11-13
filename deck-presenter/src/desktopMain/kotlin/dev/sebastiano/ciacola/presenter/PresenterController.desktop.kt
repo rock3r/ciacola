@@ -65,12 +65,14 @@ data class ReadinessStatus(
     val studioOpen: Boolean,
     val inspectOpen: Boolean,
     val hasUnbakedOverrides: Boolean,
+    val openAuthoringTools: List<String> = emptyList(),
+    val unbakedDomains: List<String> = emptyList(),
 ) {
     val hasAnyHazard: Boolean
-        get() = studioOpen || inspectOpen || hasUnbakedOverrides
+        get() = studioOpen || inspectOpen || openAuthoringTools.isNotEmpty() || hasUnbakedOverrides
 
     val hasClosableAuthoringTools: Boolean
-        get() = studioOpen || inspectOpen
+        get() = studioOpen || inspectOpen || openAuthoringTools.isNotEmpty()
 }
 
 /** Connected physical/logical display metadata from AWT [GraphicsEnvironment]. */
@@ -320,6 +322,8 @@ class PresenterController(
     private val isStudioOpenProvider: () -> Boolean = { false },
     private val isInspectOpenProvider: () -> Boolean = { false },
     private val hasUnbakedOverridesProvider: () -> Boolean = { false },
+    private val openAuthoringToolsProvider: () -> List<String> = { emptyList() },
+    private val unbakedDomainsProvider: () -> List<String> = { emptyList() },
     private val onEnterCleanShowModeAction: () -> Unit = {},
     private val isExternalTextInputActiveProvider: () -> Boolean = { false },
     private val onRestoreStageFocus: () -> Unit = {},
@@ -426,6 +430,8 @@ class PresenterController(
         studioOpen = isStudioOpenProvider(),
         inspectOpen = isInspectOpenProvider(),
         hasUnbakedOverrides = hasUnbakedOverridesProvider(),
+        openAuthoringTools = openAuthoringToolsProvider(),
+        unbakedDomains = unbakedDomainsProvider(),
     )
 
     fun enterCleanShowMode() {
@@ -435,6 +441,7 @@ class PresenterController(
     fun isShowModeActive(): Boolean =
         !isStudioOpenProvider() &&
             !isInspectOpenProvider() &&
+            openAuthoringToolsProvider().isEmpty() &&
             !isOverviewOpen &&
             !isExternalTextInputActive &&
             !jumpDialogOpen

@@ -59,6 +59,7 @@ data class LintQuickFix(
     val tooltip: String,
     val patch: ElementPatch? = null,
     val opensElementEditor: Boolean = false,
+    val opensThemeEditor: Boolean = false,
 )
 
 /**

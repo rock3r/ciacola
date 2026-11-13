@@ -59,7 +59,7 @@ class ElementEditorController(
         val sceneIndex = currentSceneIndexProvider()
         val beatIndex = currentBeatIndexProvider()
         return inspectionRegistry.nodesForSlide(sceneIndex, beatIndex)
-            .filter { it.isEditable }
+            .filter { it.isEditable && it.effectiveAlpha > 0.02f }
             .sortedWith(compareBy({ it.stageBounds.top }, { it.stageBounds.left }, { it.elementId }))
     }
 

@@ -53,9 +53,10 @@ private val INSPECTOR_WIDTH = 304.dp
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TimelineBlockInspector(
+fun TimelineBlockInspector(
     controller: TimelineStudioController,
     modifier: Modifier = Modifier,
+    fillWidth: Boolean = false,
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
@@ -64,7 +65,7 @@ internal fun TimelineBlockInspector(
 
     val activeLoopId = controller.loopClock.activeSubCompLoopId
     if (activeLoopId != null) {
-        LoopSubCompInspector(controller, activeLoopId, modifier)
+        LoopSubCompInspector(controller, activeLoopId, modifier, fillWidth = fillWidth)
         return
     }
 
@@ -74,7 +75,7 @@ internal fun TimelineBlockInspector(
 
     Box(
         modifier = modifier
-            .width(INSPECTOR_WIDTH)
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(INSPECTOR_WIDTH))
             .fillMaxHeight()
             .background(globalColors.panelBackground),
     ) {
@@ -406,6 +407,7 @@ private fun LoopSubCompInspector(
     controller: TimelineStudioController,
     loopId: String,
     modifier: Modifier = Modifier,
+    fillWidth: Boolean = false,
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
@@ -419,7 +421,7 @@ private fun LoopSubCompInspector(
 
     Column(
         modifier = modifier
-            .width(INSPECTOR_WIDTH)
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(INSPECTOR_WIDTH))
             .fillMaxHeight()
             .background(globalColors.panelBackground)
             .padding(10.dp),

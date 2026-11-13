@@ -687,7 +687,10 @@ class CiacolaStudioSpectreTest {
                 capture("04-review-on-zoomed-preview.png")
                 awaitComposerFocus()
                 automator.pressKey(KeyEvent.VK_ESCAPE)
-                automator.waitUntil(description = "composer closed", timeout = 5.seconds) { review.pendingSelection == null }
+                automator.waitUntil(description = "composer closed", timeout = 5.seconds) {
+                    review.pendingSelection == null && automator.findOneByTestTag("ciacola-review-composer-popup") == null
+                }
+                settle()
                 if (review.inspectModeEnabled) {
                     automator.click(checkNotNull(automator.findOneByTestTag("ciacola-hud-toggle-inspect")))
                 }

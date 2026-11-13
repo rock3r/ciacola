@@ -43,7 +43,9 @@ import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.LocalStoryboard
 import dev.bnorm.storyboard.easel.SceneMode
+import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
+import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.theme.colorPalette
 
@@ -129,11 +131,13 @@ fun rememberDeckLintStageDecorator(
             ) {
                 content()
             }
-            StageLintHighlightOverlay(
-                controller = controller,
-                isInspectionVisible = controller.showStageOverlay,
-                stageFormatSize = effectiveFormatSize,
-            )
+            CiacolaJewelTheme(isDark = !LocalDeckTheme.current.isLight) {
+                StageLintHighlightOverlay(
+                    controller = controller,
+                    isInspectionVisible = controller.showStageOverlay,
+                    stageFormatSize = effectiveFormatSize,
+                )
+            }
         }
     }
 }

@@ -379,19 +379,30 @@ internal object SemanticsSlideScanner {
         sampledBackground: Color?,
         pixelBuffer: StagePixelBuffer?,
     ): Pair<Color?, Color?> {
-        val styleColor = layout.layoutInput.style.color
-        if (styleColor.isSpecified) {
-            return styleColor to styleColor.copy(alpha = 1f)
+        val annotatedText = layout.layoutInput.text
+        val colorSpans = annotatedText.spanStyles.filter {
+            it.start < it.end && it.item.color.isSpecified
         }
-        val spanColors = layout.layoutInput.text.spanStyles
-            .map { it.item.color }
-            .filter { it.isSpecified }
-        if (spanColors.isNotEmpty()) {
+        val styleColor = layout.layoutInput.style.color
+        val candidateColors = buildList {
+            colorSpans.forEach { add(it.item.color) }
+            if (styleColor.isSpecified) {
+                val raw = annotatedText.text
+                val hasUncoveredVisibleChar = colorSpans.isEmpty() || raw.indices.any { idx ->
+                    !raw[idx].isWhitespace() && colorSpans.none { idx in it.start until it.end }
+                }
+                if (hasUncoveredVisibleChar) {
+                    add(styleColor)
+                }
+            }
+        }
+        if (candidateColors.isNotEmpty()) {
             val picked = if (sampledBackground != null) {
-                spanColors.minByOrNull { contrastRatio(it.copy(alpha = 1f), sampledBackground.copy(alpha = 1f)) }
-                    ?: spanColors.first()
+                candidateColors.minByOrNull {
+                    contrastRatio(it.copy(alpha = 1f), sampledBackground.copy(alpha = 1f))
+                } ?: candidateColors.first()
             } else {
-                spanColors.first()
+                candidateColors.first()
             }
             return picked to picked.copy(alpha = 1f)
         }

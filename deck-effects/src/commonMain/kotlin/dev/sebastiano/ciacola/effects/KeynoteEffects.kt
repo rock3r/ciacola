@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toIntSize
 import androidx.compose.ui.unit.toOffset
 import dev.bnorm.storyboard.layout.decorated.Decoration
+import dev.sebastiano.ciacola.inspector.provideStageVisibilityAlpha
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
@@ -303,9 +304,11 @@ fun trimPath(
     destination: Path = Path(),
 ): PathTipPose? = trimMultiContourPath(source, progress, destination)
 
-fun Modifier.keynoteDissolve(progress: () -> Float): Modifier = graphicsLayer {
-    alpha = progress().coerceIn(0f, 1f)
-}
+fun Modifier.keynoteDissolve(progress: () -> Float): Modifier =
+    provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
+        .graphicsLayer {
+            alpha = progress().coerceIn(0f, 1f)
+        }
 
 /**
  * Entrance start offset for [trackId] from the Inspector's spatial override, or [DpOffset.Zero] when
@@ -322,7 +325,7 @@ fun Modifier.keynoteFadeMoveTracked(
     trackId: String,
     progress: () -> Float,
     direction: SlideDirection = SlideDirection.Up,
-    distance: Dp = 24.dp,
+    distance: Dp = LocalDeckTheme.current.motion.fadeMoveDistance,
     // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
     // the default here is linear; pass an easing only when driving the modifier with raw progress.
     easing: Easing = LinearEasing,
@@ -352,13 +355,15 @@ fun Modifier.keynoteFadeMoveTracked(
         tagged.keynoteFadeMove(progress, direction, distance, easing)
     } else {
         val offset = DpOffset(spatial.offsetXDp.dp, spatial.offsetYDp.dp)
-        tagged.graphicsLayer {
-            val raw = progress().coerceIn(0f, 1f)
-            val eased = easing.transform(raw)
-            alpha = raw
-            translationX = (1f - eased) * offset.x.toPx()
-            translationY = (1f - eased) * offset.y.toPx()
-        }
+        tagged
+            .provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
+            .graphicsLayer {
+                val raw = progress().coerceIn(0f, 1f)
+                val eased = easing.transform(raw)
+                alpha = raw
+                translationX = (1f - eased) * offset.x.toPx()
+                translationY = (1f - eased) * offset.y.toPx()
+            }
     }
 }
 
@@ -366,35 +371,36 @@ fun Modifier.keynoteFadeMoveTracked(
 fun Modifier.keynoteFadeMove(
     progress: () -> Float,
     direction: SlideDirection = SlideDirection.Up,
-    distance: Dp = 24.dp,
+    distance: Dp = LocalDeckTheme.current.motion.fadeMoveDistance,
     // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
     // the default here is linear; pass an easing only when driving the modifier with raw progress.
     easing: Easing = LinearEasing,
 ): Modifier {
     val reducedMotion = LocalReducedMotion.current
-    return graphicsLayer {
-        val raw = progress().coerceIn(0f, 1f)
-        alpha = raw
-        if (reducedMotion) {
-            translationX = 0f
-            translationY = 0f
-        } else {
-            val eased = easing.transform(raw)
-            val remainingPx = (1f - eased) * distance.toPx()
-            when (direction) {
-                SlideDirection.Up -> translationY = remainingPx
-                SlideDirection.Down -> translationY = -remainingPx
-                SlideDirection.Left -> translationX = remainingPx
-                SlideDirection.Right -> translationX = -remainingPx
+    return provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
+        .graphicsLayer {
+            val raw = progress().coerceIn(0f, 1f)
+            alpha = raw
+            if (reducedMotion) {
+                translationX = 0f
+                translationY = 0f
+            } else {
+                val eased = easing.transform(raw)
+                val remainingPx = (1f - eased) * distance.toPx()
+                when (direction) {
+                    SlideDirection.Up -> translationY = remainingPx
+                    SlideDirection.Down -> translationY = -remainingPx
+                    SlideDirection.Left -> translationX = remainingPx
+                    SlideDirection.Right -> translationX = -remainingPx
+                }
             }
         }
-    }
 }
 
 @Composable
 fun Modifier.keynoteFromDarkness(
     progress: () -> Float,
-    initialScale: Float = 0.88f,
+    initialScale: Float = LocalDeckTheme.current.motion.fromDarknessInitialScale,
     transformOrigin: TransformOrigin = TransformOrigin.Center,
     // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
     // the default here is linear; pass an easing only when driving the modifier with raw progress.
@@ -402,35 +408,38 @@ fun Modifier.keynoteFromDarkness(
     entranceOffset: DpOffset = DpOffset.Zero,
 ): Modifier {
     val reducedMotion = LocalReducedMotion.current
-    return graphicsLayer {
-        val raw = progress().coerceIn(0f, 1f)
-        alpha = raw
-        if (reducedMotion) {
-            scaleX = 1f
-            scaleY = 1f
-            translationX = 0f
-            translationY = 0f
-        } else {
-            val eased = easing.transform(raw)
-            val s = initialScale + (1f - initialScale) * eased
-            scaleX = s
-            scaleY = s
-            translationX = (1f - eased) * entranceOffset.x.toPx()
-            translationY = (1f - eased) * entranceOffset.y.toPx()
+    return provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
+        .graphicsLayer {
+            val raw = progress().coerceIn(0f, 1f)
+            alpha = raw
+            if (reducedMotion) {
+                scaleX = 1f
+                scaleY = 1f
+                translationX = 0f
+                translationY = 0f
+            } else {
+                val eased = easing.transform(raw)
+                val s = initialScale + (1f - initialScale) * eased
+                scaleX = s
+                scaleY = s
+                translationX = (1f - eased) * entranceOffset.x.toPx()
+                translationY = (1f - eased) * entranceOffset.y.toPx()
+            }
+            this.transformOrigin = transformOrigin
         }
-        this.transformOrigin = transformOrigin
-    }
 }
 
 @Composable
 fun Modifier.keynotePop(
     progress: () -> Float,
-    initialScale: Float = 0.72f,
-    overshootScale: Float = 1.06f,
+    initialScale: Float = LocalDeckTheme.current.motion.popInitialScale,
+    overshootScale: Float = LocalDeckTheme.current.motion.popOvershootScale,
     entranceOffset: DpOffset = DpOffset.Zero,
 ): Modifier {
     val reducedMotion = LocalReducedMotion.current
-    return graphicsLayer {
+    return provideStageVisibilityAlpha {
+        if (reducedMotion) progress().coerceIn(0f, 1f) else keynotePopAlpha(progress())
+    }.graphicsLayer {
         val p = progress()
         if (reducedMotion) {
             alpha = p.coerceIn(0f, 1f)
@@ -486,12 +495,13 @@ fun Modifier.keynoteWipe(
     progress: () -> Float,
     direction: WipeDirection = WipeDirection.StartToEnd,
 ): Modifier {
+    val withAlpha = provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
     if (LocalReducedMotion.current) {
-        return graphicsLayer {
+        return withAlpha.graphicsLayer {
             alpha = progress().coerceIn(0f, 1f)
         }
     }
-    return drawWithContent {
+    return withAlpha.drawWithContent {
         val p = progress().coerceIn(0f, 1f)
         if (p <= 0f) return@drawWithContent
         val left = when (direction) {
@@ -519,7 +529,10 @@ fun Modifier.keynoteWipe(
 fun Modifier.keynoteSpotlight(
     dimProgress: () -> Float,
     dimmedAlpha: Float = 0.25f,
-): Modifier = graphicsLayer {
+): Modifier = provideStageVisibilityAlpha {
+    val d = dimProgress().coerceIn(0f, 1f)
+    1f - (1f - dimmedAlpha.coerceIn(0f, 1f)) * d
+}.graphicsLayer {
     val d = dimProgress().coerceIn(0f, 1f)
     alpha = 1f - (1f - dimmedAlpha.coerceIn(0f, 1f)) * d
 }
@@ -528,7 +541,10 @@ fun Modifier.keynoteSpotlight(
     activeFocusKey: () -> Any?,
     itemKey: Any,
     dimmedAlpha: Float = 0.25f,
-): Modifier = graphicsLayer {
+): Modifier = provideStageVisibilityAlpha {
+    val active = activeFocusKey()
+    if (active == null || active == itemKey) 1f else dimmedAlpha.coerceIn(0f, 1f)
+}.graphicsLayer {
     val active = activeFocusKey()
     alpha = if (active == null || active == itemKey) 1f else dimmedAlpha.coerceIn(0f, 1f)
 }

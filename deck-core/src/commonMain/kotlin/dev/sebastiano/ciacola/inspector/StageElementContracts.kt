@@ -3,11 +3,20 @@ package dev.sebastiano.ciacola.inspector
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.modifier.modifierLocalConsumer
+import androidx.compose.ui.modifier.modifierLocalOf
+import androidx.compose.ui.modifier.modifierLocalProvider
 import kotlinx.serialization.Serializable
 
 /**
@@ -76,7 +85,27 @@ data class StageNodeSnapshot(
     val effectiveBackground: Color? = null,
     val effectiveFontSizeSp: Float? = null,
     val isEditable: Boolean = true,
+    val effectiveAlpha: Float = 1f,
 )
+
+/**
+ * ModifierLocal carrying a lazy stage visibility/spotlight alpha provider (`0f..1f`) down layout
+ * subtrees without triggering per-frame recomposition.
+ */
+val ModifierLocalStageAlpha = modifierLocalOf<() -> Float> { { 1f } }
+
+/**
+ * Multiplies the enclosing [ModifierLocalStageAlpha] by [localAlpha] for all descendant stage
+ * elements so hidden build items (`alpha == 0f`) and spotlight-dimmed items report true alpha.
+ */
+fun Modifier.provideStageVisibilityAlpha(localAlpha: () -> Float): Modifier = composed {
+    var parentAlpha by remember { mutableStateOf<() -> Float>({ 1f }) }
+    this
+        .modifierLocalConsumer { parentAlpha = ModifierLocalStageAlpha.current }
+        .modifierLocalProvider(ModifierLocalStageAlpha) {
+            { (parentAlpha() * localAlpha()).coerceIn(0f, 1f) }
+        }
+}
 
 /**
  * Editor metadata and default styling values recorded alongside [StageNodeSnapshot] so the
@@ -113,18 +142,44 @@ class StageInspectionRegistry {
 
     private val nodeOwners = mutableMapOf<String, Any>()
     private val metadataOwners = mutableMapOf<String, Any>()
+    private val alphaProviders = mutableMapOf<String, () -> Float>()
+    private val coordinatesProviders = mutableMapOf<String, () -> LayoutCoordinates?>()
+    private val stageRootProviders = mutableMapOf<String, () -> LayoutCoordinates?>()
 
-    fun record(snapshot: StageNodeSnapshot) {
+    fun record(
+        snapshot: StageNodeSnapshot,
+        owner: Any? = null,
+        alphaProvider: (() -> Float)? = null,
+        coordinatesProvider: (() -> LayoutCoordinates?)? = null,
+        stageRootProvider: (() -> LayoutCoordinates?)? = null,
+    ) {
+        if (owner != null) {
+            nodeOwners[snapshot.elementId] = owner
+        }
+        if (alphaProvider != null) {
+            alphaProviders[snapshot.elementId] = alphaProvider
+        }
+        if (coordinatesProvider != null) {
+            coordinatesProviders[snapshot.elementId] = coordinatesProvider
+        }
+        if (stageRootProvider != null) {
+            stageRootProviders[snapshot.elementId] = stageRootProvider
+        }
         if (nodes[snapshot.elementId] != snapshot) {
             nodes[snapshot.elementId] = snapshot
         }
     }
 
-    fun record(snapshot: StageNodeSnapshot, owner: Any) {
-        nodeOwners[snapshot.elementId] = owner
-        if (nodes[snapshot.elementId] != snapshot) {
-            nodes[snapshot.elementId] = snapshot
+    fun effectiveAlphaOf(elementId: String): Float =
+        alphaProviders[elementId]?.invoke()?.coerceIn(0f, 1f) ?: nodes[elementId]?.effectiveAlpha ?: 1f
+
+    fun liveStageBoundsOf(elementId: String): Rect? {
+        val c = coordinatesProviders[elementId]?.invoke()?.takeIf { it.isAttached }
+        val root = stageRootProviders[elementId]?.invoke()?.takeIf { it.isAttached }
+        if (c != null && root != null) {
+            runCatching { root.localBoundingBoxOf(c, clipBounds = false) }.getOrNull()?.let { return it }
         }
+        return nodes[elementId]?.stageBounds
     }
 
     fun recordMetadata(meta: StageElementMetadata, owner: Any? = null) {
@@ -141,6 +196,9 @@ class StageInspectionRegistry {
     fun remove(elementId: String) {
         nodeOwners.remove(elementId)
         metadataOwners.remove(elementId)
+        alphaProviders.remove(elementId)
+        coordinatesProviders.remove(elementId)
+        stageRootProviders.remove(elementId)
         nodes.remove(elementId)
         metadata.remove(elementId)
     }
@@ -148,6 +206,9 @@ class StageInspectionRegistry {
     fun remove(elementId: String, owner: Any) {
         if (nodeOwners[elementId] === owner) {
             nodeOwners.remove(elementId)
+            alphaProviders.remove(elementId)
+            coordinatesProviders.remove(elementId)
+            stageRootProviders.remove(elementId)
             nodes.remove(elementId)
         }
         if (metadataOwners[elementId] === owner) {
@@ -157,11 +218,24 @@ class StageInspectionRegistry {
     }
 
     fun nodesForSlide(sceneIndex: Int, beatIndex: Int): List<StageNodeSnapshot> =
-        nodes.values.filter { it.sceneIndex == sceneIndex && it.beatIndex == beatIndex }
+        nodes.values
+            .filter { it.sceneIndex == sceneIndex && it.beatIndex == beatIndex }
+            .map { snap ->
+                val liveAlpha = effectiveAlphaOf(snap.elementId)
+                val liveBounds = liveStageBoundsOf(snap.elementId) ?: snap.stageBounds
+                if (liveAlpha == snap.effectiveAlpha && liveBounds == snap.stageBounds) {
+                    snap
+                } else {
+                    snap.copy(effectiveAlpha = liveAlpha, stageBounds = liveBounds)
+                }
+            }
 
     fun clear() {
         nodeOwners.clear()
         metadataOwners.clear()
+        alphaProviders.clear()
+        coordinatesProviders.clear()
+        stageRootProviders.clear()
         nodes.clear()
         metadata.clear()
     }
@@ -186,7 +260,7 @@ val LocalActiveBeatIndex = compositionLocalOf { 0 }
  */
 @Stable
 class StageRootCoordinatesHolder {
-    var coordinates: LayoutCoordinates? = null
+    var coordinates by mutableStateOf<LayoutCoordinates?>(null)
 }
 
 val LocalStageRootCoordinates = staticCompositionLocalOf<StageRootCoordinatesHolder?> { null }

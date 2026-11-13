@@ -1,10 +1,19 @@
 package dev.sebastiano.ciacola.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -165,5 +174,52 @@ fun Modifier.accessibleFocusRing(
             cornerRadius = CornerRadius(radiusPx, radiusPx),
             style = Stroke(width = strokePx),
         )
+    }
+}
+
+/**
+ * Tracks whether any authoring `TextField` or `TextArea` across Studio, Design System, Element
+ * Inspector, Inline Stage Editor, or Curve Editor currently holds focus so global single-key and
+ * Studio shortcuts (`B`, `W`, `Space`, `Arrows`, `Cmd+Z`) yield cleanly to text entry.
+ */
+@Stable
+class AuthoringTextInputFocusTracker {
+    private var focusedCount by mutableIntStateOf(0)
+
+    val hasFocusedTextInput: Boolean
+        get() = focusedCount > 0
+
+    fun onFocusAcquired() {
+        focusedCount++
+    }
+
+    fun onFocusReleased() {
+        focusedCount = (focusedCount - 1).coerceAtLeast(0)
+    }
+}
+
+val LocalAuthoringTextInputTracker = staticCompositionLocalOf<AuthoringTextInputFocusTracker?> { null }
+
+/**
+ * Registers this modifier's focus subtree as an authoring text input in [LocalAuthoringTextInputTracker],
+ * automatically releasing on unmount if the field disappears while focused.
+ */
+fun Modifier.trackAuthoringTextInputFocus(): Modifier = composed {
+    val tracker = LocalAuthoringTextInputTracker.current ?: return@composed this
+    var held by remember { mutableStateOf(false) }
+    DisposableEffect(tracker) {
+        onDispose {
+            if (held) {
+                held = false
+                tracker.onFocusReleased()
+            }
+        }
+    }
+    this.onFocusChanged { state ->
+        val nowFocused = state.hasFocus
+        if (nowFocused != held) {
+            held = nowFocused
+            if (nowFocused) tracker.onFocusAcquired() else tracker.onFocusReleased()
+        }
     }
 }

@@ -22,10 +22,11 @@ The desktop app presents five scenes with fourteen base states (beats). Together
 - a single 1920×1080 design system for type, colour, and spacing.
 
 Around the stage it adds an Easel overview grid, a Jewel Presenter window with speaker notes and
-display routing, a Ctrl-click slide review flow, a live theme and reduced-motion switcher
-(`Stage Dark` / `Keynote Light`, `System` / `Reduced` / `Full` motion), selectable-text PDF and
-60 fps MP4 video export, and an After Effects-style Timeline Studio for scrubbing and tuning
-animations. See [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) for how each piece works.
+display routing, a Ctrl-click slide review flow, selectable-text PDF and 60 fps MP4 video export,
+and a unified Studio workspace combining an After Effects-style Timeline Studio (`Motion`), Direct
+Stage Element & Inline Text Editor (`Element`), Live Design System & WCAG Contrast Editor (`Theme`),
+and Live Slide & Full-Deck Linter (`Lint`). See [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md)
+for how each piece works.
 
 All visible copy is marked provisional on purpose.
 
@@ -54,14 +55,23 @@ remembered in `.storyboard/` at the repository root.
 | `F2` | Show the Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
 | `F3` or hold `Ctrl` | Inspect mode for slide review; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
 | `F4` | Show the Review window |
-| `F5` | Toggle the Timeline Studio docked in the Story window |
-| `F6` | Open the Timeline Studio in a detached window |
+| `F5` | Toggle the Studio (`Motion \| Element \| Theme \| Lint`) docked in the Story window |
+| `F6` | Open the Studio in a detached window |
+| `F7` | Focus the `Theme` Design System tab in Studio (or toggle the Theme sidecar window) |
+| `F8` | Focus the `Lint` tab in Studio (or toggle the Deck Linter sidecar window) |
+| `⌘Z` / `⇧⌘Z` | Context-aware Undo / Redo for the active Studio editor (`Motion`, `Element`, or `Theme`) |
 
-The **Theme** menu switches between `Stage Dark` and `Keynote Light` live, configures **Motion**
-(`System`, `Reduced Motion`, `Full Motion`, or `Pause Ambient Loops`, also via
-`CIACOLA_REDUCE_MOTION`), **Export ▸ PDF…** writes one high-resolution page per beat with an
-invisible selectable Unicode text layer, and **Export ▸ Video (MP4)…** renders deterministic 60 fps
-offscreen video via `ffmpeg` (cancellable at any time with `Esc`).
+When Authoring mode is active, double-clicking editable text on the stage opens an inline text
+editor (`Enter` / `⌘Enter` saves, `Esc` cancels), and selecting an element on the `Element` tab
+enables `Arrow` (`1 dp`) / `Shift+Arrow` (`10 dp`) stage nudging.
+
+The **Theme** menu switches between `Stage Dark` and `Keynote Light` live, opens the Design System
+Editor (`F7`), and configures **Motion** (`System`, `Reduced Motion`, `Full Motion`, or
+`Pause Ambient Loops`, also via `CIACOLA_REDUCE_MOTION`). The **Linter** menu (`F8`) runs live and
+offscreen full-deck diagnostic sweeps across both presets. **Export ▸ PDF…** writes one
+high-resolution page per beat with an invisible selectable Unicode text layer, and
+**Export ▸ Video (MP4)…** renders deterministic 60 fps offscreen video via `ffmpeg` (cancellable at
+any time with `Esc`).
 
 ### Hot reload
 
@@ -112,10 +122,10 @@ rendering, or the unfinished gradual-entrance renderer. The intended boundary is
 
 ## Checks
 
-Run the focused suites with:
+Run the architecture/DAG static gate and focused suites with:
 
 ```shell
-./gradlew :storyboard-text:jvmTest :storyboard-easel:jvmTest :deck:desktopTest
+./gradlew ciacolaStaticCheck :storyboard-text:jvmTest :storyboard-easel:jvmTest :deck-core:desktopTest :deck-inspector:desktopTest :deck:desktopTest
 ```
 
 Real-window end-to-end tests drive the app with Spectre's synthetic AWT input. They run as a

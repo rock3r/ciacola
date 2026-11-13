@@ -390,8 +390,9 @@ class Animatic internal constructor(
         freezePresentedFrame()
         try {
             // 1. Fresh subtree, settled on `from` (presented frame stays frozen meanwhile).
+            // Mark unsettled until all settle frames complete without cancellation.
+            sceneCleanlySettled = false
             scrubEpoch++
-            sceneCleanlySettled = true
             if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
                 transitionState.snapTo(fromState)
             }
@@ -402,6 +403,7 @@ class Animatic internal constructor(
             retainedScrubSegment = -1
             withFrameNanos { } // make sure the seeked frame is composed before unfreezing
             restingMidSegment = clampedFraction > 0f
+            sceneCleanlySettled = true
         } finally {
             scrubSettling = false
         }
@@ -582,10 +584,10 @@ class Animatic internal constructor(
             // `toState` mounts, and settling at play time 0 prevents late-composed children from being
             // delayed by a non-zero play time (see Transition.TransitionAnimationState.updateAnimation).
             // Those settle frames are not presentable, so the last presented frame stays up.
-            val enteringFromSettledFrom = transitionState.currentState == fromState && transitionState.targetState == fromState
-            if (!enteringFromSettledFrom) {
-                sceneCleanlySettled = false
-            }
+            val wasCleanlySettled = sceneCleanlySettled &&
+                transitionState.currentState == fromState &&
+                transitionState.targetState == fromState
+            sceneCleanlySettled = false
             withPresentedFrameFrozen {
                 if (transitionState.currentState != fromState) {
                     transitionState.snapTo(fromState)
@@ -603,6 +605,7 @@ class Animatic internal constructor(
                     }
                 }
                 transitionState.seekTo(transitionFractionFor(fraction), toState)
+                sceneCleanlySettled = wasCleanlySettled
             }
             return
         }
