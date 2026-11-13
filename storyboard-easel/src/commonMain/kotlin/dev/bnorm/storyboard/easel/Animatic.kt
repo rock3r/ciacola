@@ -331,6 +331,8 @@ class Animatic internal constructor(
         }
     }
 
+    private var sceneCleanlySettled = true
+
     /**
      * Seeks to [fraction] of the segment starting at [fromStateIndex]. A newer call supersedes an
      * older one that has not finished yet, so the last request always wins.
@@ -357,7 +359,28 @@ class Animatic internal constructor(
             retainedScrubSegment = -1
         }
 
-        if (!rebuildScene) {
+        val fromState = states[segment]
+        val toState = states.getOrNull(segment + 1)
+        val alreadySettledAtFrom = transitionState.currentState == fromState && transitionState.targetState == fromState
+        if (clampedFraction <= 0f && alreadySettledAtFrom && sceneCleanlySettled) {
+            currentState = resolveBackwardValueState(segment)
+            targetState = if (fromState.frame is Frame.Value) fromState else resolveForwardValueState((segment + 1).coerceAtMost(states.lastIndex))
+            retainedScrubSegment = -1
+            return
+        }
+
+        val alreadyInTargetSegment = toState != null &&
+            transitionState.currentState == fromState &&
+            transitionState.targetState == toState
+        if (clampedFraction > 0f && alreadyInTargetSegment && sceneCleanlySettled && abs(activeFraction - clampedFraction) < 1e-4f) {
+            currentState = resolveBackwardValueState(segment)
+            targetState = resolveForwardValueState(segment + 1)
+            retainedScrubSegment = -1
+            restingMidSegment = true
+            return
+        }
+
+        if (!rebuildScene || (sceneCleanlySettled && (alreadySettledAtFrom || (clampedFraction > 0f && alreadyInTargetSegment)))) {
             seekInPlace(segment, clampedFraction)
             retainedScrubSegment = -1
             restingMidSegment = clampedFraction > 0f
@@ -368,7 +391,7 @@ class Animatic internal constructor(
         try {
             // 1. Fresh subtree, settled on `from` (presented frame stays frozen meanwhile).
             scrubEpoch++
-            val fromState = states[segment]
+            sceneCleanlySettled = true
             if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
                 transitionState.snapTo(fromState)
             }
@@ -453,6 +476,7 @@ class Animatic internal constructor(
     private suspend fun runSegmentBySeeking(to: LinkedState<*>, measureOnly: Boolean = false): Long {
         restingMidSegment = false
         retainedScrubSegment = -1
+        sceneCleanlySettled = false
         val ts = transitionState
         if (ts.currentState == to && ts.targetState == to) return 0L
         val reverse = ts.currentState == to
@@ -475,7 +499,9 @@ class Animatic internal constructor(
             // compose before seeking forward (late children are delayed by the play time at which
             // they are first composed; see seekInPlace). Those frames are not presentable (shared
             // bounds have not started yet): keep showing the resting frame until the segment moves.
-            freezePresentedFrame()
+            if (!measureOnly) {
+                freezePresentedFrame()
+            }
             try {
                 ts.seekTo(0f, to)
             } catch (e: Throwable) {
@@ -528,6 +554,7 @@ class Animatic internal constructor(
         val fromState = states[segment]
         if (segment == states.lastIndex) {
             if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
+                sceneCleanlySettled = false
                 transitionState.snapTo(fromState)
             }
             val settled = resolveBackwardValueState(segment)
@@ -542,6 +569,7 @@ class Animatic internal constructor(
             // before the click). Targeting the next state at play time 0 is not equivalent: shared
             // bounds have not started yet, so moved elements would already sit at their targets.
             if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
+                sceneCleanlySettled = false
                 transitionState.snapTo(fromState)
             }
             currentState = resolveBackwardValueState(segment)
@@ -554,6 +582,10 @@ class Animatic internal constructor(
             // `toState` mounts, and settling at play time 0 prevents late-composed children from being
             // delayed by a non-zero play time (see Transition.TransitionAnimationState.updateAnimation).
             // Those settle frames are not presentable, so the last presented frame stays up.
+            val enteringFromSettledFrom = transitionState.currentState == fromState && transitionState.targetState == fromState
+            if (!enteringFromSettledFrom) {
+                sceneCleanlySettled = false
+            }
             withPresentedFrameFrozen {
                 if (transitionState.currentState != fromState) {
                     transitionState.snapTo(fromState)
@@ -711,6 +743,7 @@ class Animatic internal constructor(
     suspend fun jumpTo(index: Storyboard.Index): Boolean = exclusive {
         restingMidSegment = false
         retainedScrubSegment = -1
+        sceneCleanlySettled = true
         // TODO a little inefficient?
         var jumpIndex = states.binarySearchBy(index) { it.index }
         if (jumpIndex < 0) return@exclusive false

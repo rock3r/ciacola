@@ -19,6 +19,7 @@ import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Path
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -362,7 +363,14 @@ class TimelineStudioController(
             }
             val curDesc = a.stateDescriptors.getOrNull(a.activeFromStateIndex)
             val reqDesc = a.stateDescriptors.getOrNull(request.stateIndex)
-            val sameSlideDrag = isScrubDragging &&
+            val sameSegmentInPlace = scrubStepIsInPlace(
+                a.activeFromStateIndex,
+                a.activeToStateIndex,
+                request.stateIndex,
+                request.fraction,
+            )
+            val sameSlideDrag = !sameSegmentInPlace &&
+                isScrubDragging &&
                 curDesc != null &&
                 reqDesc != null &&
                 curDesc.sceneIndex == reqDesc.sceneIndex &&
@@ -370,12 +378,14 @@ class TimelineStudioController(
                 !curDesc.isBoundaryEnd &&
                 !reqDesc.isBoundaryStart &&
                 !reqDesc.isBoundaryEnd
-            val inPlace = !shouldForceRebuild && (
-                scrubStepIsInPlace(a.activeFromStateIndex, a.activeToStateIndex, request.stateIndex, request.fraction) ||
-                    sameSlideDrag
-                )
+            val inPlace = !shouldForceRebuild && (sameSegmentInPlace || sameSlideDrag)
             a.seekToSegment(request.stateIndex, request.fraction, rebuildScene = !inPlace)
-            restingNeedsRebuild = inPlace && request.fraction > 0f
+            restingNeedsRebuild = when {
+                !inPlace -> false
+                request.fraction <= 0f -> false
+                sameSlideDrag -> true
+                else -> restingNeedsRebuild
+            }
             lastApplied = request
             appliedScrubSequence = maxOf(appliedScrubSequence, request.sequence)
         }
@@ -417,112 +427,83 @@ class TimelineStudioController(
                         }
                     }
                 }
-                // Playback is real arrow-key playback: each animated segment runs through the
-                // animatic's own animateTo (so it looks exactly like presenting), and click holds
-                // just advance the playhead while the slide rests on its beat.
-                var playMs = startMs
                 val spans = snapshot.stateSpans
-                var spanIndex = spans.indexOfFirst { playMs < it.startMs + it.durationMs }
-                var isFirstSpan = true
-                while (spanIndex in spans.indices && playMs < endMs) {
-                    val span = spans[spanIndex++]
-                    val spanEnd = span.startMs + span.durationMs
-                    if (span.isHold) {
-                        if (isFirstSpan) {
-                            if (animatic.activeFromStateIndex != span.stateIndex || animatic.activeToStateIndex != span.stateIndex) {
-                                animatic.seekToSegment(span.stateIndex, 0f)
-                            }
-                            if (animatic.activeFromStateIndex != span.stateIndex || animatic.activeToStateIndex != span.stateIndex) {
-                                lastRequested = null
-                                return@launch
-                            }
-                        } else if (animatic.activeFromStateIndex != span.stateIndex || animatic.activeToStateIndex != span.stateIndex) {
-                            lastRequested = null
-                            return@launch
-                        }
-                        val expectedIndex = Storyboard.Index(span.sceneIndex, span.frameIndex)
-                        val holdStopMs = minOf(spanEnd.toFloat(), endMs.toFloat())
-                        var heldMs = playMs.toFloat()
-                        lastNanos = -1L
-                        while (heldMs < holdStopMs) {
-                            if (
-                                animatic.activeFromStateIndex != span.stateIndex ||
-                                animatic.activeToStateIndex != span.stateIndex ||
-                                animatic.currentIndex != expectedIndex ||
-                                animatic.targetIndex != expectedIndex
-                            ) {
-                                lastRequested = null
-                                return@launch
-                            }
-                            withFrameNanos { now ->
-                                if (lastNanos >= 0L) heldMs += ((now - lastNanos) / 1_000_000f).coerceIn(0f, 64f)
-                                lastNanos = now
-                            }
-                            if (
-                                animatic.activeFromStateIndex != span.stateIndex ||
-                                animatic.activeToStateIndex != span.stateIndex ||
-                                animatic.currentIndex != expectedIndex ||
-                                animatic.targetIndex != expectedIndex
-                            ) {
-                                lastRequested = null
-                                return@launch
-                            }
-                            val shown = heldMs.toInt().coerceAtMost(holdStopMs.toInt())
-                            lastRequested = ScrubRequest(shown, span.stateIndex, 0f, ++scrubSequence)
-                        }
-                    } else {
-                        if (!isFirstSpan && (animatic.activeFromStateIndex != span.stateIndex || animatic.activeToStateIndex != span.stateIndex)) {
-                            lastRequested = null
-                            return@launch
-                        }
-                        val fraction = if (span.durationMs > 0) (playMs - span.startMs).toFloat() / span.durationMs else 0f
-                        if (endMs < spanEnd && span.durationMs > 0) {
-                            val targetFrac = ((endMs - span.startMs).toFloat() / span.durationMs).coerceIn(0f, 1f)
-                            var curFrac = fraction.coerceIn(0f, targetFrac)
-                            val needsInitialRebuild = animatic.activeFromStateIndex != span.stateIndex
-                            animatic.seekToSegment(span.stateIndex, curFrac, rebuildScene = needsInitialRebuild)
-                            lastRequested = ScrubRequest(
-                                timeMs = (span.startMs + curFrac * span.durationMs).toInt(),
-                                stateIndex = span.stateIndex,
-                                fraction = curFrac,
-                                sequence = ++scrubSequence,
-                            )
-                            lastNanos = -1L
-                            while (curFrac < targetFrac) {
-                                if (animatic.activeFromStateIndex != span.stateIndex) {
-                                    lastRequested = null
-                                    return@launch
-                                }
-                                var deltaMs = 0f
-                                withFrameNanos { now ->
-                                    if (lastNanos >= 0L) deltaMs = ((now - lastNanos) / 1_000_000f).coerceIn(0f, 64f)
-                                    lastNanos = now
-                                }
-                                if (deltaMs > 0f) {
-                                    curFrac = (curFrac + deltaMs / span.durationMs.toFloat()).coerceAtMost(targetFrac)
-                                    animatic.seekToSegment(span.stateIndex, curFrac, rebuildScene = false)
-                                    val shown = (span.startMs + curFrac * span.durationMs).toInt().coerceAtMost(endMs)
-                                    lastRequested = ScrubRequest(shown, span.stateIndex, curFrac, ++scrubSequence)
-                                }
-                            }
-                        } else {
-                            lastRequested = null
-                            val expectedEndState = (span.stateIndex + 1).coerceAtMost(animatic.stateDescriptors.lastIndex)
-                            animatic.playSegmentToEnd(span.stateIndex, fraction.coerceIn(0f, 1f))
-                            if (animatic.activeFromStateIndex != expectedEndState || animatic.activeToStateIndex != expectedEndState) {
-                                return@launch
-                            }
-                            val endDesc = animatic.stateDescriptors.getOrNull(expectedEndState)
-                            if (endDesc != null && !endDesc.isBoundaryStart && !endDesc.isBoundaryEnd) {
-                                val expectedEndIndex = Storyboard.Index(endDesc.sceneIndex, endDesc.frameIndex)
-                                if (animatic.currentIndex != expectedEndIndex || animatic.targetIndex != expectedEndIndex) {
-                                    return@launch
-                                }
-                            }
-                        }
+                if (spans.isEmpty() || startMs >= endMs) return@launch
+
+                // Drive playback from a single monotonic wall-clock timer across the full span so
+                // segment settle frames never add dead time (~10% drift) and lastRequested stays
+                // continuous across segment boundaries (zero 1-frame snap-back).
+                var playTimeMs = startMs.toDouble()
+                val targetEndMs = endMs.toDouble()
+                var expectedFrom = -1
+                var expectedTo = -1
+                var expectedIndex: Storyboard.Index? = null
+                var isFirstFrame = true
+
+                fun isExternallyPreempted(): Boolean {
+                    if (expectedFrom < 0) return false
+                    if (animatic.activeFromStateIndex != expectedFrom || animatic.activeToStateIndex != expectedTo) {
+                        return true
                     }
-                    isFirstSpan = false
-                    playMs = maxOf(playMs, minOf(spanEnd, endMs))
+                    val idx = expectedIndex
+                    return idx != null && (animatic.currentIndex != idx || animatic.targetIndex != idx)
+                }
+
+                while (true) {
+                    withFrameNanos { now ->
+                        if (!isFirstFrame && lastNanos >= 0L) {
+                            val deltaMs = ((now - lastNanos) / 1_000_000.0).coerceIn(0.0, 250.0)
+                            playTimeMs = (playTimeMs + deltaMs).coerceAtMost(targetEndMs)
+                        }
+                        lastNanos = now
+                        isFirstFrame = false
+                    }
+
+                    if (isExternallyPreempted()) {
+                        lastRequested = null
+                        return@launch
+                    }
+
+                    val currentMs = playTimeMs.roundToInt().coerceIn(startMs, endMs)
+                    val (stateIdx, frac) = snapshot.stateFractionForTimeMs(currentMs)
+                    val activeSpan = spans.firstOrNull { span ->
+                        (span.durationMs > 0 || span == spans.last()) &&
+                            (currentMs < span.startMs + span.durationMs || span == spans.last())
+                    } ?: spans.last()
+                    val reqFrac = if (activeSpan.isHold) 0f else frac
+
+                    val reqSeq = ++scrubSequence
+                    lastRequested = ScrubRequest(currentMs, stateIdx, reqFrac, reqSeq)
+
+                    val targetFrom = stateIdx
+                    val targetTo = if (reqFrac > 0f && stateIdx < animatic.stateDescriptors.lastIndex) {
+                        stateIdx + 1
+                    } else {
+                        stateIdx
+                    }
+                    val needsSeek = animatic.activeFromStateIndex != targetFrom ||
+                        animatic.activeToStateIndex != targetTo ||
+                        (reqFrac > 0f && abs(animatic.activeFraction - reqFrac) > 1e-4f)
+
+                    if (needsSeek) {
+                        val rebuild = expectedFrom < 0 && animatic.activeFromStateIndex != targetFrom
+                        animatic.seekToSegment(targetFrom, reqFrac, rebuildScene = rebuild)
+                    }
+                    appliedScrubSequence = maxOf(appliedScrubSequence, reqSeq)
+
+                    if (animatic.activeFromStateIndex != targetFrom || animatic.activeToStateIndex != targetTo) {
+                        lastRequested = null
+                        return@launch
+                    }
+                    expectedFrom = targetFrom
+                    expectedTo = targetTo
+                    expectedIndex = if (activeSpan.isHold) {
+                        Storyboard.Index(activeSpan.sceneIndex, activeSpan.frameIndex)
+                    } else {
+                        null
+                    }
+
+                    if (playTimeMs >= targetEndMs) break
                 }
             } finally {
                 isPlaying = false

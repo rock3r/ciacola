@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -44,9 +45,11 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextStyle
@@ -69,7 +72,7 @@ fun DottedLeaderRow(
     highlightProgress: (() -> Float)? = null,
 ) {
     val theme = LocalDeckTheme.current
-    Row(
+    Layout(
         modifier = modifier
             .fillMaxWidth()
             .reviewTarget(
@@ -77,37 +80,60 @@ fun DottedLeaderRow(
                 label = "$leading → $trailing",
                 textSnippet = "$leading … $trailing",
             ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        Text(
-            text = leading,
-            style = theme.typography.bodyEmphasis,
-            color = theme.colors.foreground,
+        content = {
+            Text(
+                text = leading,
+                style = theme.typography.bodyEmphasis,
+                color = theme.colors.foreground,
+            )
+            Canvas(Modifier.widthIn(min = 36.dp).height(4.dp)) {
+                val dotEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 8.dp.toPx()), 0f)
+                drawLine(
+                    color = theme.colors.muted.copy(alpha = 0.65f),
+                    start = Offset(0f, size.height / 2f),
+                    end = Offset(size.width, size.height / 2f),
+                    strokeWidth = 2.5.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect = dotEffect,
+                )
+            }
+            BasicText(
+                text = trailing,
+                style = trailingStyle,
+                color = {
+                    trailingHighlightColor(
+                        base = theme.colors.foreground,
+                        accent = theme.colors.accent,
+                        progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
+                    )
+                },
+                modifier = trailingModifier,
+            )
+        },
+    ) { measurables, constraints ->
+        val gapPx = 20.dp.roundToPx()
+        val minDotsPx = 36.dp.roundToPx()
+        val maxW = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val trailingPlaceable = measurables[2].measure(loose)
+        val maxLeadingW = (maxW - trailingPlaceable.width - minDotsPx - gapPx * 2).coerceAtLeast(0)
+        val leadingPlaceable = measurables[0].measure(loose.copy(maxWidth = maxLeadingW))
+        val dotsW = (maxW - leadingPlaceable.width - trailingPlaceable.width - gapPx * 2)
+            .coerceAtLeast(minDotsPx.coerceAtMost((maxW - trailingPlaceable.width - gapPx).coerceAtLeast(0)))
+        val dotsPlaceable = measurables[1].measure(
+            Constraints(minWidth = dotsW, maxWidth = dotsW, minHeight = 0, maxHeight = loose.maxHeight),
         )
-        Canvas(Modifier.weight(1f).height(4.dp)) {
-            val dotEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 8.dp.toPx()), 0f)
-            drawLine(
-                color = theme.colors.muted.copy(alpha = 0.65f),
-                start = Offset(0f, size.height / 2f),
-                end = Offset(size.width, size.height / 2f),
-                strokeWidth = 2.5.dp.toPx(),
-                cap = StrokeCap.Round,
-                pathEffect = dotEffect,
+        val rowHeight = maxOf(leadingPlaceable.height, dotsPlaceable.height, trailingPlaceable.height)
+            .coerceIn(constraints.minHeight, constraints.maxHeight)
+        val rowWidth = maxW.coerceIn(constraints.minWidth, constraints.maxWidth)
+        layout(rowWidth, rowHeight) {
+            leadingPlaceable.placeRelative(0, (rowHeight - leadingPlaceable.height) / 2)
+            dotsPlaceable.placeRelative(leadingPlaceable.width + gapPx, (rowHeight - dotsPlaceable.height) / 2)
+            trailingPlaceable.placeRelative(
+                (rowWidth - trailingPlaceable.width).coerceAtLeast(0),
+                (rowHeight - trailingPlaceable.height) / 2,
             )
         }
-        BasicText(
-            text = trailing,
-            style = trailingStyle,
-            color = {
-                trailingHighlightColor(
-                    base = theme.colors.foreground,
-                    accent = theme.colors.accent,
-                    progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
-                )
-            },
-            modifier = trailingModifier,
-        )
     }
 }
 

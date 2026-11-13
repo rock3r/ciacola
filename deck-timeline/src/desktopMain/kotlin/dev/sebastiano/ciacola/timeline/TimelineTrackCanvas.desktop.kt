@@ -57,6 +57,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.exp
@@ -75,6 +76,7 @@ internal fun MasterDeckTimelineCanvas(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val textMeasurer = rememberTextMeasurer()
+    val textCache = remember(textMeasurer) { TimelineTextLayoutCache() }
     val globalColors = JewelTheme.globalColors
     val palette = JewelTheme.colorPalette
     val isDark = JewelTheme.isDark
@@ -118,7 +120,8 @@ internal fun MasterDeckTimelineCanvas(
         )
     }
 
-    val rulerTextStyle = TextStyle(fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = colors.textSecondary)
+            val rulerTextStyle = TextStyle(fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = colors.textSecondary)
+            val holdTagStyle = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1404))
 
     val playheadMs = controller.currentPlayheadTimeMs
     // Auto-scroll when playing, advancing, or jumping moves the playhead off-screen (but not during scrub drags).
@@ -504,11 +507,12 @@ internal fun MasterDeckTimelineCanvas(
                             } else {
                                 blk.label
                             }
-                            val rightClip = x0 + w - (if (isBarOverridden) 13f else 6f)
+                            val rightClip = minOf(x0 + w - (if (isBarOverridden) 13f else 6f), size.width - 4f)
                             val labelAvailW = rightClip - (x0 + 7f)
                             if (labelAvailW > 6f) {
                                 drawEllipsizedLabel(
                                     textMeasurer = textMeasurer,
+                                    textCache = textCache,
                                     text = barText,
                                     style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = barLabelInk),
                                     left = x0 + 7f,
@@ -554,6 +558,7 @@ internal fun MasterDeckTimelineCanvas(
                 if (slideLabelAvailW > 14f) {
                     drawEllipsizedLabel(
                         textMeasurer = textMeasurer,
+                        textCache = textCache,
                         text = slide.label,
                         style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = slideLabelInk),
                         left = labelLeft,
@@ -569,6 +574,7 @@ internal fun MasterDeckTimelineCanvas(
             val minorStep = (majorStep / 5).coerceAtLeast(1)
             var tickMs = (visibleStartMs.coerceAtLeast(0f) / minorStep).toInt() * minorStep
             val lastTick = minOf(visibleEndMs.toInt(), snapshot.totalDurationMs + majorStep)
+            val tickMarginPx = 6.dp.toPx()
             var lastDrawnTickRight = Float.NEGATIVE_INFINITY
             while (tickMs <= lastTick) {
                 val tx = xOf(tickMs)
@@ -580,15 +586,15 @@ internal fun MasterDeckTimelineCanvas(
                     strokeWidth = 1f,
                 )
                 if (isMajor && tx in -4f..size.width) {
-                    val tickMeasured = textMeasurer.measure(
+                    val tickMeasured = textCache.measure(
+                        textMeasurer = textMeasurer,
                         text = formatTimelineTick(tickMs, majorStep),
                         style = rulerTextStyle,
-                        maxLines = 1,
-                        softWrap = false,
+                        density = this.density,
                     )
-                    val maxTickLeft = (size.width - tickMeasured.size.width - 2f).coerceAtLeast(0f)
-                    val tickLeft = (tx + 3f).coerceIn(0f, maxTickLeft)
-                    if (tickLeft >= lastDrawnTickRight + 6f) {
+                    val tickLeft = tx + 3f
+                    val fitsRight = tickLeft >= 0f && tickLeft + tickMeasured.size.width + tickMarginPx <= size.width
+                    if (fitsRight && tickLeft >= lastDrawnTickRight + tickMarginPx) {
                         drawText(
                             textLayoutResult = tickMeasured,
                             topLeft = Offset(tickLeft, slideRibbonPx + 2f),
@@ -617,28 +623,27 @@ internal fun MasterDeckTimelineCanvas(
                 }
                 drawPath(diamond, color = dColor)
                 if (beat.isInjected) {
-                    val holdMeasured = textMeasurer.measure(
+                    val holdMeasured = textCache.measure(
+                        textMeasurer = textMeasurer,
                         text = "HOLD",
-                        style = TextStyle(
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1A1404),
-                        ),
-                        maxLines = 1,
+                        style = holdTagStyle,
+                        density = this.density,
                     )
                     val tagW = holdMeasured.size.width + 6f
                     val tagH = holdMeasured.size.height + 2f
                     val tagTop = (cy - tagH / 2f).coerceAtLeast(slideRibbonPx + 1f)
-                    drawRoundRect(
-                        color = colors.injectedBeatLine,
-                        topLeft = Offset(bx + 6f, tagTop),
-                        size = Size(tagW, tagH),
-                        cornerRadius = CornerRadius(3f, 3f),
-                    )
-                    drawText(
-                        textLayoutResult = holdMeasured,
-                        topLeft = Offset(bx + 9f, tagTop + 1f),
-                    )
+                    if (bx + 6f + tagW <= size.width - 2f) {
+                        drawRoundRect(
+                            color = colors.injectedBeatLine,
+                            topLeft = Offset(bx + 6f, tagTop),
+                            size = Size(tagW, tagH),
+                            cornerRadius = CornerRadius(3f, 3f),
+                        )
+                        drawText(
+                            textLayoutResult = holdMeasured,
+                            topLeft = Offset(bx + 9f, tagTop + 1f),
+                        )
+                    }
                 }
             }
 
@@ -647,16 +652,7 @@ internal fun MasterDeckTimelineCanvas(
             // 3. Playhead.
             val playheadX = xOf(playheadMs)
             if (playheadX in -8f..(size.width + 8f)) {
-                drawLine(colors.playhead, Offset(playheadX, 0f), Offset(playheadX, size.height), 2f)
-                val cap = Path().apply {
-                    moveTo(playheadX - 6f, 0f)
-                    lineTo(playheadX + 6f, 0f)
-                    lineTo(playheadX + 6f, 9f)
-                    lineTo(playheadX, 15f)
-                    lineTo(playheadX - 6f, 9f)
-                    close()
-                }
-                drawPath(cap, color = colors.playhead)
+                drawPlayheadWithPentagonCap(x = playheadX, height = size.height, color = colors.playhead)
             }
         }
 

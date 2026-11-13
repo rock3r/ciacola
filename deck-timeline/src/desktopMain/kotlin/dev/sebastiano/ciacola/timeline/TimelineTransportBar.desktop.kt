@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -53,7 +54,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.bnorm.storyboard.Storyboard
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import java.util.Locale
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
@@ -79,7 +82,57 @@ internal val SLIDE_RIBBON_HEIGHT = 26.dp
 internal val TIME_RULER_HEIGHT = 26.dp
 internal val HEADER_TOTAL_HEIGHT = 52.dp
 internal val TRACK_ROW_HEIGHT = 28.dp
-internal val LAYER_COLUMN_WIDTH = 224.dp
+
+/**
+ * Formats the transport timecode & `S_:B_` location badge from the playhead's active [StateTimeSpan]
+ * so mid-segment playback/scrubbing shows `S1:B1 → B2` or `S1:B2 → S2:B1` instead of jumping
+ * prematurely to `animatic.targetIndex`.
+ */
+fun formatTimelineLocationBadge(
+    snapshot: DeckTimelineSnapshot,
+    timeMs: Int,
+    activeSubLoopId: String?,
+    fallbackIndex: Storyboard.Index,
+    sceneBeatsCountProvider: (sceneIndex: Int) -> Int,
+): String {
+    val safeMs = timeMs.coerceAtLeast(0)
+    val seconds = safeMs / 1000
+    val millis = safeMs % 1000
+    val formattedTime = String.format(Locale.US, "%02d.%03ds", seconds, millis)
+    if (activeSubLoopId != null) {
+        return "$formattedTime · Loop"
+    }
+    val spans = snapshot.stateSpans
+    if (spans.isEmpty()) {
+        val beats = sceneBeatsCountProvider(fallbackIndex.sceneIndex).coerceAtLeast(1)
+        return "$formattedTime · S${fallbackIndex.sceneIndex + 1}:B${fallbackIndex.frameIndex + 1}/$beats"
+    }
+    val clampedMs = safeMs.coerceIn(0, snapshot.totalDurationMs.coerceAtLeast(1))
+    val span = spans.firstOrNull { s ->
+        (s.durationMs > 0 || s == spans.last()) &&
+            (clampedMs < s.startMs + s.durationMs || s == spans.last())
+    } ?: spans.last()
+
+    val beatCount = sceneBeatsCountProvider(span.sceneIndex).coerceAtLeast(1)
+    val locationPart = when {
+        span.isHold -> "S${span.sceneIndex + 1}:B${span.frameIndex + 1}/$beatCount"
+        span.isBoundary && span.frameIndex < 0 -> {
+            val fromScene = (span.sceneIndex - 1).coerceAtLeast(0)
+            val fromBeat = sceneBeatsCountProvider(fromScene).coerceAtLeast(1)
+            "S${fromScene + 1}:B$fromBeat → S${span.sceneIndex + 1}:B1"
+        }
+        span.isBoundary || span.frameIndex + 1 >= beatCount -> {
+            val toScene = (span.sceneIndex + 1).coerceAtMost((snapshot.slides.size - 1).coerceAtLeast(span.sceneIndex))
+            if (toScene != span.sceneIndex) {
+                "S${span.sceneIndex + 1}:B$beatCount → S${toScene + 1}:B1"
+            } else {
+                "S${span.sceneIndex + 1}:B${span.frameIndex + 1}/$beatCount"
+            }
+        }
+        else -> "S${span.sceneIndex + 1}:B${span.frameIndex + 1} → B${span.frameIndex + 2}"
+    }
+    return "$formattedTime · $locationPart"
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -157,14 +210,17 @@ internal fun TimelineTransportBar(
                 controller.stepBeat(+1)
             }
 
-            val seconds = nowMs / 1000
-            val millis = nowMs % 1000
-            val formattedTime = "${seconds.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}s"
-            val locationText = if (activeSubLoopId != null) {
-                "$formattedTime · Loop"
-            } else {
-                "$formattedTime · S${idx.sceneIndex + 1}:B${idx.frameIndex + 1}/$sceneBeatsCount"
-            }
+            val locationText = formatTimelineLocationBadge(
+                snapshot = controller.snapshot,
+                timeMs = nowMs,
+                activeSubLoopId = activeSubLoopId,
+                fallbackIndex = idx,
+                sceneBeatsCountProvider = { sIdx ->
+                    controller.animatic.storyboard.scenes.getOrNull(sIdx)?.frames?.size
+                        ?: controller.snapshot.slides.getOrNull(sIdx)?.beatCount
+                        ?: 1
+                },
+            )
             Box(
                 modifier = Modifier
                     .padding(start = 4.dp)
@@ -410,8 +466,9 @@ internal fun TimelineMultiTrackArea(
     Row(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .width(LAYER_COLUMN_WIDTH)
+                .width(viewport.layerColumnWidthDp.dp)
                 .fillMaxHeight()
+                .clipToBounds()
                 .background(globalColors.panelBackground),
         ) {
             Column(
@@ -450,10 +507,21 @@ internal fun TimelineMultiTrackArea(
                     } else {
                         track.trackId in overridesData.tracks
                     }
-                    val displayRowLabel = if (loopBlock?.loopId != null) {
+                    val fullLoopTooltip = if (loopBlock?.loopId != null) {
                         val livePeriod = overridesData.loopPeriodsMs[loopBlock.loopId] ?: loopBlock.loopPeriodMs ?: 6_000L
                         val prefix = track.label.substringBeforeLast(" · ")
                         "$prefix · ${livePeriod}ms"
+                    } else {
+                        track.label
+                    }
+                    val displayRowLabel = if (loopBlock?.loopId != null) {
+                        val livePeriod = overridesData.loopPeriodsMs[loopBlock.loopId] ?: loopBlock.loopPeriodMs ?: 6_000L
+                        val prefix = track.label.substringBeforeLast(" · ")
+                        if (isRowOverridden || viewport.layerColumnWidthDp >= 290f) {
+                            "$prefix · ${livePeriod}ms"
+                        } else {
+                            prefix
+                        }
                     } else {
                         track.label
                     }
@@ -529,7 +597,7 @@ internal fun TimelineMultiTrackArea(
                                     )
                                 }
                             }
-                            Tooltip(tooltip = { Text(displayRowLabel) }) {
+                            Tooltip(tooltip = { Text(fullLoopTooltip) }) {
                                 Text(
                                     text = displayRowLabel,
                                     style = JewelTheme.typography.small,
@@ -543,19 +611,20 @@ internal fun TimelineMultiTrackArea(
                             Tooltip(tooltip = { Text("Enter Loop Sub-Composition") }) {
                                 Box(
                                     modifier = Modifier
+                                        .padding(start = 4.dp)
                                         .border(1.dp, globalColors.borders.focused, RoundedCornerShape(4.dp))
                                         .studioActivatableFocus(focusRingColor)
                                         .clickable {
                                             controller.enterLoopSubComp(scope, loopBlock.loopId, loopBlock.sceneIndex)
                                         }
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
                                         .testTag("ciacola-timeline-open-loop")
                                         .semantics {
                                             role = Role.Button
                                             contentDescription = "Enter loop sub-composition for ${track.label}"
                                         },
                                 ) {
-                                    Text("Sub-Comp ▸", style = JewelTheme.typography.small, color = globalColors.text.normal)
+                                    Text("Sub ▸", style = JewelTheme.typography.small, color = globalColors.text.normal)
                                 }
                             }
                         }
@@ -565,7 +634,7 @@ internal fun TimelineMultiTrackArea(
             }
         }
 
-        Divider(Orientation.Vertical, Modifier.fillMaxHeight())
+        LayerColumnSplitter(viewport)
 
         Box(Modifier.weight(1f).fillMaxHeight()) {
             MasterDeckTimelineCanvas(
@@ -574,14 +643,14 @@ internal fun TimelineMultiTrackArea(
                 surface = surface,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(end = 12.dp, bottom = 10.dp),
+                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP),
             )
             VerticalScrollbar(
                 scrollState = viewport.verticalScroll,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .fillMaxHeight()
-                    .padding(top = HEADER_TOTAL_HEIGHT, bottom = 10.dp)
+                    .padding(top = HEADER_TOTAL_HEIGHT, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP)
                     .testTag("ciacola-timeline-vscrollbar"),
             )
             val horizontalState = rememberScrollableState { delta ->
@@ -596,7 +665,7 @@ internal fun TimelineMultiTrackArea(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .padding(end = 12.dp)
+                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP)
                     .testTag("ciacola-timeline-hscrollbar"),
             )
         }

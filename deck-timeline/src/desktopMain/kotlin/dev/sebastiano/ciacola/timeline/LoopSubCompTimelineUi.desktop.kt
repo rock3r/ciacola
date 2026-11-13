@@ -1,21 +1,38 @@
 package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.v2.ScrollbarAdapter
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -25,12 +42,15 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -53,9 +73,136 @@ import kotlin.math.sin
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
+import org.jetbrains.jewel.ui.component.HorizontalScrollbar
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.Tooltip
+import org.jetbrains.jewel.ui.component.VerticalScrollbar
 import org.jetbrains.jewel.ui.theme.colorPalette
 import org.jetbrains.jewel.ui.typography
+
+internal val TIMELINE_SCROLLBAR_GUTTER_DP = 16.dp
+internal val TIMELINE_H_SCROLLBAR_GUTTER_DP = 12.dp
+
+private data class TimelineTextLayoutCacheKey(
+    val text: String,
+    val style: TextStyle,
+    val maxWidthPx: Int,
+    val softWrap: Boolean,
+    val overflow: TextOverflow,
+    val density: Float,
+)
+
+/**
+ * Bounded LRU cache for measured [TextLayoutResult] instances on 60 fps timeline canvas draw passes.
+ */
+class TimelineTextLayoutCache(private val maxEntries: Int = 256) {
+    private val entries = object : LinkedHashMap<TimelineTextLayoutCacheKey, TextLayoutResult>(64, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<TimelineTextLayoutCacheKey, TextLayoutResult>?,
+        ): Boolean = size > maxEntries
+    }
+
+    val size: Int get() = entries.size
+
+    fun measure(
+        textMeasurer: TextMeasurer,
+        text: String,
+        style: TextStyle,
+        density: Float,
+        maxWidthPx: Int = Int.MAX_VALUE,
+        softWrap: Boolean = false,
+        overflow: TextOverflow = TextOverflow.Clip,
+    ): TextLayoutResult {
+        val key = TimelineTextLayoutCacheKey(
+            text = text,
+            style = style,
+            maxWidthPx = maxWidthPx,
+            softWrap = softWrap,
+            overflow = overflow,
+            density = density,
+        )
+        entries[key]?.let { return it }
+        val constraints = if (maxWidthPx == Int.MAX_VALUE) Constraints() else Constraints(maxWidth = maxWidthPx)
+        val result = textMeasurer.measure(
+            text = text,
+            style = style,
+            maxLines = 1,
+            softWrap = softWrap,
+            overflow = overflow,
+            constraints = constraints,
+        )
+        entries[key] = result
+        return result
+    }
+}
+
+/** Shared 5-point pentagon playhead cap + vertical hair line used by both Master Deck and Loop Sub-Comp. */
+internal fun DrawScope.drawPlayheadWithPentagonCap(
+    x: Float,
+    height: Float,
+    color: Color,
+) {
+    drawLine(color, Offset(x, 0f), Offset(x, height), 2f)
+    val cap = Path().apply {
+        moveTo(x - 6f, 0f)
+        lineTo(x + 6f, 0f)
+        lineTo(x + 6f, 9f)
+        lineTo(x, 15f)
+        lineTo(x - 6f, 9f)
+        close()
+    }
+    drawPath(cap, color = color)
+}
+
+/** Hover-highlighted 5 dp vertical splitter for resizing the layer column (`180..420.dp`, double-click resets). */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun LayerColumnSplitter(
+    viewport: TimelineViewportState,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val globalColors = JewelTheme.globalColors
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    var dragging by remember { mutableStateOf(false) }
+    val active = hovered || dragging
+
+    Tooltip(tooltip = { Text("Drag to resize layer column (double-click to reset)") }) {
+        Box(
+            modifier = modifier
+                .width(5.dp)
+                .fillMaxHeight()
+                .hoverable(interactionSource)
+                .background(
+                    if (active) globalColors.outlines.focused.copy(alpha = 0.14f) else Color.Transparent,
+                )
+                .pointerHoverIcon(PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR)))
+                .pointerInput(viewport) {
+                    detectTapGestures(onDoubleTap = { viewport.resetLayerColumnWidth() })
+                }
+                .pointerInput(viewport, density.density) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragging = true },
+                        onDragEnd = { dragging = false },
+                        onDragCancel = { dragging = false },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        viewport.resizeLayerColumnBy(dragAmount / density.density)
+                    }
+                }
+                .testTag("ciacola-layer-column-splitter"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(if (active) 2.dp else 1.dp)
+                    .fillMaxHeight()
+                    .background(if (active) globalColors.outlines.focused else globalColors.borders.normal),
+            )
+        }
+    }
+}
 
 internal enum class DragMode {
     ScrubPlayhead,
@@ -158,6 +305,7 @@ internal fun pointerIconForDragMode(dragMode: DragMode?): PointerIcon = when (dr
 
 internal fun DrawScope.drawEllipsizedLabel(
     textMeasurer: TextMeasurer,
+    textCache: TimelineTextLayoutCache,
     text: String,
     style: TextStyle,
     left: Float,
@@ -168,13 +316,14 @@ internal fun DrawScope.drawEllipsizedLabel(
 ) {
     val maxW = availWidth.roundToInt()
     if (maxW < 8) return
-    val measured = textMeasurer.measure(
+    val measured = textCache.measure(
+        textMeasurer = textMeasurer,
         text = text,
         style = style,
-        maxLines = 1,
+        density = density,
+        maxWidthPx = maxW,
         softWrap = true,
         overflow = TextOverflow.Ellipsis,
-        constraints = Constraints(maxWidth = maxW),
     )
     if (measured.size.width > availWidth + 1.5f) return
     clipRect(left = left - 1f, top = clipTop, right = left + availWidth, bottom = clipBottom) {
@@ -213,122 +362,242 @@ internal fun LoopSubCompTimelineView(
 ) {
     val density = LocalDensity.current
     val textMeasurer: TextMeasurer = rememberTextMeasurer()
+    val textCache = remember(textMeasurer) { TimelineTextLayoutCache() }
     val globalColors = JewelTheme.globalColors
     val palette = JewelTheme.colorPalette
     val isDark = JewelTheme.isDark
+    val colors = remember(JewelTheme.instanceUuid, isDark) {
+        buildStudioCanvasPaletteForTheme(
+            isDark = isDark,
+            panelBg = globalColors.panelBackground,
+            borderNormal = globalColors.borders.normal,
+            textPrimary = globalColors.text.normal,
+            focusedOutline = globalColors.outlines.focused,
+            injectedBeatLine = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFE0A82E),
+            boundaryLine = palette.tealOrNull(if (isDark) 6 else 5) ?: Color(0xFF2FA896),
+            playhead = palette.redOrNull(if (isDark) 6 else 5) ?: Color(0xFFE5534B),
+        )
+    }
 
     val desc = controller.loopClock.registeredLoops[loopId]
         ?: LoopSubCompDescriptor(loopId = loopId, label = loopId, defaultPeriodMillis = 6_000L)
     val periodMs = controller.loopClock.effectivePeriodMillis(loopId, desc.defaultPeriodMillis).toInt()
     val channels = desc.harmonicChannels
+    val slideRibbonPx = with(density) { SLIDE_RIBBON_HEIGHT.toPx() }
     val rulerPx = with(density) { HEADER_TOTAL_HEIGHT.toPx() }
     val rowPx = with(density) { 36.dp.toPx() }
+    val verticalScroll = rememberScrollState()
+    var canvasWidthPx by remember { mutableFloatStateOf(0f) }
+    var hScrollPx by remember { mutableFloatStateOf(0f) }
 
     Row(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .width(LAYER_COLUMN_WIDTH)
+                .width(controller.viewport.layerColumnWidthDp.dp)
                 .fillMaxHeight()
+                .clipToBounds()
                 .background(globalColors.panelBackground),
         ) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(HEADER_TOTAL_HEIGHT).padding(horizontal = 10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(HEADER_TOTAL_HEIGHT)
+                    .background(colors.headerBg)
+                    .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Text(
                     text = "LOOP SUB-COMP (${periodMs}ms)",
                     style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
                     color = globalColors.text.normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-            channels.forEachIndexed { idx, ch ->
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 12.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Text(text = "${idx + 1}. $ch", style = JewelTheme.typography.small, color = studioSecondaryTextColor(isDark))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(verticalScroll),
+            ) {
+                channels.forEachIndexed { idx, ch ->
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            text = "${idx + 1}. $ch",
+                            style = JewelTheme.typography.small,
+                            color = studioSecondaryTextColor(isDark),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
+                Spacer(Modifier.height(24.dp))
             }
         }
 
-        Divider(Orientation.Vertical, Modifier.fillMaxHeight())
+        LayerColumnSplitter(controller.viewport)
 
-        Canvas(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .testTag("ciacola-subcomp-canvas")
-                .semantics {
-                    contentDescription = "Loop sub-composition wave timeline for ${desc.label}"
-                    stateDescription = "Playhead at ${formatMillisForAccessibility(controller.currentPlayheadTimeMs)} " +
-                        "of ${formatMillisForAccessibility(periodMs)}"
-                }
-                .pointerInput(periodMs) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        val usableW = (size.width - 32f).coerceAtLeast(1f)
-                        controller.scrubToTimeMs((((down.position.x - 16f) / usableW) * periodMs).roundToInt())
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            val ch = ev.changes.firstOrNull() ?: break
-                            if (!ch.pressed) break
-                            ch.consume()
-                            controller.scrubToTimeMs((((ch.position.x - 16f) / usableW) * periodMs).roundToInt())
-                        }
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP)
+                    .clipToBounds()
+                    .onSizeChanged { canvasWidthPx = it.width.toFloat() }
+                    .testTag("ciacola-subcomp-canvas")
+                    .semantics {
+                        contentDescription = "Loop sub-composition wave timeline for ${desc.label}"
+                        stateDescription = "Playhead at ${formatMillisForAccessibility(controller.currentPlayheadTimeMs)} " +
+                            "of ${formatMillisForAccessibility(periodMs)}"
                     }
-                },
-        ) {
-            val leftPad = 16f
-            val usableW = (size.width - 32f).coerceAtLeast(1f)
-            val teal = palette.tealOrNull(if (isDark) 6 else 5) ?: Color(0xFF35B5AC)
-            val playheadColor = palette.redOrNull(if (isDark) 6 else 5) ?: Color(0xFFE5534B)
+                    .pointerInput(periodMs) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            val usableW = (size.width - 32f).coerceAtLeast(1f)
+                            controller.scrubToTimeMs((((down.position.x - 16f + hScrollPx) / usableW) * periodMs).roundToInt())
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val ch = ev.changes.firstOrNull() ?: break
+                                if (!ch.pressed) break
+                                ch.consume()
+                                controller.scrubToTimeMs((((ch.position.x - 16f + hScrollPx) / usableW) * periodMs).roundToInt())
+                            }
+                        }
+                    },
+            ) {
+                val leftPad = 16f
+                val usableW = (size.width - 32f).coerceAtLeast(1f)
+                val teal = colors.loopBar
+                val scrollY = verticalScroll.value.toFloat()
 
-            drawRect(color = globalColors.panelBackground)
+                drawRect(color = colors.bg)
 
-            val steps = 6
-            val tickStyle = TextStyle(fontSize = 10.sp, color = studioSecondaryTextColor(isDark), fontFamily = FontFamily.Monospace)
-            for (s in 0..steps) {
-                val frac = s.toFloat() / steps.toFloat()
-                val x = leftPad + frac * usableW
-                drawLine(
-                    color = globalColors.borders.normal.copy(alpha = 0.5f),
-                    start = Offset(x, rulerPx - 14f),
-                    end = Offset(x, size.height),
-                    strokeWidth = 1f,
-                )
-                val label = String.format(Locale.US, "%.2fs", (frac * periodMs) / 1000.0)
-                val measured = textMeasurer.measure(label, style = tickStyle, maxLines = 1, softWrap = false)
-                val textX = if (s == steps) (x - measured.size.width - 3f).coerceAtLeast(0f) else x + 3f
-                drawText(textLayoutResult = measured, topLeft = Offset(textX, rulerPx - 22f))
-            }
-            drawLine(globalColors.borders.normal, Offset(0f, rulerPx), Offset(size.width, rulerPx), 1.5f)
-
-            channels.forEachIndexed { idx, _ ->
-                val yTop = rulerPx + idx * rowPx + 4f
-                val barH = rowPx - 8f
-                drawRoundRect(
-                    color = teal.copy(alpha = 0.22f),
-                    topLeft = Offset(leftPad, yTop),
-                    size = Size(usableW, barH),
-                    cornerRadius = CornerRadius(5f, 5f),
-                )
-                val wave = Path()
-                val samples = 72
-                for (k in 0..samples) {
-                    val f = k.toFloat() / samples.toFloat()
-                    val wx = leftPad + f * usableW
-                    val phase = f * 2f * PI.toFloat() + idx * (PI.toFloat() / 2f)
-                    val wy = yTop + barH * 0.5f - sin(phase) * (barH * 0.34f)
-                    if (k == 0) wave.moveTo(wx, wy) else wave.lineTo(wx, wy)
+                // Scrollable harmonic wave channels (clipped below fixed header).
+                clipRect(top = rulerPx) {
+                    channels.forEachIndexed { idx, _ ->
+                        val yTop = rulerPx + idx * rowPx - scrollY + 4f
+                        val barH = rowPx - 8f
+                        if (yTop + barH < rulerPx || yTop > size.height) return@forEachIndexed
+                        drawLine(
+                            color = colors.gridLine,
+                            start = Offset(0f, yTop - 4f + rowPx),
+                            end = Offset(size.width, yTop - 4f + rowPx),
+                            strokeWidth = 1f,
+                        )
+                        drawRoundRect(
+                            color = teal.copy(alpha = 0.22f),
+                            topLeft = Offset(leftPad - hScrollPx, yTop),
+                            size = Size(usableW, barH),
+                            cornerRadius = CornerRadius(5f, 5f),
+                        )
+                        val wave = Path()
+                        val samples = 72
+                        for (k in 0..samples) {
+                            val f = k.toFloat() / samples.toFloat()
+                            val wx = leftPad - hScrollPx + f * usableW
+                            val phase = f * 2f * PI.toFloat() + idx * (PI.toFloat() / 2f)
+                            val wy = yTop + barH * 0.5f - sin(phase) * (barH * 0.34f)
+                            if (k == 0) wave.moveTo(wx, wy) else wave.lineTo(wx, wy)
+                        }
+                        drawPath(wave, color = teal, style = Stroke(width = 2f))
+                    }
                 }
-                drawPath(wave, color = teal, style = Stroke(width = 2f))
+
+                // Fixed header matching Master Deck shading & ribbon style.
+                drawRect(color = colors.headerBg, topLeft = Offset.Zero, size = Size(size.width, rulerPx))
+                val ribbonFill = teal.copy(alpha = 0.85f)
+                val ribbonInk = barLabelInkForFill(compositeColorOver(ribbonFill, colors.headerBg))
+                drawRoundRect(
+                    color = ribbonFill,
+                    topLeft = Offset(leftPad - hScrollPx, 2f),
+                    size = Size(usableW, slideRibbonPx - 4f),
+                    cornerRadius = CornerRadius(4f, 4f),
+                )
+                drawEllipsizedLabel(
+                    textMeasurer = textMeasurer,
+                    textCache = textCache,
+                    text = "⟳ ${desc.label} (${periodMs}ms cycle)",
+                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = ribbonInk),
+                    left = (leftPad - hScrollPx + 6f).coerceAtLeast(6f),
+                    top = 5f,
+                    availWidth = (usableW - 12f).coerceAtLeast(0f),
+                    clipTop = 2f,
+                    clipBottom = slideRibbonPx - 2f,
+                )
+
+                val steps = 6
+                val tickStyle = TextStyle(fontSize = 10.sp, color = colors.textSecondary, fontFamily = FontFamily.Monospace)
+                val rightMarginPx = 6.dp.toPx()
+                var lastDrawnTickRight = Float.NEGATIVE_INFINITY
+                for (s in 0..steps) {
+                    val frac = s.toFloat() / steps.toFloat()
+                    val x = leftPad - hScrollPx + frac * usableW
+                    drawLine(
+                        color = colors.gridLine,
+                        start = Offset(x, slideRibbonPx + 4f),
+                        end = Offset(x, size.height),
+                        strokeWidth = 1f,
+                    )
+                    val label = String.format(Locale.US, "%.2fs", (frac * periodMs) / 1000.0)
+                    val measured = textCache.measure(
+                        textMeasurer = textMeasurer,
+                        text = label,
+                        style = tickStyle,
+                        density = this.density,
+                    )
+                    val textX = if (s == steps) (x - measured.size.width - 3f).coerceAtLeast(0f) else x + 3f
+                    val fitsRight = textX >= 0f && (s == steps || textX + measured.size.width + rightMarginPx <= size.width)
+                    if (fitsRight && textX >= lastDrawnTickRight + rightMarginPx) {
+                        drawText(textLayoutResult = measured, topLeft = Offset(textX, slideRibbonPx + 3f))
+                        lastDrawnTickRight = textX + measured.size.width
+                    }
+                }
+                drawLine(colors.gridLine, Offset(0f, rulerPx), Offset(size.width, rulerPx), 1.5f)
+
+                val scrubFrac = (controller.currentPlayheadTimeMs.toFloat() / periodMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+                val px = leftPad - hScrollPx + scrubFrac * usableW
+                if (px in -8f..(size.width + 8f)) {
+                    drawPlayheadWithPentagonCap(x = px, height = size.height, color = colors.playhead)
+                }
             }
 
-            val scrubFrac = (controller.currentPlayheadTimeMs.toFloat() / periodMs.coerceAtLeast(1)).coerceIn(0f, 1f)
-            val px = leftPad + scrubFrac * usableW
-            drawLine(playheadColor, Offset(px, 0f), Offset(px, size.height), 2f)
+            VerticalScrollbar(
+                scrollState = verticalScroll,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .fillMaxHeight()
+                    .padding(top = HEADER_TOTAL_HEIGHT, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP)
+                    .testTag("ciacola-subcomp-vscrollbar"),
+            )
+            val hScrollState = rememberScrollableState { delta ->
+                val maxH = 0f
+                val prev = hScrollPx
+                hScrollPx = (hScrollPx - delta).coerceIn(0f, maxH)
+                -(hScrollPx - prev)
+            }
+            val hAdapter = remember(canvasWidthPx, hScrollPx) {
+                object : ScrollbarAdapter {
+                    override val scrollOffset: Double get() = hScrollPx.toDouble()
+                    override val contentSize: Double get() = canvasWidthPx.coerceAtLeast(1f).toDouble()
+                    override val viewportSize: Double get() = canvasWidthPx.coerceAtLeast(1f).toDouble()
+                    override suspend fun scrollTo(scrollOffset: Double) {
+                        hScrollPx = 0f
+                    }
+                }
+            }
+            HorizontalScrollbar(
+                scrollState = hScrollState,
+                adapter = hAdapter,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP)
+                    .testTag("ciacola-subcomp-hscrollbar"),
+            )
         }
     }
 }
