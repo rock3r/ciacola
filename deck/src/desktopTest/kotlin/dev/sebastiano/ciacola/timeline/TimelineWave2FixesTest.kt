@@ -814,4 +814,64 @@ class TimelineWave2FixesTest {
         waitForIdle()
         onNodeWithTag("ciacola-timeline-canvas", useUnmergedTree = true).assertExists()
     }
+
+    @Test
+    fun playheadScrubTracksPointerWithoutSnappingToBeatsAndScrubsAnimationsProportionally() = runComposeUiTest {
+        mainClock.autoAdvance = false
+        val tempDir = Files.createTempDirectory("ciacola-scrub-sync")
+        val store = TimelineOverridesStore(tempDir)
+        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        lateinit var controller: TimelineStudioController
+        lateinit var animatic: dev.bnorm.storyboard.easel.Animatic
+
+        setContent {
+            val loopClock = remember { DeckLoopClock() }
+            animatic = rememberAnimatic(storyboard = { deck })
+            controller = rememberTimelineStudioController(
+                animatic = animatic,
+                overridesStore = store,
+                loopClock = loopClock,
+            )
+            Box(Modifier.size(Dp(1280f), Dp(720f))) {
+                dev.bnorm.storyboard.easel.Easel(animatic)
+                TimelineStudioPanel(controller = controller, isDark = true)
+            }
+        }
+        mainClock.advanceTimeBy(400)
+
+        // Pick an animated segment on Slide 5 (e.g. IMMUTABLE stamp build)
+        val segSpan = controller.snapshot.stateSpans.first { it.sceneIndex == 4 && !it.isHold && it.durationMs > 100 }
+        val midTimeMs = segSpan.startMs + segSpan.durationMs / 2
+
+        // Issue a scrub request and inspect currentPlayheadTimeMs on EVERY intermediate frame
+        // while runScrubWorker() is still applying the seek: it must stay at midTimeMs, never
+        // snapping backward to segSpan.startMs (the beat diamond)!
+        runOnIdle { controller.scrubToTimeMs(midTimeMs) }
+        assertEquals(
+            midTimeMs,
+            controller.currentPlayheadTimeMs,
+            "Playhead must immediately reflect requested scrub time without snapping to beat start (${segSpan.startMs})",
+        )
+        repeat(12) { frame ->
+            mainClock.advanceTimeByFrame()
+            assertEquals(
+                midTimeMs,
+                controller.currentPlayheadTimeMs,
+                "Frame $frame while seeking: playhead snapped away from $midTimeMs to ${controller.currentPlayheadTimeMs}",
+            )
+        }
+
+        // Now scrub VERY slowly (25% -> 50% -> 75% with 200ms pauses between steps while holding drag):
+        // animation fraction must stay frozen at 25%, 50%, 75% (never running at normal speed on its own!).
+        for (targetFrac in listOf(0.25f, 0.50f, 0.75f)) {
+            val tMs = segSpan.startMs + (segSpan.durationMs * targetFrac).toInt()
+            runOnIdle { controller.scrubToTimeMs(tMs) }
+            repeat(8) { mainClock.advanceTimeByFrame() }
+            assertEquals(targetFrac, animatic.activeFraction, absoluteTolerance = 0.06f)
+            // Hold pointer still for 300ms: animation MUST NOT advance on its own!
+            mainClock.advanceTimeBy(300)
+            assertEquals(targetFrac, animatic.activeFraction, absoluteTolerance = 0.06f)
+            assertEquals(tMs, controller.currentPlayheadTimeMs)
+        }
+    }
 }

@@ -63,7 +63,7 @@ actual fun parse(code: String, language: Language): List<Token> {
                 // Update state
                 state = result.ruleStack
             }
-            tokens
+            tokens.splitIntoLexicalTokens()
         }
     }
 }

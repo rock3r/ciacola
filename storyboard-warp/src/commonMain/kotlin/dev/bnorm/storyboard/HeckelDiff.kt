@@ -19,70 +19,84 @@ fun diff(
     // Symbol tables
     val statesP: Array<State> = Array(previous.size) { State.Empty }
     val statesC: Array<State> = Array(current.size) { State.Empty }
-    // Frequency + Context
-    val (freqP, contextP) = frequencyAndContext(tokens = previous)
-    val (freqC, _) = frequencyAndContext(tokens = current)
-    // Phase 1: Find unique anchors such that frequency = 1 in both lists.
-    // That is a match.
-    current.forEachIndexed { index, token ->
-        val c = freqC[token]
-        val p = freqP[token]
-        val context = contextP[token]
-        if (c == 1 && p == 1 && context != null) {
-            val indexP = context.index
-            // Here we are also keeping track of the previous token.
-            // This is because we exclude the actual start and end offsets from the equals()
-            // to find high-quality anchor points.
-            val tokenP = context.token
-            val match = State.Match(
-                previous = tokenP,
-                previousIdx = indexP,
-                current = token,
-                currentIdx = index
-            )
-            statesP[match.previousIdx] = match
-            statesC[match.currentIdx] = match
-        }
+
+    fun matchTokens(pIdx: Int, cIdx: Int) {
+        val match = State.Match(
+            previous = previous[pIdx],
+            previousIdx = pIdx,
+            current = current[cIdx],
+            currentIdx = cIdx,
+        )
+        statesP[pIdx] = match
+        statesC[cIdx] = match
     }
-    // Phase 2: We found unique anchors.
-    // Move forward and find the ones that are matching adjacent to the ones that already matched.
-    for (index in 0 until statesC.lastIndex) {
-        val state = statesC[index]
-        val nextState = statesC[index + 1]
-        if (state is State.Match && nextState == State.Empty) {
-            val nextToken = current.getOrNull(index + 1)
-            val nextPreviousToken = previous.getOrNull(state.previousIdx + 1)
-            if (nextPreviousToken != null && nextToken == nextPreviousToken) {
-                val match = State.Match(
-                    previous = nextPreviousToken,
-                    previousIdx = state.previousIdx + 1,
-                    current = nextToken,
-                    currentIdx = index + 1,
-                )
-                statesP[match.previousIdx] = match
-                statesC[match.currentIdx] = match
+
+    fun matchAndWidenRange(pStart: Int, pEnd: Int, cStart: Int, cEnd: Int) {
+        if (pStart >= pEnd || cStart >= cEnd) return
+        val (freqP, contextP) = frequencyAndContextInRange(previous, pStart, pEnd)
+        val (freqC, _) = frequencyAndContextInRange(current, cStart, cEnd)
+        for (cIdx in cStart until cEnd) {
+            if (statesC[cIdx] != State.Empty) continue
+            val tokenC = current[cIdx]
+            if (tokenC.content.isBlank()) continue
+            val cCount = freqC[tokenC.content] ?: 0
+            val pCount = freqP[tokenC.content] ?: 0
+            val ctx = contextP[tokenC.content]
+            if (cCount == 1 && pCount == 1 && ctx != null && statesP[ctx.index] == State.Empty) {
+                matchTokens(ctx.index, cIdx)
+            }
+        }
+        // Forward widening across matching lexical content (insensitive to TextMate rule-stack depth
+        // shifts caused by wrapping a single-line signature across multiple lines).
+        for (cIdx in cStart until (cEnd - 1)) {
+            val state = statesC[cIdx]
+            if (state is State.Match && statesC[cIdx + 1] == State.Empty) {
+                val nextPIdx = state.previousIdx + 1
+                if (
+                    nextPIdx in pStart until pEnd &&
+                    statesP[nextPIdx] == State.Empty &&
+                    current[cIdx + 1].content == previous[nextPIdx].content
+                ) {
+                    matchTokens(nextPIdx, cIdx + 1)
+                }
+            }
+        }
+        // Backward widening across matching lexical content.
+        for (cIdx in (cEnd - 1) downTo (cStart + 1)) {
+            val state = statesC[cIdx]
+            if (state is State.Match && statesC[cIdx - 1] == State.Empty) {
+                val priorPIdx = state.previousIdx - 1
+                if (
+                    priorPIdx in pStart until pEnd &&
+                    statesP[priorPIdx] == State.Empty &&
+                    current[cIdx - 1].content == previous[priorPIdx].content
+                ) {
+                    matchTokens(priorPIdx, cIdx - 1)
+                }
             }
         }
     }
-    // Phase 3: Same as Phase 2 but backwards.
-    for (index in statesC.lastIndex downTo 1) {
-        val state = statesC[index]
-        val priorState = statesC[index - 1]
-        if (state is State.Match && priorState == State.Empty) {
-            val priorToken = current.getOrNull(index - 1)
-            val priorPreviousToken = previous.getOrNull(state.previousIdx - 1)
-            if (priorToken != null && priorToken == priorPreviousToken) {
-                val match = State.Match(
-                    previous = priorPreviousToken,
-                    previousIdx = state.previousIdx - 1,
-                    current = priorToken,
-                    currentIdx = index - 1
-                )
-                statesP[match.previousIdx] = match
-                statesC[match.currentIdx] = match
+
+    // Global pass: unique non-blank anchors + bidirectional neighborhood widening.
+    matchAndWidenRange(0, previous.size, 0, current.size)
+
+    // Local pass inside each monotonic gap between already-matched anchors so repeated identifiers
+    // or delimiters (e.g. `s` or `(`) inside an enclosed parameter/argument list still pair cleanly.
+    var prevAnchorP = -1
+    var prevAnchorC = -1
+    for (cIdx in 0..statesC.size) {
+        val m = if (cIdx < statesC.size) statesC[cIdx] as? State.Match else null
+        if (m != null) {
+            if (m.previousIdx > prevAnchorP) {
+                matchAndWidenRange(prevAnchorP + 1, m.previousIdx, prevAnchorC + 1, cIdx)
+                prevAnchorP = m.previousIdx
+                prevAnchorC = cIdx
             }
+        } else if (cIdx == statesC.size) {
+            matchAndWidenRange(prevAnchorP + 1, previous.size, prevAnchorC + 1, current.size)
         }
     }
+
     // Phase 4: Final pass.
     // Anything that did not match in:
     // - statesP = Delete
@@ -129,22 +143,24 @@ fun diff(
 
 internal data class TokenContext(val token: Token, val index: Int)
 
-internal fun frequencyAndContext(
-    tokens: List<Token>
-): Pair<ScatterMap<Token, Int>, ScatterMap<Token, TokenContext?>> {
-    val freq = mutableScatterMapOf<Token, Int>()
-    // Context for tokens whose count == 1
-    val indexes = mutableScatterMapOf<Token, TokenContext?>()
-    tokens.forEachIndexed { index, token ->
-        val count = freq.getOrDefault(token, 0)
+internal fun frequencyAndContextInRange(
+    tokens: List<Token>,
+    start: Int,
+    end: Int,
+): Pair<ScatterMap<String, Int>, ScatterMap<String, TokenContext?>> {
+    val freq = mutableScatterMapOf<String, Int>()
+    val indexes = mutableScatterMapOf<String, TokenContext?>()
+    for (index in start until end) {
+        val token = tokens[index]
+        if (token.content.isBlank()) continue
+        val key = token.content
+        val count = freq.getOrDefault(key, 0)
         if (count == 0) {
-            indexes[token] = TokenContext(token = token, index = index)
+            indexes[key] = TokenContext(token = token, index = index)
         } else {
-            // If this is not the first time we are seeing this,
-            // We no longer care about tracking its index.
-            indexes[token] = null
+            indexes[key] = null
         }
-        freq[token] = count + 1
+        freq[key] = count + 1
     }
     return freq to indexes
 }

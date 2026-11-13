@@ -6,6 +6,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -21,12 +22,10 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,9 +36,6 @@ enum class TimelineBakeStatus {
     Sent,
     Error,
 }
-
-/** Pointer rest after which an in-place scrub position is rebuilt for an exact resting frame. */
-private const val SCRUB_SETTLE_REBUILD_DELAY_MS = 150L
 
 /**
  * Quiet time after an override edit before the deck is re-indexed. Re-indexing runs offscreen
@@ -60,6 +56,7 @@ internal data class ScrubRequest(
     val stateIndex: Int,
     val fraction: Float,
     val sequence: Long,
+    val forceRebuild: Boolean = false,
 )
 
 /**
@@ -133,8 +130,25 @@ class TimelineStudioController(
 
     private var playbackJob: Job? = null
     private var scrubSequence = 0L
+    private var appliedScrubSequence by mutableLongStateOf(0L)
     private val scrubRequests = MutableStateFlow<ScrubRequest?>(null)
     private var lastRequested by mutableStateOf<ScrubRequest?>(null)
+    var isScrubDragging by mutableStateOf(false)
+        private set
+
+    fun beginScrubDrag() {
+        isScrubDragging = true
+    }
+
+    fun endScrubDrag() {
+        isScrubDragging = false
+        val req = lastRequested
+        if (req != null && req.fraction > 0f && loopClock.activeSubCompLoopId == null) {
+            val settleReq = req.copy(sequence = ++scrubSequence, forceRebuild = true)
+            lastRequested = settleReq
+            scrubRequests.value = settleReq
+        }
+    }
 
     init {
         syncLoopPeriodsFromStore()
@@ -213,12 +227,16 @@ class TimelineStudioController(
             }
             val from = animatic.activeFromStateIndex
             val fraction = animatic.activeFraction
-            // Show the exact requested time while the animatic sits where that request mapped
-            // (a click hold maps a whole time range onto one settled state).
+            // Keep the playhead locked 1:1 to the requested scrub position both while the scrub
+            // worker is applying the seek (so the red line never snaps back to a beat diamond mid-seek)
+            // and while resting at the position that request mapped to (e.g. inside a click hold).
             val requested = lastRequested
             if (requested != null) {
+                if (isScrubDragging || appliedScrubSequence < requested.sequence) {
+                    return requested.timeMs
+                }
                 val (expectedState, expectedFraction) = normalized(requested.stateIndex, requested.fraction)
-                if (from == expectedState && abs(fraction - expectedFraction) < 0.002f) {
+                if (from == expectedState && abs(fraction - expectedFraction) < 0.005f) {
                     return requested.timeMs
                 }
             }
@@ -292,41 +310,45 @@ class TimelineStudioController(
      *
      * Rebuilding the scene subtree ([Animatic.seekToSegment] with `rebuildScene = true`) makes every
      * frame independent of the scrub path, but costs ~6-15 frames per step. While dragging:
-     * - a step that stays inside the segment the stage already shows seeks in place
-     *   ([scrubStepIsInPlace]); only segment changes rebuild,
+     * - steps inside the active segment or across intra-slide beats seek in place (`rebuildScene = false`)
+     *   so animations follow pointer scrubbing proportionally at 60 fps without snapping or freezing,
      * - a step that maps to the exact position already presented (a drag through a click hold) is
-     *   skipped,
-     * - once the pointer rests for [SCRUB_SETTLE_REBUILD_DELAY_MS], an in-place position is rebuilt
-     *   so the resting frame is exactly the one a direct jump renders.
+     *   skipped.
      */
-    @OptIn(FlowPreview::class)
     suspend fun runScrubWorker() = coroutineScope {
-        var restingNeedsRebuild = false
-        launch {
-            scrubRequests.filterNotNull().debounce(SCRUB_SETTLE_REBUILD_DELAY_MS).collect { request ->
-                if (restingNeedsRebuild) {
-                    restingNeedsRebuild = false
-                    animatic.seekToSegment(request.stateIndex, request.fraction)
-                }
-            }
-        }
         var lastApplied: ScrubRequest? = null
+        var restingNeedsRebuild = false
         scrubRequests.filterNotNull().collect { request ->
             val a = animatic
             val previous = lastApplied
-            if (previous != null && previous.stateIndex == request.stateIndex && previous.fraction == request.fraction &&
+            val shouldForceRebuild = request.forceRebuild && restingNeedsRebuild
+            if (!shouldForceRebuild &&
+                previous != null &&
+                previous.stateIndex == request.stateIndex &&
+                previous.fraction == request.fraction &&
                 a.isPresenting(request.stateIndex, request.fraction)
             ) {
+                appliedScrubSequence = maxOf(appliedScrubSequence, request.sequence)
                 return@collect
             }
-            if (scrubStepIsInPlace(a.activeFromStateIndex, a.activeToStateIndex, request.stateIndex, request.fraction)) {
-                a.seekToSegment(request.stateIndex, request.fraction, rebuildScene = false)
-                restingNeedsRebuild = true
-            } else {
-                a.seekToSegment(request.stateIndex, request.fraction)
-                restingNeedsRebuild = false
-            }
+            val curDesc = a.stateDescriptors.getOrNull(a.activeFromStateIndex)
+            val reqDesc = a.stateDescriptors.getOrNull(request.stateIndex)
+            val sameSlideDrag = isScrubDragging &&
+                curDesc != null &&
+                reqDesc != null &&
+                curDesc.sceneIndex == reqDesc.sceneIndex &&
+                !curDesc.isBoundaryStart &&
+                !curDesc.isBoundaryEnd &&
+                !reqDesc.isBoundaryStart &&
+                !reqDesc.isBoundaryEnd
+            val inPlace = !shouldForceRebuild && (
+                scrubStepIsInPlace(a.activeFromStateIndex, a.activeToStateIndex, request.stateIndex, request.fraction) ||
+                    sameSlideDrag
+                )
+            a.seekToSegment(request.stateIndex, request.fraction, rebuildScene = !inPlace)
+            restingNeedsRebuild = inPlace && request.fraction > 0f
             lastApplied = request
+            appliedScrubSequence = maxOf(appliedScrubSequence, request.sequence)
         }
     }
 
@@ -459,6 +481,7 @@ class TimelineStudioController(
      */
     fun advance(scope: CoroutineScope, direction: AdvanceDirection) {
         stopPlayback()
+        lastRequested = null
         scope.launch { animatic.advance(direction) }
     }
 
@@ -607,9 +630,9 @@ fun rememberTimelineStudioController(
     val paramRev = overridesStore.parameterRevision
     val structRev = overridesStore.structuralRevision
     SideEffect {
-        paramRev
-        structRev
-        controller.syncLoopPeriodsFromStore()
+        if (paramRev >= 0 && structRev >= 0) {
+            controller.syncLoopPeriodsFromStore()
+        }
     }
     LaunchedEffect(
         animatic.storyboard,

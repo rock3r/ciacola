@@ -5,11 +5,14 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -87,12 +90,35 @@ fun DeckWarpCodeCard(
         }
         buildDiffList(blocks, language)
     }
-    // A finite tween instead of spring(0.82, 460): the spring spent ~300 ms of a 633 ms segment in an
-    // invisible sub-pixel tail. Tokens and the card height share one duration and curve, so the
-    // segment length matches the visible motion in both directions.
-    val moveDurationMs = (tokenDurationMs * 6) / 5
-    val warpBoundsTransform = remember(moveDurationMs) {
-        BoundsTransform { _, _ -> tween(moveDurationMs, easing = FastOutSlowInEasing) }
+    // Stagger Deletions -> Movement (+ Card Bounds Morph) -> Additions so outgoing clutter clears
+    // first, retained tokens and the card body glide together, and inserted tokens materialize in
+    // place inside their newly opened slots after moving tokens have cleared out of the way.
+    val startDelayMs = (warpOverride?.delayMs ?: 0).coerceAtLeast(0)
+    val fromIdx = stateTransition.currentState.coerceIn(0, diffList.lastIndex)
+    val toIdx = stateTransition.targetState.coerceIn(0, diffList.lastIndex)
+    val sharedKeys = remember(diffList, fromIdx, toIdx) {
+        val fromKeys = diffList[fromIdx].rows.flatten().mapNotNullTo(HashSet()) { it.warpStableKey() }
+        val toKeys = diffList[toIdx].rows.flatten().mapNotNullTo(HashSet()) { it.warpStableKey() }
+        fromKeys intersect toKeys
+    }
+    fun segmentHasDeletes(segFromRaw: Int, segToRaw: Int): Boolean {
+        val sf = segFromRaw.coerceIn(0, diffList.lastIndex)
+        val st = segToRaw.coerceIn(0, diffList.lastIndex)
+        if (sf == st) return false
+        val toKeys = diffList[st].rows.flatten().mapNotNullTo(HashSet()) { it.warpStableKey() }
+        return diffList[sf].rows.flatten().any { s ->
+            s.content().isNotBlank() && s.warpStableKey().let { k -> k == null || k !in toKeys }
+        }
+    }
+    val hasVisibleDeletes = remember(diffList, fromIdx, toIdx) { segmentHasDeletes(fromIdx, toIdx) }
+    val deleteDurationMs = (tokenDurationMs * 0.48f).roundToInt().coerceAtLeast(40)
+    val moveDelayMs = startDelayMs + if (hasVisibleDeletes) (tokenDurationMs * 0.25f).roundToInt() else 0
+    val moveDurationMs = (tokenDurationMs * 1.05f).roundToInt().coerceAtLeast(60)
+    val insertDelayMs = moveDelayMs + (moveDurationMs * 0.65f).roundToInt()
+    val insertDurationMs = (tokenDurationMs * 0.65f).roundToInt().coerceAtLeast(50)
+
+    val warpBoundsTransform = remember(moveDelayMs, moveDurationMs) {
+        BoundsTransform { _, _ -> tween(moveDurationMs, delayMillis = moveDelayMs, easing = FastOutSlowInEasing) }
     }
 
     val currentCodeSnippet = codeStates[stateTransition.targetState.coerceIn(0, codeStates.lastIndex)]
@@ -109,15 +135,14 @@ fun DeckWarpCodeCard(
     ) {
         SharedTransitionLayout(Modifier.horizontalScroll(rememberScrollState())) {
             stateTransition.DeterministicStateHost(
-                enter = { _, _ -> fadeIn(tween(tokenDurationMs)) },
-                exit = { _, _ -> fadeOut(tween(tokenDurationMs)) },
+                enter = { _, _ -> fadeIn(tween(insertDurationMs, delayMillis = insertDelayMs, easing = EaseOutCubic)) },
+                exit = { _, _ -> fadeOut(tween(deleteDurationMs, delayMillis = startDelayMs, easing = EaseInCubic)) },
             ) { rawIndex ->
                 val clampedIndex = rawIndex.coerceIn(0, diffList.lastIndex)
                 val diffContents = diffList[clampedIndex]
                 // The card body is itself a shared bounds between the outgoing and incoming code
-                // states, so its size morphs with exactly the same transform and timing as the tokens
-                // it holds, instead of snapping to the larger state on the first (forward) or last
-                // (backward) frame.
+                // states, so its size morphs with the exact same transform and timing as the tokens
+                // it holds, instead of snapping on the first or last frame.
                 Column(
                     with(this@SharedTransitionLayout) {
                         Modifier
@@ -138,55 +163,74 @@ fun DeckWarpCodeCard(
                     diffContents.rows.forEachIndexed { rowIdx, rowStates ->
                         Row {
                             rowStates.forEachIndexed { colIdx, state ->
-                                when (state) {
-                                    is State.Match -> {
+                                if (state == State.Empty) return@forEachIndexed
+                                val text = state.content()
+                                if (text.isBlank()) {
+                                    Text(
+                                        text = text,
+                                        style = codeTextStyle,
+                                        softWrap = false,
+                                        maxLines = 1,
+                                    )
+                                } else {
+                                    val stableKey = state.warpStableKey()
+                                    val isRetained = (fromIdx == toIdx) ||
+                                        (stableKey != null && stableKey in sharedKeys) ||
+                                        (state is State.Match && stableKey == null)
+                                    val colorToken = if (
+                                        state is State.Match &&
+                                        state.current.scope.startsWith("source.") &&
+                                        !state.previous.scope.startsWith("source.")
+                                    ) {
+                                        state.previous
+                                    } else {
+                                        state.warpToken()
+                                    }
+                                    if (isRetained) {
+                                        val sharedKey = stableKey
+                                            ?: (state as? State.Match)?.sharedWarpKey(rowIdx, colIdx)
+                                            ?: "warp-retained:$rowIdx:$colIdx"
                                         with(this@SharedTransitionLayout) {
                                             Text(
-                                                text = state.content(),
+                                                text = text,
                                                 style = codeTextStyle,
-                                                color = state.current.colorIn(palette),
+                                                color = colorToken.colorIn(palette),
                                                 softWrap = false,
                                                 maxLines = 1,
                                                 modifier = Modifier.sharedElement(
-                                                    sharedContentState = rememberSharedContentState(
-                                                        key = state.sharedWarpKey(rowIdx, colIdx),
-                                                    ),
+                                                    sharedContentState = rememberSharedContentState(key = sharedKey),
                                                     animatedVisibilityScope = this@DeterministicStateHost,
                                                     boundsTransform = warpBoundsTransform,
                                                 ),
                                             )
                                         }
-                                    }
-                                    is State.Insert,
-                                    is State.Delete,
-                                    -> {
-                                        val tok = state.warpToken()
-                                        with(this@SharedTransitionLayout) {
-                                            with(this@DeterministicStateHost) {
-                                                Text(
-                                                    text = state.content(),
-                                                    style = codeTextStyle,
-                                                    color = tok.colorIn(palette),
-                                                    softWrap = false,
-                                                    maxLines = 1,
-                                                    modifier = Modifier
-                                                        .sharedElement(
-                                                            sharedContentState = rememberSharedContentState(
-                                                                key = "delta:${tok.key()}:$rowIdx:$colIdx",
-                                                            ),
-                                                            animatedVisibilityScope = this@DeterministicStateHost,
-                                                            boundsTransform = warpBoundsTransform,
+                                    } else {
+                                        with(this@DeterministicStateHost) {
+                                            Text(
+                                                text = text,
+                                                style = codeTextStyle,
+                                                color = colorToken.colorIn(palette),
+                                                softWrap = false,
+                                                maxLines = 1,
+                                                modifier = Modifier.animateEnterExit(
+                                                    enter = fadeIn(
+                                                        tween(
+                                                            insertDurationMs,
+                                                            delayMillis = insertDelayMs,
+                                                            easing = EaseOutCubic,
                                                         )
-                                                        .renderInSharedTransitionScopeOverlay()
-                                                        .animateEnterExit(
-                                                            enter = fadeIn(tween(tokenDurationMs)),
-                                                            exit = fadeOut(tween(tokenDurationMs)),
-                                                        ),
-                                                )
-                                            }
+                                                    ),
+                                                    exit = fadeOut(
+                                                        tween(
+                                                            deleteDurationMs,
+                                                            delayMillis = startDelayMs,
+                                                            easing = EaseInCubic,
+                                                        )
+                                                    ),
+                                                ),
+                                            )
                                         }
                                     }
-                                    State.Empty -> Unit
                                 }
                             }
                         }
@@ -213,3 +257,10 @@ private fun State.Match.sharedWarpKey(rowIdx: Int, colIdx: Int): String =
     } else {
         "WarpMatch($previousIdx->$currentIdx@$rowIdx:$colIdx)"
     }
+
+private fun State.warpStableKey(): String? = when (this) {
+    is State.Match -> if (current.hasKey()) current.key() else null
+    is State.Insert -> if (token.hasKey()) token.key() else null
+    is State.Delete -> if (token.hasKey()) token.key() else null
+    State.Empty -> null
+}

@@ -348,6 +348,35 @@ class MotionAndContrastFixesTest {
         assertSmoothHeight(warpCardHeights(1, 0), "backward 6 -> 3 lines")
     }
 
+    @Test
+    fun warpCodeDiffMatchesParenthesesParametersAndDelimitersAcrossMultilineReflow() {
+        val diffs = dev.bnorm.storyboard.buildDiffList(
+            warpSnippets.map { dev.bnorm.storyboard.BasicCode(it) },
+            dev.bnorm.storyboard.Kotlin,
+        )
+        val beforeStates = diffs[0].rows.flatten()
+        val afterStates = diffs[1].rows.flatten()
+
+        val deletedVisible = beforeStates
+            .filterIsInstance<dev.bnorm.storyboard.State.Delete>()
+            .map { it.token.content }
+            .filter { it.isNotBlank() }
+        assertTrue(
+            deletedVisible.isEmpty(),
+            "Expanding fun fade(s: String) to multiline should not delete any visible token (including '(' or 's'), got deletes=$deletedVisible",
+        )
+
+        val matchedAfter = afterStates
+            .filterIsInstance<dev.bnorm.storyboard.State.Match>()
+            .map { it.current.content }
+            .filter { it.isNotBlank() }
+        // Both '(' (after fade and after BasicText), both ')', 's' (twice), ':', 'String', '{', 'BasicText', '}' must all match!
+        assertEquals(2, matchedAfter.count { it == "(" }, "Both '(' tokens must match instead of being replaced: $matchedAfter")
+        assertEquals(2, matchedAfter.count { it == ")" }, "Both ')' tokens must match: $matchedAfter")
+        assertEquals(2, matchedAfter.count { it == "s" }, "Both 's' identifiers must match: $matchedAfter")
+        assertTrue(matchedAfter.containsAll(listOf("fun", "fade", ":", "String", "{", "BasicText", "}")))
+    }
+
     // --- 73: single easing, C1 pop, smooth highlight, loupe clip, slide 2 clearance ---------------
 
     @Test

@@ -19,6 +19,7 @@ import androidx.compose.ui.text.AnnotatedString
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmName
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 const val DefaultMoveDurationMillis = 300
@@ -126,14 +127,18 @@ private fun MagicTextInternal(
     val moveDelay = choreography.moveDelayMillis
     val moveSpan = choreography.moveDurationMillis
     val moveEasing = choreography.moveEasing
-    val sizeProgress = transition.animateFloat(
-        transitionSpec = { tween(choreography.totalDurationMillis, easing = EaseInOut) },
-        label = "MagicTextSize",
-    ) { if (it == transition.targetState) 1f else 0f }
+
+    val sizeSpec = remember(choreography) {
+        tween<Float>(
+            durationMillis = choreography.sizeDurationMillis,
+            delayMillis = choreography.sizeDelayMillis,
+            easing = choreography.sizeEasing,
+        )
+    }
 
     SharedTransitionLayout(modifier) {
         transition.SeekSafeTokenHost(
-            sizeProgress = sizeProgress,
+            sizeSpec = sizeSpec,
             enter = fadeIn(
                 tween(choreography.enterDurationMillis, delayMillis = choreography.enterDelayMillis, easing = choreography.enterEasing),
             ),
@@ -337,7 +342,7 @@ private fun WrappingTokenLine(
  */
 @Composable
 private fun <S> Transition<S>.SeekSafeTokenHost(
-    sizeProgress: State<Float>,
+    sizeSpec: FiniteAnimationSpec<Float>,
     enter: EnterTransition,
     exit: ExitTransition,
     modifier: Modifier = Modifier,
@@ -346,6 +351,11 @@ private fun <S> Transition<S>.SeekSafeTokenHost(
     val from = currentState
     val to = targetState
     val active = if (from == to) listOf(to) else listOf(from, to)
+    // Driven by the incoming branch's fresh `EnterExitState` transition (`PreEnter -> Visible`),
+    // whose initial and target states differ from birth so `SeekableTransitionState.seekTo` never
+    // triggers `TransitionAnimationState`'s `defaultSpring` fallback from a `0f == 0f` rest state.
+    val sizeProgressHolder = remember { arrayOfNulls<State<Float>>(1) }
+    if (active.size < 2) sizeProgressHolder[0] = null
     Layout(
         modifier = modifier,
         content = {
@@ -356,6 +366,14 @@ private fun <S> Transition<S>.SeekSafeTokenHost(
                         enter = enter,
                         exit = exit,
                     ) {
+                        if (active.size == 2 && state == to) {
+                            sizeProgressHolder[0] = transition.animateFloat(
+                                transitionSpec = { sizeSpec },
+                                label = "MagicTextSizeProgress",
+                            ) { enterExit ->
+                                if (enterExit == EnterExitState.Visible) 1f else 0f
+                            }
+                        }
                         content(state)
                     }
                 }
@@ -364,10 +382,14 @@ private fun <S> Transition<S>.SeekSafeTokenHost(
     ) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints) }
         val (width, height) = if (placeables.size == 2) {
-            val p = sizeProgress.value.coerceIn(0f, 1f)
-            val w = placeables[0].width + (placeables[1].width - placeables[0].width) * p
-            val h = placeables[0].height + (placeables[1].height - placeables[0].height) * p
-            w.roundToInt() to h.roundToInt()
+            if (isLookingAhead) {
+                placeables[1].width to placeables[1].height
+            } else {
+                val p = (sizeProgressHolder[0]?.value ?: 1f).coerceIn(0f, 1f)
+                val w = placeables[0].width + (placeables[1].width - placeables[0].width) * p
+                val h = placeables[0].height + (placeables[1].height - placeables[0].height) * p
+                w.roundToInt() to h.roundToInt()
+            }
         } else {
             (placeables.firstOrNull()?.width ?: 0) to (placeables.firstOrNull()?.height ?: 0)
         }
@@ -412,9 +434,16 @@ internal class MagicTextChoreography(
     val enterDelayMillis: Int,
     val enterDurationMillis: Int,
     val enterEasing: Easing,
+    val sizeDelayMillis: Int = moveDelayMillis,
+    val sizeDurationMillis: Int = moveDurationMillis,
+    val sizeEasing: Easing = moveEasing,
 ) {
-    val totalDurationMillis: Int =
-        maxOf(exitDelayMillis + exitDurationMillis, moveDelayMillis + moveDurationMillis, enterDelayMillis + enterDurationMillis)
+    val totalDurationMillis: Int = maxOf(
+        exitDelayMillis + exitDurationMillis,
+        moveDelayMillis + moveDurationMillis,
+        enterDelayMillis + enterDurationMillis,
+        sizeDelayMillis + sizeDurationMillis,
+    )
 
     /** Alpha of an outgoing (deleted) word at [timeMillis]. */
     fun exitAlpha(timeMillis: Int): Float = 1f - exitEasing.transform(fraction(timeMillis, exitDelayMillis, exitDurationMillis))
@@ -442,12 +471,16 @@ internal class MagicTextChoreography(
             val total = 2 * fade + move + 2 * gap
             // Exits accelerate away (outgoing words linger, then leave); entrances decelerate in.
             val exitEasing = EaseInCubic
+            val moveCurve = easing ?: FastOutSlowInEasing
             val enterEasing = easing ?: EaseOutCubic
             return if (!hasMovement || move == 0) {
-                // Nothing travels: split the full budget cleanly into FadeOut -> FadeIn with zero dead
-                // wait and zero double-exposed glyph overlap on the same line.
-                val exitSpan = (total * 0.45f).roundToInt()
+                // Nothing travels: stagger Deletions -> Container Size Morph -> Additions so outgoing
+                // text visibly clears before layout bounds glide along a symmetric S-curve and incoming
+                // text materializes into the newly sized slot.
+                val exitSpan = (total * 0.42f).roundToInt()
                 val enterSpan = total - exitSpan
+                val sizeDelay = (total * 0.30f).roundToInt()
+                val sizeSpan = (total * 0.48f).roundToInt().coerceAtLeast(1)
                 MagicTextChoreography(
                     exitDelayMillis = start,
                     exitDurationMillis = exitSpan,
@@ -458,11 +491,14 @@ internal class MagicTextChoreography(
                     enterDelayMillis = start + exitSpan,
                     enterDurationMillis = enterSpan,
                     enterEasing = enterEasing,
+                    sizeDelayMillis = start + sizeDelay,
+                    sizeDurationMillis = sizeSpan,
+                    sizeEasing = easing ?: EaseInOutCubic,
                 )
             } else {
-                // Sequential Keynote-style FadeOut -> Move -> FadeIn: outgoing words clear to 0 alpha
-                // before shared words travel, and shared words finish opening target slots before
-                // incoming words fade into them.
+                // Staggered Keynote-style FadeOut -> Move (+ Layout Bounds Morph) -> FadeIn:
+                // deletions clear first, then shared words and container bounds glide together, and
+                // additions fade into the newly opened slots.
                 val moveDelay = gap + fade
                 val enterDelay = 2 * gap + fade + move
                 MagicTextChoreography(
@@ -475,6 +511,9 @@ internal class MagicTextChoreography(
                     enterDelayMillis = start + enterDelay,
                     enterDurationMillis = fade,
                     enterEasing = enterEasing,
+                    sizeDelayMillis = start + moveDelay,
+                    sizeDurationMillis = move,
+                    sizeEasing = moveCurve,
                 )
             }
         }

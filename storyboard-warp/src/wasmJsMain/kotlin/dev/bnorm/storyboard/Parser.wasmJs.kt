@@ -49,7 +49,7 @@ actual fun parse(code: String, language: Language): List<Token> {
                     }
                 }
             }
-            tokens
+            tokens.splitIntoLexicalTokens()
         }
     }
 }

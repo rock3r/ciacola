@@ -713,17 +713,22 @@ private fun MasterDeckTimelineCanvas(
                     }
 
                     if (startPos.y <= headerTotalPx) {
-                        scrubLoop(startPos.x)
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull() ?: break
-                            if (!change.pressed) break
-                            change.consume()
-                            // Auto-scroll when dragging the playhead past either edge.
-                            val edge = 24f
-                            if (change.position.x > size.width - edge) viewport.scrollHorizontallyBy(12f)
-                            if (change.position.x < edge) viewport.scrollHorizontallyBy(-12f)
-                            controller.scrubToTimeMs(timeAt(change.position.x))
+                        controller.beginScrubDrag()
+                        try {
+                            scrubLoop(startPos.x)
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                change.consume()
+                                // Auto-scroll when dragging the playhead past either edge.
+                                val edge = 24f
+                                if (change.position.x > size.width - edge) viewport.scrollHorizontallyBy(12f)
+                                if (change.position.x < edge) viewport.scrollHorizontallyBy(-12f)
+                                controller.scrubToTimeMs(timeAt(change.position.x))
+                            }
+                        } finally {
+                            controller.endScrubDrag()
                         }
                         return@awaitEachGesture
                     }
@@ -737,13 +742,18 @@ private fun MasterDeckTimelineCanvas(
                     }
 
                     if (hitBlock == null) {
-                        controller.scrubToTimeMs(timeAt(startPos.x))
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull() ?: break
-                            if (!change.pressed) break
-                            change.consume()
-                            controller.scrubToTimeMs(timeAt(change.position.x))
+                        controller.beginScrubDrag()
+                        try {
+                            controller.scrubToTimeMs(timeAt(startPos.x))
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                change.consume()
+                                controller.scrubToTimeMs(timeAt(change.position.x))
+                            }
+                        } finally {
+                            controller.endScrubDrag()
                         }
                         return@awaitEachGesture
                     }
@@ -782,6 +792,7 @@ private fun MasterDeckTimelineCanvas(
                     var lastTriggerBeat = hitBlock.triggerBeatInScene
 
                     controller.overridesStore.beginEditGesture()
+                    if (dragMode == DragMode.ScrubPlayhead) controller.beginScrubDrag()
                     try {
                         while (true) {
                             val event = awaitPointerEvent()
@@ -826,6 +837,7 @@ private fun MasterDeckTimelineCanvas(
                             }
                         }
                     } finally {
+                        if (dragMode == DragMode.ScrubPlayhead) controller.endScrubDrag()
                         controller.overridesStore.endEditGesture()
                     }
                 }
