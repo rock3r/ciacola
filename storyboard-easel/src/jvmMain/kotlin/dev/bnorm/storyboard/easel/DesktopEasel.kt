@@ -6,9 +6,11 @@ import androidx.compose.ui.window.*
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.assist.rememberAssistantWindow
+import dev.bnorm.storyboard.easel.export.ExportCoordinator
 import dev.bnorm.storyboard.easel.export.ExportMenu
 import dev.bnorm.storyboard.easel.export.ExportProgressPopup
 import dev.bnorm.storyboard.easel.export.StoryboardPdfExporter
+import dev.bnorm.storyboard.easel.export.StoryboardVideoExporter
 import dev.bnorm.storyboard.easel.overlay.EaselOverlay
 import dev.bnorm.storyboard.easel.overlay.EaselOverlayScope
 import dev.bnorm.storyboard.easel.overlay.OverlayNavigation
@@ -38,9 +40,12 @@ fun ApplicationScope.DesktopEasel(
         rememberAssistantWindow(animatic)
     ),
 ) {
-    // One exporter for the app's lifetime: the storyboard is rebuilt on every override or theme
-    // change, and a new exporter would drop a running export's status and re-enable the menu.
-    val exporter = remember { StoryboardPdfExporter() }
+    // One coordinator/exporter pair for the app's lifetime: the storyboard is rebuilt on every
+    // override or theme change, and a new coordinator would drop a running export's status and
+    // re-enable the menu.
+    val exportCoordinator = remember { ExportCoordinator() }
+    val pdfExporter = remember(exportCoordinator) { StoryboardPdfExporter(exportCoordinator) }
+    val videoExporter = remember(exportCoordinator) { StoryboardVideoExporter(exportCoordinator) }
 
     val storyWindowState = rememberWindowState(fileName = "Story", defaultSize = DefaultStoryWindowSize)
     var storyWindow by remember { mutableStateOf<ComposeWindow?>(null) }
@@ -50,7 +55,7 @@ fun ApplicationScope.DesktopEasel(
     fun FrameWindowScope.Toolbar() {
         MenuBar {
             DesktopMenu(animatic.storyboard, storyWindowState, storyWindow, overviewVisibility)
-            ExportMenu(exporter, animatic.storyboard)
+            ExportMenu(exportCoordinator, pdfExporter, videoExporter, animatic.storyboard)
             for (window in windows) {
                 key(window.name) {
                     Menu(window.name) {
@@ -100,7 +105,13 @@ fun ApplicationScope.DesktopEasel(
             }
         }
 
-        exporter.status?.let { ExportProgressPopup(it, onDismiss = exporter::dismissFailure) }
+        exportCoordinator.status?.let {
+            ExportProgressPopup(
+                status = it,
+                onDismiss = exportCoordinator::dismissFailure,
+                onCancel = exportCoordinator::cancel,
+            )
+        }
     }
 
     for (window in windows) {
