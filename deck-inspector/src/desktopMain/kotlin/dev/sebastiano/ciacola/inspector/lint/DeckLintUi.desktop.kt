@@ -48,11 +48,11 @@ import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.sebastiano.ciacola.inspector.ElementPatch
-import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import kotlinx.coroutines.delay
@@ -87,6 +87,9 @@ fun DeckLintPanel(
     storyboardProvider: (() -> Storyboard)? = null,
     presetsToCheck: List<DeckThemePreset> = emptyList(),
     storyboardForPreset: ((DeckThemePreset) -> Storyboard)? = null,
+    timelineOverridesProvider: () -> DeckTimelineOverridesFile = { DeckTimelineOverridesFile() },
+    fallbackBackground: Color = LocalDeckTheme.current.colors.background,
+    externalRevisionKey: Int = 0,
     stageInspectionRegistry: StageInspectionRegistry? = LocalStageInspectionRegistry.current,
     onApplyElementPatch: ((ElementPatch) -> Unit)? = null,
     onEditElement: ((elementId: String, sceneIndex: Int, beatIndex: Int) -> Unit)? = null,
@@ -99,8 +102,6 @@ fun DeckLintPanel(
     val globalColors = JewelTheme.globalColors
     val palette = rememberLintPalette()
     val focusRingColor = rememberAccessibleFocusRingColor()
-    val theme = LocalDeckTheme.current
-    val elementOverrides = LocalElementOverrides.current
 
     val currentIndex = animatic.currentIndex
     val targetIndex = animatic.targetIndex
@@ -113,8 +114,8 @@ fun DeckLintPanel(
         currentIndex,
         isSettled,
         registrySnapshotKey,
-        theme,
-        elementOverrides,
+        fallbackBackground,
+        externalRevisionKey,
     ) {
         if (!isActive || !isSettled) return@LaunchedEffect
         controller.updateActiveLocation(currentIndex.sceneIndex, currentIndex.frameIndex)
@@ -123,7 +124,7 @@ fun DeckLintPanel(
             registry = stageInspectionRegistry,
             sceneIndex = currentIndex.sceneIndex,
             beatIndex = currentIndex.frameIndex,
-            fallbackBackground = theme.colors.background,
+            fallbackBackground = fallbackBackground,
         )
     }
 
@@ -134,6 +135,7 @@ fun DeckLintPanel(
                 storyboard = sb,
                 presetsToCheck = presetsToCheck,
                 storyboardForPreset = storyboardForPreset,
+                timelineOverrides = timelineOverridesProvider(),
             )
         }
     }
@@ -159,13 +161,14 @@ fun DeckLintPanel(
                             storyboard = sb,
                             presetsToCheck = presetsToCheck,
                             storyboardForPreset = storyboardForPreset,
+                            timelineOverrides = timelineOverridesProvider(),
                         )
                     } else {
                         controller.refreshActiveBeat(
                             registry = stageInspectionRegistry,
                             sceneIndex = controller.currentSceneIndex,
                             beatIndex = controller.currentBeatIndex,
-                            fallbackBackground = theme.colors.background,
+                            fallbackBackground = fallbackBackground,
                         )
                     }
                 }

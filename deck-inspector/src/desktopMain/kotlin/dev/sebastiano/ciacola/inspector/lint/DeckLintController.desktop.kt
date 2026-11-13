@@ -27,9 +27,11 @@ import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.timeline.DeckLoopClock
+import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
 import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
 import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
+import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TimelineHarvestCollector
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -214,6 +216,7 @@ class DeckLintController {
         storyboard: Storyboard,
         presetsToCheck: List<DeckThemePreset> = emptyList(),
         storyboardForPreset: ((DeckThemePreset) -> Storyboard)? = null,
+        timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
         extraDecorator: ContentDecorator = ContentDecorator.None,
     ): List<DeckLintIssue> {
         if (isAuditing) return fullDeckIssues
@@ -254,6 +257,7 @@ class DeckLintController {
             ) {
                 CompositionLocalProvider(
                     LocalTimelineOffscreen provides true,
+                    LocalTimelineOverrides provides timelineOverrides,
                     LocalStageInspectionRegistry provides offscreenRegistry,
                     LocalTimelineHarvestCollector provides harvestCollector,
                     LocalDeckLoopClock provides frozenClock,

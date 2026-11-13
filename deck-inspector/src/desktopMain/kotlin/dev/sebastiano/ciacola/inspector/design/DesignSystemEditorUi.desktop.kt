@@ -101,13 +101,6 @@ fun DesignSystemEditorPanel(
     val scope = rememberCoroutineScope()
     var copiedJob by remember { mutableStateOf<Job?>(null) }
 
-    LaunchedEffect(store) {
-        while (true) {
-            delay(300)
-            store.reloadFromDiskIfChanged()
-        }
-    }
-
     store.revision
     val baseTheme = remember(currentPreset, baseThemeProvider) { baseThemeProvider(currentPreset) }
     val overrides = store.overridesFor(currentPreset)

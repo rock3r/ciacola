@@ -16,13 +16,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Easel
@@ -93,7 +97,7 @@ class EditorOverhaulIntegrationTest {
                 { targetPreset ->
                     val designOverrides = designStore.overridesFor(targetPreset)
                     createFoundationDeck(
-                        theme = DeckThemes.forPreset(targetPreset).withOverrides(designOverrides),
+                        theme = DeckThemes.forPreset(targetPreset),
                         bundledPreset = targetPreset,
                         includeKeynoteEffectsLab = true,
                         timelineOverrides = timelineStore.data(),
@@ -113,6 +117,7 @@ class EditorOverhaulIntegrationTest {
                     storyboard = storyboardForPreset(DeckThemePreset.StageDark),
                     presetsToCheck = listOf(DeckThemePreset.StageDark, DeckThemePreset.KeynoteLight),
                     storyboardForPreset = storyboardForPreset,
+                    timelineOverrides = timelineStore.data(),
                 )
             }
         }
@@ -166,8 +171,9 @@ class EditorOverhaulIntegrationTest {
             val paramRev = timelineStore.parameterRevision
 
             val designOverrides = remember(preset, designRev) { designStore.overridesFor(preset) }
-            val hostTheme = remember(preset, designOverrides) {
-                DeckThemes.forPreset(preset).withOverrides(designOverrides)
+            val baseHostTheme = remember(preset) { DeckThemes.forPreset(preset) }
+            val hostTheme = remember(baseHostTheme, designOverrides) {
+                baseHostTheme.withOverrides(designOverrides)
             }
             val elementOverrides = remember(elementRev) { elementStore.data() }
             val timelineOverrides = remember(structuralRev, paramRev) { timelineStore.data() }
@@ -197,7 +203,7 @@ class EditorOverhaulIntegrationTest {
                 elementRev,
             ) {
                 createFoundationDeck(
-                    theme = hostTheme,
+                    theme = baseHostTheme,
                     bundledPreset = preset,
                     includeKeynoteEffectsLab = true,
                     stageDecorator = stageLoopDecorator +
@@ -214,7 +220,7 @@ class EditorOverhaulIntegrationTest {
                 { targetPreset ->
                     val targetDesign = designStore.overridesFor(targetPreset)
                     createFoundationDeck(
-                        theme = DeckThemes.forPreset(targetPreset).withOverrides(targetDesign),
+                        theme = DeckThemes.forPreset(targetPreset),
                         bundledPreset = targetPreset,
                         includeKeynoteEffectsLab = true,
                         timelineOverrides = timelineStore.data(),
@@ -470,5 +476,146 @@ class EditorOverhaulIntegrationTest {
         onRoot().performKeyInput { pressKey(Key.B) }
         waitForIdle()
         assertEquals(StageCurtain.Blackout, presenterController.curtain)
+    }
+
+    @Test
+    fun offscreenLintAuditHonorsTimelineTrackEnterBeatOverrides() = runComposeUiTest {
+        val tempDir = Files.createTempDirectory("ciacola-lint-timeline-override-")
+        val storyboardDir = tempDir.resolve(".storyboard")
+        val timelineStore = TimelineOverridesStore(storyboardDir = storyboardDir)
+        val elementStore = ElementOverridesStore(storyboardDir = storyboardDir)
+
+        // Move s5:stamp off-stage so it triggers STAGE_OUT_OF_BOUNDS whenever visible,
+        // and override its timeline track (defaultTriggerBeat = 2) to enter early at Beat 1!
+        elementStore.updateElement("s5:stamp") { it.copy(offsetXDp = 900f) }
+        elementStore.flushPendingPersistence()
+        timelineStore.updateTrack("lab-immutable-stamp") { it.copy(enterBeat = 1) }
+
+        lateinit var lintController: DeckLintController
+        lateinit var uiScope: CoroutineScope
+        lateinit var storyboard: Storyboard
+
+        setContent {
+            uiScope = rememberCoroutineScope()
+            lintController = rememberDeckLintController()
+            storyboard = remember {
+                createFoundationDeck(
+                    theme = DeckThemes.forPreset(DeckThemePreset.StageDark),
+                    bundledPreset = DeckThemePreset.StageDark,
+                    includeKeynoteEffectsLab = true,
+                    timelineOverrides = timelineStore.data(),
+                    elementOverrides = elementStore.data(),
+                )
+            }
+            Box(Modifier.size(32.dp))
+        }
+        waitForIdle()
+
+        var issues: List<DeckLintIssue>? = null
+        runOnIdle {
+            uiScope.launch {
+                issues = lintController.runFullDeckAudit(
+                    storyboard = storyboard,
+                    timelineOverrides = timelineStore.data(),
+                )
+            }
+        }
+        waitUntil(conditionDescription = "Audit with timeline override completes", timeoutMillis = 10_000) {
+            issues != null && !lintController.isAuditing
+        }
+
+        val beat1StampIssue = issues!!.firstOrNull {
+            it.ruleId == LintRuleId.STAGE_OUT_OF_BOUNDS &&
+                it.sceneIndex == 4 &&
+                it.beatIndex == 1 &&
+                it.elementId == "s5:stamp"
+        }
+        assertNotNull(
+            beat1StampIssue,
+            "Offscreen full-deck audit must apply timeline enterBeat=1 override so s5:stamp is audited on S5:B2",
+        )
+    }
+
+    @Test
+    fun storesDeferGestureDebounceCoalescedWritesAndFlushCleanly() {
+        val tempDir = Files.createTempDirectory("ciacola-store-io-bar-")
+        val designStore = DesignSystemStore(storyboardDir = tempDir)
+        val elementStore = ElementOverridesStore(storyboardDir = tempDir)
+
+        // 1. DesignSystemStore defers all disk writes during continuous color/slider drag gestures.
+        designStore.beginEditGesture()
+        repeat(25) { step ->
+            designStore.updateColors(DeckThemePreset.StageDark, coalesceKey = "color:accent", coalesce = true) {
+                it.copy(accentArgb = 0xFF112200L + step)
+            }
+        }
+        assertFalse(Files.exists(designStore.overridesFile), "DesignSystemStore must not write during active drag gesture")
+        designStore.endEditGesture()
+        assertTrue(Files.exists(designStore.overridesFile), "DesignSystemStore flushes once when gesture ends")
+
+        // 2. ElementOverridesStore debounces coalesced arrow-nudge auto-repeat bursts without per-repeat writes.
+        repeat(20) { step ->
+            elementStore.updateElement("s1:eyebrow", coalesce = true, coalesceKey = "nudge:s1:eyebrow") {
+                it.copy(offsetXDp = (step + 1).toFloat())
+            }
+        }
+        assertFalse(
+            Files.exists(elementStore.overridesFile),
+            "Coalesced key-repeat updates must debounce off-thread rather than writing synchronously per repeat",
+        )
+        elementStore.flushPendingPersistence()
+        assertTrue(Files.exists(elementStore.overridesFile), "flushPendingPersistence writes latest coalesced state")
+        assertEquals(20f, ElementOverridesStore(tempDir).patchFor("s1:eyebrow")?.offsetXDp)
+    }
+
+    @Test
+    fun inlineStageEditorCommitsLastKeystrokeSynchronouslyOnEnterAndClickOutside() = runComposeUiTest {
+        val tempDir = Files.createTempDirectory("ciacola-inline-sync-")
+        val elementStore = ElementOverridesStore(storyboardDir = tempDir)
+        lateinit var elementController: ElementEditorController
+
+        setContent {
+            val registry = remember { StageInspectionRegistry() }
+            elementController = rememberElementEditorController(
+                overridesStore = elementStore,
+                inspectionRegistry = registry,
+            )
+            SideEffect {
+                elementController.editorActive = true
+                elementController.elementPickingEnabled = true
+            }
+            val sb = remember(elementStore.revision) {
+                createFoundationDeck(
+                    theme = DeckThemes.forPreset(DeckThemePreset.StageDark),
+                    bundledPreset = DeckThemePreset.StageDark,
+                    includeKeynoteEffectsLab = false,
+                    stageDecorator = elementController.stageDecorator,
+                    elementOverrides = elementStore.data(),
+                )
+            }
+            val animatic = rememberAnimatic(storyboard = { sb })
+            Box(Modifier.size(960.dp, 540.dp)) {
+                Easel(animatic)
+            }
+        }
+        waitForIdle()
+
+        // 1. Type and commit immediately with Enter in the same interaction sequence without waiting an extra frame.
+        runOnIdle { assertTrue(elementController.startInlineEdit("s1:eyebrow")) }
+        waitForIdle()
+        onNodeWithTag("ciacola-inline-stage-editor-input").performTextInput(" Z")
+        onNodeWithTag("ciacola-inline-stage-editor-input").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals("FOUNDATION / PROVISIONAL Z", elementStore.patchFor("s1:eyebrow")?.text)
+
+        // 2. Type and commit immediately by clicking outside on the stage.
+        runOnIdle { assertTrue(elementController.startInlineEdit("s1:eyebrow")) }
+        waitForIdle()
+        onNodeWithTag("ciacola-inline-stage-editor-input").performTextInput("!")
+        onNodeWithTag("ciacola-direct-edit-overlay").performMouseInput {
+            click(Offset(width * 0.85f, height * 0.85f))
+        }
+        waitForIdle()
+        assertEquals("FOUNDATION / PROVISIONAL Z!", elementStore.patchFor("s1:eyebrow")?.text)
     }
 }

@@ -143,39 +143,43 @@ internal fun StageDirectEditLayer(
             swallowNextEscapeKeyUp = false
             return true
         }
+        val delegated = controller.onStageKeyHandler
+        if (delegated != null) {
+            return delegated(ev)
+        }
         if (!active || controller.inlineEditingElementId != null) return false
         if (controller.isExternalTextInputActive()) return false
         if (controller.selectedElementId == null) return false
-        if (ev.type != KeyEventType.KeyDown) return false
+        if (ev.type != KeyEventType.KeyDown || ev.isAltPressed) return false
 
         val step = if (ev.isShiftPressed) 10f else 1f
         return when {
-            ev.key == Key.DirectionLeft -> {
+            !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionLeft -> {
                 controller.nudgeSelected(-step, 0f)
                 true
             }
-            ev.key == Key.DirectionRight -> {
+            !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionRight -> {
                 controller.nudgeSelected(step, 0f)
                 true
             }
-            ev.key == Key.DirectionUp -> {
+            !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionUp -> {
                 controller.nudgeSelected(0f, -step)
                 true
             }
-            ev.key == Key.DirectionDown -> {
+            !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionDown -> {
                 controller.nudgeSelected(0f, step)
                 true
             }
-            ev.key == Key.Escape -> {
+            !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.Escape -> {
                 swallowNextEscapeKeyUp = true
                 controller.selectElement(null)
                 true
             }
-            ev.isMetaPressed && (ev.key == Key.Backspace || ev.key == Key.Delete) -> {
+            (ev.isMetaPressed || ev.isCtrlPressed) && (ev.key == Key.Backspace || ev.key == Key.Delete) -> {
                 controller.resetSelectedElement()
                 true
             }
-            ev.isMetaPressed && ev.key == Key.Z -> {
+            (ev.isMetaPressed || ev.isCtrlPressed) && ev.key == Key.Z -> {
                 if (ev.isShiftPressed) controller.redo() else controller.undo()
                 true
             }
@@ -460,6 +464,19 @@ private fun InlineStageTextEditor(
     val textFieldState = rememberTextFieldState(initialText = controller.inlineDraftText)
     var editorFocused by remember(elementId) { mutableStateOf(false) }
 
+    val liveTextReader = remember(textFieldState) {
+        { textFieldState.text.toString() }
+    }
+    controller.inlineDraftTextProvider = liveTextReader
+    DisposableEffect(controller, liveTextReader) {
+        controller.inlineDraftTextProvider = liveTextReader
+        onDispose {
+            if (controller.inlineDraftTextProvider === liveTextReader) {
+                controller.inlineDraftTextProvider = null
+            }
+        }
+    }
+
     LaunchedEffect(elementId) {
         if (textFieldState.text.toString() != controller.inlineDraftText) {
             textFieldState.setTextAndPlaceCursorAtEnd(controller.inlineDraftText)
@@ -471,10 +488,6 @@ private fun InlineStageTextEditor(
             withFrameNanos { }
             attempts++
         }
-    }
-
-    LaunchedEffect(textFieldState.text.toString()) {
-        controller.inlineDraftText = textFieldState.text.toString()
     }
 
     val editorWidthDp = with(density) { targetBounds.width.toDp() }.coerceIn(280.dp, 680.dp)
@@ -492,7 +505,10 @@ private fun InlineStageTextEditor(
         }
         if (ev.key == Key.Enter || ev.key == Key.NumPadEnter) {
             if (ev.isMetaPressed || (!ev.isShiftPressed && !ev.isAltPressed)) {
-                controller.commitInlineEdit(restoreStageFocus = true)
+                controller.commitInlineEdit(
+                    textOverride = textFieldState.text.toString(),
+                    restoreStageFocus = true,
+                )
                 return true
             }
         }
@@ -566,7 +582,12 @@ private fun InlineStageTextEditor(
             }
             Tooltip(tooltip = { Text("Apply text override (Enter / ⌘Enter)") }) {
                 DefaultButton(
-                    onClick = { controller.commitInlineEdit(restoreStageFocus = true) },
+                    onClick = {
+                        controller.commitInlineEdit(
+                            textOverride = textFieldState.text.toString(),
+                            restoreStageFocus = true,
+                        )
+                    },
                     modifier = Modifier.testTag("ciacola-inline-stage-editor-save"),
                 ) {
                     Text("Apply", style = JewelTheme.typography.small)

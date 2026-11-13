@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -55,7 +56,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.sebastiano.ciacola.inspector.ElementPatch
@@ -345,30 +345,11 @@ class StudioWorkspaceController(
 
         return false
     }
-
-    /**
-     * Story-window decorator installing `F7`/`F8` shortcuts even when Timeline Studio is closed.
-     */
-    val storyShortcutDecorator: ContentDecorator = ContentDecorator { content ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .onPreviewKeyEvent { ev ->
-                    if (!isStudioOpen) {
-                        handleStudioPreviewKey(ev)
-                    } else {
-                        false
-                    }
-                },
-        ) {
-            content()
-        }
-    }
 }
 
 /**
- * Synchronizes sidecar folding (closing standalone Theme/Lint sidecars into Studio tabs when
- * Studio opens) and tracks the most recently edited store domain for Undo/Redo on the Lint tab.
+ * Synchronizes sidecar folding, unified off-EDT disk polling + exit flush for both inspector
+ * stores, shortcut delegation, and the most recently edited store domain for Undo/Redo on Lint.
  */
 @Composable
 fun StudioWorkspaceSyncEffects(workspace: StudioWorkspaceController) {
@@ -380,6 +361,9 @@ fun StudioWorkspaceSyncEffects(workspace: StudioWorkspaceController) {
     SideEffect {
         workspace.elementController.editorActive = anyAuthoringOpen
         workspace.elementController.elementPickingEnabled = elementPicking
+        workspace.elementController.onStageKeyHandler = { ev ->
+            workspace.handleStudioPreviewKey(ev)
+        }
         workspace.elementController.onInlineEditOpened = {
             if (workspace.isStudioOpen) {
                 workspace.activeTab = StudioInspectorTab.Element
@@ -389,6 +373,24 @@ fun StudioWorkspaceSyncEffects(workspace: StudioWorkspaceController) {
             if (trackId != null && workspace.isStudioOpen) {
                 workspace.activeTab = StudioInspectorTab.Motion
             }
+        }
+    }
+
+    DisposableEffect(workspace) {
+        onDispose {
+            if (workspace.elementController.onStageKeyHandler != null) {
+                workspace.elementController.onStageKeyHandler = null
+            }
+            workspace.designSystemStore.flushPendingPersistence()
+            workspace.elementOverridesStore.flushPendingPersistence()
+        }
+    }
+
+    LaunchedEffect(workspace.designSystemStore, workspace.elementOverridesStore) {
+        while (true) {
+            kotlinx.coroutines.delay(300L)
+            workspace.designSystemStore.pollExternalChangesFromDisk()
+            workspace.elementOverridesStore.pollExternalChangesFromDisk()
         }
     }
 
@@ -486,15 +488,17 @@ fun StudioUnifiedInspectorPane(
         )
     }
 
-    // Observe store revisions so tab override dots stay live.
-    workspace.timelineOverridesStore.parameterRevision
-    workspace.timelineOverridesStore.structuralRevision
-    workspace.elementOverridesStore.revision
-    workspace.designSystemStore.revision
+    val motionParamRev = workspace.timelineOverridesStore.parameterRevision
+    val motionStructRev = workspace.timelineOverridesStore.structuralRevision
+    val elemRev = workspace.elementOverridesStore.revision
+    val desRev = workspace.designSystemStore.revision
 
     val hasMotionOverrides = workspace.timelineOverridesStore.data().hasOverrides
     val hasElementOverrides = workspace.elementOverridesStore.data().hasOverrides
     val hasThemeOverrides = workspace.designSystemStore.overridesFor(currentPreset).hasOverrides
+    val resolvedFallbackBg = remember(currentPreset, desRev, baseThemeProvider) {
+        workspace.designSystemStore.resolveTheme(currentPreset, baseThemeProvider(currentPreset)).colors.background
+    }
     val lintErrorCount = workspace.lintController.errorCount
     val lintWarningCount = workspace.lintController.warningCount
     val lintTotalCount = lintErrorCount + lintWarningCount
@@ -570,6 +574,9 @@ fun StudioUnifiedInspectorPane(
                     storyboardProvider = { animatic.storyboard },
                     presetsToCheck = DeckThemePreset.entries,
                     storyboardForPreset = storyboardForPreset,
+                    timelineOverridesProvider = { workspace.timelineOverridesStore.data() },
+                    fallbackBackground = resolvedFallbackBg,
+                    externalRevisionKey = motionStructRev + motionParamRev + elemRev + desRev,
                     stageInspectionRegistry = workspace.stageInspectionRegistry,
                     onApplyElementPatch = { patch -> workspace.applyElementPatch(patch) },
                     onEditElement = { elementId, sceneIndex, beatIndex ->

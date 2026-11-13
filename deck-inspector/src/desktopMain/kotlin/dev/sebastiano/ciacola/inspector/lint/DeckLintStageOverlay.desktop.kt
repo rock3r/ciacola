@@ -90,53 +90,65 @@ fun rememberDeckLintStageDecorator(
             !LocalOverviewOpen.current &&
             LocalSceneMode.current == SceneMode.Story
 
-        if (!visible) {
-            content()
-            return@ContentDecorator
-        }
-
         val storyboard = LocalStoryboard.current
         val effectiveFormatSize = storyboard?.format?.size ?: stageFormatSize
-        val cleanLayer = rememberGraphicsLayer()
+        val cleanLayer = if (visible) rememberGraphicsLayer() else null
 
-        DisposableEffect(controller, cleanLayer) {
-            controller.cleanStageGraphicsLayer = cleanLayer
-            onDispose {
-                if (controller.cleanStageGraphicsLayer === cleanLayer) {
-                    controller.cleanStageGraphicsLayer = null
+        if (visible && cleanLayer != null) {
+            DisposableEffect(controller, cleanLayer) {
+                controller.cleanStageGraphicsLayer = cleanLayer
+                onDispose {
+                    if (controller.cleanStageGraphicsLayer === cleanLayer) {
+                        controller.cleanStageGraphicsLayer = null
+                    }
+                    controller.stageRootCoordinates = null
+                    controller.stageBoundsInRoot = null
                 }
-                controller.stageRootCoordinates = null
-                controller.stageBoundsInRoot = null
             }
         }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .testTag("ciacola-lint-stage")
-                .onPlaced { coords ->
-                    controller.stageRootCoordinates = coords
-                    if (coords.isAttached) {
-                        controller.stageBoundsInRoot = runCatching { coords.boundsInRoot() }.getOrNull()
+                .let { base ->
+                    if (visible) {
+                        base
+                            .testTag("ciacola-lint-stage")
+                            .onPlaced { coords ->
+                                controller.stageRootCoordinates = coords
+                                if (coords.isAttached) {
+                                    controller.stageBoundsInRoot = runCatching { coords.boundsInRoot() }.getOrNull()
+                                }
+                            }
+                    } else {
+                        base
                     }
                 },
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .drawWithContent {
-                        cleanLayer.record { this@drawWithContent.drawContent() }
-                        drawLayer(cleanLayer)
+                    .let { base ->
+                        if (visible && cleanLayer != null) {
+                            base.drawWithContent {
+                                cleanLayer.record { this@drawWithContent.drawContent() }
+                                drawLayer(cleanLayer)
+                            }
+                        } else {
+                            base
+                        }
                     },
             ) {
                 content()
             }
-            CiacolaJewelTheme(isDark = !LocalDeckTheme.current.isLight) {
-                StageLintHighlightOverlay(
-                    controller = controller,
-                    isInspectionVisible = controller.showStageOverlay,
-                    stageFormatSize = effectiveFormatSize,
-                )
+            if (visible) {
+                CiacolaJewelTheme(isDark = !LocalDeckTheme.current.isLight) {
+                    StageLintHighlightOverlay(
+                        controller = controller,
+                        isInspectionVisible = controller.showStageOverlay,
+                        stageFormatSize = effectiveFormatSize,
+                    )
+                }
             }
         }
     }

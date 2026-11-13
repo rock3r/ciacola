@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyShortcut
@@ -24,6 +25,8 @@ import dev.bnorm.storyboard.easel.EaselWindow
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.theme.DeckThemePreset
+import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import kotlinx.coroutines.launch
 
@@ -39,6 +42,9 @@ class DeckLintWindow(
     var storyboardProvider: (() -> Storyboard)? = null,
     var presetsToCheck: List<DeckThemePreset> = DeckThemePreset.entries,
     var storyboardForPreset: ((DeckThemePreset) -> Storyboard)? = null,
+    var timelineOverridesProvider: () -> DeckTimelineOverridesFile = { DeckTimelineOverridesFile() },
+    var fallbackBackgroundProvider: () -> Color = { DeckThemes.forPreset(currentPresetProvider()).colors.background },
+    var externalRevisionKeyProvider: () -> Int = { 0 },
     var stageInspectionRegistry: StageInspectionRegistry? = null,
     var onApplyElementPatch: ((ElementPatch) -> Unit)? = null,
     var onEditElement: ((elementId: String, sceneIndex: Int, beatIndex: Int) -> Unit)? = null,
@@ -94,6 +100,7 @@ class DeckLintWindow(
                         storyboard = sb,
                         presetsToCheck = presetsToCheck,
                         storyboardForPreset = storyboardForPreset,
+                        timelineOverrides = timelineOverridesProvider(),
                     )
                 }
             },
@@ -122,6 +129,9 @@ class DeckLintWindow(
                     storyboardProvider = storyboardProvider,
                     presetsToCheck = presetsToCheck,
                     storyboardForPreset = storyboardForPreset,
+                    timelineOverridesProvider = timelineOverridesProvider,
+                    fallbackBackground = fallbackBackgroundProvider(),
+                    externalRevisionKey = externalRevisionKeyProvider(),
                     stageInspectionRegistry = stageInspectionRegistry,
                     onApplyElementPatch = onApplyElementPatch,
                     onEditElement = onEditElement,
@@ -141,6 +151,9 @@ fun rememberDeckLintWindow(
     storyboardProvider: (() -> Storyboard)? = null,
     presetsToCheck: List<DeckThemePreset> = DeckThemePreset.entries,
     storyboardForPreset: ((DeckThemePreset) -> Storyboard)? = null,
+    timelineOverridesProvider: () -> DeckTimelineOverridesFile = { DeckTimelineOverridesFile() },
+    fallbackBackgroundProvider: () -> Color = { DeckThemes.forPreset(currentPresetProvider()).colors.background },
+    externalRevisionKeyProvider: () -> Int = { 0 },
     stageInspectionRegistry: StageInspectionRegistry? = null,
     onApplyElementPatch: ((ElementPatch) -> Unit)? = null,
     onEditElement: ((elementId: String, sceneIndex: Int, beatIndex: Int) -> Unit)? = null,
@@ -157,6 +170,9 @@ fun rememberDeckLintWindow(
         storyboardProvider = storyboardProvider,
         presetsToCheck = presetsToCheck,
         storyboardForPreset = storyboardForPreset,
+        timelineOverridesProvider = timelineOverridesProvider,
+        fallbackBackgroundProvider = fallbackBackgroundProvider,
+        externalRevisionKeyProvider = externalRevisionKeyProvider,
         stageInspectionRegistry = stageInspectionRegistry,
         onApplyElementPatch = onApplyElementPatch,
         onEditElement = onEditElement,
@@ -172,6 +188,9 @@ fun rememberDeckLintWindow(
     it.storyboardProvider = storyboardProvider
     it.presetsToCheck = presetsToCheck
     it.storyboardForPreset = storyboardForPreset
+    it.timelineOverridesProvider = timelineOverridesProvider
+    it.fallbackBackgroundProvider = fallbackBackgroundProvider
+    it.externalRevisionKeyProvider = externalRevisionKeyProvider
     it.stageInspectionRegistry = stageInspectionRegistry
     it.onApplyElementPatch = onApplyElementPatch
     it.onEditElement = onEditElement

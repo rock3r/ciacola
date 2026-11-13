@@ -174,7 +174,7 @@ class TimelineStudioController(
     fun endScrubDrag() {
         isScrubDragging = false
         val req = lastRequested
-        if (req != null && req.fraction > 0f && loopClock.activeSubCompLoopId == null) {
+        if (req != null && loopClock.activeSubCompLoopId == null) {
             val settleReq = req.copy(sequence = ++scrubSequence, forceRebuild = true)
             lastRequested = settleReq
             scrubRequests.value = settleReq
@@ -381,11 +381,18 @@ class TimelineStudioController(
                 !reqDesc.isBoundaryStart &&
                 !reqDesc.isBoundaryEnd
             val inPlace = !shouldForceRebuild && (sameSegmentInPlace || sameSlideDrag)
+            val enteringFromSettledStart = a.activeFromStateIndex == request.stateIndex &&
+                a.activeToStateIndex == request.stateIndex &&
+                request.fraction > 0f
+            val crossedIntraSlideBeat = sameSlideDrag && !enteringFromSettledStart
+            val reversedWithinSegment = sameSegmentInPlace &&
+                previous != null &&
+                previous.stateIndex == request.stateIndex &&
+                request.fraction < previous.fraction - 1e-4f
             a.seekToSegment(request.stateIndex, request.fraction, rebuildScene = !inPlace)
             restingNeedsRebuild = when {
                 !inPlace -> false
-                request.fraction <= 0f -> false
-                sameSlideDrag -> true
+                crossedIntraSlideBeat || reversedWithinSegment -> true
                 else -> restingNeedsRebuild
             }
             lastApplied = request

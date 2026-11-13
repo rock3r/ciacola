@@ -360,7 +360,6 @@ class Animatic internal constructor(
         }
 
         val fromState = states[segment]
-        val toState = states.getOrNull(segment + 1)
         val alreadySettledAtFrom = transitionState.currentState == fromState && transitionState.targetState == fromState
         if (clampedFraction <= 0f && alreadySettledAtFrom && sceneCleanlySettled) {
             currentState = resolveBackwardValueState(segment)
@@ -369,18 +368,10 @@ class Animatic internal constructor(
             return
         }
 
-        val alreadyInTargetSegment = toState != null &&
-            transitionState.currentState == fromState &&
-            transitionState.targetState == toState
-        if (clampedFraction > 0f && alreadyInTargetSegment && sceneCleanlySettled && abs(activeFraction - clampedFraction) < 1e-4f) {
-            currentState = resolveBackwardValueState(segment)
-            targetState = resolveForwardValueState(segment + 1)
-            retainedScrubSegment = -1
-            restingMidSegment = true
-            return
-        }
-
-        if (!rebuildScene || (sceneCleanlySettled && (alreadySettledAtFrom || (clampedFraction > 0f && alreadyInTargetSegment)))) {
+        if (!rebuildScene || (sceneCleanlySettled && alreadySettledAtFrom)) {
+            if (!rebuildScene) {
+                sceneCleanlySettled = false
+            }
             seekInPlace(segment, clampedFraction)
             retainedScrubSegment = -1
             restingMidSegment = clampedFraction > 0f

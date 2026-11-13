@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.KeyEvent
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalSceneMode
@@ -44,6 +45,7 @@ class ElementEditorController(
         private set
 
     var inlineDraftText by mutableStateOf("")
+    internal var inlineDraftTextProvider: (() -> String)? = null
 
     var suppressPicking: () -> Boolean = { false }
     var isExternalTextInputActive: () -> Boolean = { false }
@@ -53,6 +55,7 @@ class ElementEditorController(
     var isDarkThemeProvider: () -> Boolean = { true }
     var onElementSelected: ((String?) -> Unit)? = null
     var onInlineEditOpened: ((String) -> Unit)? = null
+    var onStageKeyHandler: ((KeyEvent) -> Boolean)? = null
     var onReturnFocusToStage: () -> Unit = {}
 
     fun slidesNodesForCurrentSlide(): List<StageNodeSnapshot> {
@@ -93,9 +96,14 @@ class ElementEditorController(
         return true
     }
 
-    fun commitInlineEdit(restoreStageFocus: Boolean = true): Boolean {
+    fun commitInlineEdit(
+        textOverride: String? = null,
+        restoreStageFocus: Boolean = true,
+    ): Boolean {
         val id = inlineEditingElementId ?: return false
-        val committed = inlineDraftText
+        val committed = textOverride ?: inlineDraftTextProvider?.invoke() ?: inlineDraftText
+        inlineDraftText = committed
+        inlineDraftTextProvider = null
         overridesStore.updateElement(
             elementId = id,
             coalesce = false,
@@ -113,6 +121,7 @@ class ElementEditorController(
     fun cancelInlineEdit(restoreStageFocus: Boolean = true) {
         if (inlineEditingElementId == null) return
         inlineEditingElementId = null
+        inlineDraftTextProvider = null
         inlineDraftText = ""
         if (restoreStageFocus) {
             onReturnFocusToStage()

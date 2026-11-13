@@ -111,13 +111,6 @@ fun main() = application {
         )
         val lintController = rememberDeckLintController()
 
-        LaunchedEffect(elementOverridesStore) {
-            while (true) {
-                delay(300)
-                elementOverridesStore.reloadFromDiskIfChanged()
-            }
-        }
-
         val designRev = designSystemStore.revision
         val designOverrides = remember(preset, designRev) {
             designSystemStore.overridesFor(preset)
@@ -168,7 +161,7 @@ fun main() = application {
             elementRev,
         ) {
             createFoundationDeck(
-                theme = hostTheme,
+                theme = baseHostTheme,
                 bundledPreset = preset,
                 includeKeynoteEffectsLab = true,
                 stageDecorator = stageLoopAndArcDecorator +
@@ -193,7 +186,7 @@ fun main() = application {
             { targetPreset ->
                 val targetDesignOverrides = designSystemStore.overridesFor(targetPreset)
                 createFoundationDeck(
-                    theme = DeckThemes.forPreset(targetPreset).withOverrides(targetDesignOverrides),
+                    theme = DeckThemes.forPreset(targetPreset),
                     bundledPreset = targetPreset,
                     includeKeynoteEffectsLab = true,
                     timelineOverrides = timelineOverridesStore.data(),
@@ -305,6 +298,11 @@ fun main() = application {
             storyboardProvider = { animatic.storyboard },
             presetsToCheck = DeckThemePreset.entries,
             storyboardForPreset = buildAuditStoryboardForPreset,
+            timelineOverridesProvider = { timelineOverridesStore.data() },
+            fallbackBackgroundProvider = { hostTheme.colors.background },
+            externalRevisionKeyProvider = {
+                structuralRev + paramRev + elementRev + designRev
+            },
             stageInspectionRegistry = stageInspectionRegistry,
             onApplyElementPatch = { patch -> studioWorkspace.applyElementPatch(patch) },
             onEditElement = { elementId, sceneIndex, beatIndex ->
@@ -320,7 +318,6 @@ fun main() = application {
             isLinterShownProvider = { studioWorkspace.isLinterVisible },
             onToggleLinter = { studioWorkspace.toggleDeckLinter() },
             onPreviewKeyHandler = { ev -> studioWorkspace.handleStudioPreviewKey(ev) },
-            decorator = studioWorkspace.storyShortcutDecorator,
         )
 
         studioWorkspace.designSidecarVisibleProvider = { themeWindow.visible }
@@ -351,8 +348,8 @@ fun main() = application {
                 elementOverridesStore.revision
                 designSystemStore.revision
                 timelineOverridesStore.data().hasOverrides ||
-                    (elementOverridesStore.canUndo && elementOverridesStore.data().hasOverrides) ||
-                    (designSystemStore.canUndo && designSystemStore.data().hasOverrides)
+                    elementOverridesStore.data().hasOverrides ||
+                    designSystemStore.data().hasOverrides
             },
             unbakedDomainsProvider = {
                 timelineOverridesStore.structuralRevision
@@ -361,8 +358,8 @@ fun main() = application {
                 designSystemStore.revision
                 buildList {
                     if (timelineOverridesStore.data().hasOverrides) add("Timeline")
-                    if (elementOverridesStore.canUndo && elementOverridesStore.data().hasOverrides) add("Element")
-                    if (designSystemStore.canUndo && designSystemStore.data().hasOverrides) add("Theme")
+                    if (elementOverridesStore.data().hasOverrides) add("Element")
+                    if (designSystemStore.data().hasOverrides) add("Theme")
                 }
             },
             onEnterCleanShowMode = {

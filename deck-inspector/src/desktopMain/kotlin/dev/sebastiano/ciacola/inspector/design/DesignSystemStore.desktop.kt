@@ -14,13 +14,22 @@ import dev.sebastiano.ciacola.theme.MotionTokenOverrides
 import dev.sebastiano.ciacola.theme.StyleTokenOverrides
 import dev.sebastiano.ciacola.theme.TypographyTokenOverrides
 import dev.sebastiano.ciacola.theme.withOverrides
+import java.awt.EventQueue
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.FileTime
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -53,8 +62,9 @@ data class DesignSystemOverridesFile(
 
 /**
  * Manages live design system token overrides persisted in `.storyboard/design-system.json` with
- * independent per-preset storage, atomic writes, corrupt-file backup, external disk reload,
- * gesture-coalesced 64-step Undo/Redo, granular resets, and Kotlin snippet export.
+ * independent per-preset storage, off-EDT atomic writes, corrupt-file backup, `Dispatchers.IO`
+ * external mtime+size polling, gesture-coalesced 64-step Undo/Redo, granular resets, and Kotlin
+ * snippet export.
  */
 class DesignSystemStore(
     val storyboardDir: Path = Path.of(".storyboard"),
@@ -63,6 +73,7 @@ class DesignSystemStore(
     companion object {
         const val MAX_UNDO_HISTORY = 64
         private const val COALESCE_WINDOW_MS = 250L
+        private const val DEBOUNCE_PERSIST_MS = 200L
     }
 
     private val json = Json {
@@ -71,17 +82,22 @@ class DesignSystemStore(
         encodeDefaults = true
     }
 
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val overridesFile: Path = storyboardDir.resolve("design-system.json")
     val corruptBackupFile: Path = storyboardDir.resolve("design-system.corrupt.json")
 
     private var currentData: DesignSystemOverridesFile = DesignSystemOverridesFile()
-    private var lastObservedText: String? = null
-    private var lastObservedFileExisted: Boolean = false
+    private var lastObservedModifiedTime: FileTime? = null
+    private var lastObservedFileSize: Long = -1L
 
     private val undoStack = ArrayDeque<DesignSystemOverridesFile>()
     private val redoStack = ArrayDeque<DesignSystemOverridesFile>()
     private var activeGestureDepth = 0
     private var gestureSnapshotRecorded = false
+    private var pendingPersist = false
+    private var persistEpoch = 0L
+    private var debouncePersistJob: Job? = null
     private var lastCoalesceKey: String? = null
     private var lastMutationMillis: Long = Long.MIN_VALUE
 
@@ -141,13 +157,25 @@ class DesignSystemStore(
             if (activeGestureDepth == 0) {
                 gestureSnapshotRecorded = false
                 lastCoalesceKey = null
+                if (pendingPersist) {
+                    scheduleOrFlushPersist(debounce = false)
+                }
             }
         }
     }
 
     @Synchronized
+    fun flushPendingPersistence() {
+        debouncePersistJob?.cancel()
+        debouncePersistJob = null
+        if (!pendingPersist) return
+        val snapshot = currentData
+        val targetEpoch = ++persistEpoch
+        writeSnapshotToDisk(snapshot, targetEpoch)
+    }
+
+    @Synchronized
     fun data(): DesignSystemOverridesFile {
-        // Read revision to subscribe Compose callers when accessed inside composition.
         revision
         return currentData
     }
@@ -167,25 +195,63 @@ class DesignSystemStore(
         return baseTheme.withOverrides(currentData.forPreset(preset))
     }
 
+    private sealed interface PollOutcome {
+        data object Unchanged : PollOutcome
+        data object Deleted : PollOutcome
+        data class Loaded(
+            val parsed: DesignSystemOverridesFile,
+            val modifiedTime: FileTime?,
+            val fileSize: Long,
+        ) : PollOutcome
+    }
+
+    /**
+     * Performs file stat/read/parse on [Dispatchers.IO] and applies state changes on the caller
+     * (UI) thread so polling never touches disk on the EDT.
+     */
+    suspend fun pollExternalChangesFromDisk(notifyRevision: Boolean = true): Boolean {
+        val (prevMtime, prevSize, skip) = synchronized(this) {
+            Triple(
+                lastObservedModifiedTime,
+                lastObservedFileSize,
+                activeGestureDepth > 0 || pendingPersist,
+            )
+        }
+        if (skip) return false
+
+        val outcome = withContext(Dispatchers.IO) {
+            readDiskIfChanged(prevMtime, prevSize)
+        }
+
+        return synchronized(this) {
+            if (activeGestureDepth > 0 || pendingPersist) return@synchronized false
+            applyPollOutcomeLocked(outcome, notifyRevision)
+        }
+    }
+
     @Synchronized
     fun reloadFromDiskIfChanged(notifyRevision: Boolean = true): Boolean {
-        if (!overridesFile.exists()) {
-            val existedBefore = lastObservedFileExisted
-            lastObservedFileExisted = false
-            lastObservedText = null
-            if (existedBefore && currentData != DesignSystemOverridesFile()) {
-                currentData = DesignSystemOverridesFile()
-                if (notifyRevision) revision++
-                return true
-            }
-            return false
-        }
-        lastObservedFileExisted = true
-        val text = runCatching { overridesFile.readText() }.getOrNull() ?: return false
-        if (text == lastObservedText) return false
-        lastObservedText = text
-        if (text.isBlank()) return false
+        if (activeGestureDepth > 0 || pendingPersist) return false
+        val outcome = readDiskIfChanged(lastObservedModifiedTime, lastObservedFileSize)
+        return applyPollOutcomeLocked(outcome, notifyRevision)
+    }
 
+    private fun readDiskIfChanged(
+        prevMtime: FileTime?,
+        prevSize: Long,
+    ): PollOutcome {
+        if (!overridesFile.exists()) {
+            return if (prevMtime != null || prevSize != -1L) PollOutcome.Deleted else PollOutcome.Unchanged
+        }
+        val mtime = runCatching { Files.getLastModifiedTime(overridesFile) }.getOrNull()
+        val size = runCatching { Files.size(overridesFile) }.getOrDefault(-1L)
+        if (mtime != null && mtime == prevMtime && size == prevSize) {
+            return PollOutcome.Unchanged
+        }
+        val text = runCatching { overridesFile.readText() }.getOrNull() ?: return PollOutcome.Unchanged
+        if (text.isBlank()) {
+            return PollOutcome.Loaded(DesignSystemOverridesFile(), mtime, size)
+        }
         val parsed = runCatching {
             json.decodeFromString<DesignSystemOverridesFile>(text)
         }.getOrNull()
@@ -196,12 +262,35 @@ class DesignSystemStore(
                     Files.copy(overridesFile, corruptBackupFile, StandardCopyOption.REPLACE_EXISTING)
                 }
             }
-            return false
+            return PollOutcome.Loaded(currentData, mtime, size)
         }
-        if (parsed == currentData) return false
-        currentData = parsed
-        if (notifyRevision) revision++
-        return true
+        return PollOutcome.Loaded(parsed, mtime, size)
+    }
+
+    private fun applyPollOutcomeLocked(outcome: PollOutcome, notifyRevision: Boolean): Boolean = when (outcome) {
+        PollOutcome.Unchanged -> false
+        PollOutcome.Deleted -> {
+            lastObservedModifiedTime = null
+            lastObservedFileSize = -1L
+            if (currentData != DesignSystemOverridesFile()) {
+                currentData = DesignSystemOverridesFile()
+                if (notifyRevision) revision++
+                true
+            } else {
+                false
+            }
+        }
+        is PollOutcome.Loaded -> {
+            lastObservedModifiedTime = outcome.modifiedTime
+            lastObservedFileSize = outcome.fileSize
+            if (outcome.parsed != currentData) {
+                currentData = outcome.parsed
+                if (notifyRevision) revision++
+                true
+            } else {
+                false
+            }
+        }
     }
 
     @Synchronized
@@ -211,13 +300,12 @@ class DesignSystemStore(
         coalesce: Boolean = false,
         transform: (DesignSystemOverrides) -> DesignSystemOverrides,
     ) {
-        reloadFromDiskIfChanged(notifyRevision = false)
         val prev = currentData.forPreset(preset)
         val updated = transform(prev)
         if (updated == prev) return
         recordUndoSnapshotBeforeMutation(coalesceKey = coalesceKey, coalesce = coalesce)
         currentData = currentData.withPreset(preset, updated)
-        persist()
+        requestPersistLocked(coalesce = coalesce)
         revision++
     }
 
@@ -299,17 +387,15 @@ class DesignSystemStore(
 
     @Synchronized
     fun resetAll() {
-        reloadFromDiskIfChanged(notifyRevision = false)
         if (!currentData.hasOverrides) return
         recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
         currentData = DesignSystemOverridesFile()
-        persist()
+        requestPersistLocked(coalesce = false)
         revision++
     }
 
     @Synchronized
     fun undo(): Boolean {
-        reloadFromDiskIfChanged(notifyRevision = false)
         if (undoStack.isEmpty()) return false
         activeGestureDepth = 0
         gestureSnapshotRecorded = false
@@ -319,7 +405,7 @@ class DesignSystemStore(
         }
         redoStack.addLast(currentData)
         currentData = undoStack.removeLast()
-        persist()
+        requestPersistLocked(coalesce = false)
         syncUndoFlags()
         revision++
         return true
@@ -327,7 +413,6 @@ class DesignSystemStore(
 
     @Synchronized
     fun redo(): Boolean {
-        reloadFromDiskIfChanged(notifyRevision = false)
         if (redoStack.isEmpty()) return false
         activeGestureDepth = 0
         gestureSnapshotRecorded = false
@@ -337,7 +422,7 @@ class DesignSystemStore(
         }
         undoStack.addLast(currentData)
         currentData = redoStack.removeLast()
-        persist()
+        requestPersistLocked(coalesce = false)
         syncUndoFlags()
         revision++
         return true
@@ -347,19 +432,52 @@ class DesignSystemStore(
     fun exportKotlinSnippet(
         preset: DeckThemePreset,
         baseTheme: DeckTheme = DeckThemes.forPreset(preset),
-    ): String {
-        reloadFromDiskIfChanged(notifyRevision = false)
-        return exportDesignSystemKotlinSnippet(
-            preset = preset,
-            overrides = currentData.forPreset(preset),
-            baseTheme = baseTheme,
-        )
+    ): String = exportDesignSystemKotlinSnippet(
+        preset = preset,
+        overrides = currentData.forPreset(preset),
+        baseTheme = baseTheme,
+    )
+
+    private fun requestPersistLocked(coalesce: Boolean) {
+        pendingPersist = true
+        if (activeGestureDepth > 0) {
+            debouncePersistJob?.cancel()
+            debouncePersistJob = null
+            return
+        }
+        scheduleOrFlushPersist(debounce = coalesce)
     }
 
-    private fun persist() {
+    private fun scheduleOrFlushPersist(debounce: Boolean) {
+        debouncePersistJob?.cancel()
+        debouncePersistJob = null
+        val targetEpoch = ++persistEpoch
+        val snapshot = currentData
+        if (debounce) {
+            debouncePersistJob = ioScope.launch {
+                delay(DEBOUNCE_PERSIST_MS)
+                val latest = synchronized(this@DesignSystemStore) {
+                    if (persistEpoch != targetEpoch || !pendingPersist || activeGestureDepth > 0) {
+                        null
+                    } else {
+                        currentData
+                    }
+                } ?: return@launch
+                writeSnapshotToDisk(latest, targetEpoch)
+            }
+        } else if (EventQueue.isDispatchThread()) {
+            debouncePersistJob = ioScope.launch {
+                writeSnapshotToDisk(snapshot, targetEpoch)
+            }
+        } else {
+            writeSnapshotToDisk(snapshot, targetEpoch)
+        }
+    }
+
+    private fun writeSnapshotToDisk(snapshot: DesignSystemOverridesFile, targetEpoch: Long) {
         runCatching {
             Files.createDirectories(storyboardDir)
-            val encoded = json.encodeToString(currentData) + "\n"
+            val encoded = json.encodeToString(snapshot) + "\n"
             val tmp = overridesFile.resolveSibling("${overridesFile.fileName}.tmp")
             tmp.writeText(encoded)
             try {
@@ -372,8 +490,15 @@ class DesignSystemStore(
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING)
             }
-            lastObservedFileExisted = true
-            lastObservedText = encoded
+            val mtime = Files.getLastModifiedTime(overridesFile)
+            val size = Files.size(overridesFile)
+            synchronized(this) {
+                if (persistEpoch == targetEpoch) {
+                    pendingPersist = false
+                }
+                lastObservedModifiedTime = mtime
+                lastObservedFileSize = size
+            }
         }
     }
 }

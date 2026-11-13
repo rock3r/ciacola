@@ -1,5 +1,6 @@
 package dev.sebastiano.ciacola.inspector.lint
 
+import androidx.compose.runtime.tooling.ComposeToolingApi
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.awt.ComposeWindow
@@ -94,6 +95,7 @@ internal object SemanticsSlideScanner {
         fallbackBackground = fallbackBackground,
     )
 
+    @OptIn(ComposeToolingApi::class)
     fun scanLiveWindows(
         stageBoundsInRoot: Rect?,
         pixelBuffer: StagePixelBuffer?,
@@ -105,13 +107,8 @@ internal object SemanticsSlideScanner {
             AwtWindow.getWindows().filterIsInstance<ComposeWindow>().filter { it.isShowing }
         }.getOrDefault(emptyList())
         if (windows.isEmpty()) return emptyList()
-        val storyWindow = windows.firstOrNull { it.title.endsWith("- Story") } ?: windows.first()
-        val owners = runCatching {
-            @Suppress("UNCHECKED_CAST")
-            ComposeWindow::class.java
-                .getMethod("getSemanticsOwners")
-                .invoke(storyWindow) as? Collection<SemanticsOwner>
-        }.getOrNull().orEmpty()
+        val storyWindow = windows.firstOrNull { it.title.endsWith("- Story") } ?: return emptyList()
+        val owners = runCatching { storyWindow.semanticsOwners }.getOrNull().orEmpty()
         if (owners.isEmpty()) return emptyList()
         return scanOwners(
             owners = owners,

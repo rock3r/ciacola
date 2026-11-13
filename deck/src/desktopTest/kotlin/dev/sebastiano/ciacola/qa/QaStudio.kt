@@ -721,8 +721,9 @@ fun launchStudio(
 
             val designRev = designStore.revision
             val designOverrides = remember(activePreset, designRev) { designStore.overridesFor(activePreset) }
-            val hostTheme = remember(activePreset, designOverrides) {
-                DeckThemes.forPreset(activePreset).withOverrides(designOverrides)
+            val baseHostTheme = remember(activePreset) { DeckThemes.forPreset(activePreset) }
+            val hostTheme = remember(baseHostTheme, designOverrides) {
+                baseHostTheme.withOverrides(designOverrides)
             }
             val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
             val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
@@ -759,7 +760,7 @@ fun launchStudio(
                 elementRev,
             ) {
                 createFoundationDeck(
-                    theme = hostTheme,
+                    theme = baseHostTheme,
                     bundledPreset = activePreset,
                     includeKeynoteEffectsLab = includeKeynoteEffectsLab,
                     stageDecorator = timelineStageDecorator +
@@ -781,7 +782,7 @@ fun launchStudio(
                 { targetPreset ->
                     val targetDesignOverrides = designStore.overridesFor(targetPreset)
                     createFoundationDeck(
-                        theme = DeckThemes.forPreset(targetPreset).withOverrides(targetDesignOverrides),
+                        theme = DeckThemes.forPreset(targetPreset),
                         bundledPreset = targetPreset,
                         includeKeynoteEffectsLab = includeKeynoteEffectsLab,
                         timelineOverrides = overridesStore.data(),
@@ -903,9 +904,7 @@ fun launchStudio(
                 reviewWindowRef.set(it)
             }
 
-            val fullDecorator = slideReviewWindow.decorator +
-                studioWindow.decorator +
-                studioWorkspace.storyShortcutDecorator
+            val fullDecorator = slideReviewWindow.decorator + studioWindow.decorator
 
             CompositionLocalProvider(LocalAuthoringTextInputTracker provides textInputTracker) {
                 MaterialTheme(colors = materialColors, typography = materialTypography) {
