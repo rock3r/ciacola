@@ -621,6 +621,8 @@ class QaStudio internal constructor(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { controller.stopPlayback() }
+        runCatching { designStore.close() }
+        runCatching { elementStore.close() }
         uiScopeRef.set(null)
         val exitApp = exitAppRef.getAndSet(null)
         val detached = detachedTimelineWindowRef.getAndSet(null)

@@ -186,5 +186,46 @@ class DesignSystemStoreAndMathTest {
 
         val emptySnippet = store.exportKotlinSnippet(DeckThemePreset.KeynoteLight)
         assertTrue(emptySnippet.contains("DeckThemes.keynoteLight()"))
+        store.close()
+    }
+
+    @Test
+    fun outOfOrderEpochWritesNeverOverwriteNewerSnapshotOnDisk() {
+        val tempDir = Files.createTempDirectory("ciacola-design-epoch-order")
+        val store = DesignSystemStore(tempDir)
+        try {
+            val olderSnapshot = DesignSystemOverridesFile().withPreset(
+                DeckThemePreset.StageDark,
+                dev.sebastiano.ciacola.theme.DesignSystemOverrides(
+                    colors = dev.sebastiano.ciacola.theme.ColorTokenOverrides(accentArgb = 0xFF111111L),
+                ),
+            )
+            val newerSnapshot = DesignSystemOverridesFile().withPreset(
+                DeckThemePreset.StageDark,
+                dev.sebastiano.ciacola.theme.DesignSystemOverrides(
+                    colors = dev.sebastiano.ciacola.theme.ColorTokenOverrides(accentArgb = 0xFF22CC88L),
+                ),
+            )
+
+            assertTrue(store.writeSnapshotToDisk(newerSnapshot, targetEpoch = 2L))
+            assertFalse(
+                store.writeSnapshotToDisk(olderSnapshot, targetEpoch = 1L),
+                "Older epoch write arriving after newer epoch must be rejected",
+            )
+
+            DesignSystemStore(tempDir).use { reloaded ->
+                assertEquals(
+                    0xFF22CC88L,
+                    reloaded.overridesFor(DeckThemePreset.StageDark).colors.accentArgb,
+                    "Disk file must retain the newer epoch snapshot",
+                )
+            }
+            val strayTmps = Files.list(tempDir).use { stream ->
+                stream.filter { it.fileName.toString().endsWith(".tmp") }.count()
+            }
+            assertEquals(0L, strayTmps, "No temporary .tmp files should remain in storyboardDir")
+        } finally {
+            store.close()
+        }
     }
 }

@@ -131,5 +131,36 @@ class ElementOverridesStoreTest {
 
         store.resetAll()
         assertFalse(store.data().hasOverrides)
+        store.close()
+    }
+
+    @Test
+    fun outOfOrderEpochWritesNeverOverwriteNewerSnapshotOnDisk() {
+        val dir = Files.createTempDirectory("ciacola-el-epoch-order")
+        val store = ElementOverridesStore(dir)
+        try {
+            val older = dev.sebastiano.ciacola.inspector.DeckElementOverridesFile(
+                elements = mapOf("s1:eyebrow" to dev.sebastiano.ciacola.inspector.ElementPatch("s1:eyebrow", text = "OLDER")),
+            )
+            val newer = dev.sebastiano.ciacola.inspector.DeckElementOverridesFile(
+                elements = mapOf("s1:eyebrow" to dev.sebastiano.ciacola.inspector.ElementPatch("s1:eyebrow", text = "NEWER")),
+            )
+
+            assertTrue(store.writeSnapshotToDisk(newer, targetEpoch = 2L))
+            assertFalse(
+                store.writeSnapshotToDisk(older, targetEpoch = 1L),
+                "Older epoch write arriving after newer epoch must be rejected",
+            )
+
+            ElementOverridesStore(dir).use { reloaded ->
+                assertEquals("NEWER", reloaded.patchFor("s1:eyebrow")?.text)
+            }
+            val strayTmps = Files.list(dir).use { stream ->
+                stream.filter { it.fileName.toString().endsWith(".tmp") }.count()
+            }
+            assertEquals(0L, strayTmps, "No temporary .tmp files should remain in storyboardDir")
+        } finally {
+            store.close()
+        }
     }
 }

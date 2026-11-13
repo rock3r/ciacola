@@ -18,8 +18,10 @@ import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,14 +31,16 @@ import kotlinx.serialization.json.Json
  * Persistent, undoable store for per-element stage overrides stored at
  * `.storyboard/element-overrides.json`.
  *
- * Supports off-EDT atomic saves, corrupt-file backup, `Dispatchers.IO` mtime+size external reload,
- * 64-step Undo/Redo with gesture & key-repeat/typing coalescing + debounce, granular element reset,
- * and Kotlin snippet export.
+ * Supports epoch-ordered off-EDT atomic saves, corrupt-file backup, `Dispatchers.IO` mtime+size
+ * external reload, 64-step Undo/Redo with gesture & key-repeat/typing coalescing + debounce,
+ * granular element reset, and Kotlin snippet export.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ElementOverridesStore(
     val storyboardDir: Path = Path.of(".storyboard"),
     private val clockMillis: () -> Long = System::currentTimeMillis,
-) {
+    externalIoScope: CoroutineScope? = null,
+) : AutoCloseable {
     companion object {
         const val MAX_UNDO_HISTORY = 64
         private const val COALESCE_WINDOW_MS = 400L
@@ -49,7 +53,10 @@ class ElementOverridesStore(
         encodeDefaults = false
     }
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ownsIoScope = externalIoScope == null
+    private val ioScope: CoroutineScope = externalIoScope
+        ?: CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val writeLock = Any()
 
     val overridesFile: Path = storyboardDir.resolve("element-overrides.json")
 
@@ -63,6 +70,7 @@ class ElementOverridesStore(
     private var gestureSnapshotRecorded = false
     private var pendingPersist = false
     private var persistEpoch = 0L
+    private var lastWrittenEpoch = 0L
     private var debouncePersistJob: Job? = null
     private var lastCoalesceKey: String? = null
     private var lastMutationMillis: Long = Long.MIN_VALUE
@@ -116,28 +124,41 @@ class ElementOverridesStore(
         activeGestureDepth++
     }
 
-    @Synchronized
     fun endEditGesture() {
-        if (activeGestureDepth > 0) {
-            activeGestureDepth--
-            if (activeGestureDepth == 0) {
-                gestureSnapshotRecorded = false
-                lastCoalesceKey = null
-                if (pendingPersist) {
-                    scheduleOrFlushPersist(debounce = false)
+        val syncWrite: Pair<DeckElementOverridesFile, Long>? = synchronized(this) {
+            if (activeGestureDepth > 0) {
+                activeGestureDepth--
+                if (activeGestureDepth == 0) {
+                    gestureSnapshotRecorded = false
+                    lastCoalesceKey = null
+                    if (pendingPersist) {
+                        return@synchronized preparePersistLocked(debounce = false)
+                    }
                 }
             }
+            null
+        }
+        if (syncWrite != null) {
+            writeSnapshotToDisk(syncWrite.first, syncWrite.second)
         }
     }
 
-    @Synchronized
     fun flushPendingPersistence() {
-        debouncePersistJob?.cancel()
-        debouncePersistJob = null
-        if (!pendingPersist) return
-        val snapshot = currentData
-        val targetEpoch = ++persistEpoch
-        writeSnapshotToDisk(snapshot, targetEpoch)
+        val pending: Pair<DeckElementOverridesFile, Long>? = synchronized(this) {
+            debouncePersistJob?.cancel()
+            debouncePersistJob = null
+            if (!pendingPersist) null else currentData to ++persistEpoch
+        }
+        if (pending != null) {
+            writeSnapshotToDisk(pending.first, pending.second)
+        }
+    }
+
+    override fun close() {
+        flushPendingPersistence()
+        if (ownsIoScope) {
+            ioScope.cancel()
+        }
     }
 
     @Synchronized
@@ -149,6 +170,10 @@ class ElementOverridesStore(
     private sealed interface PollOutcome {
         data object Unchanged : PollOutcome
         data object Deleted : PollOutcome
+        data class Corrupt(
+            val modifiedTime: FileTime?,
+            val fileSize: Long,
+        ) : PollOutcome
         data class Loaded(
             val parsed: DeckElementOverridesFile,
             val modifiedTime: FileTime?,
@@ -213,7 +238,7 @@ class ElementOverridesStore(
                     Files.copy(overridesFile, backup, StandardCopyOption.REPLACE_EXISTING)
                 }
             }
-            return PollOutcome.Loaded(currentData, mtime, size)
+            return PollOutcome.Corrupt(mtime, size)
         }
         return PollOutcome.Loaded(normalizeFile(parsed), mtime, size)
     }
@@ -231,6 +256,11 @@ class ElementOverridesStore(
                 false
             }
         }
+        is PollOutcome.Corrupt -> {
+            lastObservedModifiedTime = outcome.modifiedTime
+            lastObservedFileSize = outcome.fileSize
+            false
+        }
         is PollOutcome.Loaded -> {
             lastObservedModifiedTime = outcome.modifiedTime
             lastObservedFileSize = outcome.fileSize
@@ -244,79 +274,100 @@ class ElementOverridesStore(
         }
     }
 
-    @Synchronized
     fun updateElement(
         elementId: String,
         coalesce: Boolean = false,
         coalesceKey: String = "element:$elementId",
         transform: (ElementPatch) -> ElementPatch,
     ) {
-        val prev = currentData.elements[elementId] ?: ElementPatch(elementId = elementId)
-        val rawUpdated = transform(prev).copy(elementId = elementId)
-        val nextMap = if (rawUpdated.isEmpty) {
-            currentData.elements - elementId
-        } else {
-            currentData.elements + (elementId to rawUpdated)
-        }
-        val nextData = DeckElementOverridesFile(elements = nextMap)
-        if (nextData == currentData) return
+        val syncWrite: Pair<DeckElementOverridesFile, Long>? = synchronized(this) {
+            val prev = currentData.elements[elementId] ?: ElementPatch(elementId = elementId)
+            val rawUpdated = transform(prev).copy(elementId = elementId)
+            val nextMap = if (rawUpdated.isEmpty) {
+                currentData.elements - elementId
+            } else {
+                currentData.elements + (elementId to rawUpdated)
+            }
+            val nextData = DeckElementOverridesFile(elements = nextMap)
+            if (nextData == currentData) return@synchronized null
 
-        recordUndoSnapshotBeforeMutation(coalesceKey = coalesceKey, coalesce = coalesce)
-        currentData = nextData
-        requestPersistLocked(coalesce = coalesce)
-        revision++
+            recordUndoSnapshotBeforeMutation(coalesceKey = coalesceKey, coalesce = coalesce)
+            currentData = nextData
+            val write = requestPersistLocked(coalesce = coalesce)
+            revision++
+            write
+        }
+        if (syncWrite != null) {
+            writeSnapshotToDisk(syncWrite.first, syncWrite.second)
+        }
     }
 
-    @Synchronized
     fun resetElement(elementId: String) {
-        if (elementId !in currentData.elements) return
-        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
-        currentData = DeckElementOverridesFile(elements = currentData.elements - elementId)
-        requestPersistLocked(coalesce = false)
-        revision++
+        val syncWrite: Pair<DeckElementOverridesFile, Long>? = synchronized(this) {
+            if (elementId !in currentData.elements) return@synchronized null
+            recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
+            currentData = DeckElementOverridesFile(elements = currentData.elements - elementId)
+            val write = requestPersistLocked(coalesce = false)
+            revision++
+            write
+        }
+        if (syncWrite != null) {
+            writeSnapshotToDisk(syncWrite.first, syncWrite.second)
+        }
     }
 
-    @Synchronized
     fun resetAll() {
-        if (!currentData.hasOverrides && currentData.elements.isEmpty()) return
-        recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
-        currentData = DeckElementOverridesFile()
-        requestPersistLocked(coalesce = false)
-        revision++
+        val syncWrite: Pair<DeckElementOverridesFile, Long>? = synchronized(this) {
+            if (!currentData.hasOverrides && currentData.elements.isEmpty()) return@synchronized null
+            recordUndoSnapshotBeforeMutation(coalesceKey = null, coalesce = false)
+            currentData = DeckElementOverridesFile()
+            val write = requestPersistLocked(coalesce = false)
+            revision++
+            write
+        }
+        if (syncWrite != null) {
+            writeSnapshotToDisk(syncWrite.first, syncWrite.second)
+        }
     }
 
-    @Synchronized
     fun undo(): Boolean {
-        if (undoStack.isEmpty()) return false
-        activeGestureDepth = 0
-        gestureSnapshotRecorded = false
-        lastCoalesceKey = null
-        if (redoStack.size >= MAX_UNDO_HISTORY) {
-            redoStack.removeFirst()
+        val syncWrite: Pair<Boolean, Pair<DeckElementOverridesFile, Long>?> = synchronized(this) {
+            if (undoStack.isEmpty()) return@synchronized false to null
+            activeGestureDepth = 0
+            gestureSnapshotRecorded = false
+            lastCoalesceKey = null
+            if (redoStack.size >= MAX_UNDO_HISTORY) {
+                redoStack.removeFirst()
+            }
+            redoStack.addLast(currentData)
+            currentData = undoStack.removeLast()
+            val write = requestPersistLocked(coalesce = false)
+            syncUndoFlags()
+            revision++
+            true to write
         }
-        redoStack.addLast(currentData)
-        currentData = undoStack.removeLast()
-        requestPersistLocked(coalesce = false)
-        syncUndoFlags()
-        revision++
-        return true
+        syncWrite.second?.let { writeSnapshotToDisk(it.first, it.second) }
+        return syncWrite.first
     }
 
-    @Synchronized
     fun redo(): Boolean {
-        if (redoStack.isEmpty()) return false
-        activeGestureDepth = 0
-        gestureSnapshotRecorded = false
-        lastCoalesceKey = null
-        if (undoStack.size >= MAX_UNDO_HISTORY) {
-            undoStack.removeFirst()
+        val syncWrite: Pair<Boolean, Pair<DeckElementOverridesFile, Long>?> = synchronized(this) {
+            if (redoStack.isEmpty()) return@synchronized false to null
+            activeGestureDepth = 0
+            gestureSnapshotRecorded = false
+            lastCoalesceKey = null
+            if (undoStack.size >= MAX_UNDO_HISTORY) {
+                undoStack.removeFirst()
+            }
+            undoStack.addLast(currentData)
+            currentData = redoStack.removeLast()
+            val write = requestPersistLocked(coalesce = false)
+            syncUndoFlags()
+            revision++
+            true to write
         }
-        undoStack.addLast(currentData)
-        currentData = redoStack.removeLast()
-        requestPersistLocked(coalesce = false)
-        syncUndoFlags()
-        revision++
-        return true
+        syncWrite.second?.let { writeSnapshotToDisk(it.first, it.second) }
+        return syncWrite.first
     }
 
     /**
@@ -366,22 +417,22 @@ class ElementOverridesStore(
     private fun normalizeFile(file: DeckElementOverridesFile): DeckElementOverridesFile =
         DeckElementOverridesFile(elements = file.elements.filterValues { !it.isEmpty })
 
-    private fun requestPersistLocked(coalesce: Boolean) {
+    private fun requestPersistLocked(coalesce: Boolean): Pair<DeckElementOverridesFile, Long>? {
         pendingPersist = true
         if (activeGestureDepth > 0) {
             debouncePersistJob?.cancel()
             debouncePersistJob = null
-            return
+            return null
         }
-        scheduleOrFlushPersist(debounce = coalesce)
+        return preparePersistLocked(debounce = coalesce)
     }
 
-    private fun scheduleOrFlushPersist(debounce: Boolean) {
+    private fun preparePersistLocked(debounce: Boolean): Pair<DeckElementOverridesFile, Long>? {
         debouncePersistJob?.cancel()
         debouncePersistJob = null
         val targetEpoch = ++persistEpoch
         val snapshot = currentData
-        if (debounce) {
+        return if (debounce) {
             debouncePersistJob = ioScope.launch {
                 delay(DEBOUNCE_PERSIST_MS)
                 val latest = synchronized(this@ElementOverridesStore) {
@@ -393,33 +444,47 @@ class ElementOverridesStore(
                 } ?: return@launch
                 writeSnapshotToDisk(latest, targetEpoch)
             }
+            null
         } else if (EventQueue.isDispatchThread()) {
             debouncePersistJob = ioScope.launch {
                 writeSnapshotToDisk(snapshot, targetEpoch)
             }
+            null
         } else {
-            writeSnapshotToDisk(snapshot, targetEpoch)
+            snapshot to targetEpoch
         }
     }
 
-    private fun writeSnapshotToDisk(snapshot: DeckElementOverridesFile, targetEpoch: Long) {
-        runCatching {
-            Files.createDirectories(storyboardDir)
-            val tmp = Files.createTempFile(storyboardDir, "element-overrides-", ".tmp")
-            Files.writeString(tmp, json.encodeToString(DeckElementOverridesFile.serializer(), snapshot))
-            try {
-                Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING)
+    internal fun writeSnapshotToDisk(snapshot: DeckElementOverridesFile, targetEpoch: Long): Boolean {
+        synchronized(writeLock) {
+            if (targetEpoch <= lastWrittenEpoch) {
+                return false
             }
-            val mtime = Files.getLastModifiedTime(overridesFile)
-            val size = Files.size(overridesFile)
-            synchronized(this) {
-                if (persistEpoch == targetEpoch) {
-                    pendingPersist = false
+            var tmp: Path? = null
+            return try {
+                Files.createDirectories(storyboardDir)
+                tmp = Files.createTempFile(storyboardDir, "element-overrides-", ".tmp")
+                Files.writeString(tmp, json.encodeToString(DeckElementOverridesFile.serializer(), snapshot))
+                try {
+                    Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(tmp, overridesFile, StandardCopyOption.REPLACE_EXISTING)
                 }
-                lastObservedModifiedTime = mtime
-                lastObservedFileSize = size
+                tmp = null
+                val mtime = Files.getLastModifiedTime(overridesFile)
+                val size = Files.size(overridesFile)
+                lastWrittenEpoch = targetEpoch
+                synchronized(this) {
+                    if (persistEpoch == targetEpoch) {
+                        pendingPersist = false
+                    }
+                    lastObservedModifiedTime = mtime
+                    lastObservedFileSize = size
+                }
+                true
+            } catch (_: Throwable) {
+                tmp?.let { runCatching { Files.deleteIfExists(it) } }
+                false
             }
         }
     }

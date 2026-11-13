@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola
 import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -103,6 +104,12 @@ fun main() = application {
         }
         val elementOverridesStore = remember(storyboardDir) {
             ElementOverridesStore(storyboardDir = storyboardDir)
+        }
+        DisposableEffect(designSystemStore, elementOverridesStore) {
+            onDispose {
+                designSystemStore.close()
+                elementOverridesStore.close()
+            }
         }
         val stageInspectionRegistry = remember { StageInspectionRegistry() }
         val elementController = rememberElementEditorController(
@@ -549,8 +556,16 @@ internal fun rememberThemeSwitcherWindow(
     store: DesignSystemStore? = null,
     onSelectPreset: (DeckThemePreset) -> Unit,
 ): EaselWindow {
+    val ownsFallbackStore = store == null
     val effectiveStore = store ?: remember {
         DesignSystemStore(storyboardDir = Files.createTempDirectory("ciacola-theme-window-"))
+    }
+    DisposableEffect(effectiveStore, ownsFallbackStore) {
+        onDispose {
+            if (ownsFallbackStore) {
+                effectiveStore.close()
+            }
+        }
     }
     return rememberDesignSystemWindow(
         store = effectiveStore,
