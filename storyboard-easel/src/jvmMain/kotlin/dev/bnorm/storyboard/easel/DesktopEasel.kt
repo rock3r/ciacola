@@ -15,6 +15,10 @@ import dev.bnorm.storyboard.easel.overlay.OverlayNavigation
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.plus
+import java.awt.Dimension
+import kotlin.math.roundToInt
+
+private val StoryWindowMinimumSize = Dimension(640, 420)
 
 @Composable
 fun ApplicationScope.DesktopEasel(
@@ -74,6 +78,11 @@ fun ApplicationScope.DesktopEasel(
         title = "${animatic.storyboard.title} - Story",
     ) {
         storyWindow = window
+        SideEffect {
+            if (window.minimumSize != StoryWindowMinimumSize) {
+                window.minimumSize = StoryWindowMinimumSize
+            }
+        }
 
         Toolbar()
 
@@ -83,6 +92,7 @@ fun ApplicationScope.DesktopEasel(
 
         CompositionLocalProvider(
             LocalPresentingFullscreen provides (storyWindowState.placement == WindowPlacement.Fullscreen),
+            LocalOverviewOpen provides overviewVisibility.isVisible,
         ) {
             decorator.decorate {
                 EaselOverview(animatic, visibility = overviewVisibility) {
@@ -103,22 +113,30 @@ fun ApplicationScope.DesktopEasel(
         exporter.status?.let { ExportProgressPopup(it, onDismiss = exporter::dismissFailure) }
     }
 
-    for (window in windows) {
-        key(window.name) {
+    for (easelWindow in windows) {
+        key(easelWindow.name) {
             // Never-opened windows do not write `.storyboard/<name>.json`; they persist once shown.
             val state = rememberWindowState(
-                fileName = window.name,
-                defaultSize = window.initialSize,
-                persist = window.visible,
+                fileName = easelWindow.name,
+                defaultSize = easelWindow.initialSize,
+                persist = easelWindow.visible,
             )
-            if (state != null && window.visible) {
+            if (state != null && easelWindow.visible) {
                 Window(
-                    title = "${animatic.storyboard.title} - ${window.name}",
+                    title = "${animatic.storyboard.title} - ${easelWindow.name}",
                     state = state,
-                    onCloseRequest = { window.visible = false },
+                    onCloseRequest = { easelWindow.visible = false },
                 ) {
+                    SideEffect {
+                        easelWindow.minimumSize?.let { min ->
+                            val dim = Dimension(min.width.value.roundToInt(), min.height.value.roundToInt())
+                            if (window.minimumSize != dim) {
+                                window.minimumSize = dim
+                            }
+                        }
+                    }
                     Toolbar()
-                    window.Content()
+                    easelWindow.Content()
                 }
             }
         }

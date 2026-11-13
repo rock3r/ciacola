@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -70,8 +71,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.awt.Cursor
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -141,6 +145,7 @@ private fun TransportIconButton(
 internal fun TimelineTransportBar(
     controller: TimelineStudioController,
     modifier: Modifier = Modifier,
+    surface: TimelineSurface = TimelineSurface.Docked,
 ) {
     val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
@@ -270,25 +275,34 @@ internal fun TimelineTransportBar(
         ) {
             if (activeSubLoopId == null) {
                 TransportIconButton(AllIconsKeys.General.ZoomOut, "Zoom out", "Zoom out (-, or Alt+wheel)", "ciacola-timeline-zoom-out") {
-                    viewport.zoomBy(0.8f, viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx))
+                    viewport.markSurfaceActive(surface)
+                    viewport.zoomBy(0.8f, viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface)), surface)
                 }
                 // Logarithmic zoom slider (After Effects-style), anchored on the playhead.
-                val minZoom = minOf(MIN_PX_PER_MS, viewport.fitPxPerMs())
+                val minZoom = viewport.minZoomDpPerMs(surface).coerceAtMost(MAX_DP_PER_MS)
                 val logMin = ln(minZoom)
-                val logMax = ln(MAX_PX_PER_MS)
+                val logMax = ln(MAX_DP_PER_MS)
+                val sliderValue = if (logMax > logMin) {
+                    ((ln(viewport.dpPerMs) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
                 Slider(
-                    value = ((ln(viewport.pxPerMs) - logMin) / (logMax - logMin)).coerceIn(0f, 1f),
+                    value = sliderValue,
                     onValueChange = { v ->
-                        val anchor = viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx)
-                        viewport.setZoom(exp(logMin + v * (logMax - logMin)), anchor)
+                        viewport.markSurfaceActive(surface)
+                        val anchor = viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface))
+                        viewport.setZoomDpPerMs(exp(logMin + v * (logMax - logMin)), anchor, surface)
                     },
                     modifier = Modifier.width(84.dp).testTag("ciacola-timeline-zoom-slider"),
                 )
                 TransportIconButton(AllIconsKeys.General.ZoomIn, "Zoom in", "Zoom in (=, or Alt+wheel)", "ciacola-timeline-zoom-in") {
-                    viewport.zoomBy(1.25f, viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx))
+                    viewport.markSurfaceActive(surface)
+                    viewport.zoomBy(1.25f, viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface)), surface)
                 }
                 TransportIconButton(AllIconsKeys.General.FitContent, "Zoom to fit", "Toggle fit / frame level (;)", "ciacola-timeline-zoom-fit") {
-                    viewport.toggleFitAndFrames(nowMs.toFloat())
+                    viewport.markSurfaceActive(surface)
+                    viewport.toggleFitAndFrames(nowMs.toFloat(), surface)
                 }
             }
             if (controller.bakeStatus != TimelineBakeStatus.Idle) {
@@ -367,6 +381,7 @@ internal fun TimelineTransportBar(
 internal fun TimelineMultiTrackArea(
     controller: TimelineStudioController,
     modifier: Modifier = Modifier,
+    surface: TimelineSurface = TimelineSurface.Docked,
 ) {
     val scope = rememberCoroutineScope()
     val activeSubLoopId = controller.loopClock.activeSubCompLoopId
@@ -504,7 +519,10 @@ internal fun TimelineMultiTrackArea(
             MasterDeckTimelineCanvas(
                 controller = controller,
                 snapshot = snapshot,
-                modifier = Modifier.fillMaxSize(),
+                surface = surface,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(end = 12.dp, bottom = 10.dp),
             )
             VerticalScrollbar(
                 scrollState = viewport.verticalScroll,
@@ -514,27 +532,34 @@ internal fun TimelineMultiTrackArea(
                     .padding(top = HEADER_TOTAL_HEIGHT, bottom = 10.dp)
                     .testTag("ciacola-timeline-vscrollbar"),
             )
-            val horizontalState = rememberScrollableState { delta -> viewport.scrollHorizontallyBy(-delta).let { -it } }
-            val horizontalAdapter = remember(viewport) { TimelineHorizontalScrollbarAdapter(viewport) }
+            val horizontalState = rememberScrollableState { delta ->
+                viewport.scrollHorizontallyBy(-delta, surface).let { -it }
+            }
+            val horizontalAdapter = remember(viewport, surface) {
+                TimelineHorizontalScrollbarAdapter(viewport, surface)
+            }
             HorizontalScrollbar(
                 scrollState = horizontalState,
                 adapter = horizontalAdapter,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .padding(end = 10.dp)
+                    .padding(end = 12.dp)
                     .testTag("ciacola-timeline-hscrollbar"),
             )
         }
     }
 }
 
-private class TimelineHorizontalScrollbarAdapter(private val viewport: TimelineViewportState) : ScrollbarAdapter {
-    override val scrollOffset: Double get() = viewport.scrollX.toDouble()
-    override val contentSize: Double get() = viewport.contentWidthPx.toDouble()
-    override val viewportSize: Double get() = viewport.viewportWidthPx.toDouble()
+private class TimelineHorizontalScrollbarAdapter(
+    private val viewport: TimelineViewportState,
+    private val surface: TimelineSurface,
+) : ScrollbarAdapter {
+    override val scrollOffset: Double get() = viewport.scrollX(surface).toDouble()
+    override val contentSize: Double get() = viewport.contentWidthPx(surface).toDouble()
+    override val viewportSize: Double get() = viewport.viewportWidthPx(surface).toDouble()
     override suspend fun scrollTo(scrollOffset: Double) {
-        viewport.scrollHorizontallyTo(scrollOffset.toFloat())
+        viewport.scrollHorizontallyTo(scrollOffset.toFloat(), surface)
     }
 }
 
@@ -543,12 +568,112 @@ private fun chooseTickStepMs(pxPerMs: Float): Int {
     return candidates.firstOrNull { it * pxPerMs >= 80f } ?: candidates.last()
 }
 
-private fun formatTick(ms: Int, stepMs: Int): String {
+internal fun formatTimelineTick(ms: Int, stepMs: Int): String {
     val seconds = ms / 1000.0
     return when {
-        stepMs >= 1000 -> "${(ms / 1000)}s"
-        stepMs >= 100 -> "%.1fs".format(seconds)
-        else -> "%.2fs".format(seconds)
+        stepMs >= 1000 -> "${ms / 1000}s"
+        stepMs >= 100 -> String.format(Locale.US, "%.1fs", seconds)
+        else -> String.format(Locale.US, "%.2fs", seconds)
+    }
+}
+
+private fun effectiveBlockSpanMs(
+    row: TimelineTrackRow,
+    blk: TimelineBlockBar,
+    liveOvr: TrackOverride?,
+): Pair<Int, Int> {
+    val drawStartMs = if (
+        row.category != TrackCategory.SharedElement &&
+        row.category != TrackCategory.LoopSubComp &&
+        liveOvr?.delayMs != null
+    ) {
+        val stepOffset = (blk.staggerIndex ?: 0) * (liveOvr.staggerStepMs ?: 55)
+        (blk.startMs - blk.delayMs) + liveOvr.delayMs + stepOffset
+    } else {
+        blk.startMs
+    }
+    val drawDurationMs = when {
+        row.category == TrackCategory.SharedElement || row.category == TrackCategory.LoopSubComp -> blk.durationMs
+        liveOvr?.curve?.isSpring == true -> liveOvr.curve.estimatedSpringDurationMs()
+        row.category == TrackCategory.StaggerGroup && liveOvr?.durationMs != null -> {
+            val count = (blk.staggerCount ?: 1).coerceAtLeast(1)
+            val step = liveOvr.staggerStepMs ?: 55
+            liveOvr.durationMs + (count - 1) * step
+        }
+        liveOvr?.durationMs != null -> liveOvr.durationMs
+        else -> blk.durationMs
+    }
+    return drawStartMs to drawDurationMs
+}
+
+private data class TimelineBlockHit(
+    val row: TimelineTrackRow,
+    val block: TimelineBlockBar,
+    val dragMode: DragMode,
+)
+
+private fun resolveTimelineBlockHit(
+    pos: Offset,
+    snapshot: DeckTimelineSnapshot,
+    viewport: TimelineViewportState,
+    surface: TimelineSurface,
+    headerTotalPx: Float,
+    rowHeightPx: Float,
+    liveOverrides: Map<String, TrackOverride>,
+): TimelineBlockHit? {
+    if (pos.y <= headerTotalPx) return null
+    val trackIdx = ((pos.y - headerTotalPx + viewport.verticalScroll.value) / rowHeightPx).toInt()
+    val hitRow = snapshot.tracks.getOrNull(trackIdx) ?: return null
+    val pxPerMs = viewport.pxPerMs(surface)
+    val hitBlock = hitRow.blocks.firstOrNull { blk ->
+        val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(hitRow, blk, liveOverrides[blk.trackId])
+        val bx0 = viewport.xForTime(drawStartMs.toFloat(), surface)
+        val bx1 = bx0 + max(18f, drawDurationMs * pxPerMs)
+        pos.x in (bx0 - 6f)..(bx1 + 6f)
+    } ?: return null
+
+    val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(hitRow, hitBlock, liveOverrides[hitBlock.trackId])
+    val bx0 = viewport.xForTime(drawStartMs.toFloat(), surface)
+    val bx1 = bx0 + max(18f, drawDurationMs * pxPerMs)
+    val dragMode = when {
+        hitBlock.category == TrackCategory.LoopSubComp -> DragMode.ScrubPlayhead
+        abs(pos.x - bx1) <= 9f -> DragMode.ResizeRightDuration
+        abs(pos.x - bx0) <= 9f -> DragMode.ResizeLeftDelay
+        hitBlock.category == TrackCategory.SharedElement || hitBlock.category == TrackCategory.WarpCode -> DragMode.ScrubPlayhead
+        else -> DragMode.MoveBlockBeat
+    }
+    return TimelineBlockHit(hitRow, hitBlock, dragMode)
+}
+
+private fun pointerIconForDragMode(dragMode: DragMode?): PointerIcon = when (dragMode) {
+    DragMode.ResizeLeftDelay, DragMode.ResizeRightDuration -> PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR))
+    DragMode.MoveBlockBeat -> PointerIcon(Cursor(Cursor.HAND_CURSOR))
+    DragMode.ScrubPlayhead, DragMode.Pan, null -> PointerIcon.Default
+}
+
+private fun DrawScope.drawEllipsizedLabel(
+    textMeasurer: TextMeasurer,
+    text: String,
+    style: TextStyle,
+    left: Float,
+    top: Float,
+    availWidth: Float,
+    clipTop: Float,
+    clipBottom: Float,
+) {
+    val maxW = availWidth.roundToInt()
+    if (maxW < 8) return
+    val measured = textMeasurer.measure(
+        text = text,
+        style = style,
+        maxLines = 1,
+        softWrap = true,
+        overflow = TextOverflow.Ellipsis,
+        constraints = Constraints(maxWidth = maxW),
+    )
+    if (measured.size.width > availWidth + 1.5f) return
+    clipRect(left = left - 1f, top = clipTop, right = left + availWidth, bottom = clipBottom) {
+        drawText(textLayoutResult = measured, topLeft = Offset(left, top))
     }
 }
 
@@ -556,6 +681,7 @@ private fun formatTick(ms: Int, stepMs: Int): String {
 private fun MasterDeckTimelineCanvas(
     controller: TimelineStudioController,
     snapshot: DeckTimelineSnapshot,
+    surface: TimelineSurface,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -570,13 +696,26 @@ private fun MasterDeckTimelineCanvas(
     val overridesFile = controller.overridesStore.data()
     val liveOverrides = overridesFile.tracks
     val liveLoopPeriods = overridesFile.loopPeriodsMs
+    val latestOverrides by rememberUpdatedState(liveOverrides)
 
     val slideRibbonPx = with(density) { SLIDE_RIBBON_HEIGHT.toPx() }
     val rulerHeightPx = with(density) { TIME_RULER_HEIGHT.toPx() }
     val headerTotalPx = slideRibbonPx + rulerHeightPx
     val rowHeightPx = with(density) { TRACK_ROW_HEIGHT.toPx() }
     var canvasHeightPx by remember { mutableFloatStateOf(0f) }
-    var didInitialFit by remember { mutableStateOf(false) }
+    var hoverIcon by remember { mutableStateOf(PointerIcon.Default) }
+
+    DisposableEffect(viewport, surface) {
+        onDispose { viewport.unregisterSurface(surface) }
+    }
+
+    val surfaceWidthDp = viewport.viewportWidthDp(surface)
+    LaunchedEffect(surface, snapshot.totalDurationMs, snapshot.stateSpans.isNotEmpty(), surfaceWidthDp, viewport.isFitLocked) {
+        if (snapshot.stateSpans.isNotEmpty() && surfaceWidthDp > 0f && snapshot.totalDurationMs > 0) {
+            viewport.contentDurationMs = snapshot.totalDurationMs
+            viewport.applyStickyFitIfNeeded(surface)
+        }
+    }
 
     val colors = remember(JewelTheme.instanceUuid, isDark) {
         buildStudioCanvasPaletteForTheme(
@@ -591,13 +730,14 @@ private fun MasterDeckTimelineCanvas(
         )
     }
 
-    val slideLabelTextStyle = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White)
     val rulerTextStyle = TextStyle(fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = colors.textSecondary)
 
     val playheadMs = controller.currentPlayheadTimeMs
-    // Follow the playhead only while playing (scrub drags and stepping manage visibility themselves).
-    LaunchedEffect(playheadMs, controller.isPlaying) {
-        if (controller.isPlaying) viewport.ensureTimeVisible(playheadMs.toFloat())
+    // Auto-scroll when playing, advancing, or jumping moves the playhead off-screen (but not during scrub drags).
+    LaunchedEffect(playheadMs, controller.isScrubDragging, surface, snapshot.totalDurationMs) {
+        if (!controller.isScrubDragging) {
+            viewport.ensureTimeVisible(playheadMs.toFloat(), surface = surface)
+        }
     }
     LaunchedEffect(viewport.pendingRevealTrackId, snapshot) {
         val revealId = viewport.pendingRevealTrackId ?: return@LaunchedEffect
@@ -611,14 +751,15 @@ private fun MasterDeckTimelineCanvas(
                 viewport.verticalScroll.animateScrollTo((rowTop - visibleHeight / 3).coerceAtLeast(0))
             }
             val block = snapshot.tracks[rowIndex].blocks.firstOrNull()
-            if (block != null) viewport.ensureTimeVisible(block.startMs.toFloat())
+            if (block != null) viewport.ensureTimeVisible(block.startMs.toFloat(), surface = surface)
         }
         viewport.pendingRevealTrackId = null
     }
 
     // Plain wheel / trackpad scrolling in both axes (CMP 1.13 scrollable2D).
     val scrollState: Scrollable2DState = rememberScrollable2DState { delta ->
-        val consumedX = -viewport.scrollHorizontallyBy(-delta.x)
+        viewport.markSurfaceActive(surface)
+        val consumedX = -viewport.scrollHorizontallyBy(-delta.x, surface)
         val consumedY = -viewport.verticalScroll.dispatchRawDelta(-delta.y)
         Offset(consumedX, consumedY)
     }
@@ -627,19 +768,14 @@ private fun MasterDeckTimelineCanvas(
         modifier = modifier
             .clipToBounds()
             .onSizeChanged {
-                viewport.viewportWidthPx = it.width.toFloat()
+                viewport.updateSurfaceMetrics(surface, it.width.toFloat(), density.density)
                 canvasHeightPx = it.height.toFloat()
-                if (!didInitialFit && it.width > 0 && snapshot.totalDurationMs > 0) {
-                    viewport.contentDurationMs = snapshot.totalDurationMs
-                    viewport.zoomToFit()
-                    didInitialFit = true
-                }
             }
-            .pointerHoverIcon(if (controller.spaceHeld) PointerIcon.Hand else PointerIcon.Default)
+            .pointerHoverIcon(if (controller.spaceHeld) PointerIcon.Hand else hoverIcon)
             // After Effects modifiers: Alt/Ctrl+wheel zooms time at the cursor, Shift+wheel scrolls
             // horizontally; middle-drag or Space+drag pans (hand tool). Handled on the Initial pass,
             // before scrollable2D and the scrub/edit gestures see the events.
-            .pointerInput(viewport) {
+            .pointerInput(viewport, surface) {
                 awaitPointerEventScope {
                     var panning = false
                     var last = Offset.Zero
@@ -648,33 +784,55 @@ private fun MasterDeckTimelineCanvas(
                         val change = event.changes.firstOrNull() ?: continue
                         when (event.type) {
                             PointerEventType.Scroll -> {
+                                viewport.markSurfaceActive(surface)
                                 val mods = event.keyboardModifiers
                                 val delta = change.scrollDelta
                                 when {
                                     mods.isAltPressed || mods.isCtrlPressed -> {
                                         val steps = if (delta.y != 0f) delta.y else delta.x
-                                        viewport.zoomBy(exp(-steps * 0.15f), change.position.x)
+                                        viewport.zoomBy(exp(-steps * 0.15f), change.position.x, surface)
                                         change.consume()
                                     }
                                     mods.isShiftPressed -> {
                                         val steps = if (delta.x != 0f) delta.x else delta.y
-                                        viewport.scrollHorizontallyBy(steps * 48f)
+                                        viewport.scrollHorizontallyBy(steps * 48f, surface)
                                         change.consume()
                                     }
                                 }
                             }
-                            PointerEventType.Press -> if (event.buttons.isTertiaryPressed || controller.spaceHeld) {
-                                panning = true
-                                controller.spaceUsedForPan = true
-                                last = change.position
-                                change.consume()
+                            PointerEventType.Press -> {
+                                viewport.markSurfaceActive(surface)
+                                if (event.buttons.isTertiaryPressed || controller.spaceHeld) {
+                                    panning = true
+                                    controller.spaceUsedForPan = true
+                                    last = change.position
+                                    change.consume()
+                                }
                             }
-                            PointerEventType.Move -> if (panning) {
-                                val d = change.position - last
-                                last = change.position
-                                viewport.scrollHorizontallyBy(-d.x)
-                                viewport.verticalScroll.dispatchRawDelta(-d.y)
-                                change.consume()
+                            PointerEventType.Move -> {
+                                if (panning) {
+                                    val d = change.position - last
+                                    last = change.position
+                                    viewport.scrollHorizontallyBy(-d.x, surface)
+                                    viewport.verticalScroll.dispatchRawDelta(-d.y)
+                                    change.consume()
+                                } else if (!event.buttons.isPrimaryPressed && !controller.spaceHeld) {
+                                    val hit = resolveTimelineBlockHit(
+                                        pos = change.position,
+                                        snapshot = latestSnapshot,
+                                        viewport = viewport,
+                                        surface = surface,
+                                        headerTotalPx = headerTotalPx,
+                                        rowHeightPx = rowHeightPx,
+                                        liveOverrides = latestOverrides,
+                                    )
+                                    hoverIcon = pointerIconForDragMode(hit?.dragMode)
+                                }
+                            }
+                            PointerEventType.Exit -> {
+                                if (!panning) {
+                                    hoverIcon = PointerIcon.Default
+                                }
                             }
                             PointerEventType.Release -> if (panning) {
                                 panning = false
@@ -687,12 +845,13 @@ private fun MasterDeckTimelineCanvas(
             .scrollable2D(scrollState)
             .testTag("ciacola-timeline-canvas")
             .semantics {
-                contentDescription = "zoom=${"%.4f".format(viewport.pxPerMs)} scrollX=${viewport.scrollX.roundToInt()} " +
+                contentDescription = "zoom=${String.format(Locale.US, "%.4f", viewport.pxPerMs(surface))} " +
+                    "scrollX=${viewport.scrollX(surface).roundToInt()} " +
                     "scrollY=${viewport.verticalScroll.value}"
             }
-            // Keyed on stable controller/viewport (and reading latestSnapshot) so in-flight block
+            // Keyed on stable controller/viewport/surface (reading latestSnapshot) so in-flight block
             // edge/body drags are never cancelled when an override edit refreshes the snapshot.
-            .pointerInput(controller, viewport) {
+            .pointerInput(controller, viewport, surface) {
                 var lastClickBlockId: String? = null
                 var lastClickMillis = 0L
 
@@ -706,7 +865,7 @@ private fun MasterDeckTimelineCanvas(
                     if (!buttons.isPrimaryPressed) return@awaitEachGesture
                     down.consume()
 
-                    fun timeAt(x: Float): Int = viewport.timeForX(x).roundToInt()
+                    fun timeAt(x: Float): Int = viewport.timeForX(x, surface).roundToInt()
 
                     fun scrubLoop(initialX: Float) {
                         controller.scrubToTimeMs(timeAt(initialX))
@@ -723,8 +882,8 @@ private fun MasterDeckTimelineCanvas(
                                 change.consume()
                                 // Auto-scroll when dragging the playhead past either edge.
                                 val edge = 24f
-                                if (change.position.x > size.width - edge) viewport.scrollHorizontallyBy(12f)
-                                if (change.position.x < edge) viewport.scrollHorizontallyBy(-12f)
+                                if (change.position.x > size.width - edge) viewport.scrollHorizontallyBy(12f, surface)
+                                if (change.position.x < edge) viewport.scrollHorizontallyBy(-12f, surface)
                                 controller.scrubToTimeMs(timeAt(change.position.x))
                             }
                         } finally {
@@ -733,15 +892,17 @@ private fun MasterDeckTimelineCanvas(
                         return@awaitEachGesture
                     }
 
-                    val trackIdx = ((startPos.y - headerTotalPx + viewport.verticalScroll.value) / rowHeightPx).toInt()
-                    val hitRow = currentSnapshot.tracks.getOrNull(trackIdx)
-                    val hitBlock = hitRow?.blocks?.firstOrNull { blk ->
-                        val bx0 = viewport.xForTime(blk.startMs.toFloat())
-                        val bx1 = bx0 + max(18f, blk.durationMs * viewport.pxPerMs)
-                        startPos.x in (bx0 - 6f)..(bx1 + 6f)
-                    }
+                    val blockHit = resolveTimelineBlockHit(
+                        pos = startPos,
+                        snapshot = currentSnapshot,
+                        viewport = viewport,
+                        surface = surface,
+                        headerTotalPx = headerTotalPx,
+                        rowHeightPx = rowHeightPx,
+                        liveOverrides = latestOverrides,
+                    )
 
-                    if (hitBlock == null) {
+                    if (blockHit == null) {
                         controller.beginScrubDrag()
                         try {
                             controller.scrubToTimeMs(timeAt(startPos.x))
@@ -758,6 +919,10 @@ private fun MasterDeckTimelineCanvas(
                         return@awaitEachGesture
                     }
 
+                    val hitRow = blockHit.row
+                    val hitBlock = blockHit.block
+                    val dragMode = blockHit.dragMode
+
                     val nowWall = System.currentTimeMillis()
                     if (hitBlock.loopId != null && lastClickBlockId == hitBlock.id && (nowWall - lastClickMillis) < 380L) {
                         controller.enterLoopSubComp(scope, hitBlock.loopId, hitBlock.sceneIndex)
@@ -770,17 +935,8 @@ private fun MasterDeckTimelineCanvas(
                     // Rows of stagger items select the individual item; everything else its track.
                     controller.selectTrack(hitRow.trackId)
 
-                    val bx0 = viewport.xForTime(hitBlock.startMs.toFloat())
-                    val bx1 = bx0 + max(18f, hitBlock.durationMs * viewport.pxPerMs)
-                    val dragMode = when {
-                        hitBlock.category == TrackCategory.LoopSubComp -> DragMode.ScrubPlayhead
-                        abs(startPos.x - bx1) <= 9f -> DragMode.ResizeRightDuration
-                        abs(startPos.x - bx0) <= 9f -> DragMode.ResizeLeftDelay
-                        hitBlock.category == TrackCategory.SharedElement || hitBlock.category == TrackCategory.WarpCode -> DragMode.ScrubPlayhead
-                        else -> DragMode.MoveBlockBeat
-                    }
                     val staggerSpreadOnHit = if (hitBlock.category == TrackCategory.StaggerGroup && (hitBlock.staggerCount ?: 1) > 1) {
-                        val step = liveOverrides[hitBlock.trackId]?.staggerStepMs ?: hitBlock.staggerStepMs ?: 55
+                        val step = latestOverrides[hitBlock.trackId]?.staggerStepMs ?: hitBlock.staggerStepMs ?: 55
                         ((hitBlock.staggerCount ?: 1) - 1) * step
                     } else {
                         0
@@ -791,6 +947,7 @@ private fun MasterDeckTimelineCanvas(
                     var lastDelay = origDelay
                     var lastTriggerBeat = hitBlock.triggerBeatInScene
 
+                    hoverIcon = pointerIconForDragMode(dragMode)
                     controller.overridesStore.beginEditGesture()
                     if (dragMode == DragMode.ScrubPlayhead) controller.beginScrubDrag()
                     try {
@@ -801,7 +958,7 @@ private fun MasterDeckTimelineCanvas(
                             change.consume()
                             val dxPx = change.position.x - startPos.x
                             if (abs(dxPx) < 3f) continue
-                            val deltaMs = (dxPx / viewport.pxPerMs).roundToInt()
+                            val deltaMs = (dxPx / viewport.pxPerMs(surface)).roundToInt()
 
                             when (dragMode) {
                                 DragMode.ResizeRightDuration -> {
@@ -837,17 +994,18 @@ private fun MasterDeckTimelineCanvas(
                             }
                         }
                     } finally {
+                        hoverIcon = PointerIcon.Default
                         if (dragMode == DragMode.ScrubPlayhead) controller.endScrubDrag()
                         controller.overridesStore.endEditGesture()
                     }
                 }
             },
     ) {
-        val pxPerMs = viewport.pxPerMs
+        val pxPerMs = viewport.pxPerMs(surface)
         val scrollY = viewport.verticalScroll.value.toFloat()
-        fun xOf(timeMs: Int): Float = viewport.xForTime(timeMs.toFloat())
-        val visibleStartMs = viewport.timeForX(-40f)
-        val visibleEndMs = viewport.timeForX(size.width + 40f)
+        fun xOf(timeMs: Int): Float = viewport.xForTime(timeMs.toFloat(), surface)
+        val visibleStartMs = viewport.timeForX(-40f, surface)
+        val visibleEndMs = viewport.timeForX(size.width + 40f, surface)
 
         drawRect(color = colors.bg)
 
@@ -905,23 +1063,7 @@ private fun MasterDeckTimelineCanvas(
                     } else {
                         liveOvr != null
                     }
-                    val drawStartMs = if (row.category != TrackCategory.SharedElement && row.category != TrackCategory.LoopSubComp && liveOvr?.delayMs != null) {
-                        val stepOffset = (blk.staggerIndex ?: 0) * (liveOvr.staggerStepMs ?: 55)
-                        (blk.startMs - blk.delayMs) + liveOvr.delayMs + stepOffset
-                    } else {
-                        blk.startMs
-                    }
-                    val drawDurationMs = when {
-                        row.category == TrackCategory.SharedElement || row.category == TrackCategory.LoopSubComp -> blk.durationMs
-                        liveOvr?.curve?.isSpring == true -> liveOvr.curve.estimatedSpringDurationMs()
-                        row.category == TrackCategory.StaggerGroup && liveOvr?.durationMs != null -> {
-                            val count = (blk.staggerCount ?: 1).coerceAtLeast(1)
-                            val step = liveOvr.staggerStepMs ?: 55
-                            liveOvr.durationMs + (count - 1) * step
-                        }
-                        liveOvr?.durationMs != null -> liveOvr.durationMs
-                        else -> blk.durationMs
-                    }
+                    val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(row, blk, liveOvr)
                     if (drawStartMs + drawDurationMs < visibleStartMs || drawStartMs > visibleEndMs) continue
                     val x0 = xOf(drawStartMs)
                     val w = max(6f, drawDurationMs * pxPerMs)
@@ -970,19 +1112,18 @@ private fun MasterDeckTimelineCanvas(
                             blk.label
                         }
                         val rightClip = x0 + w - (if (isBarOverridden) 13f else 6f)
-                        if (rightClip > x0 + 8f) {
-                            clipRect(left = x0 + 6f, top = yTop, right = rightClip, bottom = yTop + barH) {
-                                drawText(
-                                    textMeasurer = textMeasurer,
-                                    text = barText,
-                                    topLeft = Offset(x0 + 7f, yTop + 2f),
-                                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = barLabelInk),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
-                                    size = Size(rightClip - (x0 + 7f), barH),
-                                )
-                            }
+                        val labelAvailW = rightClip - (x0 + 7f)
+                        if (labelAvailW > 6f) {
+                            drawEllipsizedLabel(
+                                textMeasurer = textMeasurer,
+                                text = barText,
+                                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = barLabelInk),
+                                left = x0 + 7f,
+                                top = yTop + 2f,
+                                availWidth = labelAvailW,
+                                clipTop = yTop,
+                                clipBottom = yTop + barH,
+                            )
                         }
                     }
                 }
@@ -997,8 +1138,10 @@ private fun MasterDeckTimelineCanvas(
             val sw = max(4f, (slide.endMs - slide.startMs) * pxPerMs)
             if (sx + sw < 0f || sx > size.width) continue
             val baseColor = colors.slideColors[slide.sceneIndex % colors.slideColors.size]
+            val paintedSlide = baseColor.copy(alpha = 0.88f)
+            val slideLabelInk = barLabelInkForFill(compositeColorOver(paintedSlide, colors.headerBg))
             drawRoundRect(
-                color = baseColor.copy(alpha = 0.85f),
+                color = paintedSlide,
                 topLeft = Offset(sx, 2f),
                 size = Size(sw, slideRibbonPx - 4f),
                 cornerRadius = CornerRadius(4f, 4f),
@@ -1013,19 +1156,19 @@ private fun MasterDeckTimelineCanvas(
                 )
             }
             val labelLeft = maxOf(sx + slide.overlapInMs * pxPerMs, 0f) + 6f
-            val labelRight = sx + sw - slide.overlapOutMs * pxPerMs - 6f
-            if (labelRight > labelLeft + 14f) {
-                clipRect(left = labelLeft, top = 2f, right = labelRight, bottom = slideRibbonPx - 2f) {
-                    drawText(
-                        textMeasurer = textMeasurer,
-                        text = slide.label,
-                        topLeft = Offset(labelLeft, 5f),
-                        style = slideLabelTextStyle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        size = Size(labelRight - labelLeft, slideRibbonPx - 4f),
-                    )
-                }
+            val labelRight = minOf(sx + sw - slide.overlapOutMs * pxPerMs - 6f, size.width - 4f)
+            val slideLabelAvailW = labelRight - labelLeft
+            if (slideLabelAvailW > 14f) {
+                drawEllipsizedLabel(
+                    textMeasurer = textMeasurer,
+                    text = slide.label,
+                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = slideLabelInk),
+                    left = labelLeft,
+                    top = 5f,
+                    availWidth = slideLabelAvailW,
+                    clipTop = 2f,
+                    clipBottom = slideRibbonPx - 2f,
+                )
             }
         }
 
@@ -1033,6 +1176,7 @@ private fun MasterDeckTimelineCanvas(
         val minorStep = (majorStep / 5).coerceAtLeast(1)
         var tickMs = (visibleStartMs.coerceAtLeast(0f) / minorStep).toInt() * minorStep
         val lastTick = minOf(visibleEndMs.toInt(), snapshot.totalDurationMs + majorStep)
+        var lastDrawnTickRight = Float.NEGATIVE_INFINITY
         while (tickMs <= lastTick) {
             val tx = xOf(tickMs)
             val isMajor = tickMs % majorStep == 0
@@ -1042,18 +1186,22 @@ private fun MasterDeckTimelineCanvas(
                 end = Offset(tx, headerTotalPx),
                 strokeWidth = 1f,
             )
-            if (isMajor) {
+            if (isMajor && tx in -4f..size.width) {
                 val tickMeasured = textMeasurer.measure(
-                    text = formatTick(tickMs, majorStep),
+                    text = formatTimelineTick(tickMs, majorStep),
                     style = rulerTextStyle,
                     maxLines = 1,
                     softWrap = false,
                 )
-                val tickLeft = (tx + 3f).coerceAtMost((size.width - tickMeasured.size.width - 2f).coerceAtLeast(0f))
-                drawText(
-                    textLayoutResult = tickMeasured,
-                    topLeft = Offset(tickLeft, slideRibbonPx + 2f),
-                )
+                val maxTickLeft = (size.width - tickMeasured.size.width - 2f).coerceAtLeast(0f)
+                val tickLeft = (tx + 3f).coerceIn(0f, maxTickLeft)
+                if (tickLeft >= lastDrawnTickRight + 6f) {
+                    drawText(
+                        textLayoutResult = tickMeasured,
+                        topLeft = Offset(tickLeft, slideRibbonPx + 2f),
+                    )
+                    lastDrawnTickRight = tickLeft + tickMeasured.size.width
+                }
             }
             tickMs += minorStep
         }
@@ -1209,8 +1357,8 @@ private fun LoopSubCompTimelineView(
                     end = Offset(x, size.height),
                     strokeWidth = 1f,
                 )
-                val label = "${((frac * periodMs).roundToInt()) / 1000f}s"
-                val measured = textMeasurer.measure(label, style = tickStyle, maxLines = 1)
+                val label = String.format(Locale.US, "%.2fs", (frac * periodMs) / 1000.0)
+                val measured = textMeasurer.measure(label, style = tickStyle, maxLines = 1, softWrap = false)
                 val textX = if (s == steps) (x - measured.size.width - 3f).coerceAtLeast(0f) else x + 3f
                 drawText(textLayoutResult = measured, topLeft = Offset(textX, rulerPx - 22f))
             }
@@ -1331,13 +1479,23 @@ internal fun buildStudioCanvasPaletteForTheme(
     buildBar = if (isDark) Color(0xFFEB8A44) else Color(0xFFF59E56),
     lineDrawBar = if (isDark) Color(0xFFE5B546) else Color(0xFFF4C552),
     loopBar = if (isDark) Color(0xFF1B746B) else Color(0xFF68C9BF),
-    slideColors = listOf(
-        Color(0xFF334466),
-        Color(0xFF4A3861),
-        Color(0xFF2B5450),
-        Color(0xFF5A3F37),
-        Color(0xFF3B4F3B),
-    ),
+    slideColors = if (isDark) {
+        listOf(
+            Color(0xFF334466),
+            Color(0xFF4A3861),
+            Color(0xFF2B5450),
+            Color(0xFF5A3F37),
+            Color(0xFF3B4F3B),
+        )
+    } else {
+        listOf(
+            Color(0xFFD4E1F5),
+            Color(0xFFE4D8F2),
+            Color(0xFFCDE9E5),
+            Color(0xFFF2DDD4),
+            Color(0xFFD8EAD9),
+        )
+    },
 )
 
 internal fun wcagRelativeLuminance(color: Color): Float {

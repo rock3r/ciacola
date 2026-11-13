@@ -79,6 +79,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
@@ -107,6 +108,7 @@ fun TimelineStudioPanel(
     controller: TimelineStudioController,
     isDark: Boolean,
     modifier: Modifier = Modifier,
+    surface: TimelineSurface = TimelineSurface.Docked,
 ) {
     CiacolaJewelTheme(isDark = isDark) {
         Column(
@@ -115,7 +117,7 @@ fun TimelineStudioPanel(
                 .background(JewelTheme.globalColors.panelBackground)
                 .testTag("ciacola-timeline-studio"),
         ) {
-            TimelineTransportBar(controller = controller)
+            TimelineTransportBar(controller = controller, surface = surface)
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
             controller.overridesStore.structuralRevision
             if (controller.isPlayheadOnInjectedVirtualBeat()) {
@@ -140,6 +142,7 @@ fun TimelineStudioPanel(
             Row(Modifier.fillMaxSize()) {
                 TimelineMultiTrackArea(
                     controller = controller,
+                    surface = surface,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 Divider(Orientation.Vertical, Modifier.fillMaxHeight())
@@ -341,6 +344,7 @@ class TimelineStudioWindow(
     val suppressShortcutsProvider: () -> Boolean = { false },
 ) : EaselWindow {
     override val name: String = "Timeline"
+    override val minimumSize: DpSize get() = DpSize(720.dp, 420.dp)
     override var visible: Boolean
         get() = controller.detachedWindowVisible
         set(value) {
@@ -415,7 +419,11 @@ class TimelineStudioWindow(
                         .fillMaxWidth()
                         .weight((1f - controller.splitFraction).coerceIn(0.22f, 0.72f)),
                 ) {
-                    TimelineStudioPanel(controller = controller, isDark = isDark)
+                    TimelineStudioPanel(
+                        controller = controller,
+                        isDark = isDark,
+                        surface = TimelineSurface.Docked,
+                    )
                 }
             } else {
                 Box(Modifier.fillMaxSize()) {
@@ -476,7 +484,11 @@ class TimelineStudioWindow(
                 .focusable()
                 .onPreviewKeyEvent { ev -> controller.handleStudioKey(ev, scope, suppressShortcutsProvider()) },
         ) {
-            TimelineStudioPanel(controller = controller, isDark = isDark)
+            TimelineStudioPanel(
+                controller = controller,
+                isDark = isDark,
+                surface = TimelineSurface.Detached,
+            )
         }
     }
 }

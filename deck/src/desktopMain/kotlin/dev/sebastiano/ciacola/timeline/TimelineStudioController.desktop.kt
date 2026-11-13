@@ -60,6 +60,30 @@ internal data class ScrubRequest(
 )
 
 /**
+ * Computes the `[startMs, endMs]` playback window for Inspector `Preview ▶`, stopping cleanly at
+ * `min(segmentEnd, blockEnd + 120 ms)` so preview never runs through the trailing 400 ms click hold.
+ */
+internal fun computeBlockPreviewRangeMs(
+    snapshot: DeckTimelineSnapshot,
+    block: TimelineBlockBar,
+): IntRange {
+    val blockStart = block.startMs
+    val blockTriggerStart = (blockStart - block.delayMs).coerceAtLeast(0)
+    val blockEnd = blockStart + block.durationMs
+    val containingAnimated = snapshot.stateSpans.lastOrNull {
+        !it.isHold &&
+            it.durationMs > 0 &&
+            it.startMs <= blockEnd &&
+            (it.startMs + it.durationMs) >= blockTriggerStart
+    }
+    val segmentEnd = containingAnimated?.let { it.startMs + it.durationMs } ?: snapshot.totalDurationMs
+    val startMs = (blockTriggerStart - 120).coerceAtLeast(0)
+    val maxEnd = snapshot.totalDurationMs.coerceAtLeast(startMs + 1)
+    val endMs = minOf(segmentEnd, blockEnd + 120).coerceIn(startMs + 1, maxEnd)
+    return startMs..endMs
+}
+
+/**
  * Presenter/coordinator for Ciacola's After Effects Timeline Studio.
  *
  * Owns timeline snapshot indexing, playhead scrubbing, transport playback, 0-ms event-beat
@@ -412,9 +436,10 @@ class TimelineStudioController(
                             return@launch
                         }
                         val expectedIndex = Storyboard.Index(span.sceneIndex, span.frameIndex)
+                        val holdStopMs = minOf(spanEnd.toFloat(), endMs.toFloat())
                         var heldMs = playMs.toFloat()
                         lastNanos = -1L
-                        while (heldMs < spanEnd) {
+                        while (heldMs < holdStopMs) {
                             if (
                                 animatic.activeFromStateIndex != span.stateIndex ||
                                 animatic.activeToStateIndex != span.stateIndex ||
@@ -437,7 +462,7 @@ class TimelineStudioController(
                                 lastRequested = null
                                 return@launch
                             }
-                            val shown = heldMs.toInt().coerceAtMost(spanEnd)
+                            val shown = heldMs.toInt().coerceAtMost(holdStopMs.toInt())
                             lastRequested = ScrubRequest(shown, span.stateIndex, 0f, ++scrubSequence)
                         }
                     } else {
@@ -446,22 +471,53 @@ class TimelineStudioController(
                             return@launch
                         }
                         val fraction = if (span.durationMs > 0) (playMs - span.startMs).toFloat() / span.durationMs else 0f
-                        lastRequested = null
-                        val expectedEndState = (span.stateIndex + 1).coerceAtMost(animatic.stateDescriptors.lastIndex)
-                        animatic.playSegmentToEnd(span.stateIndex, fraction.coerceIn(0f, 1f))
-                        if (animatic.activeFromStateIndex != expectedEndState || animatic.activeToStateIndex != expectedEndState) {
-                            return@launch
-                        }
-                        val endDesc = animatic.stateDescriptors.getOrNull(expectedEndState)
-                        if (endDesc != null && !endDesc.isBoundaryStart && !endDesc.isBoundaryEnd) {
-                            val expectedEndIndex = Storyboard.Index(endDesc.sceneIndex, endDesc.frameIndex)
-                            if (animatic.currentIndex != expectedEndIndex || animatic.targetIndex != expectedEndIndex) {
+                        if (endMs < spanEnd && span.durationMs > 0) {
+                            val targetFrac = ((endMs - span.startMs).toFloat() / span.durationMs).coerceIn(0f, 1f)
+                            var curFrac = fraction.coerceIn(0f, targetFrac)
+                            val needsInitialRebuild = animatic.activeFromStateIndex != span.stateIndex
+                            animatic.seekToSegment(span.stateIndex, curFrac, rebuildScene = needsInitialRebuild)
+                            lastRequested = ScrubRequest(
+                                timeMs = (span.startMs + curFrac * span.durationMs).toInt(),
+                                stateIndex = span.stateIndex,
+                                fraction = curFrac,
+                                sequence = ++scrubSequence,
+                            )
+                            lastNanos = -1L
+                            while (curFrac < targetFrac) {
+                                if (animatic.activeFromStateIndex != span.stateIndex) {
+                                    lastRequested = null
+                                    return@launch
+                                }
+                                var deltaMs = 0f
+                                withFrameNanos { now ->
+                                    if (lastNanos >= 0L) deltaMs = ((now - lastNanos) / 1_000_000f).coerceIn(0f, 64f)
+                                    lastNanos = now
+                                }
+                                if (deltaMs > 0f) {
+                                    curFrac = (curFrac + deltaMs / span.durationMs.toFloat()).coerceAtMost(targetFrac)
+                                    animatic.seekToSegment(span.stateIndex, curFrac, rebuildScene = false)
+                                    val shown = (span.startMs + curFrac * span.durationMs).toInt().coerceAtMost(endMs)
+                                    lastRequested = ScrubRequest(shown, span.stateIndex, curFrac, ++scrubSequence)
+                                }
+                            }
+                        } else {
+                            lastRequested = null
+                            val expectedEndState = (span.stateIndex + 1).coerceAtMost(animatic.stateDescriptors.lastIndex)
+                            animatic.playSegmentToEnd(span.stateIndex, fraction.coerceIn(0f, 1f))
+                            if (animatic.activeFromStateIndex != expectedEndState || animatic.activeToStateIndex != expectedEndState) {
                                 return@launch
+                            }
+                            val endDesc = animatic.stateDescriptors.getOrNull(expectedEndState)
+                            if (endDesc != null && !endDesc.isBoundaryStart && !endDesc.isBoundaryEnd) {
+                                val expectedEndIndex = Storyboard.Index(endDesc.sceneIndex, endDesc.frameIndex)
+                                if (animatic.currentIndex != expectedEndIndex || animatic.targetIndex != expectedEndIndex) {
+                                    return@launch
+                                }
                             }
                         }
                     }
                     isFirstSpan = false
-                    playMs = maxOf(playMs, spanEnd)
+                    playMs = maxOf(playMs, minOf(spanEnd, endMs))
                 }
             } finally {
                 isPlaying = false
@@ -487,9 +543,12 @@ class TimelineStudioController(
 
     fun stepBeat(delta: Int) {
         stopPlayback()
-        if (loopClock.activeSubCompLoopId != null) {
+        val subLoopId = loopClock.activeSubCompLoopId
+        if (subLoopId != null) {
+            val desc = loopClock.registeredLoops[subLoopId]
+            val period = loopClock.effectivePeriodMillis(subLoopId, desc?.defaultPeriodMillis ?: 6_000L)
             val step = 500L * delta
-            loopClock.scrubbedMillis = ((loopClock.scrubbedMillis ?: 0L) + step).coerceAtLeast(0L)
+            loopClock.scrubbedMillis = ((loopClock.scrubbedMillis ?: 0L) + step).coerceIn(0L, period)
             return
         }
         val beats = snapshot.eventBeats
@@ -545,9 +604,8 @@ class TimelineStudioController(
             ?: snapshot.tracks.firstOrNull { it.trackId == selectedTrackId }
             ?: return
         val firstBlock = row.blocks.firstOrNull() ?: return
-        val startMs = (firstBlock.startMs - firstBlock.delayMs - 120).coerceAtLeast(0)
-        val endMs = (firstBlock.startMs + firstBlock.durationMs + 120).coerceAtMost(snapshot.totalDurationMs)
-        playRange(scope, startMs, endMs)
+        val range = computeBlockPreviewRangeMs(snapshot, firstBlock)
+        playRange(scope, range.first, range.last)
     }
 
     fun clearBakeStatus() {

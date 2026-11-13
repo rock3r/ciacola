@@ -10,10 +10,20 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.Animatic
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
+import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.clampStoryboardIndex
 import dev.bnorm.storyboard.easel.onStoryNavigation
+import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -93,30 +103,62 @@ fun EaselOverview(
                 if (isOverview) {
                     val isVisible = transition.currentState == EnterExitState.Visible &&
                             transition.currentState == transition.targetState
-                    EaselOverviewInternal(
-                        animatic = animatic,
-                        overviewState = overviewState,
-                        isVisible = isVisible,
-                        onExitOverview = {
-                            job?.cancel()
-                            job = coroutineScope.launch {
-                                animatic.jumpTo(it)
-                                job = null
-                                overviewVisible = false
-                            }
-                        },
-                        onDismiss = { overviewVisible = false },
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    CompositionLocalProvider(LocalOverviewOpen provides true) {
+                        EaselOverviewInternal(
+                            animatic = animatic,
+                            overviewState = overviewState,
+                            isVisible = isVisible,
+                            onExitOverview = {
+                                job?.cancel()
+                                job = coroutineScope.launch {
+                                    animatic.jumpTo(it)
+                                    job = null
+                                    overviewVisible = false
+                                }
+                            },
+                            onDismiss = { overviewVisible = false },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 } else {
                     holder.SaveableStateProvider(storyboard) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        var containerSize by remember { mutableStateOf(IntSize.Zero) }
+                        var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+                        val isLetterboxedOrPillarboxed = containerSize.width > 0 &&
+                            containerSize.height > 0 &&
+                            viewportSize.width > 0 &&
+                            viewportSize.height > 0 &&
+                            (abs(containerSize.width - viewportSize.width) > 1 ||
+                                abs(containerSize.height - viewportSize.height) > 1)
+                        val showViewportHairline = !LocalPresentingFullscreen.current || isLetterboxedOrPillarboxed
+                        val colors = MaterialTheme.colors
+                        val hairlineColor = colors.onBackground.copy(alpha = if (colors.isLight) 0.16f else 0.18f)
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .onSizeChanged { containerSize = it },
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .sharedElement(
                                         rememberSharedContentState(OverviewCurrentItemKey),
                                         animatedVisibilityScope = this@AnimatedContent
                                     )
+                                    .onSizeChanged { viewportSize = it }
+                                    .drawWithContent {
+                                        drawContent()
+                                        if (showViewportHairline && size.width > 2f && size.height > 2f) {
+                                            val strokePx = 1.dp.toPx()
+                                            drawRect(
+                                                color = hairlineColor,
+                                                topLeft = Offset(strokePx / 2f, strokePx / 2f),
+                                                size = Size(size.width - strokePx, size.height - strokePx),
+                                                style = Stroke(width = strokePx),
+                                            )
+                                        }
+                                    }
                                     .onStoryNavigation(animatic)
                                     .onKeyEvent { handleKeyEvent(it) }
                             ) {

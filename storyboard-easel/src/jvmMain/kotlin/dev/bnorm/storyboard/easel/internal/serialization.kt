@@ -141,7 +141,8 @@ internal object WindowStateSerializer : KSerializer<WindowState> {
 
     override fun serialize(encoder: Encoder, value: WindowState) = encoder.encodeStructure(descriptor) {
         encodeStringElement(descriptor, 0, value.placement.name)
-        encodeBooleanElement(descriptor, 1, value.isMinimized)
+        // Never persist isMinimized = true so quitting while minimized never launches invisible.
+        encodeBooleanElement(descriptor, 1, false)
         if (value.position != WindowPosition.PlatformDefault) {
             encodeSerializableElement(descriptor, 2, WindowPositionSerializer, value.position)
         }
@@ -150,6 +151,7 @@ internal object WindowStateSerializer : KSerializer<WindowState> {
 
     override fun deserialize(decoder: Decoder): WindowState = decoder.decodeStructure(descriptor) {
         var placement = WindowPlacement.Floating
+        @Suppress("UNUSED_VARIABLE")
         var isMinimized = false
         var position: WindowPosition = WindowPosition.PlatformDefault
         var size = DpSize(800.dp, 600.dp)
@@ -169,6 +171,6 @@ internal object WindowStateSerializer : KSerializer<WindowState> {
             }
         }
         val safePosition = clampWindowPositionToScreens(position, size, connectedScreenBounds())
-        WindowState(placement, isMinimized, safePosition, size)
+        WindowState(placement, isMinimized = false, safePosition, size)
     }
 }

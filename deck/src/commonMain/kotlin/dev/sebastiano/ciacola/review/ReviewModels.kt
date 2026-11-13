@@ -2,6 +2,7 @@ package dev.sebastiano.ciacola.review
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.IntSize
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.serialization.SerialName
@@ -53,6 +54,7 @@ data class SlideReviewComment(
     val frameIndex: Int,
     val sceneCount: Int,
     val frameCount: Int,
+    val sceneTitle: String = "",
     val sceneHeader: String = "",
     val themePreset: String = "StageDark",
     val stageX: Float,
@@ -92,6 +94,29 @@ fun normalizeDragRect(start: Offset, end: Offset): Rect = Rect(
     right = max(start.x, end.x),
     bottom = max(start.y, end.y),
 )
+
+fun clampStagePoint(point: Offset, stageSize: IntSize): Offset {
+    val maxW = stageSize.width.toFloat().coerceAtLeast(1f)
+    val maxH = stageSize.height.toFloat().coerceAtLeast(1f)
+    return Offset(
+        x = point.x.coerceIn(0f, maxW),
+        y = point.y.coerceIn(0f, maxH),
+    )
+}
+
+fun clampStageRect(rect: Rect, stageSize: IntSize): Rect {
+    val maxW = stageSize.width.toFloat().coerceAtLeast(1f)
+    val maxH = stageSize.height.toFloat().coerceAtLeast(1f)
+    val left = rect.left.coerceIn(0f, maxW)
+    val top = rect.top.coerceIn(0f, maxH)
+    val right = rect.right.coerceIn(left, maxW)
+    val bottom = rect.bottom.coerceIn(top, maxH)
+    return Rect(left, top, right, bottom)
+}
+
+/** 1-based global display number shared between Stage pins and ReviewWindow cards. */
+fun reviewDisplayNumber(allComments: List<SlideReviewComment>, commentId: String): Int =
+    (allComments.indexOfFirst { it.id == commentId } + 1).coerceAtLeast(1)
 
 fun isSignificantDrag(rect: Rect): Boolean =
     rect.width >= MIN_REGION_DRAG_PX || rect.height >= MIN_REGION_DRAG_PX

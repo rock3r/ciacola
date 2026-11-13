@@ -218,6 +218,14 @@ class TimelineHarvestCollector {
     val sharedLabels = mutableMapOf<String, String>()
     val sharedDurations = mutableMapOf<String, Int>()
     val loopRecords = linkedMapOf<String, Pair<LoopSubCompDescriptor, Int>>()
+    val sceneTitles = mutableMapOf<Int, String>()
+
+    fun recordSceneTitle(sceneIndex: Int, title: String) {
+        val clean = title.trim()
+        if (clean.isNotEmpty() && sceneIndex !in sceneTitles) {
+            sceneTitles[sceneIndex] = clean
+        }
+    }
 
     /** Default entrance offsets reported by the effect modifier that animates each track. */
     private val defaultOffsets = mutableMapOf<String, Pair<Float, Float>>()
@@ -483,6 +491,7 @@ fun Modifier.deckSharedBounds(
 
     SideEffect {
         if (sceneCtx != null) {
+            collector?.recordSceneTitle(sceneCtx.sceneIndex, sceneCtx.sceneTitle)
             collector?.recordSharedSighting(
                 sharedKey = sharedKey,
                 label = label,

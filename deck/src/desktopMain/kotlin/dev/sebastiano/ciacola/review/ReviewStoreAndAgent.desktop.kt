@@ -71,6 +71,7 @@ class ReviewCommentStore(
     val capturesDir: Path = storyboardDir.resolve("review-captures")
 
     val comments = SnapshotStateList<SlideReviewComment>()
+    val trashedComments = SnapshotStateList<SlideReviewComment>()
     var config by mutableStateOf(ReviewConfig())
         private set
 
@@ -165,7 +166,8 @@ class ReviewCommentStore(
         }
         val modified = runCatching { commentsFile.getLastModifiedTime().toMillis() }.getOrDefault(-1L)
         val size = runCatching { commentsFile.fileSize() }.getOrDefault(-1L)
-        if (modified == lastObservedModifiedMillis && size == lastObservedFileSize) {
+        val hasInFlightApplying = comments.any { it.status == ReviewCommentStatus.Applying }
+        if (!hasInFlightApplying && modified == lastObservedModifiedMillis && size == lastObservedFileSize) {
             return false
         }
         lastObservedModifiedMillis = modified
@@ -258,7 +260,67 @@ class ReviewCommentStore(
 
     fun deleteComment(commentId: String) {
         synchronized(this) {
+            val target = comments.firstOrNull { it.id == commentId }
+            if (target != null && trashedComments.none { it.id == target.id }) {
+                trashedComments.add(target)
+                while (trashedComments.size > 20) {
+                    trashedComments.removeAt(0)
+                }
+            }
             persistCommentsInternal(comments.filterNot { it.id == commentId })
+        }
+    }
+
+    fun restoreComment(commentId: String): Boolean {
+        synchronized(this) {
+            val idx = trashedComments.indexOfFirst { it.id == commentId }
+            if (idx < 0) return false
+            val item = trashedComments.removeAt(idx)
+            if (comments.none { it.id == item.id }) {
+                persistCommentsInternal(comments.toList() + item)
+            }
+            return true
+        }
+    }
+
+    fun restoreLastDeleted(): SlideReviewComment? {
+        synchronized(this) {
+            val last = trashedComments.lastOrNull() ?: return null
+            trashedComments.removeAt(trashedComments.lastIndex)
+            if (comments.none { it.id == last.id }) {
+                persistCommentsInternal(comments.toList() + last)
+            }
+            return last
+        }
+    }
+
+    fun dismissTrashItem(commentId: String) {
+        synchronized(this) {
+            trashedComments.removeAll { it.id == commentId }
+        }
+    }
+
+    fun markCommentApplied(
+        commentId: String,
+        resolutionNote: String = "Marked applied manually",
+    ) {
+        synchronized(this) {
+            var changed = false
+            val updated = comments.map { existing ->
+                if (existing.id == commentId) {
+                    changed = true
+                    existing.copy(
+                        status = ReviewCommentStatus.Applied,
+                        deliveryError = null,
+                        resolution = existing.resolution.ifBlank { resolutionNote },
+                    )
+                } else {
+                    existing
+                }
+            }
+            if (changed) {
+                persistCommentsInternal(updated)
+            }
         }
     }
 
@@ -365,8 +427,9 @@ class ReviewCommentStore(
             for (c in items) {
                 appendLine("- Comment ID: `${c.id}`")
                 appendLine(
-                    "  Slide: Scene ${c.sceneIndex + 1}/${c.sceneCount} (sceneIndex=${c.sceneIndex}), " +
-                        "Frame ${c.frameIndex + 1}/${c.frameCount} (frameIndex=${c.frameIndex})" +
+                    "  Slide: Scene ${c.sceneIndex + 1}/${c.sceneCount} (sceneIndex=${c.sceneIndex})" +
+                        (if (c.sceneTitle.isNotBlank()) " \"${c.sceneTitle}\"" else "") +
+                        ", Frame ${c.frameIndex + 1}/${c.frameCount} (frameIndex=${c.frameIndex})" +
                         if (c.sceneHeader.isNotBlank()) " · Header: \"${c.sceneHeader}\"" else ""
                 )
                 appendLine("  Theme preset: `${c.themePreset}`")

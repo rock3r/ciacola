@@ -21,6 +21,11 @@ interface EaselWindow {
      */
     val initialSize: DpSize get() = DpSize(1280.dp, 800.dp)
 
+    /**
+     * Optional minimum size enforced on the AWT window so resizing cannot crush tool panes to 0 px.
+     */
+    val minimumSize: DpSize? get() = null
+
     @Composable
     fun MenuScope.Menu()
 

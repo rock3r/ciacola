@@ -44,12 +44,14 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuScope
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.EaselWindow
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
@@ -64,6 +66,7 @@ import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.GroupHeader
 import org.jetbrains.jewel.ui.component.Icon
+import org.jetbrains.jewel.ui.component.IconButton
 import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
@@ -89,6 +92,7 @@ class SlideReviewWindow(
         internal set
 
     override val name: String = "Review"
+    override val minimumSize: DpSize get() = DpSize(420.dp, 480.dp)
     override var visible: Boolean by mutableStateOf(false)
     var highlightAgentConfigBanner: Boolean by mutableStateOf(false)
         internal set
@@ -288,7 +292,23 @@ private fun ReviewOuterWindowOverlay(
     val currentSlideComments = store.comments.filter {
         it.sceneIndex == targetIndex.sceneIndex && it.frameIndex == targetIndex.frameIndex
     }
-    coordinator.currentSlideCommentsProvider = { currentSlideComments }
+    coordinator.currentSlideCommentsProvider = {
+        val idx = animatic.targetIndex
+        store.comments.filter {
+            it.sceneIndex == idx.sceneIndex && it.frameIndex == idx.frameIndex
+        }
+    }
+    coordinator.commentDisplayNumberProvider = { id -> reviewDisplayNumber(store.comments, id) }
+    coordinator.currentSlideContextProvider = {
+        val idx = animatic.targetIndex
+        val sb = animatic.storyboard
+        SlideCaptureContext(
+            sceneIndex = idx.sceneIndex,
+            frameIndex = idx.frameIndex,
+            sceneCount = sb.scenes.size,
+            frameCount = sb.scenes.getOrNull(idx.sceneIndex)?.frames?.size ?: 1,
+        )
+    }
 
     var outerBoundsInRoot by remember { mutableStateOf<Rect?>(null) }
 
@@ -340,12 +360,21 @@ private fun ReviewOuterWindowOverlay(
         }
 
         // Fullscreen presenting is audience-facing: keep the review HUD off it unless reviewing.
+        // Also hide the HUD whenever the Esc Overview grid is open so it never occludes thumbnails.
         val hideForAudience = LocalPresentingFullscreen.current && !coordinator.inspectModeEnabled &&
             pending == null && coordinator.selectedPinCommentId == null
+        val overviewOpen = LocalOverviewOpen.current
+        val showHud = coordinator.showStageBadges &&
+            !hideForAudience &&
+            !overviewOpen &&
+            coordinator.stageBoundsInRoot != null
+        if (!showHud) {
+            coordinator.hudBoundsInRoot = null
+        }
         val agentConfigured = store.effectiveConversationId().isNotBlank()
         CiacolaJewelTheme(isDark = isDark) {
             Box(Modifier.fillMaxSize()) {
-                if (coordinator.showStageBadges && !hideForAudience && coordinator.stageBoundsInRoot != null) {
+                if (showHud) {
                     val queuedCount = store.comments.count {
                         it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
                     }
@@ -360,6 +389,7 @@ private fun ReviewOuterWindowOverlay(
                         queuedCount = queuedCount,
                         applyingCount = applyingCount,
                         appliedCount = appliedCount,
+                        onHudBoundsChanged = { coordinator.hudBoundsInRoot = it },
                         onToggleInspectMode = {
                             coordinator.inspectModeEnabled = !coordinator.inspectModeEnabled
                         },
@@ -384,7 +414,6 @@ private fun ReviewOuterWindowOverlay(
                 if (pending != null) {
                     AnchoredCommentComposerPopup(
                         pending = pending,
-                        animatic = animatic,
                         store = store,
                         themePresetName = preset.name,
                         outerBoundsInRoot = outerBoundsInRoot,
@@ -425,6 +454,7 @@ private fun ReviewOuterWindowOverlay(
                 if (activePinComment != null && pending == null) {
                     AnchoredSelectedPinPopup(
                         comment = activePinComment,
+                        displayNumber = reviewDisplayNumber(store.comments, activePinComment.id),
                         outerBoundsInRoot = outerBoundsInRoot,
                         stageBoundsInRoot = coordinator.stageBoundsInRoot,
                         stageFormatSize = coordinator.stageFormatSize,
@@ -434,6 +464,10 @@ private fun ReviewOuterWindowOverlay(
                         },
                         onDelete = {
                             store.deleteComment(activePinComment.id)
+                            coordinator.selectedPinCommentId = null
+                        },
+                        onMarkApplied = {
+                            store.markCommentApplied(activePinComment.id)
                             coordinator.selectedPinCommentId = null
                         },
                         onRetry = {
@@ -619,23 +653,74 @@ private fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DefaultButton(
-                    enabled = queuedCount > 0 && effectiveConvId.isNotBlank(),
-                    onClick = {
-                        if (typedConvId.isNotEmpty() && typedConvId != store.config.conversationId) {
-                            store.saveConfig(store.config.copy(conversationId = typedConvId))
-                        }
-                        windowController.highlightAgentConfigBanner = false
-                        scope.launch { store.flushQueued() }
-                    },
-                ) {
-                    Text("Send Queued ($queuedCount)")
+                Tooltip(tooltip = { Text("Dispatch all queued and failed comments to target agent") }) {
+                    DefaultButton(
+                        enabled = queuedCount > 0 && effectiveConvId.isNotBlank(),
+                        onClick = {
+                            if (typedConvId.isNotEmpty() && typedConvId != store.config.conversationId) {
+                                store.saveConfig(store.config.copy(conversationId = typedConvId))
+                            }
+                            windowController.highlightAgentConfigBanner = false
+                            scope.launch { store.flushQueued() }
+                        },
+                    ) {
+                        Text("Send Queued ($queuedCount)")
+                    }
                 }
-                OutlinedButton(
-                    enabled = hasApplied,
-                    onClick = { store.clearAppliedComments() },
+                Tooltip(tooltip = { Text("Remove all applied comments from the review feed") }) {
+                    OutlinedButton(
+                        enabled = hasApplied,
+                        onClick = { store.clearAppliedComments() },
+                    ) {
+                        Text("Clear Applied")
+                    }
+                }
+            }
+
+            val lastTrashed = store.trashedComments.lastOrNull()
+            if (lastTrashed != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, statusPalette.queued, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .testTag("ciacola-review-trash-restore-banner"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Clear Applied")
+                    Text(
+                        text = "Discarded (${store.trashedComments.size}): “${lastTrashed.note}”",
+                        style = JewelTheme.typography.small,
+                        color = globalColors.text.normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Tooltip(tooltip = { Text("Restore the most recently discarded comment") }) {
+                            OutlinedButton(
+                                onClick = { store.restoreLastDeleted() },
+                                modifier = Modifier.testTag("ciacola-review-restore-trash-button"),
+                            ) {
+                                Text("Undo", style = JewelTheme.typography.small)
+                            }
+                        }
+                        Tooltip(tooltip = { Text("Dismiss undo notice") }) {
+                            IconButton(
+                                onClick = { store.dismissTrashItem(lastTrashed.id) },
+                                modifier = Modifier.size(20.dp),
+                            ) {
+                                Icon(
+                                    key = AllIconsKeys.General.Close,
+                                    contentDescription = "Dismiss undo notice",
+                                    modifier = Modifier.size(12.dp),
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -668,6 +753,7 @@ private fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 indexNumber = idx + 1,
                                 item = item,
                                 statusColor = statusPalette.colorFor(item.status),
+                                agentConfigured = effectiveConvId.isNotBlank(),
                                 onJumpToSlide = {
                                     scope.launch {
                                         val target = Storyboard.Index(item.sceneIndex, item.frameIndex)
@@ -675,6 +761,21 @@ private fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                             animatic.jumpTo(target)
                                         }
                                     }
+                                },
+                                onMarkApplied = {
+                                    store.markCommentApplied(item.id)
+                                },
+                                onRetry = {
+                                    if (typedConvId.isNotEmpty() && typedConvId != store.config.conversationId) {
+                                        store.saveConfig(store.config.copy(conversationId = typedConvId))
+                                    }
+                                    scope.launch { store.retryComment(item.id) }
+                                },
+                                onConfigureAgent = {
+                                    windowController.openForAgentConfiguration()
+                                },
+                                onResolve = {
+                                    store.deleteComment(item.id)
                                 },
                             )
                         }
@@ -691,10 +792,18 @@ private fun ReviewCommentRowCard(
     indexNumber: Int,
     item: SlideReviewComment,
     statusColor: androidx.compose.ui.graphics.Color,
+    agentConfigured: Boolean,
     onJumpToSlide: () -> Unit,
+    onMarkApplied: () -> Unit,
+    onRetry: () -> Unit,
+    onConfigureAgent: () -> Unit,
+    onResolve: () -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
+    val statusPalette = rememberReviewStatusPalette()
     val cardShape = RoundedCornerShape(6.dp)
+    var confirmDiscard by remember(item.id) { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -708,10 +817,18 @@ private fun ReviewCommentRowCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val scenePart = if (item.sceneTitle.isNotBlank()) {
+                "Scene ${item.sceneIndex + 1} (${item.sceneTitle})"
+            } else {
+                "Scene ${item.sceneIndex + 1}"
+            }
             Text(
-                text = "#$indexNumber · Scene ${item.sceneIndex + 1}, Frame ${item.frameIndex + 1} (${item.target.kind})",
+                text = "#$indexNumber · $scenePart, Frame ${item.frameIndex + 1} (${item.target.kind})",
                 style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                 color = globalColors.text.normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -748,6 +865,14 @@ private fun ReviewCommentRowCard(
             color = globalColors.text.normal,
         )
 
+        if (!item.deliveryError.isNullOrBlank()) {
+            Text(
+                text = item.deliveryError,
+                style = JewelTheme.typography.small,
+                color = globalColors.text.error,
+            )
+        }
+
         if (item.resolution.isNotBlank()) {
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
             Row(
@@ -764,6 +889,101 @@ private fun ReviewCommentRowCard(
                     style = JewelTheme.typography.small,
                     color = globalColors.text.info,
                 )
+            }
+        }
+
+        if (confirmDiscard) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, statusPalette.queued, RoundedCornerShape(4.dp))
+                    .padding(6.dp)
+                    .testTag("ciacola-review-card-discard-confirm-${item.id}"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Discard unapplied feedback?",
+                    style = JewelTheme.typography.small,
+                    color = globalColors.text.normal,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = { confirmDiscard = false }) {
+                        Text("Keep", style = JewelTheme.typography.small)
+                    }
+                    DefaultButton(
+                        onClick = onResolve,
+                        modifier = Modifier.testTag("ciacola-review-card-confirm-discard-${item.id}"),
+                    ) {
+                        Text("Discard", style = JewelTheme.typography.small)
+                    }
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (item.status != ReviewCommentStatus.Applied) {
+                        Tooltip(tooltip = { Text("Mark this comment as applied") }) {
+                            OutlinedButton(
+                                onClick = onMarkApplied,
+                                modifier = Modifier.testTag("ciacola-review-mark-applied-${item.id}"),
+                            ) {
+                                Text("Mark Applied", style = JewelTheme.typography.small)
+                            }
+                        }
+                        if (agentConfigured) {
+                            val isQueued = item.status == ReviewCommentStatus.Queued
+                            val label = if (isQueued) "Send Now" else "Retry Send"
+                            val tip = if (isQueued) {
+                                "Send this queued comment to agent"
+                            } else {
+                                "Retry dispatching this comment to agent"
+                            }
+                            Tooltip(tooltip = { Text(tip) }) {
+                                OutlinedButton(
+                                    onClick = onRetry,
+                                    modifier = Modifier.testTag("ciacola-review-retry-${item.id}"),
+                                ) {
+                                    Text(label, style = JewelTheme.typography.small)
+                                }
+                            }
+                        } else {
+                            Tooltip(tooltip = { Text("Configure Target Agent Conversation ID") }) {
+                                OutlinedButton(onClick = onConfigureAgent) {
+                                    Text("Set Agent…", style = JewelTheme.typography.small)
+                                }
+                            }
+                        }
+                    }
+                    Tooltip(
+                        tooltip = {
+                            Text(
+                                if (item.status == ReviewCommentStatus.Applied) {
+                                    "Resolve and remove this comment"
+                                } else {
+                                    "Discard this unapplied comment (confirmation required)"
+                                },
+                            )
+                        },
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (item.status == ReviewCommentStatus.Applied) {
+                                    onResolve()
+                                } else {
+                                    confirmDiscard = true
+                                }
+                            },
+                            modifier = Modifier.testTag("ciacola-review-resolve-${item.id}"),
+                        ) {
+                            Text("Resolve", style = JewelTheme.typography.small)
+                        }
+                    }
+                }
             }
         }
     }

@@ -92,6 +92,7 @@ fun rememberDeckLoopMillis(
         clock.registeredLoops[loopId] = descriptor
     }
     if (collector != null) {
+        if (sceneCtx != null) collector.recordSceneTitle(sceneCtx.sceneIndex, sceneCtx.sceneTitle)
         collector.recordLoop(descriptor, sceneCtx?.sceneIndex ?: 0)
     }
     SideEffect {
@@ -99,13 +100,18 @@ fun rememberDeckLoopMillis(
             clock.registeredLoops[loopId] = descriptor
         }
         if (collector != null) {
+            if (sceneCtx != null) collector.recordSceneTitle(sceneCtx.sceneIndex, sceneCtx.sceneTitle)
             collector.recordLoop(descriptor, sceneCtx?.sceneIndex ?: 0)
         }
     }
 
-    val isThisSubCompScrubbed =
-        (clock.activeSubCompLoopId == null || clock.activeSubCompLoopId == loopId) &&
-            clock.scrubbedMillis != null
+    // Scope sub-comp scrub strictly to the entered loopId so other ambient loops stay unaffected.
+    val enteredLoopId = clock.activeSubCompLoopId
+    val isThisSubCompScrubbed = if (enteredLoopId != null) {
+        enteredLoopId == loopId && clock.scrubbedMillis != null
+    } else {
+        clock.scrubbedMillis != null
+    }
 
     if (isThisSubCompScrubbed) {
         val raw = clock.scrubbedMillis ?: 0L
@@ -117,8 +123,9 @@ fun rememberDeckLoopMillis(
         return ((master % effectivePeriod) + effectivePeriod) % effectivePeriod
     }
 
-    LaunchedEffect(loopId, clock.isPlaying, effectivePeriod) {
-        if (!clock.isPlaying) return@LaunchedEffect
+    val effectivePlaying = clock.isPlaying || (enteredLoopId != null && enteredLoopId != loopId)
+    LaunchedEffect(loopId, effectivePlaying, effectivePeriod) {
+        if (!effectivePlaying) return@LaunchedEffect
         var lastNanos = -1L
         while (true) {
             withFrameNanos { nowNanos ->
