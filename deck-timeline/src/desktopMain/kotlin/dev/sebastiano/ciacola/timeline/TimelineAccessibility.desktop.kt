@@ -30,15 +30,27 @@ internal class StudioA11yFocusState {
     var swallowNextEscapeKeyUp by mutableStateOf(false)
 
     private val focusedActivatables = mutableStateMapOf<Any, Boolean>()
+    private val focusedTextInputs = mutableStateMapOf<Any, Boolean>()
 
     val activatableControlHasFocus: Boolean
         get() = focusedActivatables.isNotEmpty()
+
+    val textInputHasFocus: Boolean
+        get() = focusedTextInputs.isNotEmpty()
 
     fun setActivatableFocused(key: Any, focused: Boolean) {
         if (focused) {
             focusedActivatables[key] = true
         } else {
             focusedActivatables.remove(key)
+        }
+    }
+
+    fun setTextInputFocused(key: Any, focused: Boolean) {
+        if (focused) {
+            focusedTextInputs[key] = true
+        } else {
+            focusedTextInputs.remove(key)
         }
     }
 }
@@ -84,6 +96,25 @@ internal fun Modifier.studioActivatableFocus(
         ringColor = ringColor,
         cornerRadius = cornerRadius,
     )
+}
+
+/**
+ * Registers a text-input field (such as numeric Bezier inputs) so global studio shortcuts yield
+ * printable keys, minus/plus, brackets, and cursor arrows while the user is typing.
+ */
+internal fun Modifier.studioTextInputFocus(): Modifier = composed {
+    val focusState = LocalStudioA11yFocusState.current
+    val key = remember { Any() }
+
+    DisposableEffect(focusState, key) {
+        onDispose {
+            focusState?.setTextInputFocused(key, false)
+        }
+    }
+
+    onFocusChanged { state ->
+        focusState?.setTextInputFocused(key, state.isFocused)
+    }
 }
 
 internal fun TrackCategory.accessibleLabel(): String = when (this) {

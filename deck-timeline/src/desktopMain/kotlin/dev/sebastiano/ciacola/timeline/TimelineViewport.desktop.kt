@@ -29,6 +29,9 @@ internal const val TIMELINE_RIGHT_PAD_DP = 48f
 const val FRAME_LEVEL_DP_PER_MS = 0.72f
 const val MIN_DP_PER_MS = 0.01f
 const val MAX_DP_PER_MS = 3f
+const val DEFAULT_LAYER_COLUMN_WIDTH_DP = 236f
+const val MIN_LAYER_COLUMN_WIDTH_DP = 180f
+const val MAX_LAYER_COLUMN_WIDTH_DP = 420f
 
 /**
  * Density-independent horizontal time zoom (`dpPerMs`) + 2D scroll position of the timeline canvas.
@@ -57,6 +60,21 @@ class TimelineViewportState {
 
     val verticalScroll = ScrollState(0)
     var contentDurationMs by mutableIntStateOf(1)
+
+    /** User-resizable layer header column width in dp (`180.dp .. 420.dp`). */
+    var layerColumnWidthDp by mutableFloatStateOf(DEFAULT_LAYER_COLUMN_WIDTH_DP)
+        private set
+
+    fun resizeLayerColumnBy(deltaDp: Float) {
+        layerColumnWidthDp = (layerColumnWidthDp + deltaDp).coerceIn(
+            MIN_LAYER_COLUMN_WIDTH_DP,
+            MAX_LAYER_COLUMN_WIDTH_DP,
+        )
+    }
+
+    fun resetLayerColumnWidth() {
+        layerColumnWidthDp = DEFAULT_LAYER_COLUMN_WIDTH_DP
+    }
 
     /** Track id whose row should be scrolled into view by the canvas (consumed once). */
     var pendingRevealTrackId by mutableStateOf<String?>(null)

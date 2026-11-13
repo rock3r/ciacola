@@ -1,13 +1,10 @@
 package dev.sebastiano.ciacola.review
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,9 +30,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -45,6 +40,9 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,172 +74,6 @@ import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.typography
 
 /**
- * Compact, flat Int UI status bar anchored in the top-right corner of the Story window.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun BoxScope.ReviewHudToolbar(
-    inspectActive: Boolean,
-    inspectPinned: Boolean,
-    timelineDocked: Boolean = false,
-    agentConfigured: Boolean = true,
-    queuedCount: Int,
-    applyingCount: Int,
-    appliedCount: Int,
-    onHudBoundsChanged: (Rect) -> Unit = {},
-    onToggleInspectMode: () -> Unit,
-    onToggleTimeline: (() -> Unit)? = null,
-    onOpenReviewPanel: () -> Unit,
-    onFlushQueued: () -> Unit,
-) {
-    val globalColors = JewelTheme.globalColors
-    val statusPalette = rememberReviewStatusPalette()
-    val borderColor = if (inspectActive) statusPalette.inspectAccent else globalColors.borders.normal
-    val toolbarShape = RoundedCornerShape(6.dp)
-
-    Row(
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(10.dp)
-            .onGloballyPositioned { coords ->
-                if (coords.isAttached) {
-                    onHudBoundsChanged(coords.boundsInRoot())
-                }
-            }
-            .background(globalColors.panelBackground.copy(alpha = 0.92f), toolbarShape)
-            .border(1.dp, borderColor, toolbarShape)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .testTag("ciacola-hud-toolbar"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Tooltip(tooltip = { Text("Toggle Inspect Mode (F3) — or hold Ctrl and click any slide element") }) {
-            Row(
-                modifier = Modifier
-                    .clickable(onClick = onToggleInspectMode)
-                    .padding(horizontal = 2.dp, vertical = 2.dp)
-                    .testTag("ciacola-hud-toggle-inspect"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Icon(
-                    key = AllIconsKeys.General.InspectionsEye,
-                    contentDescription = "Inspect slide elements",
-                    modifier = Modifier.size(14.dp),
-                )
-                val label = if (inspectPinned) "Inspecting (F3)" else "Ctrl+Click stage to comment"
-                Text(
-                    text = label,
-                    style = JewelTheme.typography.small,
-                    color = if (inspectActive) {
-                        statusPalette.inspectAccent
-                    } else {
-                        globalColors.text.info
-                    },
-                )
-            }
-        }
-
-        if (applyingCount > 0) {
-            Tooltip(tooltip = { Text("Open Review panel (F4) — $applyingCount comment(s) applying") }) {
-                Row(
-                    modifier = Modifier
-                        .clickable(onClick = onOpenReviewPanel)
-                        .padding(horizontal = 3.dp, vertical = 2.dp)
-                        .testTag("ciacola-hud-applying-badge"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(
-                        key = AllIconsKeys.Actions.Refresh,
-                        contentDescription = "Applying comments",
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Text(
-                        text = "$applyingCount applying…",
-                        style = JewelTheme.typography.small,
-                        color = statusPalette.applying,
-                    )
-                }
-            }
-        }
-
-        if (onToggleTimeline != null) {
-            Tooltip(tooltip = { Text("Toggle After Effects Timeline Studio (F5)") }) {
-                Row(
-                    modifier = Modifier
-                        .clickable(onClick = onToggleTimeline)
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                        .testTag("ciacola-hud-toggle-timeline"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        key = AllIconsKeys.Actions.Preview,
-                        contentDescription = "Toggle Timeline Studio",
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Text(
-                        text = if (timelineDocked) "Timeline ●" else "Timeline",
-                        style = JewelTheme.typography.small,
-                        color = if (timelineDocked) statusPalette.inspectAccent else globalColors.text.info,
-                    )
-                }
-            }
-        }
-
-        if (appliedCount > 0) {
-            Tooltip(tooltip = { Text("Open Review panel (F4) — $appliedCount applied") }) {
-                Row(
-                    modifier = Modifier
-                        .clickable(onClick = onOpenReviewPanel)
-                        .padding(horizontal = 3.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(
-                        key = AllIconsKeys.General.GreenCheckmark,
-                        contentDescription = "Applied comments",
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Text(
-                        text = appliedCount.toString(),
-                        style = JewelTheme.typography.small,
-                        color = statusPalette.applied,
-                    )
-                }
-            }
-        }
-
-        if (queuedCount > 0) {
-            if (agentConfigured) {
-                Tooltip(tooltip = { Text("Dispatch $queuedCount queued comment(s) to agent") }) {
-                    DefaultButton(
-                        onClick = onFlushQueued,
-                        modifier = Modifier.testTag("ciacola-hud-send-queued"),
-                    ) {
-                        Text("Send $queuedCount", style = JewelTheme.typography.small)
-                    }
-                }
-            } else {
-                Tooltip(
-                    tooltip = {
-                        Text("No Conversation ID configured — open Review panel (F4) to connect an agent for $queuedCount queued comment(s)")
-                    },
-                ) {
-                    OutlinedButton(
-                        onClick = onOpenReviewPanel,
-                        modifier = Modifier.testTag("ciacola-hud-send-queued"),
-                    ) {
-                        Text("Set Agent ($queuedCount)", style = JewelTheme.typography.small)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
  * Anchored Jewel [PopupContainer] for composing a new slide review comment at the clicked point.
  *
  * Uses its own focusable popup layer so keyboard typing and `Esc` dismissal never collide with
@@ -262,13 +94,38 @@ internal fun AnchoredCommentComposerPopup(
     onDismiss: (fromEscapeKey: Boolean) -> Unit,
     onSubmit: (SlideReviewComment, Boolean, ByteArray) -> Unit,
 ) {
-    val anchorPx = stagePointToOuterOffsetPx(
+    val density = LocalDensity.current
+    val gapPx = with(density) { 12.dp.toPx() }
+    val marginPx = with(density) { 8.dp.toPx() }
+    val defaultPopupSize = with(density) { Size(336.dp.toPx(), 290.dp.toPx()) }
+    var popupSizePx by remember(pending) { mutableStateOf(defaultPopupSize) }
+
+    val clickPointPx = stagePointToOuterOffsetPx(
         stageX = pending.stageX,
         stageY = pending.stageY,
         stageFormatSize = pending.stageFormatSize,
         outerBoundsInRoot = outerBoundsInRoot,
         stageBoundsInRoot = stageBoundsInRoot,
     )
+    val targetRectInOuter = stageRectToOuterRect(
+        stageRect = pending.selectionBounds ?: pending.target.bounds,
+        fallbackClickPx = clickPointPx,
+        stageFormatSize = pending.stageFormatSize,
+        outerBoundsInRoot = outerBoundsInRoot,
+        stageBoundsInRoot = stageBoundsInRoot,
+    )
+    val anchorPx = if (outerBoundsInRoot != null && stageBoundsInRoot != null) {
+        computePopupOffsetOutsideTarget(
+            targetRectInOuter = targetRectInOuter,
+            clickPointInOuter = clickPointPx,
+            popupSizePx = popupSizePx,
+            windowSizePx = Size(outerBoundsInRoot.width, outerBoundsInRoot.height),
+            gapPx = gapPx,
+            marginPx = marginPx,
+        )
+    } else {
+        clickPointPx
+    }
 
     val convIdState = rememberTextFieldState(initialText = store.effectiveConversationId())
     var submitting by remember(pending) { mutableStateOf(false) }
@@ -372,6 +229,11 @@ internal fun AnchoredCommentComposerPopup(
             ),
             modifier = Modifier
                 .width(336.dp)
+                .onSizeChanged { sz ->
+                    if (sz.width > 0 && sz.height > 0) {
+                        popupSizePx = Size(sz.width.toFloat(), sz.height.toFloat())
+                    }
+                }
                 .testTag("ciacola-review-composer-popup")
                 .onPreviewKeyEvent(::handleComposerKeyEvent),
         ) {
@@ -618,13 +480,42 @@ internal fun AnchoredSelectedPinPopup(
     onRetry: () -> Unit,
     onConfigureAgent: () -> Unit = {},
 ) {
-    val anchorPx = stagePointToOuterOffsetPx(
-        stageX = comment.stageX,
-        stageY = comment.stageY,
+    val density = LocalDensity.current
+    val gapPx = with(density) { 12.dp.toPx() }
+    val marginPx = with(density) { 8.dp.toPx() }
+    val pinRadiusPx = with(density) { 12.dp.toPx() }
+    val defaultPopupSize = with(density) { Size(336.dp.toPx(), 220.dp.toPx()) }
+    var popupSizePx by remember(comment.id) { mutableStateOf(defaultPopupSize) }
+    val pinCenterStage = computeStagePinCenter(
+        comment = comment,
+        stageFormatSize = stageFormatSize,
+        pinRadiusPx = pinRadiusPx,
+    )
+    val pinCenterOuter = stagePointToOuterOffsetPx(
+        stageX = pinCenterStage.x,
+        stageY = pinCenterStage.y,
         stageFormatSize = stageFormatSize,
         outerBoundsInRoot = outerBoundsInRoot,
         stageBoundsInRoot = stageBoundsInRoot,
     )
+    val anchorPx = if (outerBoundsInRoot != null && stageBoundsInRoot != null) {
+        val pinBox = Rect(
+            left = pinCenterOuter.x - pinRadiusPx,
+            top = pinCenterOuter.y - pinRadiusPx,
+            right = pinCenterOuter.x + pinRadiusPx,
+            bottom = pinCenterOuter.y + pinRadiusPx,
+        )
+        computePopupOffsetOutsideTarget(
+            targetRectInOuter = pinBox,
+            clickPointInOuter = pinCenterOuter,
+            popupSizePx = popupSizePx,
+            windowSizePx = Size(outerBoundsInRoot.width, outerBoundsInRoot.height),
+            gapPx = gapPx,
+            marginPx = marginPx,
+        )
+    } else {
+        pinCenterOuter
+    }
     val statusPalette: ReviewStatusPalette = rememberReviewStatusPalette()
     val globalColors = JewelTheme.globalColors
     val pinPopupFocusRequester = remember(comment.id) { FocusRequester() }
@@ -650,6 +541,11 @@ internal fun AnchoredSelectedPinPopup(
             ),
             modifier = Modifier
                 .width(336.dp)
+                .onSizeChanged { sz ->
+                    if (sz.width > 0 && sz.height > 0) {
+                        popupSizePx = Size(sz.width.toFloat(), sz.height.toFloat())
+                    }
+                }
                 .testTag("ciacola-review-pin-popup")
                 .focusRequester(pinPopupFocusRequester)
                 .focusable()
@@ -859,4 +755,78 @@ internal fun stagePointToOuterOffsetPx(
         x = (stageBoundsInRoot.left - outerBoundsInRoot.left) + normX * stageBoundsInRoot.width,
         y = (stageBoundsInRoot.top - outerBoundsInRoot.top) + normY * stageBoundsInRoot.height,
     )
+}
+
+internal fun stageRectToOuterRect(
+    stageRect: StageRectDto?,
+    fallbackClickPx: Offset,
+    stageFormatSize: IntSize,
+    outerBoundsInRoot: Rect?,
+    stageBoundsInRoot: Rect?,
+): Rect {
+    if (stageRect == null || outerBoundsInRoot == null || stageBoundsInRoot == null ||
+        stageBoundsInRoot.width <= 0f || stageBoundsInRoot.height <= 0f
+    ) {
+        return Rect(
+            left = fallbackClickPx.x - 16f,
+            top = fallbackClickPx.y - 16f,
+            right = fallbackClickPx.x + 16f,
+            bottom = fallbackClickPx.y + 16f,
+        )
+    }
+    val topLeft = stagePointToOuterOffsetPx(stageRect.left, stageRect.top, stageFormatSize, outerBoundsInRoot, stageBoundsInRoot)
+    val bottomRight = stagePointToOuterOffsetPx(stageRect.right, stageRect.bottom, stageFormatSize, outerBoundsInRoot, stageBoundsInRoot)
+    return Rect(
+        left = minOf(topLeft.x, bottomRight.x),
+        top = minOf(topLeft.y, bottomRight.y),
+        right = maxOf(topLeft.x, bottomRight.x),
+        bottom = maxOf(topLeft.y, bottomRight.y),
+    )
+}
+
+/**
+ * Places a review popup outside [targetRectInOuter] so it never covers the element being reviewed:
+ * prefers below (`gapPx` clearance), then above, then whichever horizontal side has more room,
+ * always clamped inside `[marginPx .. windowSizePx - popupSizePx - marginPx]`.
+ */
+fun computePopupOffsetOutsideTarget(
+    targetRectInOuter: Rect,
+    clickPointInOuter: Offset,
+    popupSizePx: Size,
+    windowSizePx: Size,
+    gapPx: Float,
+    marginPx: Float,
+): Offset {
+    val maxX = (windowSizePx.width - popupSizePx.width - marginPx).coerceAtLeast(marginPx)
+    val maxY = (windowSizePx.height - popupSizePx.height - marginPx).coerceAtLeast(marginPx)
+    val preferredX = (targetRectInOuter.left)
+        .takeIf { targetRectInOuter.width <= popupSizePx.width * 1.4f }
+        ?: (clickPointInOuter.x - popupSizePx.width * 0.25f)
+    val clampedX = preferredX.coerceIn(marginPx, maxX)
+
+    val belowY = targetRectInOuter.bottom + gapPx
+    if (belowY <= maxY) {
+        return Offset(clampedX, belowY.coerceIn(marginPx, maxY))
+    }
+
+    val aboveY = targetRectInOuter.top - gapPx - popupSizePx.height
+    if (aboveY >= marginPx) {
+        return Offset(clampedX, aboveY.coerceIn(marginPx, maxY))
+    }
+
+    val rightX = targetRectInOuter.right + gapPx
+    val leftX = targetRectInOuter.left - gapPx - popupSizePx.width
+    val rightRoom = (windowSizePx.width - marginPx) - rightX
+    val leftRoom = (targetRectInOuter.left - gapPx) - marginPx
+    val sideY = targetRectInOuter.top.coerceIn(marginPx, maxY)
+    if (rightRoom >= popupSizePx.width || leftRoom >= popupSizePx.width) {
+        val sideX = if (rightRoom >= leftRoom) rightX.coerceIn(marginPx, maxX) else leftX.coerceIn(marginPx, maxX)
+        return Offset(sideX, sideY)
+    }
+
+    // Target fills almost the whole window: pick whichever vertical edge leaves more clearance from the click.
+    val belowClickY = (clickPointInOuter.y + gapPx).coerceIn(marginPx, maxY)
+    val aboveClickY = (clickPointInOuter.y - gapPx - popupSizePx.height).coerceIn(marginPx, maxY)
+    val finalY = if (windowSizePx.height - clickPointInOuter.y >= clickPointInOuter.y) belowClickY else aboveClickY
+    return Offset(clampedX, finalY)
 }

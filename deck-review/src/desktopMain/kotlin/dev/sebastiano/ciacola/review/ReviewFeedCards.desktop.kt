@@ -92,6 +92,10 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
     val effectiveConvId = typedConvId.ifEmpty { resolvedConv.id }
     val isShowingAutoDetected = resolvedConv.isAutoDetected &&
         (typedConvId.isEmpty() || typedConvId == resolvedConv.id)
+    var agentConfigExpanded by remember { mutableStateOf(false) }
+    val showAgentConfigDetails = store.comments.isNotEmpty() ||
+        windowController.highlightAgentConfigBanner ||
+        agentConfigExpanded
 
     Column(
         modifier = Modifier
@@ -107,101 +111,116 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                 }
             },
     ) {
-        // Compact, always-visible header bar pinned at the top of the F4 Slide Review window.
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .testTag("ciacola-review-header-bar"),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        if (showAgentConfigDetails) {
+            // Compact, always-visible header bar when comments exist or Agent Configuration is expanded.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("ciacola-review-header-bar"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text = "Target Agent Conversation ID",
-                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
-                    color = globalColors.text.normal,
-                )
-                when {
-                    isShowingAutoDetected -> {
-                        Tooltip(
-                            tooltip = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Target Agent Conversation ID",
+                        style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                        color = globalColors.text.normal,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        when {
+                            isShowingAutoDetected -> {
+                                Tooltip(
+                                    tooltip = {
+                                        Text(
+                                            "Auto-populated from ${resolvedConv.sourceName} because .storyboard/review-config.json has a blank conversationId."
+                                        )
+                                    },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.testTag("ciacola-review-conv-autodetected-badge"),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            key = AllIconsKeys.General.GreenCheckmark,
+                                            contentDescription = "Auto-detected Conversation ID",
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                        Text(
+                                            text = "Auto-detected (${resolvedConv.sourceName})",
+                                            style = JewelTheme.typography.small,
+                                            color = statusPalette.applied,
+                                        )
+                                    }
+                                }
+                            }
+
+                            resolvedConv.source == ConversationIdSource.Config && typedConvId == resolvedConv.id -> {
                                 Text(
-                                    "Auto-populated from ${resolvedConv.sourceName} because .storyboard/review-config.json has a blank conversationId."
-                                )
-                            },
-                        ) {
-                            Row(
-                                modifier = Modifier.testTag("ciacola-review-conv-autodetected-badge"),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    key = AllIconsKeys.General.GreenCheckmark,
-                                    contentDescription = "Auto-detected Conversation ID",
-                                    modifier = Modifier.size(12.dp),
-                                )
-                                Text(
-                                    text = "Auto-detected (${resolvedConv.sourceName})",
+                                    text = "Saved in review-config.json",
                                     style = JewelTheme.typography.small,
-                                    color = statusPalette.applied,
+                                    color = globalColors.text.info,
+                                    modifier = Modifier.testTag("ciacola-review-conv-saved-badge"),
+                                )
+                            }
+
+                            effectiveConvId.isBlank() -> {
+                                Text(
+                                    text = "Not configured",
+                                    style = JewelTheme.typography.small,
+                                    color = statusPalette.failed,
                                 )
                             }
                         }
-                    }
-
-                    resolvedConv.source == ConversationIdSource.Config && typedConvId == resolvedConv.id -> {
-                        Text(
-                            text = "Saved in review-config.json",
-                            style = JewelTheme.typography.small,
-                            color = globalColors.text.info,
-                            modifier = Modifier.testTag("ciacola-review-conv-saved-badge"),
-                        )
-                    }
-
-                    effectiveConvId.isBlank() -> {
-                        Text(
-                            text = "Not configured",
-                            style = JewelTheme.typography.small,
-                            color = statusPalette.failed,
-                        )
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextField(
-                    state = convIdState,
-                    placeholder = { Text("Target Agent Conversation ID") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(convIdFocusRequester)
-                        .testTag("ciacola-review-panel-conv-id-input"),
-                )
-                OutlinedButton(
-                    onClick = {
-                        store.saveConfig(
-                            store.config.copy(conversationId = typedConvId)
-                        )
-                        if (typedConvId.isNotEmpty()) {
-                            windowController.highlightAgentConfigBanner = false
+                        if (store.comments.isEmpty() && !windowController.highlightAgentConfigBanner) {
+                            OutlinedButton(
+                                onClick = { agentConfigExpanded = false },
+                                modifier = Modifier.testTag("ciacola-review-agent-config-toggle"),
+                            ) {
+                                Text("Hide", style = JewelTheme.typography.small)
+                            }
                         }
-                    },
-                    modifier = Modifier.testTag("ciacola-review-panel-save-conv-button"),
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Save")
+                    TextField(
+                        state = convIdState,
+                        placeholder = { Text("Target Agent Conversation ID") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(convIdFocusRequester)
+                            .testTag("ciacola-review-panel-conv-id-input"),
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            store.saveConfig(
+                                store.config.copy(conversationId = typedConvId)
+                            )
+                            if (typedConvId.isNotEmpty()) {
+                                windowController.highlightAgentConfigBanner = false
+                            }
+                        },
+                        modifier = Modifier.testTag("ciacola-review-panel-save-conv-button"),
+                    ) {
+                        Text("Save")
+                    }
                 }
             }
-        }
 
-        Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+            Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+        }
 
         Column(
             modifier = Modifier
@@ -209,11 +228,33 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = "Slide Review & Hot-Reload Feedback",
-                style = JewelTheme.typography.h2TextStyle,
-                color = globalColors.text.normal,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Slide Review & Hot-Reload Feedback",
+                    style = JewelTheme.typography.h2TextStyle,
+                    color = globalColors.text.normal,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!showAgentConfigDetails) {
+                    val cfgStatus = when {
+                        isShowingAutoDetected -> "Auto-detected"
+                        effectiveConvId.isNotBlank() -> "Configured"
+                        else -> "Not set"
+                    }
+                    Tooltip(tooltip = { Text("Show Target Agent Conversation ID settings ($cfgStatus)") }) {
+                        OutlinedButton(
+                            onClick = { agentConfigExpanded = true },
+                            modifier = Modifier.testTag("ciacola-review-agent-config-toggle"),
+                        ) {
+                            Text("Agent Configuration", style = JewelTheme.typography.small)
+                        }
+                    }
+                }
+            }
             InfoText("Hold Ctrl + Click (or Ctrl + Drag a marquee) on any slide element in the Story window, or press F3 for persistent Inspect Mode.")
 
             if (effectiveConvId.isBlank() && (queuedCount > 0 || windowController.highlightAgentConfigBanner)) {
@@ -232,27 +273,29 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Tooltip(tooltip = { Text("Dispatch all queued and failed comments to target agent") }) {
-                    DefaultButton(
-                        enabled = queuedCount > 0 && effectiveConvId.isNotBlank(),
-                        onClick = {
-                            if (typedConvId.isNotEmpty() && typedConvId != store.config.conversationId) {
-                                store.saveConfig(store.config.copy(conversationId = typedConvId))
-                            }
-                            windowController.highlightAgentConfigBanner = false
-                            scope.launch { store.flushQueued() }
-                        },
-                    ) {
-                        Text("Send Queued ($queuedCount)")
+            if (store.comments.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Tooltip(tooltip = { Text("Dispatch all queued and failed comments to target agent") }) {
+                        DefaultButton(
+                            enabled = queuedCount > 0 && effectiveConvId.isNotBlank(),
+                            onClick = {
+                                if (typedConvId.isNotEmpty() && typedConvId != store.config.conversationId) {
+                                    store.saveConfig(store.config.copy(conversationId = typedConvId))
+                                }
+                                windowController.highlightAgentConfigBanner = false
+                                scope.launch { store.flushQueued() }
+                            },
+                        ) {
+                            Text("Send Queued ($queuedCount)")
+                        }
                     }
-                }
-                Tooltip(tooltip = { Text("Remove all applied comments from the review feed") }) {
-                    OutlinedButton(
-                        enabled = hasApplied,
-                        onClick = { store.clearAppliedComments() },
-                    ) {
-                        Text("Clear Applied")
+                    Tooltip(tooltip = { Text("Remove all applied comments from the review feed") }) {
+                        OutlinedButton(
+                            enabled = hasApplied,
+                            onClick = { store.clearAppliedComments() },
+                        ) {
+                            Text("Clear Applied")
+                        }
                     }
                 }
             }

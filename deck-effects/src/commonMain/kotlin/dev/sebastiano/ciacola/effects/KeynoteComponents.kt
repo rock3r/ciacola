@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -46,11 +47,13 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.layout.decorated.Decoration
@@ -103,81 +106,105 @@ fun DottedLeaderRow(
         )
     }
 
-    Row(
+    val trailingOffsetMod = if (trailingPatch?.offsetXDp != null || trailingPatch?.offsetYDp != null) {
+        Modifier.offset(
+            x = (trailingPatch.offsetXDp ?: 0f).dp,
+            y = (trailingPatch.offsetYDp ?: 0f).dp,
+        )
+    } else {
+        Modifier
+    }
+    val effectiveTrailingColor = trailingOverrideColor ?: trailingHighlightColor(
+        base = theme.colors.foreground,
+        accent = theme.colors.accent,
+        progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
+    )
+    RecordStageTextInspection(
+        elementId = trailingId,
+        kind = "LeaderCode",
+        label = resolvedTrailingText,
+        defaultText = trailing,
+        resolvedText = resolvedTrailingText,
+        defaultTextColor = theme.colors.foreground,
+        effectiveForeground = effectiveTrailingColor,
+        effectiveBackground = effectiveBg,
+        defaultFontSizeSp = if (trailingStyle.fontSize.isSp) trailingStyle.fontSize.value else 16f,
+        effectiveFontSizeSp = resolvedTrailingFontSizeSp,
+        defaultFontWeight = trailingStyle.fontWeight?.weight ?: 400,
+        coords = trailingCoords,
+        layoutResult = trailingLayout,
+    )
+
+    Layout(
         modifier = rowBoxModifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        if (elementId != null) {
-            DeckEditableText(
-                elementId = "$elementId:leading",
-                text = leading,
-                label = leading,
-                kind = "LeaderLabel",
-                style = theme.typography.bodyEmphasis,
-                color = theme.colors.foreground,
-            )
-        } else {
-            Text(
-                text = leading,
-                style = theme.typography.bodyEmphasis,
-                color = theme.colors.foreground,
-            )
-        }
-        Canvas(Modifier.weight(1f).height(4.dp)) {
-            val dotEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 8.dp.toPx()), 0f)
-            drawLine(
-                color = theme.colors.muted.copy(alpha = 0.65f),
-                start = Offset(0f, size.height / 2f),
-                end = Offset(size.width, size.height / 2f),
-                strokeWidth = 2.5.dp.toPx(),
-                cap = StrokeCap.Round,
-                pathEffect = dotEffect,
-            )
-        }
-        val trailingOffsetMod = if (trailingPatch?.offsetXDp != null || trailingPatch?.offsetYDp != null) {
-            Modifier.offset(
-                x = (trailingPatch.offsetXDp ?: 0f).dp,
-                y = (trailingPatch.offsetYDp ?: 0f).dp,
-            )
-        } else {
-            Modifier
-        }
-        val effectiveTrailingColor = trailingOverrideColor ?: trailingHighlightColor(
-            base = theme.colors.foreground,
-            accent = theme.colors.accent,
-            progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
-        )
-        RecordStageTextInspection(
-            elementId = trailingId,
-            kind = "LeaderCode",
-            label = resolvedTrailingText,
-            defaultText = trailing,
-            resolvedText = resolvedTrailingText,
-            defaultTextColor = theme.colors.foreground,
-            effectiveForeground = effectiveTrailingColor,
-            effectiveBackground = effectiveBg,
-            defaultFontSizeSp = if (trailingStyle.fontSize.isSp) trailingStyle.fontSize.value else 16f,
-            effectiveFontSizeSp = resolvedTrailingFontSizeSp,
-            defaultFontWeight = trailingStyle.fontWeight?.weight ?: 400,
-            coords = trailingCoords,
-            layoutResult = trailingLayout,
-        )
-        BasicText(
-            text = resolvedTrailingText,
-            style = resolvedTrailingStyle,
-            color = {
-                trailingOverrideColor ?: trailingHighlightColor(
-                    base = theme.colors.foreground,
-                    accent = theme.colors.accent,
-                    progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
+        content = {
+            if (elementId != null) {
+                DeckEditableText(
+                    elementId = "$elementId:leading",
+                    text = leading,
+                    label = leading,
+                    kind = "LeaderLabel",
+                    style = theme.typography.bodyEmphasis,
+                    color = theme.colors.foreground,
                 )
-            },
-            onTextLayout = { trailingLayout = it },
-            modifier = trailingModifier
-                .then(trailingOffsetMod)
-                .onPlaced { trailingCoords = it },
+            } else {
+                Text(
+                    text = leading,
+                    style = theme.typography.bodyEmphasis,
+                    color = theme.colors.foreground,
+                )
+            }
+            Canvas(Modifier.widthIn(min = 36.dp).height(4.dp)) {
+                val dotEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 8.dp.toPx()), 0f)
+                drawLine(
+                    color = theme.colors.muted.copy(alpha = 0.65f),
+                    start = Offset(0f, size.height / 2f),
+                    end = Offset(size.width, size.height / 2f),
+                    strokeWidth = 2.5.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect = dotEffect,
+                )
+            }
+            BasicText(
+                text = resolvedTrailingText,
+                style = resolvedTrailingStyle,
+                color = {
+                    trailingOverrideColor ?: trailingHighlightColor(
+                        base = theme.colors.foreground,
+                        accent = theme.colors.accent,
+                        progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
+                    )
+                },
+                onTextLayout = { trailingLayout = it },
+                modifier = trailingModifier
+                    .then(trailingOffsetMod)
+                    .onPlaced { trailingCoords = it },
+            )
+        },
+    ) { measurables, constraints ->
+        val gapPx = 20.dp.roundToPx()
+        val minDotsPx = 36.dp.roundToPx()
+        val maxW = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val trailingPlaceable = measurables[2].measure(loose)
+        val maxLeadingW = (maxW - trailingPlaceable.width - minDotsPx - gapPx * 2).coerceAtLeast(0)
+        val leadingPlaceable = measurables[0].measure(loose.copy(maxWidth = maxLeadingW))
+        val dotsW = (maxW - leadingPlaceable.width - trailingPlaceable.width - gapPx * 2)
+            .coerceAtLeast(minDotsPx.coerceAtMost((maxW - trailingPlaceable.width - gapPx).coerceAtLeast(0)))
+        val dotsPlaceable = measurables[1].measure(
+            Constraints(minWidth = dotsW, maxWidth = dotsW, minHeight = 0, maxHeight = loose.maxHeight),
         )
+        val rowHeight = maxOf(leadingPlaceable.height, dotsPlaceable.height, trailingPlaceable.height)
+            .coerceIn(constraints.minHeight, constraints.maxHeight)
+        val rowWidth = maxW.coerceIn(constraints.minWidth, constraints.maxWidth)
+        layout(rowWidth, rowHeight) {
+            leadingPlaceable.placeRelative(0, (rowHeight - leadingPlaceable.height) / 2)
+            dotsPlaceable.placeRelative(leadingPlaceable.width + gapPx, (rowHeight - dotsPlaceable.height) / 2)
+            trailingPlaceable.placeRelative(
+                (rowWidth - trailingPlaceable.width).coerceAtLeast(0),
+                (rowHeight - trailingPlaceable.height) / 2,
+            )
+        }
     }
 }
 

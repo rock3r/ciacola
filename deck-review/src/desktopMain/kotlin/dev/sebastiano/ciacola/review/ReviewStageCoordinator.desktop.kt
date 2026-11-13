@@ -687,12 +687,17 @@ private fun ReviewStageHighlightsAndPins(
                 }
                 val displayNumber = coordinator.commentDisplayNumberProvider(comment.id)
                 val pinColor = statusPalette.colorFor(comment.status)
+                val pinCenter = computeStagePinCenter(
+                    comment = comment,
+                    stageFormatSize = coordinator.stageFormatSize,
+                    pinRadiusPx = coordinator.stagePinRadiusPx,
+                )
                 Box(
                     modifier = Modifier
                         .offset {
                             IntOffset(
-                                x = comment.stageX.roundToInt() - pinHalfPx,
-                                y = comment.stageY.roundToInt() - pinHalfPx,
+                                x = pinCenter.x.roundToInt() - pinHalfPx,
+                                y = pinCenter.y.roundToInt() - pinHalfPx,
                             )
                         }
                         .size(pinSizeDp)
@@ -722,4 +727,30 @@ private fun ReviewStageHighlightsAndPins(
     } else {
         coordinator.clearPinCoordinates()
     }
+}
+
+/**
+ * Computes the stage pin center offset to the top-right corner outside/on the border of the
+ * comment's target bounds (so pins never stamp over glyph strokes), clamped inside `[4..1916, 4..1076]`
+ * for a 1920×1080 stage with full pin clearance.
+ */
+fun computeStagePinCenter(
+    comment: SlideReviewComment,
+    stageFormatSize: IntSize,
+    pinRadiusPx: Float = 12f,
+): Offset {
+    val formatW = stageFormatSize.width.toFloat().coerceAtLeast(16f)
+    val formatH = stageFormatSize.height.toFloat().coerceAtLeast(16f)
+    val bounds = (comment.selectionBounds ?: comment.target.bounds)
+        ?.takeIf { comment.target.kind != "Stage" && it.width > 0f && it.height > 0f }
+    val rawX = if (bounds != null) bounds.right + 4f else comment.stageX
+    val rawY = if (bounds != null) bounds.top - 4f else comment.stageY
+    val minX = (4f + pinRadiusPx).coerceAtMost(formatW / 2f)
+    val maxX = (formatW - 4f - pinRadiusPx).coerceAtLeast(minX)
+    val minY = (4f + pinRadiusPx).coerceAtMost(formatH / 2f)
+    val maxY = (formatH - 4f - pinRadiusPx).coerceAtLeast(minY)
+    return Offset(
+        x = rawX.coerceIn(minX, maxX),
+        y = rawY.coerceIn(minY, maxY),
+    )
 }

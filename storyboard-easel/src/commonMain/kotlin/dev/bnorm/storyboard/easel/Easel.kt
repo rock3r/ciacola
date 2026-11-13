@@ -59,7 +59,7 @@ fun Easel(
             val capture: suspend () -> Boolean = {
                 // Only snapshot a layer whose children are still alive: one recorded under the current
                 // scrub epoch (each step disposes the scene subtree) and since the last unfreeze.
-                // Otherwise the layer references freed render nodes, so show live content instead.
+                // Otherwise the layer references freed render nodes, so refuse to snapshot it.
                 val safe = recording.epoch == animatic.scrubEpoch && animatic.livePresentedSinceUnfreeze
                 frozenFrame = if (safe) runCatching { presentedFrame.toImageBitmap() }.getOrNull() else null
                 frozenFrame != null
@@ -74,6 +74,10 @@ fun Easel(
     }
     Box(
         modifier = modifier.drawWithContent {
+            if (!ownsHooks) {
+                drawContent()
+                return@drawWithContent
+            }
             val frozen = frozenFrame
             if (animatic.scrubSettling) {
                 // Never draw presentedFrame here: it is not re-recorded while settling, so it may
@@ -86,7 +90,7 @@ fun Easel(
             } else {
                 presentedFrame.record { this@drawWithContent.drawContent() }
                 recording.epoch = animatic.scrubEpoch
-                if (ownsHooks) animatic.onLiveFramePresented()
+                animatic.onLiveFramePresented()
                 drawLayer(presentedFrame)
             }
         },
