@@ -2,6 +2,7 @@ package dev.sebastiano.ciacola.effects
 
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.toIntSize
 import androidx.compose.ui.unit.toOffset
 import dev.bnorm.storyboard.layout.decorated.Decoration
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.theme.LocalReducedMotion
+import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
@@ -143,6 +146,7 @@ fun <S> Transition<S>.animateBuildProgress(
     val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
     val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
     val collector = LocalTimelineHarvestCollector.current
+    val reducedMotion = LocalReducedMotion.current
 
     val maxBeat = ((sceneCtx?.totalBeats ?: 1) - 1).coerceAtLeast(0)
     val effectiveDuration = override?.durationMs ?: durationMillis
@@ -170,7 +174,13 @@ fun <S> Transition<S>.animateBuildProgress(
 
     return animateFloat(
         transitionSpec = {
-            if (override?.curve != null) {
+            if (reducedMotion) {
+                tween(
+                    durationMillis = effectiveDuration.coerceAtMost(REDUCED_MOTION_FADE_DURATION_MS),
+                    delayMillis = 0,
+                    easing = LinearOutSlowInEasing,
+                )
+            } else if (override?.curve != null) {
                 override.curve.toAnimationSpec(effectiveDuration, effectiveDelay)
             } else {
                 tween(
@@ -213,11 +223,14 @@ fun <S> Transition<S>.animateStaggerGroup(
     val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
     val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
     val collector = LocalTimelineHarvestCollector.current
+    val reducedMotion = LocalReducedMotion.current
 
     val maxBeat = ((sceneCtx?.totalBeats ?: 1) - 1).coerceAtLeast(0)
-    val effectiveItemDuration = override?.durationMs ?: itemDurationMs
-    val effectiveStep = override?.staggerStepMs ?: staggerStepMs
-    val effectiveDelay = override?.delayMs ?: 0
+    val rawItemDuration = override?.durationMs ?: itemDurationMs
+    val rawStep = override?.staggerStepMs ?: staggerStepMs
+    val effectiveItemDuration = if (reducedMotion) rawItemDuration.coerceAtMost(REDUCED_MOTION_FADE_DURATION_MS) else rawItemDuration
+    val effectiveStep = if (reducedMotion) 0 else rawStep
+    val effectiveDelay = if (reducedMotion) 0 else (override?.delayMs ?: 0)
     val effectiveTriggerBeat = (override?.enterBeat ?: defaultTriggerBeat).let {
         if (sceneCtx != null) it.coerceIn(0, maxBeat) else it
     }
@@ -232,10 +245,10 @@ fun <S> Transition<S>.animateStaggerGroup(
                     category = TrackCategory.StaggerGroup,
                     sceneIndex = sceneCtx.sceneIndex,
                     triggerBeat = effectiveTriggerBeat.coerceIn(0, (sceneCtx.totalBeats - 1).coerceAtLeast(0)),
-                    durationMs = totalDurationMs,
-                    delayMs = effectiveDelay,
+                    durationMs = rawItemDuration + (safeCount - 1) * rawStep,
+                    delayMs = override?.delayMs ?: 0,
                     staggerCount = safeCount,
-                    staggerStepMs = effectiveStep,
+                    staggerStepMs = rawStep,
                 )
             )
         }
@@ -251,7 +264,13 @@ fun <S> Transition<S>.animateStaggerGroup(
 
     val progress = animateFloat(
         transitionSpec = {
-            if (override?.curve != null) {
+            if (reducedMotion) {
+                tween(
+                    durationMillis = totalDurationMs,
+                    delayMillis = 0,
+                    easing = LinearOutSlowInEasing,
+                )
+            } else if (override?.curve != null) {
                 override.curve.toAnimationSpec(totalDurationMs, effectiveDelay)
             } else {
                 tween(
@@ -265,7 +284,7 @@ fun <S> Transition<S>.animateStaggerGroup(
     ) { state ->
         if (isVisibleAt(state)) 1f else 0f
     }
-    return remember(this, progress, safeCount, effectiveItemDuration, effectiveStep, override) {
+    return remember(this, progress, safeCount, effectiveItemDuration, effectiveStep, override, reducedMotion) {
         StaggerGroupState(
             overallProgress = progress,
             count = safeCount,
@@ -326,7 +345,8 @@ fun Modifier.keynoteFadeMoveTracked(
     } else {
         timelineTarget(trackId)
     }
-    return if (spatial == null) {
+    val reducedMotion = LocalReducedMotion.current
+    return if (spatial == null || reducedMotion) {
         tagged.keynoteFadeMove(progress, direction, distance, easing)
     } else {
         val offset = DpOffset(spatial.offsetXDp.dp, spatial.offsetYDp.dp)
@@ -340,6 +360,7 @@ fun Modifier.keynoteFadeMoveTracked(
     }
 }
 
+@Composable
 fun Modifier.keynoteFadeMove(
     progress: () -> Float,
     direction: SlideDirection = SlideDirection.Up,
@@ -347,19 +368,28 @@ fun Modifier.keynoteFadeMove(
     // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
     // the default here is linear; pass an easing only when driving the modifier with raw progress.
     easing: Easing = LinearEasing,
-): Modifier = graphicsLayer {
-    val raw = progress().coerceIn(0f, 1f)
-    val eased = easing.transform(raw)
-    val remainingPx = (1f - eased) * distance.toPx()
-    alpha = raw
-    when (direction) {
-        SlideDirection.Up -> translationY = remainingPx
-        SlideDirection.Down -> translationY = -remainingPx
-        SlideDirection.Left -> translationX = remainingPx
-        SlideDirection.Right -> translationX = -remainingPx
+): Modifier {
+    val reducedMotion = LocalReducedMotion.current
+    return graphicsLayer {
+        val raw = progress().coerceIn(0f, 1f)
+        alpha = raw
+        if (reducedMotion) {
+            translationX = 0f
+            translationY = 0f
+        } else {
+            val eased = easing.transform(raw)
+            val remainingPx = (1f - eased) * distance.toPx()
+            when (direction) {
+                SlideDirection.Up -> translationY = remainingPx
+                SlideDirection.Down -> translationY = -remainingPx
+                SlideDirection.Left -> translationX = remainingPx
+                SlideDirection.Right -> translationX = -remainingPx
+            }
+        }
     }
 }
 
+@Composable
 fun Modifier.keynoteFromDarkness(
     progress: () -> Float,
     initialScale: Float = 0.88f,
@@ -368,32 +398,54 @@ fun Modifier.keynoteFromDarkness(
     // the default here is linear; pass an easing only when driving the modifier with raw progress.
     easing: Easing = LinearEasing,
     entranceOffset: DpOffset = DpOffset.Zero,
-): Modifier = graphicsLayer {
-    val raw = progress().coerceIn(0f, 1f)
-    val eased = easing.transform(raw)
-    val s = initialScale + (1f - initialScale) * eased
-    alpha = raw
-    scaleX = s
-    scaleY = s
-    translationX = (1f - eased) * entranceOffset.x.toPx()
-    translationY = (1f - eased) * entranceOffset.y.toPx()
-    this.transformOrigin = transformOrigin
+): Modifier {
+    val reducedMotion = LocalReducedMotion.current
+    return graphicsLayer {
+        val raw = progress().coerceIn(0f, 1f)
+        alpha = raw
+        if (reducedMotion) {
+            scaleX = 1f
+            scaleY = 1f
+            translationX = 0f
+            translationY = 0f
+        } else {
+            val eased = easing.transform(raw)
+            val s = initialScale + (1f - initialScale) * eased
+            scaleX = s
+            scaleY = s
+            translationX = (1f - eased) * entranceOffset.x.toPx()
+            translationY = (1f - eased) * entranceOffset.y.toPx()
+        }
+        this.transformOrigin = transformOrigin
+    }
 }
 
+@Composable
 fun Modifier.keynotePop(
     progress: () -> Float,
     initialScale: Float = 0.72f,
     overshootScale: Float = 1.06f,
     entranceOffset: DpOffset = DpOffset.Zero,
-): Modifier = graphicsLayer {
-    val p = progress()
-    val scale = keynotePopScale(p, initialScale, overshootScale)
-    alpha = keynotePopAlpha(p)
-    scaleX = scale
-    scaleY = scale
-    val remaining = 1f - p.coerceIn(0f, 1f)
-    translationX = remaining * entranceOffset.x.toPx()
-    translationY = remaining * entranceOffset.y.toPx()
+): Modifier {
+    val reducedMotion = LocalReducedMotion.current
+    return graphicsLayer {
+        val p = progress()
+        if (reducedMotion) {
+            alpha = p.coerceIn(0f, 1f)
+            scaleX = 1f
+            scaleY = 1f
+            translationX = 0f
+            translationY = 0f
+        } else {
+            val scale = keynotePopScale(p, initialScale, overshootScale)
+            alpha = keynotePopAlpha(p)
+            scaleX = scale
+            scaleY = scale
+            val remaining = 1f - p.coerceIn(0f, 1f)
+            translationX = remaining * entranceOffset.x.toPx()
+            translationY = remaining * entranceOffset.y.toPx()
+        }
+    }
 }
 
 internal fun keynotePopScale(progress: Float, initialScale: Float, overshootScale: Float): Float {
@@ -427,30 +479,38 @@ private fun smoothstep(t: Float): Float = t * t * (3f - 2f * t)
 internal fun arrowHeadLength(fullLengthPx: Float, progress: Float): Float =
     fullLengthPx * smoothstep((progress / 0.3f).coerceIn(0f, 1f))
 
+@Composable
 fun Modifier.keynoteWipe(
     progress: () -> Float,
     direction: WipeDirection = WipeDirection.StartToEnd,
-): Modifier = drawWithContent {
-    val p = progress().coerceIn(0f, 1f)
-    if (p <= 0f) return@drawWithContent
-    val left = when (direction) {
-        WipeDirection.EndToStart -> size.width * (1f - p)
-        else -> 0f
+): Modifier {
+    if (LocalReducedMotion.current) {
+        return graphicsLayer {
+            alpha = progress().coerceIn(0f, 1f)
+        }
     }
-    val right = when (direction) {
-        WipeDirection.StartToEnd -> size.width * p
-        else -> size.width
-    }
-    val top = when (direction) {
-        WipeDirection.BottomToTop -> size.height * (1f - p)
-        else -> 0f
-    }
-    val bottom = when (direction) {
-        WipeDirection.TopToBottom -> size.height * p
-        else -> size.height
-    }
-    clipRect(left = left, top = top, right = right, bottom = bottom) {
-        this@drawWithContent.drawContent()
+    return drawWithContent {
+        val p = progress().coerceIn(0f, 1f)
+        if (p <= 0f) return@drawWithContent
+        val left = when (direction) {
+            WipeDirection.EndToStart -> size.width * (1f - p)
+            else -> 0f
+        }
+        val right = when (direction) {
+            WipeDirection.StartToEnd -> size.width * p
+            else -> size.width
+        }
+        val top = when (direction) {
+            WipeDirection.BottomToTop -> size.height * (1f - p)
+            else -> 0f
+        }
+        val bottom = when (direction) {
+            WipeDirection.TopToBottom -> size.height * p
+            else -> size.height
+        }
+        clipRect(left = left, top = top, right = right, bottom = bottom) {
+            this@drawWithContent.drawContent()
+        }
     }
 }
 

@@ -40,6 +40,8 @@ import dev.bnorm.storyboard.easel.DeterministicStateHost
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.theme.LocalReducedMotion
+import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
@@ -123,6 +125,7 @@ fun DeckWarpCodeCard(
 
     val currentCodeSnippet = codeStates[stateTransition.targetState.coerceIn(0, codeStates.lastIndex)]
     val shape = RoundedCornerShape(cardStyle.cornerRadius)
+    val reducedMotion = LocalReducedMotion.current
 
     Box(
         modifier = modifier
@@ -133,7 +136,52 @@ fun DeckWarpCodeCard(
             )
             .timelineTarget(warpTrackId),
     ) {
-        SharedTransitionLayout(Modifier.horizontalScroll(rememberScrollState())) {
+        if (reducedMotion) {
+            val fadeSpec = tween<Float>(durationMillis = REDUCED_MOTION_FADE_DURATION_MS)
+            Box(Modifier.horizontalScroll(rememberScrollState())) {
+                stateTransition.DeterministicStateHost(
+                    enter = { _, _ -> fadeIn(fadeSpec) },
+                    exit = { _, _ -> fadeOut(fadeSpec) },
+                ) { rawIndex ->
+                    val clampedIndex = rawIndex.coerceIn(0, diffList.lastIndex)
+                    val diffContents = diffList[clampedIndex]
+                    Column(
+                        Modifier
+                            .clip(shape)
+                            .background(palette.background, shape)
+                            .border(cardStyle.borderWidth, theme.colors.border, shape)
+                            .padding(cardStyle.padding),
+                    ) {
+                        diffContents.rows.forEach { rowStates ->
+                            Row {
+                                rowStates.forEach { state ->
+                                    if (state == State.Empty) return@forEach
+                                    val text = state.content()
+                                    if (text.isBlank()) {
+                                        Text(
+                                            text = text,
+                                            style = codeTextStyle,
+                                            softWrap = false,
+                                            maxLines = 1,
+                                        )
+                                    } else {
+                                        val colorToken = state.resolveWarpColorToken()
+                                        Text(
+                                            text = text,
+                                            style = codeTextStyle,
+                                            color = colorToken.colorIn(palette),
+                                            softWrap = false,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            SharedTransitionLayout(Modifier.horizontalScroll(rememberScrollState())) {
             stateTransition.DeterministicStateHost(
                 enter = { _, _ -> fadeIn(tween(insertDurationMs, delayMillis = insertDelayMs, easing = EaseOutCubic)) },
                 exit = { _, _ -> fadeOut(tween(deleteDurationMs, delayMillis = startDelayMs, easing = EaseInCubic)) },
@@ -177,15 +225,7 @@ fun DeckWarpCodeCard(
                                     val isRetained = (fromIdx == toIdx) ||
                                         (stableKey != null && stableKey in sharedKeys) ||
                                         (state is State.Match && stableKey == null)
-                                    val colorToken = if (
-                                        state is State.Match &&
-                                        state.current.scope.startsWith("source.") &&
-                                        !state.previous.scope.startsWith("source.")
-                                    ) {
-                                        state.previous
-                                    } else {
-                                        state.warpToken()
-                                    }
+                                    val colorToken = state.resolveWarpColorToken()
                                     if (isRetained) {
                                         val sharedKey = stableKey
                                             ?: (state as? State.Match)?.sharedWarpKey(rowIdx, colIdx)
@@ -238,11 +278,22 @@ fun DeckWarpCodeCard(
                 }
             }
         }
+        }
     }
 }
 
 private fun Token.colorIn(palette: DeckCodePalette) =
     palette.colorForWarpScope(scope)
+
+private fun State.resolveWarpColorToken(): Token = if (
+    this is State.Match &&
+    current.scope.startsWith("source.") &&
+    !previous.scope.startsWith("source.")
+) {
+    previous
+} else {
+    warpToken()
+}
 
 private fun State.warpToken(): Token = when (this) {
     is State.Match -> current

@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Scrollable2DState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -48,6 +53,14 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed as isKeyAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed as isKeyCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed as isKeyMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -61,8 +74,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -70,8 +86,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -121,11 +139,15 @@ private fun TransportIconButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val focusRingColor = rememberAccessibleFocusRingColor()
     Tooltip(tooltip = { Text(tooltip) }) {
         IconButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(24.dp).testTag(testTag),
+            modifier = Modifier
+                .size(24.dp)
+                .studioActivatableFocus(focusRingColor)
+                .testTag(testTag),
         ) {
             Icon(key = icon, contentDescription = contentDescription, modifier = Modifier.size(14.dp))
         }
@@ -155,6 +177,7 @@ internal fun TimelineTransportBar(
     val overridesData = controller.overridesStore.data()
     val hasOverrides = overridesData.hasOverrides
     val viewport = controller.viewport
+    val focusRingColor = rememberAccessibleFocusRingColor()
 
     Row(
         modifier = modifier
@@ -168,16 +191,16 @@ internal fun TimelineTransportBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            TransportIconButton(AllIconsKeys.General.ChevronLeft, "Previous beat", "Previous event beat", "ciacola-timeline-prev-beat") {
+            TransportIconButton(AllIconsKeys.General.ChevronLeft, "Previous beat", "Previous Beat ([)", "ciacola-timeline-prev-beat") {
                 controller.stepBeat(-1)
             }
             TransportIconButton(
                 icon = if (controller.isPlaying) AllIconsKeys.Actions.Pause else AllIconsKeys.Actions.Execute,
                 contentDescription = if (controller.isPlaying) "Pause" else "Play",
-                tooltip = "Play / pause (Space)",
+                tooltip = "Play / Pause (Space)",
                 testTag = "ciacola-timeline-play",
             ) { controller.togglePlayback(scope) }
-            TransportIconButton(AllIconsKeys.General.ChevronRight, "Next beat", "Next event beat", "ciacola-timeline-next-beat") {
+            TransportIconButton(AllIconsKeys.General.ChevronRight, "Next beat", "Next Beat (])", "ciacola-timeline-next-beat") {
                 controller.stepBeat(+1)
             }
 
@@ -204,7 +227,7 @@ internal fun TimelineTransportBar(
             }
 
             if (activeSubLoopId == null) {
-                TransportIconButton(AllIconsKeys.General.Add, "Add beat", "Insert event keyframe (click beat) after the current beat", "ciacola-timeline-add-beat") {
+                TransportIconButton(AllIconsKeys.General.Add, "Add beat", "Insert event keyframe (+ Beat)", "ciacola-timeline-add-beat") {
                     controller.insertEventBeatAtPlayhead()
                 }
                 TransportIconButton(
@@ -218,14 +241,14 @@ internal fun TimelineTransportBar(
             TransportIconButton(
                 icon = AllIconsKeys.Actions.Undo,
                 contentDescription = "Undo",
-                tooltip = "Undo timeline edit (Cmd/Ctrl+Z)",
+                tooltip = "Undo (⌘Z)",
                 testTag = "ciacola-timeline-undo",
                 enabled = controller.overridesStore.canUndo,
             ) { controller.undo() }
             TransportIconButton(
                 icon = AllIconsKeys.Actions.Redo,
                 contentDescription = "Redo",
-                tooltip = "Redo timeline edit (Cmd/Ctrl+Shift+Z)",
+                tooltip = "Redo (⇧⌘Z)",
                 testTag = "ciacola-timeline-redo",
                 enabled = controller.overridesStore.canRedo,
             ) { controller.redo() }
@@ -238,11 +261,15 @@ internal fun TimelineTransportBar(
         ) {
             if (activeSubLoopId != null) {
                 val loopLabel = controller.loopClock.registeredLoops[activeSubLoopId]?.label ?: activeSubLoopId
-                OutlinedButton(
-                    onClick = { controller.exitLoopSubComp() },
-                    modifier = Modifier.testTag("ciacola-timeline-exit-subcomp"),
-                ) {
-                    Text("← Master Deck", style = JewelTheme.typography.small, maxLines = 1)
+                Tooltip(tooltip = { Text("Return to Master Deck timeline (Esc)") }) {
+                    OutlinedButton(
+                        onClick = { controller.exitLoopSubComp() },
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-timeline-exit-subcomp"),
+                    ) {
+                        Text("← Master Deck", style = JewelTheme.typography.small, maxLines = 1)
+                    }
                 }
                 Text(
                     text = "▸ Sub-Comp: $loopLabel",
@@ -269,7 +296,7 @@ internal fun TimelineTransportBar(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (activeSubLoopId == null) {
-                TransportIconButton(AllIconsKeys.General.ZoomOut, "Zoom out", "Zoom out (-, or Alt+wheel)", "ciacola-timeline-zoom-out") {
+                TransportIconButton(AllIconsKeys.General.ZoomOut, "Zoom out", "Zoom Out (-, or Alt+wheel)", "ciacola-timeline-zoom-out") {
                     viewport.zoomBy(0.8f, viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx))
                 }
                 // Logarithmic zoom slider (After Effects-style), anchored on the playhead.
@@ -284,10 +311,10 @@ internal fun TimelineTransportBar(
                     },
                     modifier = Modifier.width(84.dp).testTag("ciacola-timeline-zoom-slider"),
                 )
-                TransportIconButton(AllIconsKeys.General.ZoomIn, "Zoom in", "Zoom in (=, or Alt+wheel)", "ciacola-timeline-zoom-in") {
+                TransportIconButton(AllIconsKeys.General.ZoomIn, "Zoom in", "Zoom In (=, or Alt+wheel)", "ciacola-timeline-zoom-in") {
                     viewport.zoomBy(1.25f, viewport.xForTime(nowMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx))
                 }
-                TransportIconButton(AllIconsKeys.General.FitContent, "Zoom to fit", "Toggle fit / frame level (;)", "ciacola-timeline-zoom-fit") {
+                TransportIconButton(AllIconsKeys.General.FitContent, "Zoom to fit", "Zoom to Fit (;)", "ciacola-timeline-zoom-fit") {
                     viewport.toggleFitAndFrames(nowMs.toFloat())
                 }
             }
@@ -307,11 +334,16 @@ internal fun TimelineTransportBar(
                             .widthIn(max = 156.dp)
                             .background(pillColor.copy(alpha = 0.16f), RoundedCornerShape(4.dp))
                             .border(1.dp, pillColor.copy(alpha = 0.70f), RoundedCornerShape(4.dp))
+                            .studioActivatableFocus(focusRingColor)
                             .clickable(enabled = controller.bakeStatus != TimelineBakeStatus.Sending) {
                                 controller.clearBakeStatus()
                             }
                             .padding(horizontal = 6.dp, vertical = 2.dp)
-                            .testTag("ciacola-timeline-bake-status"),
+                            .testTag("ciacola-timeline-bake-status")
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Bake status: $fullMessage"
+                            },
                     ) {
                         Text(
                             text = fullMessage,
@@ -327,7 +359,9 @@ internal fun TimelineTransportBar(
                 Tooltip(tooltip = { Text("Copy active overrides as Kotlin modifier/parameter snippets + JSON") }) {
                     OutlinedButton(
                         onClick = { controller.copyOverridesAsKotlinSnippet(scope) },
-                        modifier = Modifier.testTag("ciacola-timeline-copy-kotlin"),
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-timeline-copy-kotlin"),
                     ) {
                         Text(
                             text = if (controller.copiedConfirmationVisible) "Copied!" else "Copy Kotlin",
@@ -340,7 +374,9 @@ internal fun TimelineTransportBar(
                 Tooltip(tooltip = { Text("Discard all live timeline overrides across the deck") }) {
                     OutlinedButton(
                         onClick = { controller.resetAllOverrides() },
-                        modifier = Modifier.testTag("ciacola-timeline-reset"),
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-timeline-reset"),
                     ) {
                         Text("Reset All", style = JewelTheme.typography.small)
                     }
@@ -350,11 +386,23 @@ internal fun TimelineTransportBar(
                         DefaultButton(
                             onClick = { controller.bakeOverridesViaAgent(scope) },
                             enabled = controller.bakeStatus != TimelineBakeStatus.Sending,
-                            modifier = Modifier.testTag("ciacola-timeline-bake"),
+                            modifier = Modifier
+                                .studioActivatableFocus(focusRingColor)
+                                .testTag("ciacola-timeline-bake"),
                         ) {
                             Text("Bake to Kotlin", style = JewelTheme.typography.small)
                         }
                     }
+                }
+            }
+            if (controller.dockedInStoryWindow) {
+                TransportIconButton(
+                    icon = AllIconsKeys.General.Close,
+                    contentDescription = "Close Timeline",
+                    tooltip = "Close Timeline (F5)",
+                    testTag = "ciacola-timeline-close",
+                ) {
+                    controller.dockedInStoryWindow = false
                 }
             }
         }
@@ -389,6 +437,14 @@ internal fun TimelineMultiTrackArea(
     val overridesData = controller.overridesStore.data()
     val overrideBadgeColor = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFE0A82E)
 
+    val focusRingColor = rememberAccessibleFocusRingColor()
+    val focusState = LocalStudioA11yFocusState.current
+    val density = LocalDensity.current
+    val rowHeightPx = with(density) { TRACK_ROW_HEIGHT.toPx() }
+    val trackIds = remember(snapshot.tracks) { snapshot.tracks.map { it.trackId } }
+    val rowFocusRequesters = remember(trackIds) { List(trackIds.size) { FocusRequester() } }
+    var layerColumnHeightPx by remember { mutableFloatStateOf(0f) }
+
     Row(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -419,10 +475,12 @@ internal fun TimelineMultiTrackArea(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .onSizeChanged { layerColumnHeightPx = it.height.toFloat() }
+                    .onFocusChanged { focusState?.layerListHasFocus = it.hasFocus }
                     .verticalScroll(viewport.verticalScroll)
                     .testTag("ciacola-timeline-layer-headers"),
             ) {
-                for (track in snapshot.tracks) {
+                snapshot.tracks.forEachIndexed { rowIdx, track ->
                     val isSelected = controller.isTrackRowSelected(track.trackId)
                     val loopBlock = track.blocks.firstOrNull { it.loopId != null }
                     val isRowOverridden = if (loopBlock?.loopId != null) {
@@ -448,9 +506,47 @@ internal fun TimelineMultiTrackArea(
                                     else -> Color.Transparent
                                 }
                             )
+                            .focusRequester(rowFocusRequesters[rowIdx])
+                            .studioActivatableFocus(focusRingColor, cornerRadius = 2.dp)
+                            .onKeyEvent { ev ->
+                                if (ev.type == KeyEventType.KeyDown &&
+                                    !ev.isKeyCtrlPressed && !ev.isKeyMetaPressed && !ev.isKeyAltPressed
+                                ) {
+                                    val nextIdx = when (ev.key) {
+                                        Key.DirectionDown -> (rowIdx + 1).coerceAtMost(snapshot.tracks.lastIndex)
+                                        Key.DirectionUp -> (rowIdx - 1).coerceAtLeast(0)
+                                        else -> return@onKeyEvent false
+                                    }
+                                    if (nextIdx != rowIdx) {
+                                        runCatching { rowFocusRequesters[nextIdx].requestFocus() }
+                                        val nextTop = (nextIdx * rowHeightPx).roundToInt()
+                                        val nextBottom = ((nextIdx + 1) * rowHeightPx).roundToInt()
+                                        val visH = layerColumnHeightPx.roundToInt().coerceAtLeast(rowHeightPx.roundToInt())
+                                        val curScroll = viewport.verticalScroll.value
+                                        val targetScroll = when {
+                                            nextTop < curScroll -> nextTop
+                                            nextBottom > curScroll + visH -> nextBottom - visH
+                                            else -> null
+                                        }
+                                        if (targetScroll != null) {
+                                            scope.launch { viewport.verticalScroll.animateScrollTo(targetScroll.coerceAtLeast(0)) }
+                                        }
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
                             .clickable { controller.selectTrack(track.trackId) }
                             .padding(start = (10 + track.indentLevel * 14).dp, end = 6.dp)
-                            .testTag("ciacola-track-row-${track.trackId}"),
+                            .testTag("ciacola-track-row-${track.trackId}")
+                            .semantics {
+                                contentDescription = "$displayRowLabel, ${track.category.accessibleLabel()}"
+                                stateDescription = buildString {
+                                    append(if (isSelected) "Selected" else "Not selected")
+                                    if (isRowOverridden) append(", Overridden")
+                                }
+                            },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
@@ -460,33 +556,42 @@ internal fun TimelineMultiTrackArea(
                             horizontalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
                             if (isRowOverridden) {
+                                Tooltip(tooltip = { Text("Track has live overrides") }) {
+                                    Text(
+                                        text = "●",
+                                        style = JewelTheme.typography.small,
+                                        color = overrideBadgeColor,
+                                        modifier = Modifier
+                                            .testTag("ciacola-override-badge-${track.trackId}")
+                                            .semantics { contentDescription = "Track overridden" },
+                                    )
+                                }
+                            }
+                            Tooltip(tooltip = { Text(displayRowLabel) }) {
                                 Text(
-                                    text = "●",
+                                    text = displayRowLabel,
                                     style = JewelTheme.typography.small,
-                                    color = overrideBadgeColor,
-                                    modifier = Modifier
-                                        .testTag("ciacola-override-badge-${track.trackId}")
-                                        .semantics { contentDescription = "overridden" },
+                                    color = if (isSelected || isRowOverridden) globalColors.text.normal else secondaryLayerColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            Text(
-                                text = displayRowLabel,
-                                style = JewelTheme.typography.small,
-                                color = if (isSelected || isRowOverridden) globalColors.text.normal else secondaryLayerColor,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                         if (loopBlock?.loopId != null) {
                             Tooltip(tooltip = { Text("Enter Loop Sub-Composition") }) {
                                 Box(
                                     modifier = Modifier
                                         .border(1.dp, globalColors.borders.focused, RoundedCornerShape(4.dp))
+                                        .studioActivatableFocus(focusRingColor)
                                         .clickable {
                                             controller.enterLoopSubComp(scope, loopBlock.loopId, loopBlock.sceneIndex)
                                         }
                                         .padding(horizontal = 5.dp, vertical = 1.dp)
-                                        .testTag("ciacola-timeline-open-loop"),
+                                        .testTag("ciacola-timeline-open-loop")
+                                        .semantics {
+                                            role = Role.Button
+                                            contentDescription = "Enter loop sub-composition for ${track.label}"
+                                        },
                                 ) {
                                     Text("Sub-Comp ▸", style = JewelTheme.typography.small, color = globalColors.text.normal)
                                 }
@@ -622,74 +727,86 @@ private fun MasterDeckTimelineCanvas(
         val consumedY = -viewport.verticalScroll.dispatchRawDelta(-delta.y)
         Offset(consumedX, consumedY)
     }
+    val canvasFocusRequester = remember { FocusRequester() }
+    val idx = controller.animatic.targetIndex
+    val sceneBeatsCount = controller.animatic.storyboard.scenes.getOrNull(idx.sceneIndex)?.frames?.size ?: 1
+    val playheadStateDesc = "Playhead at ${formatMillisForAccessibility(playheadMs)}, " +
+        "Slide ${idx.sceneIndex + 1} of ${snapshot.slides.size}, Beat ${idx.frameIndex + 1} of $sceneBeatsCount"
 
-    Canvas(
-        modifier = modifier
-            .clipToBounds()
-            .onSizeChanged {
-                viewport.viewportWidthPx = it.width.toFloat()
-                canvasHeightPx = it.height.toFloat()
-                if (!didInitialFit && it.width > 0 && snapshot.totalDurationMs > 0) {
-                    viewport.contentDurationMs = snapshot.totalDurationMs
-                    viewport.zoomToFit()
-                    didInitialFit = true
+    Box(modifier = modifier) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .focusRequester(canvasFocusRequester)
+                .focusable()
+                .onSizeChanged {
+                    viewport.viewportWidthPx = it.width.toFloat()
+                    canvasHeightPx = it.height.toFloat()
+                    if (!didInitialFit && it.width > 0 && snapshot.totalDurationMs > 0) {
+                        viewport.contentDurationMs = snapshot.totalDurationMs
+                        viewport.zoomToFit()
+                        didInitialFit = true
+                    }
                 }
-            }
-            .pointerHoverIcon(if (controller.spaceHeld) PointerIcon.Hand else PointerIcon.Default)
-            // After Effects modifiers: Alt/Ctrl+wheel zooms time at the cursor, Shift+wheel scrolls
-            // horizontally; middle-drag or Space+drag pans (hand tool). Handled on the Initial pass,
-            // before scrollable2D and the scrub/edit gestures see the events.
-            .pointerInput(viewport) {
-                awaitPointerEventScope {
-                    var panning = false
-                    var last = Offset.Zero
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val change = event.changes.firstOrNull() ?: continue
-                        when (event.type) {
-                            PointerEventType.Scroll -> {
-                                val mods = event.keyboardModifiers
-                                val delta = change.scrollDelta
-                                when {
-                                    mods.isAltPressed || mods.isCtrlPressed -> {
-                                        val steps = if (delta.y != 0f) delta.y else delta.x
-                                        viewport.zoomBy(exp(-steps * 0.15f), change.position.x)
-                                        change.consume()
+                .pointerHoverIcon(if (controller.spaceHeld) PointerIcon.Hand else PointerIcon.Default)
+                // After Effects modifiers: Alt/Ctrl+wheel zooms time at the cursor, Shift+wheel scrolls
+                // horizontally; middle-drag or Space+drag pans (hand tool). Handled on the Initial pass,
+                // before scrollable2D and the scrub/edit gestures see the events.
+                .pointerInput(viewport) {
+                    awaitPointerEventScope {
+                        var panning = false
+                        var last = Offset.Zero
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull() ?: continue
+                            when (event.type) {
+                                PointerEventType.Scroll -> {
+                                    val mods = event.keyboardModifiers
+                                    val delta = change.scrollDelta
+                                    when {
+                                        mods.isAltPressed || mods.isCtrlPressed -> {
+                                            val steps = if (delta.y != 0f) delta.y else delta.x
+                                            viewport.zoomBy(exp(-steps * 0.15f), change.position.x)
+                                            change.consume()
+                                        }
+                                        mods.isShiftPressed -> {
+                                            val steps = if (delta.x != 0f) delta.x else delta.y
+                                            viewport.scrollHorizontallyBy(steps * 48f)
+                                            change.consume()
+                                        }
                                     }
-                                    mods.isShiftPressed -> {
-                                        val steps = if (delta.x != 0f) delta.x else delta.y
-                                        viewport.scrollHorizontallyBy(steps * 48f)
+                                }
+                                PointerEventType.Press -> {
+                                    runCatching { canvasFocusRequester.requestFocus() }
+                                    if (event.buttons.isTertiaryPressed || controller.spaceHeld) {
+                                        panning = true
+                                        controller.spaceUsedForPan = true
+                                        last = change.position
                                         change.consume()
                                     }
                                 }
-                            }
-                            PointerEventType.Press -> if (event.buttons.isTertiaryPressed || controller.spaceHeld) {
-                                panning = true
-                                controller.spaceUsedForPan = true
-                                last = change.position
-                                change.consume()
-                            }
-                            PointerEventType.Move -> if (panning) {
-                                val d = change.position - last
-                                last = change.position
-                                viewport.scrollHorizontallyBy(-d.x)
-                                viewport.verticalScroll.dispatchRawDelta(-d.y)
-                                change.consume()
-                            }
-                            PointerEventType.Release -> if (panning) {
-                                panning = false
-                                change.consume()
+                                PointerEventType.Move -> if (panning) {
+                                    val d = change.position - last
+                                    last = change.position
+                                    viewport.scrollHorizontallyBy(-d.x)
+                                    viewport.verticalScroll.dispatchRawDelta(-d.y)
+                                    change.consume()
+                                }
+                                PointerEventType.Release -> if (panning) {
+                                    panning = false
+                                    change.consume()
+                                }
                             }
                         }
                     }
                 }
-            }
-            .scrollable2D(scrollState)
-            .testTag("ciacola-timeline-canvas")
-            .semantics {
-                contentDescription = "zoom=${"%.4f".format(viewport.pxPerMs)} scrollX=${viewport.scrollX.roundToInt()} " +
-                    "scrollY=${viewport.verticalScroll.value}"
-            }
+                .scrollable2D(scrollState)
+                .testTag("ciacola-timeline-canvas")
+                .semantics {
+                    contentDescription = "Timeline canvas and time ruler"
+                    stateDescription = playheadStateDesc
+                }
             // Keyed on stable controller/viewport (and reading latestSnapshot) so in-flight block
             // edge/body drags are never cancelled when an override edit refreshes the snapshot.
             .pointerInput(controller, viewport) {
@@ -1118,6 +1235,83 @@ private fun MasterDeckTimelineCanvas(
             drawPath(cap, color = colors.playhead)
         }
     }
+
+        // Lightweight non-interactive accessibility overlay nodes for the ruler/playhead and blocks
+        // so screen readers can inspect timeline timing without duplicating focus stops.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(HEADER_TOTAL_HEIGHT)
+                    .testTag("ciacola-timeline-ruler")
+                    .semantics {
+                        contentDescription = "Timeline ruler and playhead"
+                        stateDescription = playheadStateDesc
+                    },
+            )
+            val scrollY = viewport.verticalScroll.value.toFloat()
+            val pxPerMs = viewport.pxPerMs
+            snapshot.tracks.forEachIndexed { rIdx, row ->
+                val yTop = headerTotalPx + rIdx * rowHeightPx - scrollY + 4f
+                val barH = rowHeightPx - 8f
+                if (yTop + barH < headerTotalPx || yTop > canvasHeightPx) return@forEachIndexed
+                val isSelected = controller.isTrackRowSelected(row.trackId)
+                for (blk in row.blocks) {
+                    val liveOvr = liveOverrides[blk.trackId]
+                    val isBarOverridden = if (blk.loopId != null) {
+                        blk.loopId in liveLoopPeriods
+                    } else {
+                        liveOvr != null
+                    }
+                    val drawStartMs = if (row.category != TrackCategory.SharedElement &&
+                        row.category != TrackCategory.LoopSubComp &&
+                        liveOvr?.delayMs != null
+                    ) {
+                        val stepOffset = (blk.staggerIndex ?: 0) * (liveOvr.staggerStepMs ?: 55)
+                        (blk.startMs - blk.delayMs) + liveOvr.delayMs + stepOffset
+                    } else {
+                        blk.startMs
+                    }
+                    val drawDurationMs = when {
+                        row.category == TrackCategory.SharedElement || row.category == TrackCategory.LoopSubComp -> blk.durationMs
+                        liveOvr?.curve?.isSpring == true -> liveOvr.curve.estimatedSpringDurationMs()
+                        row.category == TrackCategory.StaggerGroup && liveOvr?.durationMs != null -> {
+                            val count = (blk.staggerCount ?: 1).coerceAtLeast(1)
+                            val step = liveOvr.staggerStepMs ?: 55
+                            liveOvr.durationMs + (count - 1) * step
+                        }
+                        liveOvr?.durationMs != null -> liveOvr.durationMs
+                        else -> blk.durationMs
+                    }
+                    val x0 = viewport.xForTime(drawStartMs.toFloat())
+                    val w = max(6f, drawDurationMs * pxPerMs)
+                    if (x0 + w < 0f || x0 > viewport.viewportWidthPx) continue
+                    val wDp = with(density) { w.toDp() }
+                    val hDp = with(density) { barH.toDp() }
+                    Box(
+                        modifier = Modifier
+                            .offset { IntOffset(x0.roundToInt(), yTop.roundToInt()) }
+                            .size(wDp, hDp)
+                            .testTag("ciacola-timeline-block-${blk.id}")
+                            .semantics {
+                                contentDescription = "${blk.label}, ${row.category.accessibleLabel()}, " +
+                                    "Slide ${blk.sceneIndex + 1} Beat ${blk.triggerBeatInScene + 1}"
+                                stateDescription = buildString {
+                                    append("Starts at ${formatMillisForAccessibility(drawStartMs)}, ")
+                                    append("duration ${formatMillisForAccessibility(drawDurationMs)}")
+                                    if (isSelected) append(", Selected")
+                                    if (isBarOverridden) append(", Overridden")
+                                }
+                            },
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** Dedicated sub-composition timeline (`0..periodMs`) when the user drills into an ambient loop. */
@@ -1175,6 +1369,11 @@ private fun LoopSubCompTimelineView(
                 .weight(1f)
                 .fillMaxHeight()
                 .testTag("ciacola-subcomp-canvas")
+                .semantics {
+                    contentDescription = "Loop sub-composition wave timeline for ${desc.label}"
+                    stateDescription = "Playhead at ${formatMillisForAccessibility(controller.currentPlayheadTimeMs)} " +
+                        "of ${formatMillisForAccessibility(periodMs)}"
+                }
                 .pointerInput(periodMs) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)

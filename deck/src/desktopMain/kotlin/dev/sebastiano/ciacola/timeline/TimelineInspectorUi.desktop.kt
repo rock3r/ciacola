@@ -1,6 +1,7 @@
 package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -31,8 +32,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +55,7 @@ import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.component.VerticalScrollbar
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
@@ -60,12 +66,14 @@ private val INSPECTOR_WIDTH = 304.dp
 /**
  * Right-hand After Effects Keyframe, Bezier Curve, & Spatial Motion-Path Inspector.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun TimelineBlockInspector(
     controller: TimelineStudioController,
     modifier: Modifier = Modifier,
 ) {
     val globalColors = JewelTheme.globalColors
+    val focusRingColor = rememberAccessibleFocusRingColor()
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
 
@@ -128,53 +136,71 @@ internal fun TimelineBlockInspector(
                 modifier = Modifier.weight(1f),
             )
             if (hasTrackOverride) {
-                Box(
-                    modifier = Modifier
-                        .padding(start = 6.dp)
-                        .background(overrideAccent.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
-                        .border(1.dp, overrideAccent.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 1.dp)
-                        .testTag("ciacola-inspector-override-badge"),
-                ) {
-                    Text(
-                        text = "● Overridden",
-                        style = JewelTheme.typography.small,
-                        color = globalColors.text.normal,
-                    )
+                Tooltip(tooltip = { Text("This track has live timeline overrides") }) {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .background(overrideAccent.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
+                            .border(1.dp, overrideAccent.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                            .testTag("ciacola-inspector-override-badge"),
+                    ) {
+                        Text(
+                            text = "● Overridden",
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.normal,
+                        )
+                    }
                 }
             }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (selectedRow.category == TrackCategory.LoopSubComp && primaryBlock.loopId != null) {
-                DefaultButton(
-                    onClick = {
-                        controller.enterLoopSubComp(scope, primaryBlock.loopId, primaryBlock.sceneIndex)
-                    },
-                    modifier = Modifier.testTag("ciacola-inspector-enter-subcomp"),
-                ) {
-                    Text("Enter Sub-Comp ▸", style = JewelTheme.typography.small)
+                Tooltip(tooltip = { Text("Inspect harmonic wave channels for this loop") }) {
+                    DefaultButton(
+                        onClick = {
+                            controller.enterLoopSubComp(scope, primaryBlock.loopId, primaryBlock.sceneIndex)
+                        },
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-inspector-enter-subcomp"),
+                    ) {
+                        Text("Enter Sub-Comp ▸", style = JewelTheme.typography.small)
+                    }
                 }
-                OutlinedButton(
-                    onClick = { controller.resetLoopPeriod(primaryBlock.loopId) },
-                    enabled = hasTrackOverride,
-                    modifier = Modifier.testTag("ciacola-inspector-reset-track"),
-                ) {
-                    Text("Reset Track", style = JewelTheme.typography.small)
+                Tooltip(tooltip = { Text("Reset cycle period override for this loop") }) {
+                    OutlinedButton(
+                        onClick = { controller.resetLoopPeriod(primaryBlock.loopId) },
+                        enabled = hasTrackOverride,
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-inspector-reset-track"),
+                    ) {
+                        Text("Reset Track", style = JewelTheme.typography.small)
+                    }
                 }
             } else {
-                DefaultButton(
-                    onClick = { controller.previewSelectedBlock(scope) },
-                    modifier = Modifier.testTag("ciacola-inspector-preview"),
-                ) {
-                    Text("Preview ▶", style = JewelTheme.typography.small)
+                Tooltip(tooltip = { Text("Preview only the selected animation block") }) {
+                    DefaultButton(
+                        onClick = { controller.previewSelectedBlock(scope) },
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-inspector-preview"),
+                    ) {
+                        Text("Preview ▶", style = JewelTheme.typography.small)
+                    }
                 }
-                OutlinedButton(
-                    onClick = { controller.overridesStore.resetTrack(selectedRow.trackId) },
-                    enabled = hasTrackOverride,
-                    modifier = Modifier.testTag("ciacola-inspector-reset-track"),
-                ) {
-                    Text("Reset Track", style = JewelTheme.typography.small)
+                Tooltip(tooltip = { Text("Reset all overrides for this track") }) {
+                    OutlinedButton(
+                        onClick = { controller.overridesStore.resetTrack(selectedRow.trackId) },
+                        enabled = hasTrackOverride,
+                        modifier = Modifier
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-inspector-reset-track"),
+                    ) {
+                        Text("Reset Track", style = JewelTheme.typography.small)
+                    }
                 }
             }
         }
@@ -317,6 +343,7 @@ internal fun TimelineBlockInspector(
         ) {
             CurvePresetButton(
                 label = "Ease",
+                tooltip = "Keynote Ease (0.25, 0.10, 0.25, 1.00)",
                 selected = !curve.isSpring && curve.preset == "KeynoteEase",
                 modifier = Modifier.weight(1f),
             ) {
@@ -326,6 +353,7 @@ internal fun TimelineBlockInspector(
             }
             CurvePresetButton(
                 label = "Linear",
+                tooltip = "Linear constant speed",
                 selected = !curve.isSpring && curve.preset == "Linear",
                 modifier = Modifier.weight(1f),
             ) {
@@ -335,6 +363,7 @@ internal fun TimelineBlockInspector(
             }
             CurvePresetButton(
                 label = "Pop",
+                tooltip = "Pop overshoot curve",
                 selected = !curve.isSpring && curve.preset == "Overshoot",
                 modifier = Modifier.weight(1f),
             ) {
@@ -344,6 +373,7 @@ internal fun TimelineBlockInspector(
             }
             CurvePresetButton(
                 label = "Spring",
+                tooltip = "Spring physics interpolation",
                 selected = curve.isSpring,
                 modifier = Modifier.weight(1f),
             ) {
@@ -497,6 +527,7 @@ internal fun TimelineBlockInspector(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LoopSubCompInspector(
     controller: TimelineStudioController,
@@ -504,6 +535,7 @@ private fun LoopSubCompInspector(
     modifier: Modifier = Modifier,
 ) {
     val globalColors = JewelTheme.globalColors
+    val focusRingColor = rememberAccessibleFocusRingColor()
     controller.overridesStore.parameterRevision
     val overridesData = controller.overridesStore.data()
     val isOverridden = loopId in overridesData.loopPeriodsMs
@@ -532,12 +564,16 @@ private fun LoopSubCompInspector(
                 color = globalColors.text.normal,
                 modifier = Modifier.weight(1f),
             )
-            OutlinedButton(
-                onClick = { controller.resetLoopPeriod(loopId) },
-                enabled = isOverridden,
-                modifier = Modifier.testTag("ciacola-inspector-reset-track"),
-            ) {
-                Text("Reset Track", style = JewelTheme.typography.small)
+            Tooltip(tooltip = { Text("Reset cycle period override for this loop") }) {
+                OutlinedButton(
+                    onClick = { controller.resetLoopPeriod(loopId) },
+                    enabled = isOverridden,
+                    modifier = Modifier
+                        .studioActivatableFocus(focusRingColor)
+                        .testTag("ciacola-inspector-reset-track"),
+                ) {
+                    Text("Reset Track", style = JewelTheme.typography.small)
+                }
             }
         }
         NumericStepperRow(
@@ -556,6 +592,7 @@ private fun LoopSubCompInspector(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NumericStepperRow(
     label: String,
@@ -565,6 +602,7 @@ private fun NumericStepperRow(
     onDec: () -> Unit,
     onInc: () -> Unit,
 ) {
+    val focusRingColor = rememberAccessibleFocusRingColor()
     Row(
         modifier = Modifier.fillMaxWidth().height(26.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -575,8 +613,16 @@ private fun NumericStepperRow(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onDec, modifier = Modifier.size(22.dp).testTag(decTag)) {
-                Icon(AllIconsKeys.General.Remove, contentDescription = "Decrease $label", modifier = Modifier.size(12.dp))
+            Tooltip(tooltip = { Text("Decrease $label") }) {
+                IconButton(
+                    onClick = onDec,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .studioActivatableFocus(focusRingColor)
+                        .testTag(decTag),
+                ) {
+                    Icon(AllIconsKeys.General.Remove, contentDescription = "Decrease $label", modifier = Modifier.size(12.dp))
+                }
             }
             Text(
                 text = valueText,
@@ -585,27 +631,48 @@ private fun NumericStepperRow(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.width(58.dp).testTag("$decTag-value"),
             )
-            IconButton(onClick = onInc, modifier = Modifier.size(22.dp).testTag(incTag)) {
-                Icon(AllIconsKeys.General.Add, contentDescription = "Increase $label", modifier = Modifier.size(12.dp))
+            Tooltip(tooltip = { Text("Increase $label") }) {
+                IconButton(
+                    onClick = onInc,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .studioActivatableFocus(focusRingColor)
+                        .testTag(incTag),
+                ) {
+                    Icon(AllIconsKeys.General.Add, contentDescription = "Increase $label", modifier = Modifier.size(12.dp))
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CurvePresetButton(
     label: String,
+    tooltip: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    if (selected) {
-        DefaultButton(onClick = onClick, modifier = modifier) {
-            Text(label, style = JewelTheme.typography.small, maxLines = 1)
+    val focusRingColor = rememberAccessibleFocusRingColor()
+    val pillModifier = modifier
+        .studioActivatableFocus(focusRingColor)
+        .testTag("ciacola-inspector-curve-${label.lowercase()}")
+        .semantics {
+            this.selected = selected
+            this.role = Role.RadioButton
+            this.stateDescription = if (selected) "Selected" else "Not selected"
         }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = modifier) {
-            Text(label, style = JewelTheme.typography.small, maxLines = 1)
+    Tooltip(tooltip = { Text(tooltip) }) {
+        if (selected) {
+            DefaultButton(onClick = onClick, modifier = pillModifier) {
+                Text(label, style = JewelTheme.typography.small, maxLines = 1)
+            }
+        } else {
+            OutlinedButton(onClick = onClick, modifier = pillModifier) {
+                Text(label, style = JewelTheme.typography.small, maxLines = 1)
+            }
         }
     }
 }
@@ -640,9 +707,9 @@ private fun BezierCurveEditorBox(
                 .height(96.dp)
                 .testTag("ciacola-bezier-editor")
                 .semantics {
-                    contentDescription = "preset=${latestCurve.preset} " +
-                        "p1=${"%.2f".format(latestCurve.x1)},${"%.2f".format(latestCurve.y1)} " +
-                        "p2=${"%.2f".format(latestCurve.x2)},${"%.2f".format(latestCurve.y2)}"
+                    contentDescription = "Cubic Bezier curve editor, preset ${latestCurve.preset}"
+                    stateDescription = "Control point 1 (${"%.2f".format(latestCurve.x1)}, ${"%.2f".format(latestCurve.y1)}), " +
+                        "Control point 2 (${"%.2f".format(latestCurve.x2)}, ${"%.2f".format(latestCurve.y2)})"
                 }
                 // Keyed on Unit (reading latestCurve) so dragging a control handle is not cancelled
                 // when the first move updates the override and recomposes the Inspector.
