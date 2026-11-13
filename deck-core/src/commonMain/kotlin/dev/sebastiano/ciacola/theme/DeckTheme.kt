@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.text.highlight.CodeStyle
+import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
 import ciacola.deck.generated.resources.Inter_Black
 import ciacola.deck.generated.resources.Inter_Bold
 import ciacola.deck.generated.resources.Inter_ExtraBold
@@ -557,7 +558,10 @@ fun DeckThemeProvider(
 ) {
     val materialColors = remember(theme) { theme.toMaterialColors() }
     val materialTypography = remember(theme) { theme.toMaterialTypography() }
-    CompositionLocalProvider(LocalDeckTheme provides theme) {
+    CompositionLocalProvider(
+        LocalDeckTheme provides theme,
+        LocalEffectiveBackgroundColor provides theme.colors.background,
+    ) {
         MaterialTheme(
             colors = materialColors,
             typography = materialTypography,

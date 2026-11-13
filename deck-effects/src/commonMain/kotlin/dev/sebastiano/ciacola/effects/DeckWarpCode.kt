@@ -19,15 +19,25 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.BasicCode
 import dev.bnorm.storyboard.DiffContents
 import dev.bnorm.storyboard.Kotlin
@@ -37,6 +47,14 @@ import dev.bnorm.storyboard.Token
 import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
 import dev.bnorm.storyboard.easel.DeterministicStateHost
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
+import dev.sebastiano.ciacola.inspector.LocalActiveBeatIndex
+import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
+import dev.sebastiano.ciacola.inspector.LocalElementOverrides
+import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
+import dev.sebastiano.ciacola.inspector.StageElementMetadata
+import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
@@ -45,6 +63,7 @@ import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
+import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.timelineTarget
@@ -56,12 +75,25 @@ fun DeckWarpCodeCard(
     modifier: Modifier = Modifier,
     language: Language = Kotlin,
     textStyle: TextStyle = LocalDeckTheme.current.typography.code,
+    elementId: String? = null,
 ) {
     require(codeStates.isNotEmpty()) { "codeStates must not be empty" }
     val theme = LocalDeckTheme.current
     val cardStyle = theme.styles.codeCard
     val palette = theme.colors.code
-    val codeTextStyle = textStyle
+    val patch = elementId?.let { LocalElementOverrides.current.patchFor(it) }
+    val (codeTextStyle, _) = resolveOverriddenTextStyle(
+        baseStyle = textStyle,
+        resolvedColor = textStyle.color,
+        patch = patch,
+    )
+    val effectiveFill = patch?.fillColorArgb?.let(::Color) ?: palette.background
+    val effectiveBorderColor = patch?.borderColorArgb?.let(::Color) ?: theme.colors.border
+    val effectiveBorderWidth = (patch?.borderWidthDp ?: cardStyle.borderWidth.value).coerceAtLeast(0f).dp
+    val effectiveCornerRadius = (patch?.cornerRadiusDp ?: cardStyle.cornerRadius.value).coerceAtLeast(0f).dp
+    val effectivePadding = (patch?.paddingDp ?: cardStyle.padding.value).coerceAtLeast(0f).dp
+    val offsetX = (patch?.offsetXDp ?: 0f).dp
+    val offsetY = (patch?.offsetYDp ?: 0f).dp
     val sceneCtx = LocalActiveSceneTimeline.current
     val collector = LocalTimelineHarvestCollector.current
     val warpTrackId = if (sceneCtx != null) "s${sceneCtx.sceneIndex}:warp-code" else "warp-code"
@@ -124,11 +156,62 @@ fun DeckWarpCodeCard(
     }
 
     val currentCodeSnippet = codeStates[stateTransition.targetState.coerceIn(0, codeStates.lastIndex)]
-    val shape = RoundedCornerShape(cardStyle.cornerRadius)
+    val shape = RoundedCornerShape(effectiveCornerRadius)
     val reducedMotion = LocalReducedMotion.current
+    val registry = LocalStageInspectionRegistry.current
+    val beatIndex = LocalActiveBeatIndex.current
+    val rootHolder = LocalStageRootCoordinates.current
+    val shouldInspect = elementId != null && registry != null && !LocalOverviewOpen.current && !LocalTimelineOffscreen.current
+    val ownerToken = remember { Any() }
+    var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
+    if (shouldInspect && elementId != null) {
+        DisposableEffect(registry, elementId) {
+            onDispose { registry?.remove(elementId, ownerToken) }
+        }
+        val coordsNow = cardCoords
+        SideEffect {
+            registry?.recordMetadata(
+                meta = StageElementMetadata(
+                    elementId = elementId,
+                    supportsBoxStyle = true,
+                    defaultFillColor = palette.background,
+                    defaultBorderColor = theme.colors.border,
+                    defaultBorderWidthDp = cardStyle.borderWidth.value,
+                    defaultCornerRadiusDp = cardStyle.cornerRadius.value,
+                    defaultPaddingDp = cardStyle.padding.value,
+                ),
+                owner = ownerToken,
+            )
+            val bounds = resolveStageBounds(coordsNow, rootHolder)
+            if (bounds != null) {
+                registry?.record(
+                    snapshot = StageNodeSnapshot(
+                        elementId = elementId,
+                        kind = "WarpCodeCard",
+                        label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
+                        sceneIndex = sceneCtx?.sceneIndex ?: 0,
+                        beatIndex = beatIndex,
+                        stageBounds = bounds,
+                        resolvedText = currentCodeSnippet,
+                        effectiveForeground = palette.foreground,
+                        effectiveBackground = effectiveFill,
+                        effectiveFontSizeSp = if (codeTextStyle.fontSize.isSp) codeTextStyle.fontSize.value else 18f,
+                        isEditable = true,
+                    ),
+                    owner = ownerToken,
+                )
+            }
+        }
+    }
+
+    val offsetMod = if (offsetX != 0.dp || offsetY != 0.dp) Modifier.offset(x = offsetX, y = offsetY) else Modifier
+
+    CompositionLocalProvider(LocalEffectiveBackgroundColor provides effectiveFill) {
     Box(
         modifier = modifier
+            .then(offsetMod)
+            .onPlaced { cardCoords = it }
             .reviewTarget(
                 kind = "WarpCodeCard",
                 label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
@@ -148,9 +231,15 @@ fun DeckWarpCodeCard(
                     Column(
                         Modifier
                             .clip(shape)
-                            .background(palette.background, shape)
-                            .border(cardStyle.borderWidth, theme.colors.border, shape)
-                            .padding(cardStyle.padding),
+                            .let { if (effectiveFill.alpha > 0f) it.background(effectiveFill, shape) else it }
+                            .let {
+                                if (effectiveBorderWidth > 0.dp && effectiveBorderColor.alpha > 0f) {
+                                    it.border(effectiveBorderWidth, effectiveBorderColor, shape)
+                                } else {
+                                    it
+                                }
+                            }
+                            .padding(effectivePadding),
                     ) {
                         diffContents.rows.forEach { rowStates ->
                             Row {
@@ -203,9 +292,15 @@ fun DeckWarpCodeCard(
                                 zIndexInOverlay = -1f,
                             )
                             .clip(shape)
-                            .background(palette.background, shape)
-                            .border(cardStyle.borderWidth, theme.colors.border, shape)
-                            .padding(cardStyle.padding)
+                            .let { if (effectiveFill.alpha > 0f) it.background(effectiveFill, shape) else it }
+                            .let {
+                                if (effectiveBorderWidth > 0.dp && effectiveBorderColor.alpha > 0f) {
+                                    it.border(effectiveBorderWidth, effectiveBorderColor, shape)
+                                } else {
+                                    it
+                                }
+                            }
+                            .padding(effectivePadding)
                     },
                 ) {
                     diffContents.rows.forEachIndexed { rowIdx, rowStates ->
@@ -279,6 +374,7 @@ fun DeckWarpCodeCard(
             }
         }
         }
+    }
     }
 }
 

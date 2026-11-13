@@ -2,10 +2,12 @@ package dev.sebastiano.ciacola.inspector
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.LayoutCoordinates
 import kotlinx.serialization.Serializable
 
 /**
@@ -77,11 +79,40 @@ data class StageNodeSnapshot(
 )
 
 /**
+ * Editor metadata and default styling values recorded alongside [StageNodeSnapshot] so the
+ * Element Inspector can display accurate default values and capabilities.
+ */
+@Immutable
+data class StageElementMetadata(
+    val elementId: String,
+    val supportsText: Boolean = false,
+    val supportsBoxStyle: Boolean = false,
+    val defaultText: String = "",
+    val defaultTextColor: Color? = null,
+    val defaultFontSizeSp: Float? = null,
+    val defaultFontWeight: Int? = null,
+    val defaultFillColor: Color? = null,
+    val defaultBorderColor: Color? = null,
+    val defaultBorderWidthDp: Float? = null,
+    val defaultCornerRadiusDp: Float? = null,
+    val defaultPaddingDp: Float? = null,
+)
+
+/**
+ * Returns the beat-scoped override identifier for multi-beat elements such as MagicText.
+ */
+fun beatElementId(baseId: String, beatIndex: Int): String = "$baseId:b$beatIndex"
+
+/**
  * Live registry of rendered stage element snapshots for the active composition.
  */
 @Stable
 class StageInspectionRegistry {
     val nodes = mutableStateMapOf<String, StageNodeSnapshot>()
+    val metadata = mutableStateMapOf<String, StageElementMetadata>()
+
+    private val nodeOwners = mutableMapOf<String, Any>()
+    private val metadataOwners = mutableMapOf<String, Any>()
 
     fun record(snapshot: StageNodeSnapshot) {
         if (nodes[snapshot.elementId] != snapshot) {
@@ -89,16 +120,73 @@ class StageInspectionRegistry {
         }
     }
 
+    fun record(snapshot: StageNodeSnapshot, owner: Any) {
+        nodeOwners[snapshot.elementId] = owner
+        if (nodes[snapshot.elementId] != snapshot) {
+            nodes[snapshot.elementId] = snapshot
+        }
+    }
+
+    fun recordMetadata(meta: StageElementMetadata, owner: Any? = null) {
+        if (owner != null) {
+            metadataOwners[meta.elementId] = owner
+        }
+        if (metadata[meta.elementId] != meta) {
+            metadata[meta.elementId] = meta
+        }
+    }
+
+    fun metadataFor(elementId: String): StageElementMetadata? = metadata[elementId]
+
     fun remove(elementId: String) {
+        nodeOwners.remove(elementId)
+        metadataOwners.remove(elementId)
         nodes.remove(elementId)
+        metadata.remove(elementId)
+    }
+
+    fun remove(elementId: String, owner: Any) {
+        if (nodeOwners[elementId] === owner) {
+            nodeOwners.remove(elementId)
+            nodes.remove(elementId)
+        }
+        if (metadataOwners[elementId] === owner) {
+            metadataOwners.remove(elementId)
+            metadata.remove(elementId)
+        }
     }
 
     fun nodesForSlide(sceneIndex: Int, beatIndex: Int): List<StageNodeSnapshot> =
         nodes.values.filter { it.sceneIndex == sceneIndex && it.beatIndex == beatIndex }
 
     fun clear() {
+        nodeOwners.clear()
+        metadataOwners.clear()
         nodes.clear()
+        metadata.clear()
     }
 }
 
 val LocalStageInspectionRegistry = staticCompositionLocalOf<StageInspectionRegistry?> { null }
+
+/**
+ * Effective composited background colour behind the current subtree, updated by surface
+ * containers so child text nodes know their true background colour for contrast checks.
+ */
+val LocalEffectiveBackgroundColor = compositionLocalOf { Color.Unspecified }
+
+/**
+ * Current active beat index within the enclosing choreographed scene.
+ */
+val LocalActiveBeatIndex = compositionLocalOf { 0 }
+
+/**
+ * Holds the root 1920x1080 stage [LayoutCoordinates] so child elements compute stage-space
+ * bounds regardless of outer window scaling or letterboxing.
+ */
+@Stable
+class StageRootCoordinatesHolder {
+    var coordinates: LayoutCoordinates? = null
+}
+
+val LocalStageRootCoordinates = staticCompositionLocalOf<StageRootCoordinatesHolder?> { null }
