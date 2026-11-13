@@ -25,10 +25,11 @@ import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.DesktopEasel
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.EaselWindow
-import dev.bnorm.storyboard.easel.assist.rememberAssistantWindow
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.easel.resolveStoryboardWorkspaceRoot
 import dev.bnorm.storyboard.plus
+import dev.sebastiano.ciacola.presenter.PresenterWindow
+import dev.sebastiano.ciacola.presenter.rememberPresenterWindow
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
@@ -134,6 +135,36 @@ fun main() = application {
                 motionPathPreview = motionPathPreview,
                 stageSelection = stageSelection,
             )
+            var presenterWindowHolder by remember { mutableStateOf<PresenterWindow?>(null) }
+            val presenterWindow = rememberPresenterWindow(
+                animatic = animatic,
+                currentPresetProvider = {
+                    presetRegistry.presetFor(presenterWindowHolder?.controller?.animatic?.storyboard, fallback = preset)
+                },
+                isStudioOpenProvider = { timelineController.authoringActive },
+                isInspectOpenProvider = { reviewStageCoordinator.inspectModeEnabled },
+                hasUnbakedOverridesProvider = {
+                    timelineOverridesStore.structuralRevision
+                    timelineOverridesStore.parameterRevision
+                    timelineOverridesStore.data().hasOverrides
+                },
+                onEnterCleanShowMode = {
+                    timelineController.dockedInStoryWindow = false
+                    timelineController.detachedWindowVisible = false
+                    reviewStageCoordinator.inspectModeEnabled = false
+                    reviewStageCoordinator.dismissActivePopups()
+                },
+                isOverviewOpenProvider = {
+                    stageSelection.overviewPreviewMountCount > 0
+                },
+                isExternalTextInputActiveProvider = {
+                    reviewStageCoordinator.pendingSelection != null ||
+                        reviewStageCoordinator.selectedPinCommentId != null
+                },
+                onRestoreStageFocus = {
+                    runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
+                },
+            ).also { presenterWindowHolder = it }
             val timelineWindow = rememberTimelineStudioWindow(
                 controller = timelineController,
                 currentPresetProvider = {
@@ -141,7 +172,8 @@ fun main() = application {
                 },
                 suppressShortcutsProvider = {
                     reviewStageCoordinator.pendingSelection != null ||
-                        reviewStageCoordinator.selectedPinCommentId != null
+                        reviewStageCoordinator.selectedPinCommentId != null ||
+                        presenterWindow.controller.jumpDialogOpen
                 },
             )
             val themeWindow = rememberThemeSwitcherWindow(
@@ -165,7 +197,7 @@ fun main() = application {
             DesktopEasel(
                 animatic = animatic,
                 windows = listOf(
-                    rememberAssistantWindow(animatic),
+                    presenterWindow,
                     themeWindow,
                     reviewWindow,
                     timelineWindow,

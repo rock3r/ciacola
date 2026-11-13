@@ -74,6 +74,11 @@ import dev.sebastiano.ciacola.effects.keynoteFromDarkness
 import dev.sebastiano.ciacola.effects.keynotePop
 import dev.sebastiano.ciacola.effects.keynoteSpotlight
 import dev.sebastiano.ciacola.effects.spatialEntranceOffset
+import dev.sebastiano.ciacola.presenter.DeckSpeakerNotes
+import dev.sebastiano.ciacola.presenter.DeckSpeakerNotesBuilder
+import dev.sebastiano.ciacola.presenter.LocalDeckSpeakerNotes
+import dev.sebastiano.ciacola.presenter.SceneSpeakerNotesBuilder
+import dev.sebastiano.ciacola.presenter.StoryboardSpeakerNotesRegistry
 import dev.sebastiano.ciacola.review.ReportSceneHeader
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.DeckTheme
@@ -149,19 +154,32 @@ fun createFoundationDeck(
     includeKeynoteEffectsLab: Boolean = false,
     stageDecorator: ContentDecorator = ContentDecorator.None,
     timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
-): Storyboard = Storyboard.build(
-    title = "Ciacola",
-    description = "Provisional scenes proving the presentation architecture; not talk narrative.",
-    format = DeckDesign.format,
-    decorator = deckDecorator(textRenderer, theme, bundledPreset, timelineOverrides) + stageDecorator,
-) {
-    beatsScene(theme, timelineOverrides)
-    sharedMoveScene(theme, timelineOverrides)
-    ambientLoopScene(theme, timelineOverrides)
-    kotlinCodeScene(theme, theme.colors.code.toCodeStyle(), timelineOverrides)
-    if (includeKeynoteEffectsLab) {
-        keynoteEffectsLabScene(theme, timelineOverrides)
+): Storyboard {
+    val notesBuilder = DeckSpeakerNotesBuilder()
+    lateinit var speakerNotes: DeckSpeakerNotes
+    val storyboard = Storyboard.build(
+        title = "Ciacola",
+        description = "Provisional scenes proving the presentation architecture; not talk narrative.",
+        format = DeckDesign.format,
+        decorator = deckDecorator(
+            textRenderer = textRenderer,
+            theme = theme,
+            bundledPreset = bundledPreset,
+            timelineOverrides = timelineOverrides,
+            speakerNotesProvider = { speakerNotes },
+        ) + stageDecorator,
+    ) {
+        beatsScene(theme, timelineOverrides, notesBuilder)
+        sharedMoveScene(theme, timelineOverrides, notesBuilder)
+        ambientLoopScene(theme, timelineOverrides, notesBuilder)
+        kotlinCodeScene(theme, theme.colors.code.toCodeStyle(), timelineOverrides, notesBuilder)
+        if (includeKeynoteEffectsLab) {
+            keynoteEffectsLabScene(theme, timelineOverrides, notesBuilder)
+        }
     }
+    speakerNotes = notesBuilder.build()
+    StoryboardSpeakerNotesRegistry.register(storyboard, speakerNotes)
+    return storyboard
 }
 
 private fun deckDecorator(
@@ -169,6 +187,7 @@ private fun deckDecorator(
     theme: DeckTheme,
     bundledPreset: DeckThemePreset? = null,
     timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
+    speakerNotesProvider: () -> DeckSpeakerNotes = { DeckSpeakerNotes.Empty },
 ) = ContentDecorator { content ->
     val activeTheme = if (bundledPreset != null) {
         DeckThemes.rememberBundledDeckTheme(bundledPreset)
@@ -180,7 +199,10 @@ private fun deckDecorator(
     } else {
         timelineOverrides
     }
-    CompositionLocalProvider(LocalTimelineOverrides provides effectiveOverrides) {
+    CompositionLocalProvider(
+        LocalTimelineOverrides provides effectiveOverrides,
+        LocalDeckSpeakerNotes provides speakerNotesProvider(),
+    ) {
         DeckTextRendererProvider(textRenderer) {
             DeckThemeProvider(activeTheme) {
                 Surface(Modifier.fillMaxSize(), color = activeTheme.colors.background) { content() }
@@ -195,8 +217,15 @@ private fun <T> StoryboardBuilder.choreographedScene(
     baseFrames: List<T>,
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
+    notesBuilder: DeckSpeakerNotesBuilder? = null,
+    notes: (SceneSpeakerNotesBuilder.() -> Unit)? = null,
     content: @Composable context(androidx.compose.animation.AnimatedVisibilityScope, androidx.compose.animation.SharedTransitionScope) SceneScope<VirtualizedFrame<T>>.() -> Unit,
 ) {
+    if (notesBuilder != null) {
+        notesBuilder.scene(sceneIndex, sceneTitle) {
+            notes?.invoke(this)
+        }
+    }
     val vFrames = buildVirtualizedFrames(baseFrames, overrides.sceneBeats[sceneIndex])
     val dissolveMs = theme.motion.dissolveDurationMs
     scene(
@@ -238,6 +267,7 @@ private data class BeatState(val eyebrow: String, val prose: AnnotatedString)
 private fun StoryboardBuilder.beatsScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
+    notesBuilder: DeckSpeakerNotesBuilder? = null,
 ) = choreographedScene(
     sceneIndex = 0,
     sceneTitle = "Beats",
@@ -248,6 +278,13 @@ private fun StoryboardBuilder.beatsScene(
     ),
     theme = theme,
     overrides = overrides,
+    notesBuilder = notesBuilder,
+    notes = {
+        overview("Open with the core promise: every beat is an explicit state, driven forward and backward by one transition model.")
+        beat(0, "[Pause] Establish the baseline state. Point out that nothing runs imperatively on click — advancing targets the next state.")
+        beat(1, "[Click] Highlight how MagicText diffs and moves retained words ('A scene', 'deterministic', 'state.') instead of cross-fading the whole sentence.")
+        beat(2, "[Click] Watch the bottom-right shared badge appear — it previews the cross-slide Magic Move handoff into Slide 2.")
+    },
 ) {
     @OptIn(ExperimentalTransitionApi::class)
     val prose = transition.createChildTransition("foundation-prose") { it.toValue().value.prose }
@@ -298,12 +335,19 @@ private data class SharedMoveState(val expanded: Boolean)
 private fun StoryboardBuilder.sharedMoveScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
+    notesBuilder: DeckSpeakerNotesBuilder? = null,
 ) = choreographedScene(
     sceneIndex = 1,
     sceneTitle = "Shared Move",
     baseFrames = listOf(SharedMoveState(false), SharedMoveState(true)),
     theme = theme,
     overrides = overrides,
+    notesBuilder = notesBuilder,
+    notes = {
+        overview("Demonstrates Storyboard sharedBounds across scenes and deterministic in-scene morphing.")
+        beat(0, "Notice the accent badge from Slide 1 landed cleanly in the top-left slot as a 240dp card.")
+        beat(1, "[Click] Card expands to center stage. Mention that reversing (←) or scrubbing follows the exact same arc trajectory.")
+    },
 ) {
     val activeTheme = LocalDeckTheme.current
     val sceneVisibility: AnimatedVisibilityScope = contextOf<AnimatedVisibilityScope>()
@@ -404,12 +448,18 @@ internal fun sharedCardRect(start: Rect, end: Rect, fraction: Float, arcBend: Fl
 private fun StoryboardBuilder.ambientLoopScene(
     theme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
+    notesBuilder: DeckSpeakerNotesBuilder? = null,
 ) = choreographedScene(
     sceneIndex = 2,
     sceneTitle = "Ambient Loop",
     baseFrames = listOf(0),
     theme = theme,
     overrides = overrides,
+    notesBuilder = notesBuilder,
+    notes = {
+        overview("Single resting beat with a continuous vertex-mesh backdrop.")
+        beat(0, "Emphasize separation of concerns: the ambient loop ticks independently without mutating slide navigation state, and adapts its palette to Stage Dark / Keynote Light.")
+    },
 ) {
     val activeTheme = LocalDeckTheme.current
     val cardShape = RoundedCornerShape(activeTheme.styles.codeCard.cornerRadius)
@@ -441,6 +491,7 @@ private fun StoryboardBuilder.kotlinCodeScene(
     deckTheme: DeckTheme,
     codeStyle: CodeStyle,
     overrides: DeckTimelineOverridesFile,
+    notesBuilder: DeckSpeakerNotesBuilder? = null,
 ) = choreographedScene(
     sceneIndex = 3,
     sceneTitle = "Highlighted Code",
@@ -451,6 +502,13 @@ private fun StoryboardBuilder.kotlinCodeScene(
     ),
     theme = deckTheme,
     overrides = overrides,
+    notesBuilder = notesBuilder,
+    notes = {
+        overview("Syntax-highlighted Kotlin carried as AnnotatedString spans through MagicText.")
+        beat(0, "Start with the single-expression function; point out that token styles live on the AnnotatedString itself.")
+        beat(1, "[Click] Expression body expands into a block. 'fun provisional()' slides cleanly while retaining its highlight colors.")
+        beat(2, "[Click] Introduce parameter 'message: String' and pass it to println — new tokens fade in around stable anchors.")
+    },
 ) {
     val theme = LocalDeckTheme.current
     @OptIn(ExperimentalTransitionApi::class)
@@ -498,12 +556,22 @@ private fun codeState(
 private fun StoryboardBuilder.keynoteEffectsLabScene(
     deckTheme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
+    notesBuilder: DeckSpeakerNotesBuilder? = null,
 ) = choreographedScene(
     sceneIndex = 4,
     sceneTitle = "Keynote Effects Lab",
     baseFrames = listOf(0, 1, 2, 3, 4),
     theme = deckTheme,
     overrides = overrides,
+    notesBuilder = notesBuilder,
+    notes = {
+        overview("Full choreography testbed: staggered rows, spring stamp, LineDraw callout, WarpCode morph, and Magnifier loupe.")
+        beat(0, "Baseline heading only: sets up the naive claim ('Fix with SpanStyle(alpha)!') before revealing the breakdown.")
+        beat(1, "[Click] Staggered leader rows + right-hand WarpCode card fade in together on a 55ms cascade.")
+        beat(2, "[Click] IMMUTABLE stamp pops in with a spring and draws the curved leader arrow up to BasicText(AnnotatedString).")
+        beat(3, "[Click] WarpCode card expands to multiline parameters while the dashed callout outline draws around it and comparison rows dim.")
+        beat(4, "[Click] Punchline: animated red strikeout crosses out the old heading and the zoomed iris loupe highlights BasicText(AnnotatedString).")
+    },
 ) {
     val theme = LocalDeckTheme.current
     @OptIn(ExperimentalTransitionApi::class)
