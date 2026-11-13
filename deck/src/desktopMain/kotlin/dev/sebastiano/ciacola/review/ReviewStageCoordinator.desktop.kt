@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.LocalStoryboard
 import dev.bnorm.storyboard.easel.SceneMode
@@ -80,7 +81,19 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.typography
 
+data class SlideCaptureContext(
+    val sceneIndex: Int = 0,
+    val frameIndex: Int = 0,
+    val sceneCount: Int = 1,
+    val frameCount: Int = 1,
+)
+
 data class PendingReviewSelection(
+    val sceneIndex: Int = 0,
+    val frameIndex: Int = 0,
+    val sceneCount: Int = 1,
+    val frameCount: Int = 1,
+    val sceneTitle: String = "",
     val stageX: Float,
     val stageY: Float,
     val selectionBounds: StageRectDto?,
@@ -111,6 +124,9 @@ class ReviewStageCoordinator : ReviewStageBridge {
     var currentSceneHeader by mutableStateOf("")
         private set
 
+    var currentSceneTitle by mutableStateOf("")
+        private set
+
     var inspectModeEnabled by mutableStateOf(false)
     var showStageBadges by mutableStateOf(true)
 
@@ -137,9 +153,21 @@ class ReviewStageCoordinator : ReviewStageBridge {
     internal val stageFocusRequester = FocusRequester()
 
     internal var currentSlideCommentsProvider: () -> List<SlideReviewComment> = { emptyList() }
+    internal var commentDisplayNumberProvider: (String) -> Int = { id ->
+        (currentSlideCommentsProvider().indexOfFirst { it.id == id } + 1).coerceAtLeast(1)
+    }
+    internal var currentSlideContextProvider: () -> SlideCaptureContext = { SlideCaptureContext() }
+    internal var hudBoundsInRoot by mutableStateOf<Rect?>(null)
     internal var isDarkThemeProvider: () -> Boolean = { true }
     internal var stagePinsVisible by mutableStateOf(false)
     internal var stagePinRadiusPx: Float = 12f
+
+    internal fun isStagePointOverHud(stagePoint: Offset): Boolean {
+        val hud = hudBoundsInRoot ?: return false
+        val root = stageRootCoordinates?.takeIf { it.isAttached } ?: return false
+        val rootPoint = runCatching { root.localToRoot(stagePoint) }.getOrNull() ?: return false
+        return hud.contains(rootPoint)
+    }
 
     private val entries = mutableStateMapOf<Any, RegisteredEntry>()
     private val pinCoordinates = mutableStateMapOf<String, LayoutCoordinates>()
@@ -186,6 +214,10 @@ class ReviewStageCoordinator : ReviewStageBridge {
 
     override fun updateSceneHeader(header: String) {
         currentSceneHeader = header
+    }
+
+    override fun updateSceneTitle(title: String) {
+        currentSceneTitle = title
     }
 
     override fun registerTarget(
@@ -328,9 +360,9 @@ class ReviewStageCoordinator : ReviewStageBridge {
     }
 
     val stageDecorator: ContentDecorator = ContentDecorator { content ->
-        // Offscreen timeline indexing scenes also render in Story mode; they must never take over
+        // Offscreen timeline indexing scenes and Esc Overview thumbnails must never take over
         // (or, when they close, reset) the live stage's coordinates, capture layer, or popups.
-        if (LocalSceneMode.current != SceneMode.Story || LocalTimelineOffscreen.current) {
+        if (LocalSceneMode.current != SceneMode.Story || LocalTimelineOffscreen.current || LocalOverviewOpen.current) {
             content()
             return@ContentDecorator
         }
@@ -432,10 +464,11 @@ private fun ReviewStageLayer(
                             PointerEventType.Move -> {
                                 if (pos != null) {
                                     if (coordinator.dragStartStagePoint != null) {
-                                        coordinator.hoverStagePoint = pos
-                                        coordinator.dragCurrentStagePoint = pos
+                                        val clamped = clampStagePoint(pos, formatSize)
+                                        coordinator.hoverStagePoint = clamped
+                                        coordinator.dragCurrentStagePoint = clamped
                                         event.changes.forEach { it.consume() }
-                                    } else if (coordinator.findVisiblePinAt(pos) != null) {
+                                    } else if (coordinator.isStagePointOverHud(pos) || coordinator.findVisiblePinAt(pos) != null) {
                                         coordinator.hoverStagePoint = null
                                     } else {
                                         coordinator.hoverStagePoint = pos
@@ -451,6 +484,10 @@ private fun ReviewStageLayer(
 
                             PointerEventType.Press -> {
                                 if (pos != null && ctrlNow) {
+                                    if (coordinator.isStagePointOverHud(pos)) {
+                                        coordinator.hoverStagePoint = null
+                                        continue
+                                    }
                                     val hitPin = coordinator.findVisiblePinAt(pos)
                                     if (hitPin != null) {
                                         coordinator.hoverStagePoint = null
@@ -463,10 +500,11 @@ private fun ReviewStageLayer(
                                         continue
                                     }
                                     event.changes.forEach { it.consume() }
+                                    val clamped = clampStagePoint(pos, formatSize)
                                     coordinator.selectedPinCommentId = null
-                                    coordinator.dragStartStagePoint = pos
-                                    coordinator.dragCurrentStagePoint = pos
-                                    coordinator.hoverStagePoint = pos
+                                    coordinator.dragStartStagePoint = clamped
+                                    coordinator.dragCurrentStagePoint = clamped
+                                    coordinator.hoverStagePoint = clamped
                                 }
                             }
 
@@ -474,14 +512,21 @@ private fun ReviewStageLayer(
                                 val start = coordinator.dragStartStagePoint
                                 if (start != null) {
                                     event.changes.forEach { it.consume() }
-                                    val end = pos ?: coordinator.dragCurrentStagePoint ?: start
+                                    val clampedStart = clampStagePoint(start, formatSize)
+                                    val clampedEnd = clampStagePoint(
+                                        pos ?: coordinator.dragCurrentStagePoint ?: start,
+                                        formatSize,
+                                    )
                                     coordinator.dragStartStagePoint = null
                                     coordinator.dragCurrentStagePoint = null
                                     coordinator.isCtrlKeyHeld = false
 
-                                    val rawDrag = normalizeDragRect(start, end)
+                                    val rawDrag = clampStageRect(normalizeDragRect(clampedStart, clampedEnd), formatSize)
                                     val significantDrag = isSignificantDrag(rawDrag)
-                                    val anchor = if (significantDrag) rawDrag.center else end
+                                    val anchor = clampStagePoint(
+                                        if (significantDrag) rawDrag.center else clampedEnd,
+                                        formatSize,
+                                    )
                                     val hit = coordinator.resolveHit(
                                         stagePoint = anchor,
                                         dragRect = rawDrag.takeIf { significantDrag },
@@ -491,17 +536,27 @@ private fun ReviewStageLayer(
                                     } else {
                                         hit.bounds
                                     }
+                                    // Capture slide identity synchronously at selection time so navigating
+                                    // while the composer is open never files under the wrong slide.
+                                    val capturedSlide = coordinator.currentSlideContextProvider()
+                                    val capturedSceneTitle = coordinator.currentSceneTitle
+                                    val capturedSceneHeader = coordinator.currentSceneHeader
 
                                     scope.launch {
                                         val bitmap = runCatching {
                                             cleanStageGraphicsLayer.toImageBitmap()
                                         }.getOrNull()
                                         coordinator.pendingSelection = PendingReviewSelection(
-                                            stageX = anchor.x.coerceIn(0f, formatSize.width.toFloat()),
-                                            stageY = anchor.y.coerceIn(0f, formatSize.height.toFloat()),
+                                            sceneIndex = capturedSlide.sceneIndex,
+                                            frameIndex = capturedSlide.frameIndex,
+                                            sceneCount = capturedSlide.sceneCount,
+                                            frameCount = capturedSlide.frameCount,
+                                            sceneTitle = capturedSceneTitle,
+                                            stageX = anchor.x,
+                                            stageY = anchor.y,
                                             selectionBounds = selectionBounds,
                                             target = hit,
-                                            sceneHeader = coordinator.currentSceneHeader,
+                                            sceneHeader = capturedSceneHeader,
                                             stageFormatSize = formatSize,
                                             capturedBitmap = bitmap,
                                         )
@@ -577,7 +632,7 @@ private fun ReviewStageHighlightsAndPins(
         val dragStart = coordinator.dragStartStagePoint
         val dragCurrent = coordinator.dragCurrentStagePoint
         if (dragStart != null && dragCurrent != null) {
-            val marquee = normalizeDragRect(dragStart, dragCurrent)
+            val marquee = clampStageRect(normalizeDragRect(dragStart, dragCurrent), coordinator.stageFormatSize)
             if (isSignificantDrag(marquee)) {
                 drawRoundRect(
                     color = marqueeColor.copy(alpha = 0.14f),
@@ -623,13 +678,14 @@ private fun ReviewStageHighlightsAndPins(
         val pinSizeDp = 24.dp
         val pinHalfPx = with(density) { (pinSizeDp / 2).roundToPx() }
         coordinator.stagePinRadiusPx = with(density) { (pinSizeDp / 2).toPx() }
-        slideComments.forEachIndexed { idx, comment ->
+        slideComments.forEach { comment ->
             key(comment.id) {
                 DisposableEffect(coordinator, comment.id) {
                     onDispose {
                         coordinator.unregisterPinCoordinates(comment.id)
                     }
                 }
+                val displayNumber = coordinator.commentDisplayNumberProvider(comment.id)
                 val pinColor = statusPalette.colorFor(comment.status)
                 Box(
                     modifier = Modifier
@@ -652,11 +708,11 @@ private fun ReviewStageHighlightsAndPins(
                             coordinator.selectedPinCommentId =
                                 if (coordinator.selectedPinCommentId == comment.id) null else comment.id
                         }
-                        .testTag("ciacola-review-pin-${idx + 1}"),
+                        .testTag("ciacola-review-pin-$displayNumber"),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = (idx + 1).toString(),
+                        text = displayNumber.toString(),
                         color = statusPalette.pinBadgeForeground,
                         style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
                     )

@@ -624,7 +624,7 @@ class CiacolaStudioSpectreTest {
                 onUi { vp.zoomToFit() }
                 automator.pressKey(KeyEvent.VK_SEMICOLON)
                 settle()
-                assertEquals(FRAME_LEVEL_PX_PER_MS, vp.pxPerMs, "; goes to frame level")
+                assertEquals(FRAME_LEVEL_DP_PER_MS, vp.dpPerMs, "; goes to frame level")
                 val playheadX = vp.xForTime(controller.currentPlayheadTimeMs.toFloat())
                 assertTrue(playheadX in 0f..vp.viewportWidthPx, "Playhead stays visible at frame level")
                 automator.pressKey(KeyEvent.VK_SEMICOLON)

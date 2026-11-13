@@ -30,8 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -48,7 +52,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
-import dev.bnorm.storyboard.easel.Animatic
 import dev.sebastiano.ciacola.ui.ReviewStatusPalette
 import dev.sebastiano.ciacola.ui.iconKey
 import dev.sebastiano.ciacola.ui.labelText
@@ -84,6 +87,7 @@ internal fun BoxScope.ReviewHudToolbar(
     queuedCount: Int,
     applyingCount: Int,
     appliedCount: Int,
+    onHudBoundsChanged: (Rect) -> Unit = {},
     onToggleInspectMode: () -> Unit,
     onToggleTimeline: (() -> Unit)? = null,
     onOpenReviewPanel: () -> Unit,
@@ -98,9 +102,15 @@ internal fun BoxScope.ReviewHudToolbar(
         modifier = Modifier
             .align(Alignment.TopEnd)
             .padding(10.dp)
+            .onGloballyPositioned { coords ->
+                if (coords.isAttached) {
+                    onHudBoundsChanged(coords.boundsInRoot())
+                }
+            }
             .background(globalColors.panelBackground.copy(alpha = 0.92f), toolbarShape)
             .border(1.dp, borderColor, toolbarShape)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .testTag("ciacola-hud-toolbar"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -118,20 +128,40 @@ internal fun BoxScope.ReviewHudToolbar(
                     contentDescription = "Inspect slide elements",
                     modifier = Modifier.size(14.dp),
                 )
-                val label = when {
-                    inspectPinned -> "Inspecting (F3)"
-                    applyingCount > 0 -> "$applyingCount applying…"
-                    else -> "Ctrl+Click"
-                }
+                val label = if (inspectPinned) "Inspecting (F3)" else "Ctrl+Click stage to comment"
                 Text(
                     text = label,
                     style = JewelTheme.typography.small,
-                    color = if (inspectActive || applyingCount > 0) {
+                    color = if (inspectActive) {
                         statusPalette.inspectAccent
                     } else {
                         globalColors.text.info
                     },
                 )
+            }
+        }
+
+        if (applyingCount > 0) {
+            Tooltip(tooltip = { Text("Open Review panel (F4) — $applyingCount comment(s) applying") }) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClick = onOpenReviewPanel)
+                        .padding(horizontal = 3.dp, vertical = 2.dp)
+                        .testTag("ciacola-hud-applying-badge"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Icon(
+                        key = AllIconsKeys.Actions.Refresh,
+                        contentDescription = "Applying comments",
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        text = "$applyingCount applying…",
+                        style = JewelTheme.typography.small,
+                        color = statusPalette.applying,
+                    )
+                }
             }
         }
 
@@ -220,7 +250,6 @@ internal fun BoxScope.ReviewHudToolbar(
 @Composable
 internal fun AnchoredCommentComposerPopup(
     pending: PendingReviewSelection,
-    animatic: Animatic,
     store: ReviewCommentStore,
     themePresetName: String,
     outerBoundsInRoot: Rect?,
@@ -245,10 +274,21 @@ internal fun AnchoredCommentComposerPopup(
     var validationError by remember(pending) { mutableStateOf<String?>(null) }
     val noteFocusRequester = remember(pending) { FocusRequester() }
     val convIdFocusRequester = remember(pending) { FocusRequester() }
+    var noteFocused by remember(pending) { mutableStateOf(false) }
+    var initialFocusDone by remember(pending) { mutableStateOf(false) }
 
     LaunchedEffect(pending) {
-        withFrameNanos {}
-        runCatching { noteFocusRequester.requestFocus() }
+        var attempts = 0
+        while (!noteFocused && !initialFocusDone && attempts < 12) {
+            val requested = runCatching { noteFocusRequester.requestFocus() }.getOrDefault(false)
+            if (requested && noteFocused) {
+                initialFocusDone = true
+                break
+            }
+            withFrameNanos {}
+            attempts++
+        }
+        initialFocusDone = true
     }
 
     fun submit(dispatchImmediate: Boolean) {
@@ -272,15 +312,13 @@ internal fun AnchoredCommentComposerPopup(
             store.saveConfig(store.config.copy(conversationId = enteredConv))
         }
 
-        val storyboard = animatic.storyboard
-        val targetIdx = animatic.targetIndex
-        val frameCount = storyboard.scenes.getOrNull(targetIdx.sceneIndex)?.frames?.size ?: 1
         val comment = SlideReviewComment(
             id = generateReviewCommentId(),
-            sceneIndex = targetIdx.sceneIndex,
-            frameIndex = targetIdx.frameIndex,
-            sceneCount = storyboard.scenes.size,
-            frameCount = frameCount,
+            sceneIndex = pending.sceneIndex,
+            frameIndex = pending.frameIndex,
+            sceneCount = pending.sceneCount,
+            frameCount = pending.frameCount,
+            sceneTitle = pending.sceneTitle,
             sceneHeader = pending.sceneHeader,
             themePreset = themePresetName,
             stageX = pending.stageX,
@@ -338,15 +376,15 @@ internal fun AnchoredCommentComposerPopup(
         ) {
             val globalColors = JewelTheme.globalColors
             val statusPalette = rememberReviewStatusPalette()
-            val targetIdx = animatic.targetIndex
 
             Column(
                 modifier = Modifier.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 ComposerPopupHeader(
-                    sceneNumber = targetIdx.sceneIndex + 1,
-                    frameNumber = targetIdx.frameIndex + 1,
+                    sceneNumber = pending.sceneIndex + 1,
+                    frameNumber = pending.frameIndex + 1,
+                    sceneTitle = pending.sceneTitle,
                     targetKind = pending.target.kind,
                     stageX = pending.stageX.toInt(),
                     stageY = pending.stageY.toInt(),
@@ -413,6 +451,17 @@ internal fun AnchoredCommentComposerPopup(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onPlaced {
+                            if (!initialFocusDone && !noteFocused) {
+                                runCatching { noteFocusRequester.requestFocus() }
+                            }
+                        }
+                        .onFocusChanged { state ->
+                            if (state.isFocused) {
+                                noteFocused = true
+                                initialFocusDone = true
+                            }
+                        }
                         .focusRequester(noteFocusRequester)
                         .testTag("ciacola-review-note-input"),
                 )
@@ -477,6 +526,7 @@ internal fun AnchoredCommentComposerPopup(
 private fun ComposerPopupHeader(
     sceneNumber: Int,
     frameNumber: Int,
+    sceneTitle: String,
     targetKind: String,
     stageX: Int,
     stageY: Int,
@@ -489,18 +539,27 @@ private fun ComposerPopupHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
+            modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val slideLabel = if (sceneTitle.isNotBlank()) {
+                "Scene $sceneNumber ($sceneTitle) · Frame $frameNumber"
+            } else {
+                "Scene $sceneNumber · Frame $frameNumber"
+            }
             Text(
-                text = "Scene $sceneNumber · Frame $frameNumber",
+                text = slideLabel,
                 style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                 color = accentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "$targetKind ($stageX, $stageY)",
                 style = JewelTheme.typography.small,
                 color = JewelTheme.globalColors.text.info,
+                maxLines = 1,
             )
         }
         Tooltip(tooltip = { Text("Cancel comment (Esc)") }) {
@@ -545,12 +604,14 @@ private fun QuotedTargetPreview(quote: String) {
 @Composable
 internal fun AnchoredSelectedPinPopup(
     comment: SlideReviewComment,
+    displayNumber: Int = 1,
     outerBoundsInRoot: Rect?,
     stageBoundsInRoot: Rect?,
     stageFormatSize: IntSize,
     agentConfigured: Boolean = true,
     onClose: (fromEscapeKey: Boolean) -> Unit,
     onDelete: () -> Unit,
+    onMarkApplied: () -> Unit = {},
     onRetry: () -> Unit,
     onConfigureAgent: () -> Unit = {},
 ) {
@@ -564,6 +625,7 @@ internal fun AnchoredSelectedPinPopup(
     val statusPalette: ReviewStatusPalette = rememberReviewStatusPalette()
     val globalColors = JewelTheme.globalColors
     val pinPopupFocusRequester = remember(comment.id) { FocusRequester() }
+    var confirmDiscard by remember(comment.id) { mutableStateOf(false) }
 
     LaunchedEffect(comment.id) {
         withFrameNanos {}
@@ -584,7 +646,7 @@ internal fun AnchoredSelectedPinPopup(
                 dismissOnClickOutside = true,
             ),
             modifier = Modifier
-                .width(320.dp)
+                .width(336.dp)
                 .testTag("ciacola-review-pin-popup")
                 .focusRequester(pinPopupFocusRequester)
                 .focusable()
@@ -616,7 +678,7 @@ internal fun AnchoredSelectedPinPopup(
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = comment.status.labelText(),
+                            text = "#$displayNumber · ${comment.status.labelText()}",
                             style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                             color = statusPalette.colorFor(comment.status),
                         )
@@ -671,25 +733,100 @@ internal fun AnchoredSelectedPinPopup(
 
                 Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = onDelete) {
-                            Text("Resolve")
-                        }
-                        if (comment.status == ReviewCommentStatus.Failed ||
-                            comment.status == ReviewCommentStatus.Queued
+                if (confirmDiscard) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, statusPalette.queued, RoundedCornerShape(4.dp))
+                            .padding(8.dp)
+                            .testTag("ciacola-review-pin-discard-confirm"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = "This comment has not been applied yet. Discard it?",
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.normal,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (agentConfigured) {
-                                DefaultButton(onClick = onRetry) {
-                                    Text("Send Now")
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { confirmDiscard = false }) {
+                                    Text("Keep")
                                 }
-                            } else {
-                                OutlinedButton(onClick = onConfigureAgent) {
-                                    Text("Set Agent…")
+                                DefaultButton(
+                                    onClick = onDelete,
+                                    modifier = Modifier.testTag("ciacola-review-pin-confirm-discard"),
+                                ) {
+                                    Text("Discard")
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Tooltip(
+                                tooltip = {
+                                    Text(
+                                        if (comment.status == ReviewCommentStatus.Applied) {
+                                            "Resolve and dismiss this comment"
+                                        } else {
+                                            "Discard this unapplied comment (confirmation required)"
+                                        },
+                                    )
+                                },
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        if (comment.status == ReviewCommentStatus.Applied) {
+                                            onDelete()
+                                        } else {
+                                            confirmDiscard = true
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("ciacola-review-pin-resolve"),
+                                ) {
+                                    Text("Resolve")
+                                }
+                            }
+                            if (comment.status != ReviewCommentStatus.Applied) {
+                                Tooltip(tooltip = { Text("Mark this comment as applied") }) {
+                                    OutlinedButton(
+                                        onClick = onMarkApplied,
+                                        modifier = Modifier.testTag("ciacola-review-pin-mark-applied"),
+                                    ) {
+                                        Text("Mark Applied")
+                                    }
+                                }
+                                if (agentConfigured) {
+                                    val isQueued = comment.status == ReviewCommentStatus.Queued
+                                    val label = if (isQueued) "Send Now" else "Retry Send"
+                                    val tip = if (isQueued) {
+                                        "Send this queued comment to agent"
+                                    } else {
+                                        "Retry dispatching this comment to agent"
+                                    }
+                                    Tooltip(tooltip = { Text(tip) }) {
+                                        DefaultButton(
+                                            onClick = onRetry,
+                                            modifier = Modifier.testTag("ciacola-review-pin-retry"),
+                                        ) {
+                                            Text(label)
+                                        }
+                                    }
+                                } else {
+                                    Tooltip(tooltip = { Text("Configure Target Agent Conversation ID") }) {
+                                        OutlinedButton(onClick = onConfigureAgent) {
+                                            Text("Set Agent…")
+                                        }
+                                    }
                                 }
                             }
                         }

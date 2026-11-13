@@ -743,7 +743,7 @@ fun indexDeckTimeline(
         val end = sceneEndTime[sIdx].coerceAtLeast(start + 1)
         SlideSectionBar(
             sceneIndex = sIdx,
-            label = sceneDisplayTitle(sIdx, scene.frames.size),
+            label = sceneDisplayTitle(sIdx, scene.frames.size, collector.sceneTitles[sIdx]),
             startMs = start,
             endMs = end,
             overlapInMs = sceneOverlapIn[sIdx],
@@ -936,11 +936,7 @@ fun indexDeckTimeline(
     )
 }
 
-private fun sceneDisplayTitle(sceneIndex: Int, beatCount: Int): String = when (sceneIndex) {
-    0 -> "S1 · Beats ($beatCount)"
-    1 -> "S2 · Shared Move ($beatCount)"
-    2 -> "S3 · Ambient Loop ($beatCount)"
-    3 -> "S4 · Highlighted Code ($beatCount)"
-    4 -> "S5 · Keynote Lab ($beatCount)"
-    else -> "S${sceneIndex + 1} · Scene ($beatCount)"
+private fun sceneDisplayTitle(sceneIndex: Int, beatCount: Int, harvestedTitle: String?): String {
+    val cleanTitle = harvestedTitle?.trim()?.takeIf { it.isNotEmpty() } ?: "Scene"
+    return "S${sceneIndex + 1} · $cleanTitle ($beatCount)"
 }

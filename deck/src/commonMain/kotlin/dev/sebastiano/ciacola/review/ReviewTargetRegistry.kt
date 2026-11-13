@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.InspectorInfo
 
 interface ReviewStageBridge {
     fun updateSceneHeader(header: String)
+    fun updateSceneTitle(title: String) {}
     fun registerTarget(
         key: Any,
         kind: String,

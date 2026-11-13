@@ -177,13 +177,14 @@ class ReviewP1ErgonomicsTest {
         waitUntil(timeoutMillis = 5_000) { store.comments.size == 1 }
         assertEquals(finalNote, store.comments.single().note)
 
-        // Reopen after Send: composer must be empty with no Draft restored hint.
+        // Reopen after Send (away from Pin #1 at 300,240): composer must be empty with no Draft restored hint.
         onNodeWithTag("ciacola-review-stage", useUnmergedTree = true).performMouseInput {
-            click(position = Offset(300f, 240f))
+            click(position = Offset(520f, 360f))
         }
         waitForIdle()
         mainClock.advanceTimeBy(250)
         waitForIdle()
+        assertNotNull(coordinator.pendingSelection, "After Send, clicking empty stage must reopen composer")
         assertEquals(
             0,
             onAllNodesWithTag("ciacola-review-draft-restored-hint").fetchSemanticsNodes().size,

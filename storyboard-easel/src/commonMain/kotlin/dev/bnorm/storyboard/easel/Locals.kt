@@ -13,3 +13,9 @@ val LocalSceneMode: ProvidableCompositionLocal<SceneMode?> = compositionLocalOf 
  * decorators use it to keep authoring chrome (HUDs, review pins) off the audience's screen.
  */
 val LocalPresentingFullscreen: ProvidableCompositionLocal<Boolean> = compositionLocalOf { false }
+
+/**
+ * `true` while the Esc Overview grid is visible so window-level HUD overlays stay hidden and do
+ * not occlude overview slide thumbnails.
+ */
+val LocalOverviewOpen: ProvidableCompositionLocal<Boolean> = compositionLocalOf { false }

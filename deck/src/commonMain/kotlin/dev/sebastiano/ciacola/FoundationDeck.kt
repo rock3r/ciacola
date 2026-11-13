@@ -256,6 +256,14 @@ private fun <T> StoryboardBuilder.choreographedScene(
                 previewState?.activeStageSceneIndex = sceneIndex
             }
         }
+        dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector.current
+            ?.recordSceneTitle(sceneIndex, sceneTitle)
+        if (dev.bnorm.storyboard.easel.LocalSceneMode.current == dev.bnorm.storyboard.easel.SceneMode.Story) {
+            val reviewBridge = dev.sebastiano.ciacola.review.LocalReviewStageBridge.current
+            SideEffect {
+                reviewBridge?.updateSceneTitle(sceneTitle)
+            }
+        }
         CompositionLocalProvider(LocalActiveSceneTimeline provides ctx) {
             content()
         }
