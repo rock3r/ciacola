@@ -1,6 +1,7 @@
 package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -27,12 +28,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -72,9 +75,14 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -92,6 +100,11 @@ import dev.bnorm.storyboard.easel.SceneMode
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
+import java.awt.KeyboardFocusManager
+import java.awt.Window as AwtWindow
+import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
+import java.beans.PropertyChangeListener
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -100,6 +113,7 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.typography
 
 /** Complete After Effects Timeline Studio panel (Transport + Synchronized Tracks + Inspector). */
@@ -110,14 +124,60 @@ fun TimelineStudioPanel(
     modifier: Modifier = Modifier,
     surface: TimelineSurface = TimelineSurface.Docked,
 ) {
+    val existingFocusState = LocalStudioA11yFocusState.current
+    val focusState = existingFocusState ?: remember { StudioA11yFocusState() }
+    val panelFocusRequester = remember { FocusRequester() }
+    var panelHadFocus by remember { mutableStateOf(false) }
+    val activeSubLoopId = controller.loopClock.activeSubCompLoopId
+    var wasInSubComp by remember { mutableStateOf(activeSubLoopId != null) }
+    LaunchedEffect(activeSubLoopId) {
+        val nowInSubComp = activeSubLoopId != null
+        if (wasInSubComp && !nowInSubComp && panelHadFocus) {
+            withFrameNanos {}
+            runCatching { panelFocusRequester.requestFocus() }
+        }
+        wasInSubComp = nowInSubComp
+    }
     CiacolaJewelTheme(isDark = isDark) {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .background(JewelTheme.globalColors.panelBackground)
-                .testTag("ciacola-timeline-studio"),
-        ) {
-            TimelineTransportBar(controller = controller, surface = surface)
+        CompositionLocalProvider(LocalStudioA11yFocusState provides focusState) {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(JewelTheme.globalColors.panelBackground)
+                    .focusRequester(panelFocusRequester)
+                    .onFocusChanged {
+                        if (it.hasFocus) panelHadFocus = true
+                        focusState.timelinePanelHasFocus = it.hasFocus
+                    }
+                    .focusable()
+                    .then(
+                        if (existingFocusState == null) {
+                            Modifier.onPreviewKeyEvent { ev ->
+                                if (ev.type == KeyEventType.KeyDown && ev.key == Key.Escape &&
+                                    !ev.isCtrlPressed && !ev.isMetaPressed && !ev.isAltPressed
+                                ) {
+                                    when {
+                                        controller.loopClock.activeSubCompLoopId != null -> {
+                                            controller.exitLoopSubComp()
+                                            true
+                                        }
+                                        controller.dockedInStoryWindow -> {
+                                            controller.dockedInStoryWindow = false
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                } else {
+                                    false
+                                }
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .testTag("ciacola-timeline-studio"),
+            ) {
+                TimelineTransportBar(controller = controller, surface = surface)
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
             controller.overridesStore.structuralRevision
             if (controller.isPlayheadOnInjectedVirtualBeat()) {
@@ -149,28 +209,64 @@ fun TimelineStudioPanel(
                 TimelineBlockInspector(controller = controller)
             }
         }
+        }
     }
 }
 
 /**
  * After Effects keyboard map for the studio (active only while authoring):
- * - `Space` tap: play/pause; `Space` + drag: pan (hand tool) in the timeline or the preview.
+ * - `Space` tap: play/pause (yields to focused buttons, pills, steppers, and layer rows);
+ *   `Space` + drag: pan (hand tool) in the timeline or the preview.
+ * - `[` / `]`: previous / next event beat.
+ * - `Up` / `Down`: navigate layer rows when the layer list has focus; otherwise step slides.
  * - `=` / `-`: zoom the timeline in/out around the playhead; `;`: toggle fit / frame level.
  * - `.` / `,`: zoom the preview in/out; `/`: fit the preview.
+ * - `Esc` inside Timeline Studio: exits an active Loop Sub-Composition first, then closes docked Studio.
  * - `F5`: dock/undock the timeline (always available).
  */
 internal fun TimelineStudioController.handleStudioKey(
     event: KeyEvent,
     scope: CoroutineScope,
     suppressed: Boolean,
+    focusState: StudioA11yFocusState = StudioA11yFocusState(),
 ): Boolean {
     if (suppressed) return false
+    if (event.key == Key.Escape && event.type == KeyEventType.KeyUp && focusState.swallowNextEscapeKeyUp) {
+        focusState.swallowNextEscapeKeyUp = false
+        return true
+    }
     if (event.type == KeyEventType.KeyDown && event.key == Key.F5) {
         dockedInStoryWindow = !dockedInStoryWindow
+        if (!dockedInStoryWindow) {
+            spaceHeld = false
+            spaceUsedForPan = false
+        }
         return true
     }
     if (!authoringActive) return false
-    if (event.type == KeyEventType.KeyDown && !event.isAltPressed) {
+
+    if (event.key == Key.Escape) {
+        if (event.type == KeyEventType.KeyDown) {
+            focusState.swallowNextEscapeKeyUp = false
+        }
+        if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed) {
+            if (loopClock.activeSubCompLoopId != null && (focusState.timelinePanelHasFocus || detachedWindowVisible)) {
+                exitLoopSubComp()
+                focusState.swallowNextEscapeKeyUp = true
+                return true
+            }
+            if (dockedInStoryWindow && focusState.timelinePanelHasFocus) {
+                dockedInStoryWindow = false
+                spaceHeld = false
+                spaceUsedForPan = false
+                focusState.swallowNextEscapeKeyUp = true
+                return true
+            }
+        }
+        return false
+    }
+
+    if (event.type == KeyEventType.KeyDown && !event.isAltPressed && !focusState.textInputHasFocus) {
         val primaryMod = event.isMetaPressed || event.isCtrlPressed
         if (primaryMod && event.key == Key.Z) {
             if (event.isShiftPressed) redo() else undo()
@@ -182,23 +278,31 @@ internal fun TimelineStudioController.handleStudioKey(
         }
     }
     if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed) return false
+    if (focusState.textInputHasFocus) return false
 
     if (event.key == Key.Spacebar) {
-        when (event.type) {
-            KeyEventType.KeyDown -> if (!spaceHeld) {
-                spaceHeld = true
-                spaceUsedForPan = false
+        if (event.type == KeyEventType.KeyUp && spaceHeld) {
+            val wasTap = spaceHeld && !spaceUsedForPan
+            spaceHeld = false
+            spaceUsedForPan = false
+            if (wasTap && !focusState.activatableControlHasFocus) {
+                togglePlayback(scope)
             }
-            KeyEventType.KeyUp -> {
-                val wasTap = spaceHeld && !spaceUsedForPan
-                spaceHeld = false
-                spaceUsedForPan = false
-                if (wasTap) togglePlayback(scope)
-            }
+            return true
+        }
+        if (focusState.activatableControlHasFocus) {
+            return false
+        }
+        if (event.type == KeyEventType.KeyDown && !spaceHeld) {
+            spaceHeld = true
+            spaceUsedForPan = false
         }
         return true
     }
     if (event.type != KeyEventType.KeyDown) return false
+    if (focusState.layerListHasFocus && (event.key == Key.DirectionUp || event.key == Key.DirectionDown)) {
+        return false
+    }
     // Presenting keys work from anywhere in the studio: a click on the transport, a layer row or a
     // slider moves keyboard focus off the stage, which would otherwise swallow ←/→.
     val direction = when (event.key) {
@@ -213,6 +317,8 @@ internal fun TimelineStudioController.handleStudioKey(
     val playheadX = viewport.xForTime(currentPlayheadTimeMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx)
     val previewCenter = Offset(preview.containerSize.width / 2f, preview.containerSize.height / 2f)
     when (event.key) {
+        Key.LeftBracket -> stepBeat(-1)
+        Key.RightBracket -> stepBeat(+1)
         Key.Equals, Key.Plus, Key.NumPadAdd -> viewport.zoomBy(1.25f, playheadX)
         Key.Minus, Key.NumPadSubtract -> viewport.zoomBy(0.8f, playheadX)
         Key.Semicolon -> viewport.toggleFitAndFrames(currentPlayheadTimeMs.toFloat())
@@ -224,6 +330,49 @@ internal fun TimelineStudioController.handleStudioKey(
     return true
 }
 
+internal fun createSpaceResetWindowFocusListener(
+    controller: TimelineStudioController,
+): WindowFocusListener = object : WindowFocusListener {
+    override fun windowGainedFocus(e: WindowEvent?) = Unit
+    override fun windowLostFocus(e: WindowEvent?) {
+        controller.spaceHeld = false
+        controller.spaceUsedForPan = false
+    }
+}
+
+@Composable
+private fun InstallSpaceResetOnWindowFocusLoss(controller: TimelineStudioController) {
+    val windowInfo = LocalWindowInfo.current
+    LaunchedEffect(controller, windowInfo) {
+        snapshotFlow { windowInfo.isWindowFocused }.collect { focused ->
+            if (!focused) {
+                controller.spaceHeld = false
+                controller.spaceUsedForPan = false
+            }
+        }
+    }
+    DisposableEffect(controller) {
+        val listener = createSpaceResetWindowFocusListener(controller)
+        val attachedWindows = LinkedHashSet<AwtWindow>()
+        fun attachTo(window: AwtWindow?) {
+            if (window != null && attachedWindows.add(window)) {
+                window.addWindowFocusListener(listener)
+            }
+        }
+        AwtWindow.getWindows().forEach(::attachTo)
+        val kfm = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        val propListener = PropertyChangeListener { evt ->
+            attachTo(evt.newValue as? AwtWindow)
+        }
+        kfm.addPropertyChangeListener("focusedWindow", propListener)
+        onDispose {
+            kfm.removePropertyChangeListener("focusedWindow", propListener)
+            attachedWindows.forEach { it.removeWindowFocusListener(listener) }
+            attachedWindows.clear()
+        }
+    }
+}
+
 private val LocalInsideStagePreviewViewport = staticCompositionLocalOf { false }
 
 /**
@@ -231,6 +380,7 @@ private val LocalInsideStagePreviewViewport = staticCompositionLocalOf { false }
  * the cursor, Shift+wheel pans horizontally, Cmd/Ctrl+wheel pans vertically, and Space+drag or
  * middle-drag pans. Only active while authoring; presenting is never affected.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun StagePreviewViewport(
     controller: TimelineStudioController,
@@ -293,8 +443,12 @@ internal fun StagePreviewViewport(
             .then(if (previewActive && controller.spaceHeld) Modifier.pointerHoverIcon(PointerIcon.Hand, overrideDescendants = true) else Modifier)
             .testTag("ciacola-preview-viewport")
             .semantics {
-                contentDescription = "previewScale=${"%.3f".format(preview.scale)} " +
-                    "previewOffset=${preview.offset.x.roundToInt()},${preview.offset.y.roundToInt()}"
+                contentDescription = "Slide preview viewport"
+                stateDescription = if (preview.isIdentity) {
+                    "Fit to window"
+                } else {
+                    "Zoomed to ${(preview.scale * 100).roundToInt()} percent"
+                }
             },
     ) {
         Box(
@@ -314,20 +468,29 @@ internal fun StagePreviewViewport(
         }
         if (previewActive && !preview.isIdentity) {
             CiacolaJewelTheme(isDark = isDark) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(10.dp)
-                        .background(JewelTheme.globalColors.panelBackground.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
-                        .clickable { preview.reset() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .testTag("ciacola-preview-zoom-badge"),
-                ) {
-                    Text(
-                        text = "${(preview.scale * 100).roundToInt()}% · click or / to fit",
-                        style = JewelTheme.typography.small,
-                        color = JewelTheme.globalColors.text.info,
-                    )
+                val focusRingColor = rememberAccessibleFocusRingColor()
+                val pct = (preview.scale * 100).roundToInt()
+                Tooltip(tooltip = { Text("Reset preview zoom to fit (/)") }) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(10.dp)
+                            .background(JewelTheme.globalColors.panelBackground.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
+                            .studioActivatableFocus(focusRingColor, cornerRadius = 6.dp)
+                            .clickable { preview.reset() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("ciacola-preview-zoom-badge")
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Reset preview zoom from $pct percent to fit"
+                            },
+                    ) {
+                        Text(
+                            text = "$pct% · click or / to fit",
+                            style = JewelTheme.typography.small,
+                            color = JewelTheme.globalColors.text.info,
+                        )
+                    }
                 }
             }
         }
@@ -342,6 +505,7 @@ class TimelineStudioWindow(
     val controller: TimelineStudioController,
     val currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     val suppressShortcutsProvider: () -> Boolean = { false },
+    val onReturnFocusToStage: (() -> Unit)? = null,
 ) : EaselWindow {
     override val name: String = "Timeline"
     override val minimumSize: DpSize get() = DpSize(720.dp, 420.dp)
@@ -367,68 +531,98 @@ class TimelineStudioWindow(
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
         var totalHeightPx by remember { mutableStateOf(720f) }
         val rootFocusRequester = remember { FocusRequester() }
+        val focusManager = LocalFocusManager.current
+        val studioFocusState = remember { StudioA11yFocusState() }
         var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
+        InstallSpaceResetOnWindowFocusLoss(controller)
         LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
             if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
                 runCatching { rootFocusRequester.requestFocus() }
             }
         }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .onSizeChanged { totalHeightPx = it.height.toFloat().coerceAtLeast(240f) }
-                .onFocusChanged { state ->
-                    if (state.hasFocus) rootHadFocus = true
-                    rootHasFocus = state.hasFocus
-                }
-                .focusRequester(rootFocusRequester)
-                .focusable()
-                .onPreviewKeyEvent { ev -> controller.handleStudioKey(ev, scope, suppressShortcutsProvider()) },
-        ) {
-            if (controller.dockedInStoryWindow) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(controller.splitFraction.coerceIn(0.28f, 0.78f)),
-                ) {
-                    StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
-                        content()
+        var wasDocked by remember { mutableStateOf(controller.dockedInStoryWindow) }
+        LaunchedEffect(controller.dockedInStoryWindow) {
+            val nowDocked = controller.dockedInStoryWindow
+            if (wasDocked && !nowDocked) {
+                controller.spaceHeld = false
+                controller.spaceUsedForPan = false
+                withFrameNanos {}
+                if (onReturnFocusToStage != null) {
+                    onReturnFocusToStage.invoke()
+                } else {
+                    runCatching {
+                        rootFocusRequester.requestFocus()
+                        focusManager.moveFocus(FocusDirection.Next)
                     }
                 }
-                CiacolaJewelTheme(isDark = isDark) {
+            }
+            wasDocked = nowDocked
+        }
+
+        CompositionLocalProvider(LocalStudioA11yFocusState provides studioFocusState) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { totalHeightPx = it.height.toFloat().coerceAtLeast(240f) }
+                    .onFocusChanged { state ->
+                        if (state.hasFocus) rootHadFocus = true
+                        rootHasFocus = state.hasFocus
+                    }
+                    .focusRequester(rootFocusRequester)
+                    .focusable()
+                    .onPreviewKeyEvent { ev ->
+                        controller.handleStudioKey(
+                            event = ev,
+                            scope = scope,
+                            suppressed = suppressShortcutsProvider(),
+                            focusState = studioFocusState,
+                        )
+                    },
+            ) {
+                if (controller.dockedInStoryWindow) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(5.dp)
-                            .background(JewelTheme.globalColors.borders.normal)
-                            .pointerHoverIcon(PointerIcon.Crosshair)
-                            .pointerInput(Unit) {
-                                detectVerticalDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    val deltaFrac = dragAmount / totalHeightPx
-                                    controller.splitFraction =
-                                        (controller.splitFraction + deltaFrac).coerceIn(0.28f, 0.78f)
-                                }
-                            },
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight((1f - controller.splitFraction).coerceIn(0.22f, 0.72f)),
-                ) {
-                    TimelineStudioPanel(
-                        controller = controller,
-                        isDark = isDark,
-                        surface = TimelineSurface.Docked,
-                    )
-                }
-            } else {
-                Box(Modifier.fillMaxSize()) {
-                    StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
-                        content()
+                            .weight(controller.splitFraction.coerceIn(0.28f, 0.78f)),
+                    ) {
+                        StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
+                            content()
+                        }
+                    }
+                    CiacolaJewelTheme(isDark = isDark) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .background(JewelTheme.globalColors.borders.normal)
+                                .pointerHoverIcon(PointerIcon.Crosshair)
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val deltaFrac = dragAmount / totalHeightPx
+                                        controller.splitFraction =
+                                            (controller.splitFraction + deltaFrac).coerceIn(0.28f, 0.78f)
+                                    }
+                                },
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight((1f - controller.splitFraction).coerceIn(0.22f, 0.72f)),
+                    ) {
+                        TimelineStudioPanel(
+                            controller = controller,
+                            isDark = isDark,
+                            surface = TimelineSurface.Docked,
+                        )
+                    }
+                } else {
+                    Box(Modifier.fillMaxSize()) {
+                        StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
+                            content()
+                        }
                     }
                 }
             }
@@ -438,10 +632,11 @@ class TimelineStudioWindow(
     @Composable
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
+        // No accelerator: F5 is handled by handleStudioKey on onPreviewKeyEvent, and a Swing menu
+        // accelerator would fire in addition to it and double-toggle dockedInStoryWindow.
         CheckboxItem(
-            text = "Dock Timeline Studio in Story Window",
+            text = "Dock Timeline Studio in Story Window (F5)",
             checked = controller.dockedInStoryWindow,
-            shortcut = KeyShortcut(Key.F5),
         ) {
             controller.dockedInStoryWindow = it
         }
@@ -470,25 +665,36 @@ class TimelineStudioWindow(
         val scope = rememberCoroutineScope()
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
         val rootFocusRequester = remember { FocusRequester() }
+        val studioFocusState = remember { StudioA11yFocusState() }
         var rootHasFocus by remember { mutableStateOf(false) }
+        InstallSpaceResetOnWindowFocusLoss(controller)
         LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
             if (!rootHasFocus && !suppressShortcutsProvider()) {
                 runCatching { rootFocusRequester.requestFocus() }
             }
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .onFocusChanged { rootHasFocus = it.hasFocus }
-                .focusRequester(rootFocusRequester)
-                .focusable()
-                .onPreviewKeyEvent { ev -> controller.handleStudioKey(ev, scope, suppressShortcutsProvider()) },
-        ) {
-            TimelineStudioPanel(
-                controller = controller,
-                isDark = isDark,
-                surface = TimelineSurface.Detached,
-            )
+        CompositionLocalProvider(LocalStudioA11yFocusState provides studioFocusState) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onFocusChanged { rootHasFocus = it.hasFocus }
+                    .focusRequester(rootFocusRequester)
+                    .focusable()
+                    .onPreviewKeyEvent { ev ->
+                        controller.handleStudioKey(
+                            event = ev,
+                            scope = scope,
+                            suppressed = suppressShortcutsProvider(),
+                            focusState = studioFocusState,
+                        )
+                    },
+            ) {
+                TimelineStudioPanel(
+                    controller = controller,
+                    isDark = isDark,
+                    surface = TimelineSurface.Detached,
+                )
+            }
         }
     }
 }
@@ -498,8 +704,9 @@ fun rememberTimelineStudioWindow(
     controller: TimelineStudioController,
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     suppressShortcutsProvider: () -> Boolean = { false },
+    onReturnFocusToStage: (() -> Unit)? = null,
 ): TimelineStudioWindow = remember(controller) {
-    TimelineStudioWindow(controller, currentPresetProvider, suppressShortcutsProvider)
+    TimelineStudioWindow(controller, currentPresetProvider, suppressShortcutsProvider, onReturnFocusToStage)
 }
 
 /**

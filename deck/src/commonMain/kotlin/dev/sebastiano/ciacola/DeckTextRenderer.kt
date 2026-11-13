@@ -2,10 +2,14 @@ package dev.sebastiano.ciacola
 
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.Transition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.ProvideTextStyle
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
@@ -14,11 +18,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import dev.bnorm.storyboard.easel.DeterministicStateHost
 import dev.bnorm.storyboard.text.magic.DefaultDelayDurationMillis
 import dev.bnorm.storyboard.text.magic.DefaultFadeDurationMillis
 import dev.bnorm.storyboard.text.magic.DefaultMoveDurationMillis
 import dev.bnorm.storyboard.text.magic.MagicText
 import dev.sebastiano.ciacola.review.reviewTarget
+import dev.sebastiano.ciacola.theme.LocalReducedMotion
+import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
@@ -62,15 +69,26 @@ object MagicTextV1Renderer : DeckTextRenderer {
         val timing = magicTextOverrideTiming(override)
 
         ProvideTextStyle(style) {
-            MagicText(
-                transition = transition,
-                modifier = modifier,
-                moveDurationMillis = timing.phaseMs,
-                fadeDurationMillis = timing.phaseMs,
-                delayDurationMillis = DefaultDelayDurationMillis,
-                delayMillis = timing.delayMs,
-                easing = timing.easing,
-            )
+            if (LocalReducedMotion.current) {
+                val fadeSpec = tween<Float>(durationMillis = REDUCED_MOTION_FADE_DURATION_MS)
+                transition.DeterministicStateHost(
+                    modifier = modifier,
+                    enter = { _, _ -> fadeIn(fadeSpec) },
+                    exit = { _, _ -> fadeOut(fadeSpec) },
+                ) { text ->
+                    Text(text = text)
+                }
+            } else {
+                MagicText(
+                    transition = transition,
+                    modifier = modifier,
+                    moveDurationMillis = timing.phaseMs,
+                    fadeDurationMillis = timing.phaseMs,
+                    delayDurationMillis = DefaultDelayDurationMillis,
+                    delayMillis = timing.delayMs,
+                    easing = timing.easing,
+                )
+            }
         }
     }
 }

@@ -5,9 +5,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +38,12 @@ import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
+import dev.sebastiano.ciacola.theme.LocalReducedMotion
+import dev.sebastiano.ciacola.theme.ReducedMotionMode
+import dev.sebastiano.ciacola.theme.parseReducedMotionEnv
+import dev.sebastiano.ciacola.theme.rememberSystemReducedMotion
+import dev.sebastiano.ciacola.theme.resolveEffectiveReducedMotion
 import dev.sebastiano.ciacola.timeline.DeckLoopClock
 import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
 import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
@@ -52,6 +61,7 @@ import javax.imageio.ImageIO
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
+import org.jetbrains.jewel.ui.component.CheckboxRow
 import org.jetbrains.jewel.ui.component.GroupHeader
 import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.RadioButtonRow
@@ -67,10 +77,21 @@ fun main() = application {
             }
         )
     }
+    var motionMode by remember {
+        mutableStateOf(parseReducedMotionEnv(System.getenv("CIACOLA_REDUCE_MOTION")))
+    }
+    var ambientLoopsPaused by remember { mutableStateOf(false) }
+    val systemReducedMotion = rememberSystemReducedMotion()
+    val effectiveReducedMotion = resolveEffectiveReducedMotion(motionMode, systemReducedMotion)
+
     val hostTheme = remember(preset) { DeckThemes.forPreset(preset) }
     val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
     val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
 
+    CompositionLocalProvider(
+        LocalReducedMotion provides effectiveReducedMotion,
+        LocalAmbientLoopsPaused provides ambientLoopsPaused,
+    ) {
     MaterialTheme(
         colors = materialColors,
         typography = materialTypography,
@@ -175,9 +196,17 @@ fun main() = application {
                         reviewStageCoordinator.selectedPinCommentId != null ||
                         presenterWindow.controller.jumpDialogOpen
                 },
+                onReturnFocusToStage = {
+                    runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
+                },
             )
             val themeWindow = rememberThemeSwitcherWindow(
                 currentPreset = preset,
+                currentMotionMode = motionMode,
+                systemReducedMotion = systemReducedMotion,
+                ambientLoopsPaused = ambientLoopsPaused,
+                onSelectMotionMode = { motionMode = it },
+                onToggleAmbientLoopsPaused = { ambientLoopsPaused = it },
                 onSelectPreset = { preset = it },
             )
             var reviewWindowHolder by remember { mutableStateOf<dev.sebastiano.ciacola.review.SlideReviewWindow?>(null) }
@@ -263,6 +292,7 @@ fun main() = application {
             }
         }
     }
+    }
 }
 
 internal class StoryboardPresetRegistry {
@@ -279,16 +309,39 @@ internal class StoryboardPresetRegistry {
 @Composable
 internal fun rememberThemeSwitcherWindow(
     currentPreset: DeckThemePreset,
+    currentMotionMode: ReducedMotionMode = ReducedMotionMode.System,
+    systemReducedMotion: Boolean = false,
+    ambientLoopsPaused: Boolean = false,
+    onSelectMotionMode: (ReducedMotionMode) -> Unit = {},
+    onToggleAmbientLoopsPaused: (Boolean) -> Unit = {},
     onSelectPreset: (DeckThemePreset) -> Unit,
 ): EaselWindow = remember {
-    ThemeSwitcherWindow(currentPreset, onSelectPreset)
+    ThemeSwitcherWindow(
+        initialPreset = currentPreset,
+        initialMotionMode = currentMotionMode,
+        initialSystemReducedMotion = systemReducedMotion,
+        initialAmbientLoopsPaused = ambientLoopsPaused,
+        initialOnSelectMotionMode = onSelectMotionMode,
+        initialOnToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused,
+        initialOnSelectPreset = onSelectPreset,
+    )
 }.also {
     it.currentPreset = currentPreset
+    it.currentMotionMode = currentMotionMode
+    it.systemReducedMotion = systemReducedMotion
+    it.ambientLoopsPaused = ambientLoopsPaused
+    it.onSelectMotionMode = onSelectMotionMode
+    it.onToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused
     it.onSelectPreset = onSelectPreset
 }
 
 private class ThemeSwitcherWindow(
     initialPreset: DeckThemePreset,
+    initialMotionMode: ReducedMotionMode,
+    initialSystemReducedMotion: Boolean,
+    initialAmbientLoopsPaused: Boolean,
+    initialOnSelectMotionMode: (ReducedMotionMode) -> Unit,
+    initialOnToggleAmbientLoopsPaused: (Boolean) -> Unit,
     initialOnSelectPreset: (DeckThemePreset) -> Unit,
 ) : EaselWindow {
     override val name: String = "Theme"
@@ -298,6 +351,11 @@ private class ThemeSwitcherWindow(
     // tool-window default meant for the timeline and review panels.
     override val initialSize: DpSize get() = DpSize(420.dp, 360.dp)
     var currentPreset: DeckThemePreset by mutableStateOf(initialPreset)
+    var currentMotionMode: ReducedMotionMode by mutableStateOf(initialMotionMode)
+    var systemReducedMotion: Boolean by mutableStateOf(initialSystemReducedMotion)
+    var ambientLoopsPaused: Boolean by mutableStateOf(initialAmbientLoopsPaused)
+    var onSelectMotionMode: (ReducedMotionMode) -> Unit by mutableStateOf(initialOnSelectMotionMode)
+    var onToggleAmbientLoopsPaused: (Boolean) -> Unit by mutableStateOf(initialOnToggleAmbientLoopsPaused)
     var onSelectPreset: (DeckThemePreset) -> Unit by mutableStateOf(initialOnSelectPreset)
 
     @Composable
@@ -311,6 +369,30 @@ private class ThemeSwitcherWindow(
             text = "Keynote Light",
             selected = currentPreset == DeckThemePreset.KeynoteLight,
             onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
+        )
+        Separator()
+        Menu("Motion") {
+            val sysLabel = if (systemReducedMotion) "Reduced" else "Full"
+            RadioButtonItem(
+                text = "System ($sysLabel)",
+                selected = currentMotionMode == ReducedMotionMode.System,
+                onClick = { onSelectMotionMode(ReducedMotionMode.System) },
+            )
+            RadioButtonItem(
+                text = "Reduced Motion",
+                selected = currentMotionMode == ReducedMotionMode.Reduced,
+                onClick = { onSelectMotionMode(ReducedMotionMode.Reduced) },
+            )
+            RadioButtonItem(
+                text = "Full Motion",
+                selected = currentMotionMode == ReducedMotionMode.Full,
+                onClick = { onSelectMotionMode(ReducedMotionMode.Full) },
+            )
+        }
+        CheckboxItem(
+            text = "Pause Ambient Loops",
+            checked = ambientLoopsPaused,
+            onCheckedChange = onToggleAmbientLoopsPaused,
         )
         Separator()
         CheckboxItem(
@@ -328,6 +410,7 @@ private class ThemeSwitcherWindow(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(JewelTheme.globalColors.panelBackground)
+                    .verticalScroll(rememberScrollState())
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -348,6 +431,33 @@ private class ThemeSwitcherWindow(
                     )
                 }
                 InfoText("Switches slide stage, code cards, and Jewel chrome live without losing slide position.")
+                GroupHeader("Motion & accessibility:")
+                Column(
+                    modifier = Modifier.selectableGroup(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    val sysLabel = if (systemReducedMotion) "Reduced" else "Full"
+                    RadioButtonRow(
+                        text = "System ($sysLabel)",
+                        selected = currentMotionMode == ReducedMotionMode.System,
+                        onClick = { onSelectMotionMode(ReducedMotionMode.System) },
+                    )
+                    RadioButtonRow(
+                        text = "Reduced Motion",
+                        selected = currentMotionMode == ReducedMotionMode.Reduced,
+                        onClick = { onSelectMotionMode(ReducedMotionMode.Reduced) },
+                    )
+                    RadioButtonRow(
+                        text = "Full Motion",
+                        selected = currentMotionMode == ReducedMotionMode.Full,
+                        onClick = { onSelectMotionMode(ReducedMotionMode.Full) },
+                    )
+                }
+                CheckboxRow(
+                    text = "Pause ambient background loops",
+                    checked = ambientLoopsPaused,
+                    onCheckedChange = onToggleAmbientLoopsPaused,
+                )
             }
         }
     }

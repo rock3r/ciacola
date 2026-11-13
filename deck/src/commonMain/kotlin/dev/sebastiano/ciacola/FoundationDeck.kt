@@ -86,6 +86,8 @@ import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.theme.LocalReducedMotion
+import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.timeline.ActiveMotionArcPreview
 import dev.sebastiano.ciacola.timeline.ActiveSceneTimelineContext
 import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
@@ -298,12 +300,17 @@ private fun StoryboardBuilder.beatsScene(
     val prose = transition.createChildTransition("foundation-prose") { it.toValue().value.prose }
     val currentVf = transition.currentState.toValue()
     val targetVf = transition.targetState.toValue()
+    val reducedMotion = LocalReducedMotion.current
     val badgeProgress by transition.animateFloat(
         transitionSpec = {
-            tween(
-                durationMillis = theme.motion.fadeMoveDurationMs,
-                easing = theme.motion.standardEasing,
-            )
+            if (reducedMotion) {
+                tween(durationMillis = REDUCED_MOTION_FADE_DURATION_MS)
+            } else {
+                tween(
+                    durationMillis = theme.motion.fadeMoveDurationMs,
+                    easing = theme.motion.standardEasing,
+                )
+            }
         },
         label = "shared-badge-progress",
     ) { frame ->
@@ -314,22 +321,27 @@ private fun StoryboardBuilder.beatsScene(
         DeckMagicText(prose, Modifier.fillMaxSize())
         if (currentVf.baseBeatIndex >= 2 || targetVf.baseBeatIndex >= 2) {
             val badgeShape = RoundedCornerShape(8.dp)
+            val sharedModifier = if (reducedMotion) {
+                Modifier.timelineTarget("shared:foundation-shared-card")
+            } else {
+                Modifier.deckSharedBounds(
+                    sharedKey = "foundation-shared-card",
+                    label = "Shared Card",
+                    defaultDurationMs = theme.motion.sharedBoundsDurationMs,
+                    currentBeatInScene = maxOf(currentVf.virtualBeatIndex, targetVf.virtualBeatIndex),
+                )
+            }
             Surface(
                 color = theme.colors.accent,
                 shape = badgeShape,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .size(28.dp)
-                    .deckSharedBounds(
-                        sharedKey = "foundation-shared-card",
-                        label = "Shared Card",
-                        defaultDurationMs = theme.motion.sharedBoundsDurationMs,
-                        currentBeatInScene = maxOf(currentVf.virtualBeatIndex, targetVf.virtualBeatIndex),
-                    )
+                    .then(sharedModifier)
                     .graphicsLayer {
                         val p = badgeProgress.coerceIn(0f, 1f)
                         alpha = p
-                        val s = 0.72f + 0.28f * p
+                        val s = if (reducedMotion) 1f else 0.72f + 0.28f * p
                         scaleX = s
                         scaleY = s
                     },
@@ -358,6 +370,7 @@ private fun StoryboardBuilder.sharedMoveScene(
     },
 ) {
     val activeTheme = LocalDeckTheme.current
+    val reducedMotion = LocalReducedMotion.current
     val sceneVisibility: AnimatedVisibilityScope = contextOf<AnimatedVisibilityScope>()
     val targetVf = transition.targetState.toValue()
     val trackId = "shared:foundation-shared-card"
@@ -367,6 +380,37 @@ private fun StoryboardBuilder.sharedMoveScene(
     val effectiveCurve = trackOverride?.curve ?: TimelineCurveSpec()
     val effectiveArcBend = trackOverride?.spatial?.arcBend ?: 0f
     val previewState = LocalMotionPathPreviewState.current
+
+    if (reducedMotion) {
+        FoundationFrame("SHARED ELEMENT / PROVISIONAL") {
+            val fadeSpec = tween<Float>(durationMillis = REDUCED_MOTION_FADE_DURATION_MS)
+            transition.DeterministicStateHost(
+                modifier = Modifier.fillMaxSize(),
+                enter = { _, _ -> fadeIn(fadeSpec) },
+                exit = { _, _ -> fadeOut(fadeSpec) },
+                contentKey = { it.toValue().value.expanded },
+            ) { frame ->
+                val expanded = frame.toValue().value.expanded
+                val cardSize = if (expanded) 520.dp else 240.dp
+                val cornerDp = if (expanded) 40.dp else 24.dp
+                val alignment = if (expanded) Alignment.Center else Alignment.TopStart
+                Box(Modifier.fillMaxSize(), contentAlignment = alignment) {
+                    Surface(
+                        color = activeTheme.colors.accent,
+                        shape = RoundedCornerShape(cornerDp),
+                        modifier = Modifier
+                            .size(cardSize)
+                            .timelineTarget(trackId),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("shared", style = activeTheme.typography.heading, color = activeTheme.colors.onAccent)
+                        }
+                    }
+                }
+            }
+        }
+        return@choreographedScene
+    }
 
     val expandFraction by transition.animateFloat(
         transitionSpec = {

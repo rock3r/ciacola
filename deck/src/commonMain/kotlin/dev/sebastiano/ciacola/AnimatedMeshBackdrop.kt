@@ -1,11 +1,17 @@
 package dev.sebastiano.ciacola
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
 import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
 import dev.sebastiano.ciacola.timeline.rememberDeckLoopMillis
 import dev.sebastiano.ciacola.timeline.timelineTarget
@@ -105,17 +111,30 @@ fun AnimatedMeshBackdrop(
     modifier: Modifier = Modifier,
     loopId: String = "foundation-mesh-loop",
     periodMillis: Long = 6_000L,
+    paused: Boolean = LocalAmbientLoopsPaused.current,
 ) {
-    val elapsed = rememberDeckLoopMillis(
-        loopId = loopId,
-        label = "Ambient Vertex Mesh",
-        periodMillis = periodMillis,
-    )
+    val reducedMotion = LocalReducedMotion.current
+    val isPaused = paused || LocalAmbientLoopsPaused.current
+    var frozenAuthoredElapsed by remember { mutableLongStateOf(0L) }
+
     // The mesh choreography is authored over a 6 s cycle; scale the loop clock's position within
     // the (possibly overridden) period onto it so period overrides stay seamless at the wrap.
     val theme = LocalDeckTheme.current
-    val effectivePeriod = LocalDeckLoopClock.current.effectivePeriodMillis(loopId, periodMillis)
-    val authoredElapsed = (elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong()
+    val authoredElapsed = when {
+        reducedMotion -> 0L
+        isPaused -> frozenAuthoredElapsed
+        else -> {
+            val elapsed = rememberDeckLoopMillis(
+                loopId = loopId,
+                label = "Ambient Vertex Mesh",
+                periodMillis = periodMillis,
+            )
+            val effectivePeriod = LocalDeckLoopClock.current.effectivePeriodMillis(loopId, periodMillis)
+            ((elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong()).also {
+                frozenAuthoredElapsed = it
+            }
+        }
+    }
     val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), authoredElapsed, theme))
     val paint = Paint()
 
