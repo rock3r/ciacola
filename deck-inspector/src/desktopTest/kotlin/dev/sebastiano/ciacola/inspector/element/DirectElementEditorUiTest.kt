@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -40,7 +41,9 @@ import dev.sebastiano.ciacola.inspector.DeckElementOverridesFile
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.contrastRatio
@@ -424,5 +427,114 @@ class DirectElementEditorUiTest {
         onNodeWithTag("ciacola-element-clear-selection", useUnmergedTree = true).performClick()
         waitForIdle()
         assertNull(controller.selectedElementId)
+    }
+
+    @Test
+    fun stageSettleRetainsInspectorControlsAndFollowsBeatScopedElements() = runComposeUiTest {
+        val dir = Files.createTempDirectory("ciacola-el-settle-follow")
+        val store = ElementOverridesStore(dir)
+        val registry = StageInspectionRegistry()
+        var activeScene by mutableStateOf(0)
+        var activeBeat by mutableStateOf(0)
+        var settling by mutableStateOf(false)
+
+        val controller = ElementEditorController(
+            overridesStore = store,
+            inspectionRegistry = registry,
+            isStageSettlingProvider = { settling },
+        ).apply {
+            editorActive = true
+            currentSceneIndexProvider = { activeScene }
+            currentBeatIndexProvider = { activeBeat }
+        }
+
+        fun recordBeatNode(beat: Int, text: String) {
+            val id = "s1:prose:b$beat"
+            registry.recordMetadata(
+                StageElementMetadata(
+                    elementId = id,
+                    supportsText = true,
+                    defaultText = text,
+                    defaultFontSizeSp = 48f,
+                ),
+            )
+            registry.record(
+                StageNodeSnapshot(
+                    elementId = id,
+                    kind = "MagicText",
+                    label = "Prose",
+                    sceneIndex = 0,
+                    beatIndex = beat,
+                    stageBounds = Rect(40f, 120f, 800f, 220f),
+                    resolvedText = text,
+                    effectiveFontSizeSp = 48f,
+                    isEditable = true,
+                    effectiveAlpha = 1f,
+                ),
+            )
+        }
+
+        recordBeatNode(0, "Beat zero prose")
+
+        setContent {
+            DeckThemeProvider(DeckThemes.stageDark()) {
+                Box(Modifier.width(340.dp)) {
+                    CiacolaJewelTheme(isDark = true) {
+                        ElementEditorPanel(controller = controller)
+                    }
+                }
+            }
+        }
+
+        waitForIdle()
+        onNodeWithTag("ciacola-element-picker-s1:prose:b0").performClick()
+        waitForIdle()
+        assertEquals("s1:prose:b0", controller.selectedElementId)
+        onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true).assertExists()
+
+        // 1. Transient Animatic settle temporarily clears registry while settling = true:
+        //    controls must stay mounted and never flash "is not on this beat".
+        runOnIdle {
+            settling = true
+            registry.clear()
+        }
+        waitForIdle()
+        assertTrue(controller.isSelectedElementOnCurrentBeat())
+        assertTrue(controller.slidesNodesForCurrentSlide().isNotEmpty())
+        onNodeWithTag("ciacola-element-missing-on-beat", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true).assertExists()
+
+        // 2. Settling onto beat 1 of the SAME slide seamlessly follows s1:prose:b1.
+        runOnIdle {
+            settling = false
+            activeBeat = 1
+            recordBeatNode(1, "Beat one prose")
+        }
+        waitForIdle()
+        assertEquals("s1:prose:b1", controller.selectedElementId)
+        assertTrue(controller.isSelectedElementOnCurrentBeat())
+        onNodeWithTag("ciacola-element-missing-on-beat", useUnmergedTree = true).assertDoesNotExist()
+        onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true).assertExists()
+
+        // 3. Dragging Font Size slider brackets gesture cleanly into 1 undo step.
+        onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true).performScrollTo().performMouseInput {
+            val midY = height / 2f
+            moveTo(Offset(width * 0.35f, midY))
+            press()
+            moveTo(Offset(width * 0.55f, midY))
+            moveTo(Offset(width * 0.70f, midY))
+            release()
+        }
+        waitForIdle()
+        assertNotNull(store.patchFor("s1:prose:b1")?.fontSizeSp)
+        assertTrue(store.canUndo)
+        onNodeWithTag("ciacola-element-undo", useUnmergedTree = true).performClick()
+        waitForIdle()
+        assertNull(store.patchFor("s1:prose:b1")?.fontSizeSp)
+
+        // 4. Navigating to another slide without s1:prose shows off-slide notice.
+        runOnIdle { activeScene = 1 }
+        waitForIdle()
+        onNodeWithTag("ciacola-element-missing-on-beat", useUnmergedTree = true).assertExists()
     }
 }

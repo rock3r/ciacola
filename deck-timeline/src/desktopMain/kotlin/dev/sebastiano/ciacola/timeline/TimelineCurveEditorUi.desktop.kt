@@ -60,7 +60,6 @@ import org.jetbrains.jewel.ui.component.GroupHeader
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
 import org.jetbrains.jewel.ui.component.OutlinedButton
-import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.TextField
 import org.jetbrains.jewel.ui.component.Tooltip
@@ -340,14 +339,18 @@ private fun SpringCurveControls(
             }
         },
     )
-    Slider(
+    TimelineSlider(
         value = clampedDamping,
+        valueRange = 0.20f..1.50f,
+        gestureKey = "damping:$trackId",
+        onGestureStart = { controller.overridesStore.beginEditGesture() },
+        onGestureEnd = { controller.overridesStore.endEditGesture() },
         onValueChange = { next ->
             controller.overridesStore.updateTrack(trackId, coalesce = true) {
-                it.copy(curve = curve.copy(isSpring = true, dampingRatio = next.coerceIn(0.20f, 1.50f)))
+                val baseCurve = it.curve ?: curve
+                it.copy(curve = baseCurve.copy(isSpring = true, dampingRatio = next.coerceIn(0.20f, 1.50f)))
             }
         },
-        valueRange = 0.20f..1.50f,
         modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-damping-slider"),
     )
     NumericStepperRow(
@@ -366,14 +369,18 @@ private fun SpringCurveControls(
             }
         },
     )
-    Slider(
+    TimelineSlider(
         value = clampedStiffness,
+        valueRange = 50f..4_000f,
+        gestureKey = "stiffness:$trackId",
+        onGestureStart = { controller.overridesStore.beginEditGesture() },
+        onGestureEnd = { controller.overridesStore.endEditGesture() },
         onValueChange = { next ->
             controller.overridesStore.updateTrack(trackId, coalesce = true) {
-                it.copy(curve = curve.copy(isSpring = true, stiffness = next.coerceIn(50f, 4_000f)))
+                val baseCurve = it.curve ?: curve
+                it.copy(curve = baseCurve.copy(isSpring = true, stiffness = next.coerceIn(50f, 4_000f)))
             }
         },
-        valueRange = 50f..4_000f,
         modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-stiffness-slider"),
     )
     org.jetbrains.jewel.ui.component.InfoText("Estimated settle: ~${curve.estimatedSpringDurationMs()}ms")

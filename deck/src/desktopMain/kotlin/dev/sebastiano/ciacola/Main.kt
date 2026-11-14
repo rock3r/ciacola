@@ -130,14 +130,8 @@ fun main() = application {
         val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
 
         val elementRev = elementOverridesStore.revision
-        val currentElementOverrides = remember(elementRev) {
-            elementOverridesStore.data()
-        }
         val structuralRev = timelineOverridesStore.structuralRevision
         val paramRev = timelineOverridesStore.parameterRevision
-        val currentTimelineOverrides = remember(structuralRev, paramRev) {
-            timelineOverridesStore.data()
-        }
 
         val deckLoopClock = remember { DeckLoopClock() }
         val motionPathPreview = remember { MotionPathPreviewState() }
@@ -163,9 +157,6 @@ fun main() = application {
             effectiveReducedMotion,
             reviewStageCoordinator,
             structuralRev,
-            paramRev,
-            designRev,
-            elementRev,
         ) {
             createFoundationDeck(
                 theme = baseHostTheme,
@@ -175,10 +166,21 @@ fun main() = application {
                     reviewStageCoordinator.stageDecorator +
                     elementController.stageDecorator +
                     lintStageDecorator,
-                timelineOverrides = currentTimelineOverrides,
+                timelineOverrides = timelineOverridesStore.data(),
                 reducedMotion = effectiveReducedMotion,
-                elementOverrides = currentElementOverrides,
-                designOverrides = designOverrides,
+                timelineOverridesProvider = {
+                    timelineOverridesStore.parameterRevision
+                    timelineOverridesStore.structuralRevision
+                    timelineOverridesStore.data()
+                },
+                elementOverridesProvider = {
+                    elementOverridesStore.revision
+                    elementOverridesStore.data()
+                },
+                designOverridesProvider = {
+                    designSystemStore.revision
+                    designSystemStore.overridesFor(preset)
+                },
             ).also { built ->
                 presetRegistry.record(built, preset)
             }
@@ -279,6 +281,7 @@ fun main() = application {
             elementController.isExternalTextInputActive = isAnyTextInputActive
             elementController.currentSceneIndexProvider = { animatic.targetIndex.sceneIndex }
             elementController.currentBeatIndexProvider = { animatic.targetIndex.frameIndex }
+            elementController.isStageSettlingProvider = { animatic.scrubSettling }
             elementController.isDarkThemeProvider = { activePreset == DeckThemePreset.StageDark }
         }
 

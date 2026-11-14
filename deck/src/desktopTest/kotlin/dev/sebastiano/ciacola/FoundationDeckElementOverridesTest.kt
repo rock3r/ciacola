@@ -23,10 +23,16 @@ import dev.sebastiano.ciacola.inspector.DeckElementOverridesFile
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
+import dev.sebastiano.ciacola.theme.CodePaletteOverrides
+import dev.sebastiano.ciacola.theme.ColorTokenOverrides
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.DesignSystemOverrides
+import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.theme.MotionTokenOverrides
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -96,5 +102,75 @@ class FoundationDeckElementOverridesTest {
         assertTrue(registry.nodes.containsKey("s5:headline"))
         assertTrue(registry.nodes.containsKey("s5:row-web:leading"))
         assertTrue(registry.nodes.containsKey("s5:row-web:trailing"))
+    }
+
+    @Test
+    fun reactiveProvidersUpdateElementsThemeAndCodePaletteWithoutRebuildingStoryboard() = runComposeUiTest {
+        val registry = StageInspectionRegistry()
+        var elementOverrides by mutableStateOf(DeckElementOverridesFile())
+        var designOverrides by mutableStateOf(DesignSystemOverrides())
+        var storyboardBuildCount = 0
+        lateinit var builtStoryboard: Storyboard
+        lateinit var animatic: Animatic
+        lateinit var scope: CoroutineScope
+
+        setContent {
+            val storyboard = androidx.compose.runtime.remember {
+                storyboardBuildCount++
+                createFoundationDeck(
+                    theme = DeckThemes.stageDark(),
+                    includeKeynoteEffectsLab = true,
+                    elementOverridesProvider = { elementOverrides },
+                    designOverridesProvider = { designOverrides },
+                )
+            }
+            builtStoryboard = storyboard
+            scope = rememberCoroutineScope()
+            CompositionLocalProvider(LocalStageInspectionRegistry provides registry) {
+                Box(Modifier.size(960.dp, 540.dp)) {
+                    animatic = rememberAnimatic(storyboard = { storyboard })
+                    Easel(animatic)
+                }
+            }
+        }
+
+        waitForIdle()
+        assertEquals(1, storyboardBuildCount)
+        val initialStoryboard = builtStoryboard
+
+        // Update elementOverridesProvider -> stage reflects change without rebuilding Storyboard.
+        elementOverrides = DeckElementOverridesFile(
+            elements = mapOf(
+                "s1:prose:b0" to ElementPatch(
+                    elementId = "s1:prose:b0",
+                    text = "Reactive Provider Prose",
+                    textColorArgb = 0xFF38BDF8L,
+                ),
+            ),
+        )
+        waitForIdle()
+        assertSame(initialStoryboard, builtStoryboard)
+        assertEquals("Reactive Provider Prose", registry.nodes["s1:prose:b0"]?.resolvedText)
+        assertEquals(Color(0xFF38BDF8L), registry.nodes["s1:prose:b0"]?.effectiveForeground)
+
+        // Jump to Slide 4 (Highlighted Code) and update designOverridesProvider (code palette + dissolve).
+        runOnIdle { scope.launch { animatic.jumpTo(Storyboard.Index(3, 0)) } }
+        waitForIdle()
+        val customCodeBg = 0xFF102030L
+        val customCodeFg = 0xFFE2E8F0L
+        designOverrides = DesignSystemOverrides(
+            colors = ColorTokenOverrides(
+                code = CodePaletteOverrides(
+                    backgroundArgb = customCodeBg,
+                    foregroundArgb = customCodeFg,
+                    keywordArgb = 0xFFF472B6L,
+                ),
+            ),
+            motion = MotionTokenOverrides(dissolveDurationMs = 520),
+        )
+        waitForIdle()
+        assertSame(initialStoryboard, builtStoryboard)
+        assertEquals(Color(customCodeBg), registry.nodes["s4:code-card"]?.effectiveBackground)
+        assertEquals(Color(customCodeFg), registry.nodes["s4:code:b0"]?.effectiveForeground)
     }
 }

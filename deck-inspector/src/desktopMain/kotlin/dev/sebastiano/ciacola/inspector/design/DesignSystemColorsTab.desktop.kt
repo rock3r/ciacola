@@ -295,6 +295,8 @@ internal fun DesignSystemColorsTab(
             valueText = "%.2f".format(Locale.US, dimAlpha),
             testTagPrefix = "design-color-spotlight-dim",
             isOverridden = overrides.colors.spotlightDimAlpha != null,
+            onGestureStart = { store.beginEditGesture() },
+            onGestureEnd = { store.endEditGesture() },
             onValueChange = { next ->
                 store.updateColors(preset, coalesceKey = "color:spotlightDimAlpha", coalesce = true) {
                     it.copy(spotlightDimAlpha = next.coerceIn(0.05f, 1.0f))

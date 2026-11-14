@@ -92,12 +92,18 @@ fun ElementEditorPanel(
     store.revision
     val overridesFile = store.data()
     val slideNodes = controller.slidesNodesForCurrentSlide()
-    val selectedId = controller.selectedElementId
+    val rawSelectedId = controller.selectedElementId
+    val selectedId = controller.resolveSelectedElementIdForCurrentBeat()
+    LaunchedEffect(selectedId) {
+        if (selectedId != null && selectedId != rawSelectedId) {
+            controller.followBeatScopedSelection(selectedId)
+        }
+    }
     val isOnCurrentBeat = controller.isSelectedElementOnCurrentBeat()
     val selectedSnapshot = selectedId?.let { id ->
         slideNodes.firstOrNull { it.elementId == id } ?: controller.inspectionRegistry.nodes[id]
     }
-    val selectedMeta = selectedId?.let { controller.inspectionRegistry.metadataFor(it) }
+    val selectedMeta = selectedId?.let { controller.metadataFor(it) }
     val patch = selectedId?.let { overridesFile.patchFor(it) } ?: selectedId?.let { ElementPatch(it) }
 
     Box(

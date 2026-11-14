@@ -18,7 +18,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -341,14 +348,17 @@ fun TimelineBlockInspector(
                 style = JewelTheme.typography.small,
                 color = globalColors.text.info,
             )
-            Slider(
+            TimelineSlider(
                 value = spatial.arcBend,
+                valueRange = -1f..1f,
+                gestureKey = "arc:${selectedRow.trackId}",
+                onGestureStart = { controller.overridesStore.beginEditGesture() },
+                onGestureEnd = { controller.overridesStore.endEditGesture() },
                 onValueChange = { newBend ->
                     controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
                         it.copy(spatial = (it.spatial ?: TimelineSpatialSpec(offsetXDp = 0f, offsetYDp = 0f)).copy(arcBend = newBend))
                     }
                 },
-                valueRange = -1f..1f,
                 modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-arc-slider"),
             )
         } else if (supportsSlideOffset) {
@@ -363,14 +373,17 @@ fun TimelineBlockInspector(
                 style = JewelTheme.typography.small,
                 color = globalColors.text.info,
             )
-            Slider(
+            TimelineSlider(
                 value = spatial.offsetXDp,
+                valueRange = -96f..96f,
+                gestureKey = "offsetX:${selectedRow.trackId}",
+                onGestureStart = { controller.overridesStore.beginEditGesture() },
+                onGestureEnd = { controller.overridesStore.endEditGesture() },
                 onValueChange = { newX ->
                     controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
                         it.copy(spatial = (it.spatial ?: defaultSpatial).copy(offsetXDp = newX))
                     }
                 },
-                valueRange = -96f..96f,
                 modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-offset-x-slider"),
             )
             Text(
@@ -378,14 +391,17 @@ fun TimelineBlockInspector(
                 style = JewelTheme.typography.small,
                 color = globalColors.text.info,
             )
-            Slider(
+            TimelineSlider(
                 value = spatial.offsetYDp,
+                valueRange = -96f..96f,
+                gestureKey = "offsetY:${selectedRow.trackId}",
+                onGestureStart = { controller.overridesStore.beginEditGesture() },
+                onGestureEnd = { controller.overridesStore.endEditGesture() },
                 onValueChange = { newY ->
                     controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
                         it.copy(spatial = (it.spatial ?: defaultSpatial).copy(offsetYDp = newY))
                     }
                 },
-                valueRange = -96f..96f,
                 modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-offset-y-slider"),
             )
         }
@@ -519,4 +535,59 @@ internal fun NumericStepperRow(
             }
         }
     }
+}
+
+/**
+ * Slider with local drag state so store quantization or deferred re-indexing never fights the
+ * active thumb drag, bracketed cleanly by [onGestureStart] and [onGestureEnd].
+ */
+@Composable
+internal fun TimelineSlider(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    gestureKey: String,
+    onGestureStart: () -> Unit,
+    onGestureEnd: () -> Unit,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
+    var sliderDragging by remember(gestureKey) { mutableStateOf(false) }
+    var localDragValue by remember(gestureKey) { mutableFloatStateOf(clampedExternal) }
+
+    LaunchedEffect(clampedExternal, sliderDragging) {
+        if (!sliderDragging) {
+            localDragValue = clampedExternal
+        }
+    }
+
+    DisposableEffect(gestureKey) {
+        onDispose {
+            if (sliderDragging) {
+                sliderDragging = false
+                onGestureEnd()
+            }
+        }
+    }
+
+    Slider(
+        value = if (sliderDragging) localDragValue else clampedExternal,
+        onValueChange = { next ->
+            if (!sliderDragging) {
+                sliderDragging = true
+                onGestureStart()
+            }
+            val clamped = next.coerceIn(valueRange.start, valueRange.endInclusive)
+            localDragValue = clamped
+            onValueChange(clamped)
+        },
+        onValueChangeFinished = {
+            if (sliderDragging) {
+                sliderDragging = false
+                onGestureEnd()
+            }
+        },
+        valueRange = valueRange,
+        modifier = modifier,
+    )
 }

@@ -151,8 +151,10 @@ fun createFoundationDeck(
     reducedMotion: Boolean = false,
     elementOverrides: DeckElementOverridesFile = DeckElementOverridesFile(),
     designOverrides: DesignSystemOverrides = DesignSystemOverrides(),
+    timelineOverridesProvider: () -> DeckTimelineOverridesFile = { timelineOverrides },
+    elementOverridesProvider: () -> DeckElementOverridesFile = { elementOverrides },
+    designOverridesProvider: () -> DesignSystemOverrides = { designOverrides },
 ): Storyboard {
-    val effectiveTheme = theme.withOverrides(designOverrides)
     val notesBuilder = DeckSpeakerNotesBuilder()
     val storyboard = Storyboard.build(
         title = "Ciacola",
@@ -160,20 +162,20 @@ fun createFoundationDeck(
         format = DeckDesign.format,
         decorator = deckDecorator(
             textRenderer = textRenderer,
-            theme = effectiveTheme,
+            theme = theme,
             bundledPreset = bundledPreset,
-            timelineOverrides = timelineOverrides,
             reducedMotion = reducedMotion,
-            elementOverrides = elementOverrides,
-            designOverrides = designOverrides,
+            timelineOverridesProvider = timelineOverridesProvider,
+            elementOverridesProvider = elementOverridesProvider,
+            designOverridesProvider = designOverridesProvider,
         ) + stageDecorator,
     ) {
-        beatsScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
-        sharedMoveScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
-        ambientLoopScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
-        kotlinCodeScene(effectiveTheme, effectiveTheme.colors.code.toCodeStyle(), timelineOverrides, notesBuilder, reducedMotion)
+        beatsScene(theme, timelineOverrides, notesBuilder, reducedMotion, designOverridesProvider)
+        sharedMoveScene(theme, timelineOverrides, notesBuilder, reducedMotion, designOverridesProvider)
+        ambientLoopScene(theme, timelineOverrides, notesBuilder, reducedMotion, designOverridesProvider)
+        kotlinCodeScene(theme, timelineOverrides, notesBuilder, reducedMotion, designOverridesProvider)
         if (includeKeynoteEffectsLab) {
-            keynoteEffectsLabScene(effectiveTheme, timelineOverrides, notesBuilder, reducedMotion)
+            keynoteEffectsLabScene(theme, timelineOverrides, notesBuilder, reducedMotion, designOverridesProvider)
         }
     }
     StoryboardSpeakerNotesRegistry.register(storyboard, notesBuilder.build())
@@ -184,26 +186,29 @@ private fun deckDecorator(
     textRenderer: DeckTextRenderer,
     theme: DeckTheme,
     bundledPreset: DeckThemePreset? = null,
-    timelineOverrides: DeckTimelineOverridesFile = DeckTimelineOverridesFile(),
     reducedMotion: Boolean = false,
-    elementOverrides: DeckElementOverridesFile = DeckElementOverridesFile(),
-    designOverrides: DesignSystemOverrides = DesignSystemOverrides(),
+    timelineOverridesProvider: () -> DeckTimelineOverridesFile = { DeckTimelineOverridesFile() },
+    elementOverridesProvider: () -> DeckElementOverridesFile = { DeckElementOverridesFile() },
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
 ) = ContentDecorator { content ->
+    val currentDesignOverrides = designOverridesProvider()
+    val currentTimelineOverrides = timelineOverridesProvider()
+    val currentElementOverrides = elementOverridesProvider()
     val baseActiveTheme = if (bundledPreset != null) {
         DeckThemes.rememberBundledDeckTheme(bundledPreset)
     } else {
         theme
     }
-    val activeTheme = remember(baseActiveTheme, designOverrides) {
-        baseActiveTheme.withOverrides(designOverrides)
+    val activeTheme = remember(baseActiveTheme, currentDesignOverrides) {
+        baseActiveTheme.withOverrides(currentDesignOverrides)
     }
     val effectiveOverrides = if (dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen.current) {
         LocalTimelineOverrides.current
     } else {
-        timelineOverrides
+        currentTimelineOverrides
     }
-    val effectiveElementOverrides = if (elementOverrides.hasOverrides) {
-        elementOverrides
+    val effectiveElementOverrides = if (currentElementOverrides.hasOverrides) {
+        currentElementOverrides
     } else {
         LocalElementOverrides.current
     }
@@ -240,6 +245,7 @@ private fun <T> StoryboardBuilder.choreographedScene(
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
     reducedMotion: Boolean = false,
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
     notes: (SceneSpeakerNotesBuilder.() -> Unit)? = null,
     content: @Composable context(androidx.compose.animation.AnimatedVisibilityScope, androidx.compose.animation.SharedTransitionScope) SceneScope<VirtualizedFrame<T>>.() -> Unit,
 ) {
@@ -249,15 +255,14 @@ private fun <T> StoryboardBuilder.choreographedScene(
         }
     }
     val vFrames = buildVirtualizedFrames(baseFrames, overrides.sceneBeats[sceneIndex])
-    val dissolveMs = if (reducedMotion) {
-        minOf(theme.motion.dissolveDurationMs, REDUCED_MOTION_FADE_DURATION_MS)
-    } else {
-        theme.motion.dissolveDurationMs
+    val resolveDissolveMs = {
+        val d = theme.withOverrides(designOverridesProvider()).motion.dissolveDurationMs
+        if (reducedMotion) minOf(d, REDUCED_MOTION_FADE_DURATION_MS) else d
     }
     scene(
         frames = vFrames,
-        enterTransition = SceneEnterTransition { fadeIn(tween(dissolveMs)) },
-        exitTransition = SceneExitTransition { fadeOut(tween(dissolveMs)) },
+        enterTransition = SceneEnterTransition { fadeIn(tween(resolveDissolveMs())) },
+        exitTransition = SceneExitTransition { fadeOut(tween(resolveDissolveMs())) },
     ) {
         val ctx = remember(sceneIndex, sceneTitle, vFrames) {
             ActiveSceneTimelineContext(
@@ -307,6 +312,7 @@ private fun StoryboardBuilder.beatsScene(
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
     reducedMotion: Boolean = false,
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
 ) = choreographedScene(
     sceneIndex = 0,
     sceneTitle = "Beats",
@@ -319,6 +325,7 @@ private fun StoryboardBuilder.beatsScene(
     overrides = overrides,
     notesBuilder = notesBuilder,
     reducedMotion = reducedMotion,
+    designOverridesProvider = designOverridesProvider,
     notes = {
         overview("Open with the core promise: every beat is an explicit state, driven forward and backward by one transition model.")
         beat(0, "[Pause] Establish the baseline state. Point out that nothing runs imperatively on click — advancing targets the next state.")
@@ -326,6 +333,7 @@ private fun StoryboardBuilder.beatsScene(
         beat(2, "[Click] Watch the bottom-right shared badge appear — it previews the cross-slide Magic Move handoff into Slide 2.")
     },
 ) {
+    val activeTheme = LocalDeckTheme.current
     val prose = transition.createEditableTextTransition("s1:prose", "foundation-prose") { it.prose }
     val currentVf = transition.currentState.toValue()
     val targetVf = transition.targetState.toValue()
@@ -335,8 +343,8 @@ private fun StoryboardBuilder.beatsScene(
                 tween(durationMillis = REDUCED_MOTION_FADE_DURATION_MS)
             } else {
                 tween(
-                    durationMillis = theme.motion.fadeMoveDurationMs,
-                    easing = theme.motion.standardEasing,
+                    durationMillis = activeTheme.motion.fadeMoveDurationMs,
+                    easing = activeTheme.motion.standardEasing,
                 )
             }
         },
@@ -355,12 +363,12 @@ private fun StoryboardBuilder.beatsScene(
                 Modifier.deckSharedBounds(
                     sharedKey = "foundation-shared-card",
                     label = "Shared Card",
-                    defaultDurationMs = theme.motion.sharedBoundsDurationMs,
+                    defaultDurationMs = activeTheme.motion.sharedBoundsDurationMs,
                     currentBeatInScene = maxOf(currentVf.virtualBeatIndex, targetVf.virtualBeatIndex),
                 )
             }
             Surface(
-                color = theme.colors.accent,
+                color = activeTheme.colors.accent,
                 shape = badgeShape,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -385,6 +393,7 @@ private fun StoryboardBuilder.sharedMoveScene(
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
     reducedMotion: Boolean = false,
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
 ) = choreographedScene(
     sceneIndex = 1,
     sceneTitle = "Shared Move",
@@ -393,6 +402,7 @@ private fun StoryboardBuilder.sharedMoveScene(
     overrides = overrides,
     notesBuilder = notesBuilder,
     reducedMotion = reducedMotion,
+    designOverridesProvider = designOverridesProvider,
     notes = {
         overview("Demonstrates Storyboard sharedBounds across scenes and deterministic in-scene morphing.")
         beat(0, "Notice the accent badge from Slide 1 landed cleanly in the top-left slot as a 240dp card.")
@@ -551,6 +561,7 @@ private fun StoryboardBuilder.ambientLoopScene(
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
     reducedMotion: Boolean = false,
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
 ) = choreographedScene(
     sceneIndex = 2,
     sceneTitle = "Ambient Loop",
@@ -559,6 +570,7 @@ private fun StoryboardBuilder.ambientLoopScene(
     overrides = overrides,
     notesBuilder = notesBuilder,
     reducedMotion = reducedMotion,
+    designOverridesProvider = designOverridesProvider,
     notes = {
         overview("Single resting beat with a continuous vertex-mesh backdrop.")
         beat(0, "Emphasize separation of concerns: the ambient loop ticks independently without mutating slide navigation state, and adapts its palette to Stage Dark / Keynote Light.")
@@ -604,26 +616,27 @@ private fun StoryboardBuilder.ambientLoopScene(
     }
 }
 
-private data class CodeState(val description: AnnotatedString, val source: AnnotatedString)
+private data class CodeState(val description: String, val source: String)
 
 private fun StoryboardBuilder.kotlinCodeScene(
     deckTheme: DeckTheme,
-    codeStyle: CodeStyle,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
     reducedMotion: Boolean = false,
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
 ) = choreographedScene(
     sceneIndex = 3,
     sceneTitle = "Highlighted Code",
     baseFrames = listOf(
-        codeState("Syntax highlighting is data carried by AnnotatedString.", "fun provisional() = Unit", codeStyle),
-        codeState("Retained Kotlin tokens move while styles remain attached.", "fun provisional() {\n    println(\"foundation\")\n}", codeStyle),
-        codeState("The sample remains intentionally small and replaceable.", "fun provisional(message: String) {\n    println(message)\n}", codeStyle),
+        CodeState("Syntax highlighting is data carried by AnnotatedString.", "fun provisional() = Unit"),
+        CodeState("Retained Kotlin tokens move while styles remain attached.", "fun provisional() {\n    println(\"foundation\")\n}"),
+        CodeState("The sample remains intentionally small and replaceable.", "fun provisional(message: String) {\n    println(message)\n}"),
     ),
     theme = deckTheme,
     overrides = overrides,
     notesBuilder = notesBuilder,
     reducedMotion = reducedMotion,
+    designOverridesProvider = designOverridesProvider,
     notes = {
         overview("Syntax-highlighted Kotlin carried as AnnotatedString spans through MagicText.")
         beat(0, "Start with the single-expression function; point out that token styles live on the AnnotatedString itself.")
@@ -632,12 +645,18 @@ private fun StoryboardBuilder.kotlinCodeScene(
     },
 ) {
     val theme = LocalDeckTheme.current
-    val description = transition.createEditableTextTransition("s4:description", "code-description") { it.description }
+    val codeStyle = remember(theme.colors.code) { theme.colors.code.toCodeStyle() }
+    val highlightedCache = remember(codeStyle) { HashMap<String, AnnotatedString>() }
+    val description = transition.createEditableTextTransition("s4:description", "code-description") {
+        AnnotatedString(it.description)
+    }
     val code = transition.createEditableTextTransition(
         elementId = "s4:code",
         label = "highlighted-kotlin",
-        formatOverride = { highlightFoundationKotlin(it, codeStyle) },
-    ) { it.source }
+        formatOverride = { highlightedCache.getOrPut(it) { highlightFoundationKotlin(it, codeStyle) } },
+    ) {
+        highlightedCache.getOrPut(it.source) { highlightFoundationKotlin(it.source, codeStyle) }
+    }
 
     FoundationFrame("MAGIC TEXT / KOTLIN / PROVISIONAL") {
         Column(verticalArrangement = Arrangement.spacedBy(44.dp)) {
@@ -681,21 +700,13 @@ private fun highlightFoundationKotlin(
     },
 )
 
-private fun codeState(
-    description: String,
-    source: String,
-    codeStyle: CodeStyle,
-): CodeState = CodeState(
-    description = AnnotatedString(description),
-    source = highlightFoundationKotlin(source, codeStyle),
-)
-
 // Provisional interactive lab scene exercising every Keynote effect + DeckWarpCode + MagnifierLoupe.
 private fun StoryboardBuilder.keynoteEffectsLabScene(
     deckTheme: DeckTheme,
     overrides: DeckTimelineOverridesFile,
     notesBuilder: DeckSpeakerNotesBuilder? = null,
     reducedMotion: Boolean = false,
+    designOverridesProvider: () -> DesignSystemOverrides = { DesignSystemOverrides() },
 ) = choreographedScene(
     sceneIndex = 4,
     sceneTitle = "Keynote Effects Lab",
@@ -704,6 +715,7 @@ private fun StoryboardBuilder.keynoteEffectsLabScene(
     overrides = overrides,
     notesBuilder = notesBuilder,
     reducedMotion = reducedMotion,
+    designOverridesProvider = designOverridesProvider,
     notes = {
         overview("Full choreography testbed: staggered rows, spring stamp, LineDraw callout, WarpCode morph, and Magnifier loupe.")
         beat(0, "Baseline heading only: sets up the naive claim ('Fix with SpanStyle(alpha)!') before revealing the breakdown.")

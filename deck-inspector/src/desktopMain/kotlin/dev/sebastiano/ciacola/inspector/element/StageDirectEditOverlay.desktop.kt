@@ -327,10 +327,17 @@ private fun StageSelectionAndInlineOverlay(
     onEscapeKeyDownHandled: () -> Unit = {},
 ) {
     val slideNodes = controller.slidesNodesForCurrentSlide()
+    val rawSelectedId = controller.selectedElementId
+    val resolvedSelectedId = controller.resolveSelectedElementIdForCurrentBeat()
+    LaunchedEffect(resolvedSelectedId) {
+        if (resolvedSelectedId != null && resolvedSelectedId != rawSelectedId) {
+            controller.followBeatScopedSelection(resolvedSelectedId)
+        }
+    }
     val hoveredNode = controller.hoveredElementId?.let { id ->
         slideNodes.firstOrNull { it.elementId == id }
     }
-    val selectedNode = controller.selectedElementId?.let { id ->
+    val selectedNode = resolvedSelectedId?.let { id ->
         slideNodes.firstOrNull { it.elementId == id }
     }
     val inlineId = controller.inlineEditingElementId

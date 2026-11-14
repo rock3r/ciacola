@@ -678,7 +678,10 @@ fun rememberTimelineStudioController(
         animatic.storyboard,
         overridesStore.structuralRevision,
         overridesStore.parameterRevision,
+        overridesStore.isInEditGesture,
     ) {
+        val inGesture = overridesStore.isInEditGesture
+        if (inGesture && controller.snapshot.stateSpans.isNotEmpty()) return@LaunchedEffect
         // The first index (empty snapshot) runs immediately; edits are coalesced (a new key cancels
         // this effect while it waits).
         if (controller.snapshot.stateSpans.isNotEmpty()) delay(INDEX_DEBOUNCE_MS)

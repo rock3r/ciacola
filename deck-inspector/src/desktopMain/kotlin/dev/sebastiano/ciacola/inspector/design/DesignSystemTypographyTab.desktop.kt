@@ -129,6 +129,8 @@ internal fun DesignSystemTypographyTab(
             valueText = "%.2f×".format(Locale.US, globalScale),
             testTagPrefix = "design-typo-global-scale",
             isOverridden = overrides.typography.globalFontScale != null,
+            onGestureStart = { store.beginEditGesture() },
+            onGestureEnd = { store.endEditGesture() },
             onValueChange = { next ->
                 val snapped = ((next * 100f).roundToInt() / 100f).coerceIn(0.75f, 1.50f)
                 store.updateTypography(preset, coalesceKey = "typo:globalScale", coalesce = true) {

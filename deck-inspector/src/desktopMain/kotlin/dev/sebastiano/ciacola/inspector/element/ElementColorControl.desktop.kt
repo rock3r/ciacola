@@ -188,19 +188,18 @@ internal fun ElementColorControlRow(
                 }
             }
 
-            Tooltip(tooltip = { Text("Enter #RRGGBB or #AARRGGBB hex color") }) {
-                TextField(
-                    state = hexState,
-                    outline = if (hexValid) Outline.None else Outline.Error,
-                    modifier = Modifier
-                        .weight(1f)
-                        .trackAuthoringTextInputFocus()
-                        .designActivatableFocus(focusRingColor) { focused ->
-                            hexHasFocus = focused
-                        }
-                        .testTag("$testTagPrefix-hex"),
-                )
-            }
+            TextField(
+                state = hexState,
+                outline = if (hexValid) Outline.None else Outline.Error,
+                placeholder = { Text("#RRGGBB") },
+                modifier = Modifier
+                    .weight(1f)
+                    .trackAuthoringTextInputFocus()
+                    .designActivatableFocus(focusRingColor) { focused ->
+                        hexHasFocus = focused
+                    }
+                    .testTag("$testTagPrefix-hex"),
+            )
 
             if (allowClearFill) {
                 DesignTooltipIconButton(

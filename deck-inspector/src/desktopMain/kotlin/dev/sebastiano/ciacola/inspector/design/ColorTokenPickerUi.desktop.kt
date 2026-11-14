@@ -392,26 +392,26 @@ private fun InlineHsvColorEditor(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Hex",
-                    style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
-                )
                 Tooltip(tooltip = { Text("Enter #RRGGBB" + if (supportsAlpha) " or #AARRGGBB" else "") }) {
-                    TextField(
-                        state = hexState,
-                        outline = if (hexError != null) Outline.Error else Outline.None,
-                        placeholder = { Text(if (supportsAlpha) "#AARRGGBB" else "#RRGGBB") },
-                        modifier = Modifier
-                            .width(124.dp)
-                            .trackAuthoringTextInputFocus()
-                            .designActivatableFocus(focusRingColor) { focused ->
-                                hexHasFocus = focused
-                                onTextInputFocusChanged(focused)
-                            }
-                            .testTag("design-color-$tokenId-hex"),
+                    Text(
+                        text = "Hex",
+                        style = JewelTheme.typography.small,
+                        color = globalColors.text.info,
                     )
                 }
+                TextField(
+                    state = hexState,
+                    outline = if (hexError != null) Outline.Error else Outline.None,
+                    placeholder = { Text(if (supportsAlpha) "#AARRGGBB" else "#RRGGBB") },
+                    modifier = Modifier
+                        .width(124.dp)
+                        .trackAuthoringTextInputFocus()
+                        .designActivatableFocus(focusRingColor) { focused ->
+                            hexHasFocus = focused
+                            onTextInputFocusChanged(focused)
+                        }
+                        .testTag("design-color-$tokenId-hex"),
+                )
                 Text(
                     text = "H:${localHsv.hue.toInt()}° S:${(localHsv.saturation * 100).toInt()}% V:${(localHsv.value * 100).toInt()}%",
                     style = JewelTheme.typography.small.copy(fontFamily = FontFamily.Monospace),

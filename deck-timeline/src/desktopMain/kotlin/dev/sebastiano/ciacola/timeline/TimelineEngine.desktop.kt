@@ -233,6 +233,9 @@ class TimelineOverridesStore(
     var parameterRevision by mutableIntStateOf(0)
         private set
 
+    var isInEditGesture by mutableStateOf(false)
+        private set
+
     init {
         reloadFromDiskIfChanged(notifyRevisions = false)
     }
@@ -271,6 +274,7 @@ class TimelineOverridesStore(
             gestureSnapshotRecorded = false
         }
         activeGestureDepth++
+        isInEditGesture = true
     }
 
     @Synchronized
@@ -280,6 +284,7 @@ class TimelineOverridesStore(
             if (activeGestureDepth == 0) {
                 gestureSnapshotRecorded = false
                 lastCoalesceKey = null
+                isInEditGesture = false
             }
         }
     }
@@ -291,6 +296,7 @@ class TimelineOverridesStore(
         activeGestureDepth = 0
         gestureSnapshotRecorded = false
         lastCoalesceKey = null
+        isInEditGesture = false
         if (redoStack.size >= MAX_UNDO_HISTORY) {
             redoStack.removeFirst()
         }
@@ -313,6 +319,7 @@ class TimelineOverridesStore(
         activeGestureDepth = 0
         gestureSnapshotRecorded = false
         lastCoalesceKey = null
+        isInEditGesture = false
         if (undoStack.size >= MAX_UNDO_HISTORY) {
             undoStack.removeFirst()
         }

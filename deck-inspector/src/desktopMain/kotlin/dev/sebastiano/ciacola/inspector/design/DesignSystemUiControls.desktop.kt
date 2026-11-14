@@ -15,7 +15,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -261,12 +264,34 @@ internal fun DesignSliderRow(
     valueText: String,
     testTagPrefix: String,
     isOverridden: Boolean,
+    onGestureStart: () -> Unit = {},
+    onGestureEnd: () -> Unit = {},
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit = {},
     onReset: () -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
+    val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
+    var sliderDragging by remember(testTagPrefix) { mutableStateOf(false) }
+    var localDragValue by remember(testTagPrefix) { mutableFloatStateOf(clampedExternal) }
+
+    LaunchedEffect(clampedExternal, sliderDragging) {
+        if (!sliderDragging) {
+            localDragValue = clampedExternal
+        }
+    }
+
+    DisposableEffect(testTagPrefix) {
+        onDispose {
+            if (sliderDragging) {
+                sliderDragging = false
+                onGestureEnd()
+                onValueChangeFinished()
+            }
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -318,9 +343,23 @@ internal fun DesignSliderRow(
             }
         }
         Slider(
-            value = value.coerceIn(valueRange.start, valueRange.endInclusive),
-            onValueChange = onValueChange,
-            onValueChangeFinished = onValueChangeFinished,
+            value = if (sliderDragging) localDragValue else clampedExternal,
+            onValueChange = { next ->
+                if (!sliderDragging) {
+                    sliderDragging = true
+                    onGestureStart()
+                }
+                val clamped = next.coerceIn(valueRange.start, valueRange.endInclusive)
+                localDragValue = clamped
+                onValueChange(clamped)
+            },
+            onValueChangeFinished = {
+                if (sliderDragging) {
+                    sliderDragging = false
+                    onGestureEnd()
+                }
+                onValueChangeFinished()
+            },
             valueRange = valueRange,
             modifier = Modifier
                 .fillMaxWidth()

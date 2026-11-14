@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -220,9 +222,17 @@ internal fun ElementStepperSliderRow(
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
+    val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
     var sliderDragging by remember(testTagPrefix) { mutableStateOf(false) }
+    var localDragValue by remember(testTagPrefix) { mutableFloatStateOf(clampedExternal) }
     val canDecrease = value > valueRange.start + 1e-4f
     val canIncrease = value < valueRange.endInclusive - 1e-4f
+
+    LaunchedEffect(clampedExternal, sliderDragging) {
+        if (!sliderDragging) {
+            localDragValue = clampedExternal
+        }
+    }
 
     DisposableEffect(testTagPrefix) {
         onDispose {
@@ -307,13 +317,15 @@ internal fun ElementStepperSliderRow(
             }
         }
         Slider(
-            value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+            value = if (sliderDragging) localDragValue else clampedExternal,
             onValueChange = { next ->
                 if (!sliderDragging) {
                     sliderDragging = true
                     onGestureStart()
                 }
-                onValueChanged(next, true)
+                val clamped = next.coerceIn(valueRange.start, valueRange.endInclusive)
+                localDragValue = clamped
+                onValueChanged(clamped, true)
             },
             onValueChangeFinished = {
                 if (sliderDragging) {

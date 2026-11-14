@@ -645,10 +645,11 @@ class TimelineStudioWindow(
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
         val rootFocusRequester = remember { FocusRequester() }
         val studioFocusState = remember { StudioA11yFocusState() }
+        var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
         InstallSpaceResetOnWindowFocusLoss(controller)
         LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
-            if (!rootHasFocus && !suppressShortcutsProvider()) {
+            if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
                 runCatching { rootFocusRequester.requestFocus() }
             }
         }
@@ -656,7 +657,10 @@ class TimelineStudioWindow(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .onFocusChanged { rootHasFocus = it.hasFocus }
+                    .onFocusChanged { state ->
+                        if (state.hasFocus) rootHadFocus = true
+                        rootHasFocus = state.hasFocus
+                    }
                     .focusRequester(rootFocusRequester)
                     .focusable()
                     .onPreviewKeyEvent { ev ->

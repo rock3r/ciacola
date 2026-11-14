@@ -47,6 +47,7 @@ import java.nio.file.Files
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
@@ -361,6 +362,56 @@ class TimelinePerfAndPolishTest {
         assertTrue(
             gapBetweenTextsDp >= 36f + 36f, // 20dp + >=36dp dots + 20dp
             "DottedLeaderRow must preserve >=36dp dots gap (got ${gapBetweenTextsDp}dp)",
+        )
+    }
+
+    @Test
+    fun editGestureFlagDefersReindexingUntilGestureEnds() = runComposeUiTest {
+        val tempDir = Files.createTempDirectory("ciacola-gesture-defer")
+        val store = TimelineOverridesStore(storyboardDir = tempDir)
+        val loopClock = DeckLoopClock()
+        lateinit var controller: TimelineStudioController
+
+        setContent {
+            val deck = remember { createFoundationDeck(includeKeynoteEffectsLab = false) }
+            val animatic = rememberAnimatic(storyboard = { deck })
+            controller = rememberTimelineStudioController(
+                animatic = animatic,
+                overridesStore = store,
+                loopClock = loopClock,
+            )
+        }
+
+        // Initial index populates stateSpans immediately.
+        waitForIdle()
+        assertTrue(controller.snapshot.stateSpans.isNotEmpty())
+        val initialDuration = controller.snapshot.totalDurationMs
+        assertFalse(store.isInEditGesture)
+
+        // Start an edit gesture and mutate a track duration: re-indexing stays deferred while dragging.
+        runOnIdle {
+            store.beginEditGesture()
+            assertTrue(store.isInEditGesture)
+            store.updateTrack("s0:magic-text", coalesce = true) { it.copy(durationMs = 1_800) }
+        }
+        mainClock.advanceTimeBy(450)
+        waitForIdle()
+        assertEquals(
+            initialDuration,
+            controller.snapshot.totalDurationMs,
+            "Offscreen re-indexing must stay deferred while isInEditGesture is true",
+        )
+
+        // Ending the gesture unblocks the debounce effect and refreshes the timeline snapshot.
+        runOnIdle {
+            store.endEditGesture()
+            assertFalse(store.isInEditGesture)
+        }
+        mainClock.advanceTimeBy(450)
+        waitForIdle()
+        assertTrue(
+            controller.snapshot.totalDurationMs > initialDuration,
+            "Timeline snapshot must refresh after endEditGesture()",
         )
     }
 }
