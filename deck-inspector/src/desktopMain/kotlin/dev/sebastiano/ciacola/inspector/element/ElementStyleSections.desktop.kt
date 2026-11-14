@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +67,7 @@ internal fun FillAndBorderSection(
         color = currentFill,
         isOverridden = patch.fillColorArgb != null,
         testTagPrefix = "ciacola-element-fill",
+        elementId = elementId,
         allowClearFill = true,
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
@@ -89,6 +91,7 @@ internal fun FillAndBorderSection(
         step = 0.5f,
         isOverridden = patch.borderWidthDp != null,
         testTagPrefix = "ciacola-element-borderwidth",
+        gestureKey = "ciacola-element-borderwidth:$elementId",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
@@ -104,6 +107,7 @@ internal fun FillAndBorderSection(
         color = currentBorderColor,
         isOverridden = patch.borderColorArgb != null,
         testTagPrefix = "ciacola-element-bordercolor",
+        elementId = elementId,
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onColorChanged = { c, coalesce ->
@@ -122,6 +126,7 @@ internal fun FillAndBorderSection(
         step = 2f,
         isOverridden = patch.cornerRadiusDp != null,
         testTagPrefix = "ciacola-element-cornerradius",
+        gestureKey = "ciacola-element-cornerradius:$elementId",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
@@ -155,6 +160,7 @@ internal fun SpacingAndPositionSection(
         step = 2f,
         isOverridden = patch.paddingDp != null,
         testTagPrefix = "ciacola-element-padding",
+        gestureKey = "ciacola-element-padding:$elementId",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
@@ -174,6 +180,7 @@ internal fun SpacingAndPositionSection(
         isOverridden = patch.offsetXDp != null,
         resetTooltip = "Reset Offset X to 0 dp",
         testTagPrefix = "ciacola-element-offsetx",
+        gestureKey = "ciacola-element-offsetx:$elementId",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
@@ -193,6 +200,7 @@ internal fun SpacingAndPositionSection(
         isOverridden = patch.offsetYDp != null,
         resetTooltip = "Reset Offset Y to 0 dp",
         testTagPrefix = "ciacola-element-offsety",
+        gestureKey = "ciacola-element-offsety:$elementId",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
@@ -214,6 +222,7 @@ internal fun ElementStepperSliderRow(
     step: Float,
     isOverridden: Boolean,
     testTagPrefix: String,
+    gestureKey: String = testTagPrefix,
     resetTooltip: String = "Reset $label to default",
     onGestureStart: () -> Unit,
     onGestureEnd: () -> Unit,
@@ -223,8 +232,9 @@ internal fun ElementStepperSliderRow(
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
     val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
-    var sliderDragging by remember(testTagPrefix) { mutableStateOf(false) }
-    var localDragValue by remember(testTagPrefix) { mutableFloatStateOf(clampedExternal) }
+    var sliderDragging by remember(gestureKey) { mutableStateOf(false) }
+    var localDragValue by remember(gestureKey) { mutableFloatStateOf(clampedExternal) }
+    val latestOnGestureEnd by rememberUpdatedState(onGestureEnd)
     val canDecrease = value > valueRange.start + 1e-4f
     val canIncrease = value < valueRange.endInclusive - 1e-4f
 
@@ -234,11 +244,11 @@ internal fun ElementStepperSliderRow(
         }
     }
 
-    DisposableEffect(testTagPrefix) {
+    DisposableEffect(gestureKey) {
         onDispose {
             if (sliderDragging) {
                 sliderDragging = false
-                onGestureEnd()
+                latestOnGestureEnd()
             }
         }
     }

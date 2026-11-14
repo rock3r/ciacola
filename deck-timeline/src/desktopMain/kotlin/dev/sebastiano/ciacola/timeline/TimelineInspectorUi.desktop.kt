@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -554,6 +555,7 @@ internal fun TimelineSlider(
     val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
     var sliderDragging by remember(gestureKey) { mutableStateOf(false) }
     var localDragValue by remember(gestureKey) { mutableFloatStateOf(clampedExternal) }
+    val latestOnGestureEnd by rememberUpdatedState(onGestureEnd)
 
     LaunchedEffect(clampedExternal, sliderDragging) {
         if (!sliderDragging) {
@@ -565,7 +567,7 @@ internal fun TimelineSlider(
         onDispose {
             if (sliderDragging) {
                 sliderDragging = false
-                onGestureEnd()
+                latestOnGestureEnd()
             }
         }
     }

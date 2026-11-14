@@ -294,6 +294,7 @@ internal fun DesignSystemColorsTab(
             valueRange = 0.05f..1.00f,
             valueText = "%.2f".format(Locale.US, dimAlpha),
             testTagPrefix = "design-color-spotlight-dim",
+            gestureKey = "design-color-spotlight-dim:${preset.name}",
             isOverridden = overrides.colors.spotlightDimAlpha != null,
             onGestureStart = { store.beginEditGesture() },
             onGestureEnd = { store.endEditGesture() },

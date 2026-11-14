@@ -22,10 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -318,12 +320,25 @@ internal fun TimelineTransportBar(
                 } else {
                     0f
                 }
+                var zoomDragging by remember(surface) { mutableStateOf(false) }
+                var localZoomValue by remember(surface) { mutableFloatStateOf(sliderValue) }
+                LaunchedEffect(sliderValue, zoomDragging) {
+                    if (!zoomDragging) {
+                        localZoomValue = sliderValue
+                    }
+                }
                 Slider(
-                    value = sliderValue,
+                    value = if (zoomDragging) localZoomValue else sliderValue,
                     onValueChange = { v ->
+                        zoomDragging = true
+                        val clamped = v.coerceIn(0f, 1f)
+                        localZoomValue = clamped
                         viewport.markSurfaceActive(surface)
                         val anchor = viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface))
-                        viewport.setZoomDpPerMs(exp(logMin + v * (logMax - logMin)), anchor, surface)
+                        viewport.setZoomDpPerMs(exp(logMin + clamped * (logMax - logMin)), anchor, surface)
+                    },
+                    onValueChangeFinished = {
+                        zoomDragging = false
                     },
                     modifier = Modifier.width(84.dp).testTag("ciacola-timeline-zoom-slider"),
                 )

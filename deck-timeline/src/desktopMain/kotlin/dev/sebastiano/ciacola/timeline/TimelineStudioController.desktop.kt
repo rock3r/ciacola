@@ -650,6 +650,7 @@ fun rememberTimelineStudioController(
     bakeGradleTaskHint: String = ":deck:reload",
     motionPathPreview: MotionPathPreviewState = remember { MotionPathPreviewState() },
     stageSelection: TimelineStageSelection = remember { TimelineStageSelection() },
+    externalTimingKey: Any? = Unit,
 ): TimelineStudioController {
     val controller = remember(overridesStore, loopClock, motionPathPreview, stageSelection) {
         TimelineStudioController(
@@ -679,6 +680,7 @@ fun rememberTimelineStudioController(
         overridesStore.structuralRevision,
         overridesStore.parameterRevision,
         overridesStore.isInEditGesture,
+        externalTimingKey,
     ) {
         val inGesture = overridesStore.isInEditGesture
         if (inGesture && controller.snapshot.stateSpans.isNotEmpty()) return@LaunchedEffect

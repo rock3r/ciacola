@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -264,6 +265,7 @@ internal fun DesignSliderRow(
     valueText: String,
     testTagPrefix: String,
     isOverridden: Boolean,
+    gestureKey: String = testTagPrefix,
     onGestureStart: () -> Unit = {},
     onGestureEnd: () -> Unit = {},
     onValueChange: (Float) -> Unit,
@@ -273,8 +275,10 @@ internal fun DesignSliderRow(
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
     val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
-    var sliderDragging by remember(testTagPrefix) { mutableStateOf(false) }
-    var localDragValue by remember(testTagPrefix) { mutableFloatStateOf(clampedExternal) }
+    var sliderDragging by remember(gestureKey) { mutableStateOf(false) }
+    var localDragValue by remember(gestureKey) { mutableFloatStateOf(clampedExternal) }
+    val latestOnGestureEnd by rememberUpdatedState(onGestureEnd)
+    val latestOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
 
     LaunchedEffect(clampedExternal, sliderDragging) {
         if (!sliderDragging) {
@@ -282,12 +286,12 @@ internal fun DesignSliderRow(
         }
     }
 
-    DisposableEffect(testTagPrefix) {
+    DisposableEffect(gestureKey) {
         onDispose {
             if (sliderDragging) {
                 sliderDragging = false
-                onGestureEnd()
-                onValueChangeFinished()
+                latestOnGestureEnd()
+                latestOnValueChangeFinished()
             }
         }
     }

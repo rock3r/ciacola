@@ -335,10 +335,19 @@ private fun InlineHsvColorEditor(
     var hexHasFocus by remember(tokenId) { mutableStateOf(false) }
     var lastProgrammaticHex by remember(tokenId) { mutableStateOf(color.toHexString(includeAlpha = supportsAlpha)) }
 
-    LaunchedEffect(color, supportsAlpha) {
+    LaunchedEffect(color, supportsAlpha, hexHasFocus) {
         val formatted = color.toHexString(includeAlpha = supportsAlpha)
-        val parsedCurrent = parseHexColorOrNull(hexState.text.toString(), defaultAlpha = localHsv.alpha)
-        if (!hexHasFocus || parsedCurrent?.toArgbLong() != color.toArgbLong()) {
+        val rawCurrent = hexState.text.toString()
+        val parsedCurrent = parseHexColorOrNull(rawCurrent, defaultAlpha = localHsv.alpha)
+        val hasUnsupportedAlphaDigits = !supportsAlpha &&
+            rawCurrent.trim()
+                .removePrefix("#")
+                .removePrefix("0x")
+                .removePrefix("0X")
+                .removeSuffix("L")
+                .removeSuffix("l")
+                .length == 8
+        if (!hexHasFocus || (!hasUnsupportedAlphaDigits && parsedCurrent?.toArgbLong() != color.toArgbLong())) {
             lastProgrammaticHex = formatted
             if (hexState.text.toString() != formatted) {
                 hexState.setTextAndPlaceCursorAtEnd(formatted)
@@ -350,8 +359,21 @@ private fun InlineHsvColorEditor(
     val liveText = hexState.text.toString()
     LaunchedEffect(liveText) {
         val currentText = hexState.text.toString()
-        if (!hexHasFocus || currentText == lastProgrammaticHex) return@LaunchedEffect
-        val parsed = parseHexColorOrNull(currentText, defaultAlpha = localHsv.alpha)
+        if (!hexHasFocus || currentText.equals(lastProgrammaticHex, ignoreCase = true)) {
+            hexError = null
+            return@LaunchedEffect
+        }
+        val cleanedDigits = currentText.trim()
+            .removePrefix("#")
+            .removePrefix("0x")
+            .removePrefix("0X")
+            .removeSuffix("L")
+            .removeSuffix("l")
+        val parsed = if (!supportsAlpha && cleanedDigits.length == 8) {
+            null
+        } else {
+            parseHexColorOrNull(currentText, defaultAlpha = localHsv.alpha)
+        }
         if (parsed == null) {
             hexError = if (supportsAlpha) "Use #RRGGBB or #AARRGGBB" else "Use #RRGGBB"
         } else {

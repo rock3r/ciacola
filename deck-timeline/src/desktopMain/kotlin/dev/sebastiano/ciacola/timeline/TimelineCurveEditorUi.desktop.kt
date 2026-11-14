@@ -458,10 +458,14 @@ private fun BezierCoordinateField(
     val formatted = "%.2f".format(Locale.US, value)
     val textState = rememberTextFieldState(initialText = formatted)
     var isFocused by remember { mutableStateOf(false) }
+    var lastSyncedText by remember { mutableStateOf(formatted) }
 
     LaunchedEffect(formatted, isFocused) {
-        if (!isFocused && textState.text.toString() != formatted) {
-            textState.setTextAndPlaceCursorAtEnd(formatted)
+        if (!isFocused) {
+            lastSyncedText = formatted
+            if (textState.text.toString() != formatted) {
+                textState.setTextAndPlaceCursorAtEnd(formatted)
+            }
         }
     }
 
@@ -471,19 +475,24 @@ private fun BezierCoordinateField(
             val clamped = parsed.coerceIn(min, max)
             onCommit(clamped)
             if (reformatField) {
-                textState.setTextAndPlaceCursorAtEnd("%.2f".format(Locale.US, clamped))
+                val reformatted = "%.2f".format(Locale.US, clamped)
+                lastSyncedText = reformatted
+                textState.setTextAndPlaceCursorAtEnd(reformatted)
             }
         } else if (reformatField) {
+            lastSyncedText = formatted
             textState.setTextAndPlaceCursorAtEnd(formatted)
         }
     }
 
-    LaunchedEffect(textState.text, isFocused) {
+    val liveRaw = textState.text.toString()
+    LaunchedEffect(liveRaw, isFocused) {
         if (isFocused) {
             val raw = textState.text.toString().trim()
-            if (raw.isNotEmpty() && raw != "-" && !raw.endsWith(".")) {
+            if (raw != lastSyncedText.trim() && raw.isNotEmpty() && raw != "-" && !raw.endsWith(".")) {
                 val parsed = raw.toFloatOrNull()
                 if (parsed != null && parsed.isFinite() && parsed in min..max) {
+                    lastSyncedText = raw
                     onCommit(parsed)
                 }
             }

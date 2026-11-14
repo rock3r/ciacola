@@ -128,6 +128,7 @@ internal fun DesignSystemTypographyTab(
             valueRange = 0.75f..1.50f,
             valueText = "%.2f×".format(Locale.US, globalScale),
             testTagPrefix = "design-typo-global-scale",
+            gestureKey = "design-typo-global-scale:${preset.name}",
             isOverridden = overrides.typography.globalFontScale != null,
             onGestureStart = { store.beginEditGesture() },
             onGestureEnd = { store.endEditGesture() },

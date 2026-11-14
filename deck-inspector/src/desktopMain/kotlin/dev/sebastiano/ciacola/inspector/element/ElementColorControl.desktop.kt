@@ -73,6 +73,7 @@ internal fun ElementColorControlRow(
     color: Color,
     isOverridden: Boolean,
     testTagPrefix: String,
+    elementId: String = "",
     contrastAgainst: Color? = null,
     allowClearFill: Boolean = false,
     onGestureStart: () -> Unit = {},
@@ -85,11 +86,12 @@ internal fun ElementColorControlRow(
     val palette = JewelTheme.colorPalette
     val isDark = JewelTheme.isDark
     val theme = LocalDeckTheme.current
+    val stateKey = "$testTagPrefix:$elementId"
 
-    var expanded by remember(testTagPrefix) { mutableStateOf(false) }
-    var localHsv by remember(testTagPrefix) { mutableStateOf(color.toHsv()) }
+    var expanded by remember(stateKey) { mutableStateOf(false) }
+    var localHsv by remember(stateKey) { mutableStateOf(color.toHsv()) }
 
-    LaunchedEffect(color) {
+    LaunchedEffect(color, stateKey) {
         val currentFromLocal = hsvToColor(localHsv.hue, localHsv.saturation, localHsv.value, localHsv.alpha)
         if (currentFromLocal.toArgbLong() != color.toArgbLong()) {
             localHsv = color.toHsv()
@@ -98,11 +100,11 @@ internal fun ElementColorControlRow(
 
     val formattedHex = color.toHexString(includeAlpha = color.alpha < 0.999f)
     val hexState = rememberTextFieldState(initialText = formattedHex)
-    var hexHasFocus by remember(testTagPrefix) { mutableStateOf(false) }
-    var lastProgrammaticHex by remember(testTagPrefix) { mutableStateOf(formattedHex) }
-    var hexValid by remember(testTagPrefix) { mutableStateOf(true) }
+    var hexHasFocus by remember(stateKey) { mutableStateOf(false) }
+    var lastProgrammaticHex by remember(stateKey) { mutableStateOf(formattedHex) }
+    var hexValid by remember(stateKey) { mutableStateOf(true) }
 
-    LaunchedEffect(color) {
+    LaunchedEffect(color, hexHasFocus, stateKey) {
         val formatted = color.toHexString(includeAlpha = color.alpha < 0.999f)
         val parsedCurrent = parseHexColorOrNull(hexState.text.toString(), defaultAlpha = 1f)
         if (!hexHasFocus || parsedCurrent?.toArgbLong() != color.toArgbLong()) {

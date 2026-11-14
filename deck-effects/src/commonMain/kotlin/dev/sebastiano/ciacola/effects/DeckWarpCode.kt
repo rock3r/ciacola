@@ -167,6 +167,44 @@ fun DeckWarpCodeCard(
     var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
+    fun publishCardSnapshot(coordsNow: LayoutCoordinates?) {
+        if (!shouldInspect || elementId == null || registry == null) return
+        registry.recordMetadata(
+            meta = StageElementMetadata(
+                elementId = elementId,
+                supportsBoxStyle = true,
+                defaultFillColor = palette.background,
+                defaultBorderColor = theme.colors.border,
+                defaultBorderWidthDp = cardStyle.borderWidth.value,
+                defaultCornerRadiusDp = cardStyle.cornerRadius.value,
+                defaultPaddingDp = cardStyle.padding.value,
+            ),
+            owner = ownerToken,
+        )
+        val bounds = resolveStageBounds(coordsNow, rootHolder)
+        if (bounds != null) {
+            registry.record(
+                snapshot = StageNodeSnapshot(
+                    elementId = elementId,
+                    kind = "WarpCodeCard",
+                    label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
+                    sceneIndex = sceneCtx?.sceneIndex ?: 0,
+                    beatIndex = beatIndex,
+                    stageBounds = bounds,
+                    resolvedText = currentCodeSnippet,
+                    effectiveForeground = palette.foreground,
+                    effectiveBackground = effectiveFill,
+                    effectiveFontSizeSp = if (codeTextStyle.fontSize.isSp) codeTextStyle.fontSize.value else 18f,
+                    isEditable = true,
+                ),
+                owner = ownerToken,
+                alphaProvider = { stageAlphaProvider() },
+                coordinatesProvider = { cardCoords },
+                stageRootProvider = { rootHolder?.coordinates },
+            )
+        }
+    }
+
     if (shouldInspect && elementId != null) {
         DisposableEffect(registry, elementId) {
             onDispose { registry?.remove(elementId, ownerToken) }
@@ -175,40 +213,7 @@ fun DeckWarpCodeCard(
         val stageRootNow = rootHolder?.coordinates
         SideEffect {
             stageRootNow
-            registry?.recordMetadata(
-                meta = StageElementMetadata(
-                    elementId = elementId,
-                    supportsBoxStyle = true,
-                    defaultFillColor = palette.background,
-                    defaultBorderColor = theme.colors.border,
-                    defaultBorderWidthDp = cardStyle.borderWidth.value,
-                    defaultCornerRadiusDp = cardStyle.cornerRadius.value,
-                    defaultPaddingDp = cardStyle.padding.value,
-                ),
-                owner = ownerToken,
-            )
-            val bounds = resolveStageBounds(coordsNow, rootHolder)
-            if (bounds != null) {
-                registry?.record(
-                    snapshot = StageNodeSnapshot(
-                        elementId = elementId,
-                        kind = "WarpCodeCard",
-                        label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
-                        sceneIndex = sceneCtx?.sceneIndex ?: 0,
-                        beatIndex = beatIndex,
-                        stageBounds = bounds,
-                        resolvedText = currentCodeSnippet,
-                        effectiveForeground = palette.foreground,
-                        effectiveBackground = effectiveFill,
-                        effectiveFontSizeSp = if (codeTextStyle.fontSize.isSp) codeTextStyle.fontSize.value else 18f,
-                        isEditable = true,
-                    ),
-                    owner = ownerToken,
-                    alphaProvider = { stageAlphaProvider() },
-                    coordinatesProvider = { cardCoords },
-                    stageRootProvider = { rootHolder?.coordinates },
-                )
-            }
+            publishCardSnapshot(coordsNow)
         }
     }
 
@@ -219,7 +224,10 @@ fun DeckWarpCodeCard(
         modifier = modifier
             .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
             .then(offsetMod)
-            .onPlaced { cardCoords = it }
+            .onPlaced { coords ->
+                cardCoords = coords
+                publishCardSnapshot(coords)
+            }
             .reviewTarget(
                 kind = "WarpCodeCard",
                 label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },

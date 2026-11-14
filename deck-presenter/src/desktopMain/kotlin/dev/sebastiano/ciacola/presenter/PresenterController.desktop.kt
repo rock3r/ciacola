@@ -316,17 +316,17 @@ class PresenterTimerState(
 @Stable
 class PresenterController(
     initialAnimatic: Animatic,
-    private val speakerNotesProvider: (Storyboard) -> DeckSpeakerNotes? = {
+    internal var speakerNotesProvider: (Storyboard) -> DeckSpeakerNotes? = {
         StoryboardSpeakerNotesRegistry.forStoryboard(it)
     },
-    private val isStudioOpenProvider: () -> Boolean = { false },
-    private val isInspectOpenProvider: () -> Boolean = { false },
-    private val hasUnbakedOverridesProvider: () -> Boolean = { false },
-    private val openAuthoringToolsProvider: () -> List<String> = { emptyList() },
-    private val unbakedDomainsProvider: () -> List<String> = { emptyList() },
-    private val onEnterCleanShowModeAction: () -> Unit = {},
-    private val isExternalTextInputActiveProvider: () -> Boolean = { false },
-    private val onRestoreStageFocus: () -> Unit = {},
+    internal var isStudioOpenProvider: () -> Boolean = { false },
+    internal var isInspectOpenProvider: () -> Boolean = { false },
+    internal var hasUnbakedOverridesProvider: () -> Boolean = { false },
+    internal var openAuthoringToolsProvider: () -> List<String> = { emptyList() },
+    internal var unbakedDomainsProvider: () -> List<String> = { emptyList() },
+    internal var onEnterCleanShowModeAction: () -> Unit = {},
+    internal var isExternalTextInputActiveProvider: () -> Boolean = { false },
+    internal var onRestoreStageFocus: () -> Unit = {},
     private val displayRouter: DisplayRoutingAdapter = AwtDisplayRouter(),
     timerClockMillis: () -> Long = System::currentTimeMillis,
     private val wallClockProvider: () -> String = { LocalTime.now().format(WALL_CLOCK_FORMATTER) },

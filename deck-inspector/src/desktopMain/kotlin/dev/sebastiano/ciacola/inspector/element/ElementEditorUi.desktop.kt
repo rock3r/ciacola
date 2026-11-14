@@ -580,6 +580,7 @@ private fun TypographySection(
         step = 2f,
         isOverridden = patch.fontSizeSp != null,
         testTagPrefix = "ciacola-element-fontsize",
+        gestureKey = "ciacola-element-fontsize:$elementId",
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },
         onValueChanged = { next, coalesce ->
@@ -662,6 +663,7 @@ private fun TypographySection(
         color = currentTextColor,
         isOverridden = patch.textColorArgb != null,
         testTagPrefix = "ciacola-element-textcolor",
+        elementId = elementId,
         contrastAgainst = effectiveBg,
         onGestureStart = { store.beginEditGesture() },
         onGestureEnd = { store.endEditGesture() },

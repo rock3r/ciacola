@@ -54,6 +54,7 @@ import dev.sebastiano.ciacola.ui.ReviewStatusPalette
 import dev.sebastiano.ciacola.ui.iconKey
 import dev.sebastiano.ciacola.ui.labelText
 import dev.sebastiano.ciacola.ui.rememberReviewStatusPalette
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import java.time.Instant
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -329,6 +330,7 @@ internal fun AnchoredCommentComposerPopup(
                             }
                         }
                         .focusRequester(noteFocusRequester)
+                        .trackAuthoringTextInputFocus()
                         .testTag("ciacola-review-note-input"),
                 )
 
@@ -349,6 +351,7 @@ internal fun AnchoredCommentComposerPopup(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(convIdFocusRequester)
+                                .trackAuthoringTextInputFocus()
                                 .testTag("ciacola-review-conv-id-input"),
                         )
                         InfoText("Saved to .storyboard/review-config.json for live agentapi push.")

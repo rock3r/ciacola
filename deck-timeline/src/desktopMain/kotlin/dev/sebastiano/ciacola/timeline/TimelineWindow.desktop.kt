@@ -452,9 +452,9 @@ internal fun StagePreviewViewport(
  */
 class TimelineStudioWindow(
     val controller: TimelineStudioController,
-    val currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
-    val suppressShortcutsProvider: () -> Boolean = { false },
-    val onReturnFocusToStage: (() -> Unit)? = null,
+    var currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
+    var suppressShortcutsProvider: () -> Boolean = { false },
+    var onReturnFocusToStage: (() -> Unit)? = null,
     var inspectorSlot: (@Composable () -> Unit)? = null,
     var extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
     var extraMenuContent: (@Composable MenuScope.() -> Unit)? = null,
@@ -500,8 +500,9 @@ class TimelineStudioWindow(
                 controller.spaceHeld = false
                 controller.spaceUsedForPan = false
                 withFrameNanos {}
-                if (onReturnFocusToStage != null) {
-                    onReturnFocusToStage.invoke()
+                val onReturn = onReturnFocusToStage
+                if (onReturn != null) {
+                    onReturn.invoke()
                 } else {
                     runCatching {
                         rootFocusRequester.requestFocus()
@@ -707,6 +708,9 @@ fun rememberTimelineStudioWindow(
         extraMenuContent = extraMenuContent,
     )
 }.also {
+    it.currentPresetProvider = currentPresetProvider
+    it.suppressShortcutsProvider = suppressShortcutsProvider
+    it.onReturnFocusToStage = onReturnFocusToStage
     it.inspectorSlot = inspectorSlot
     it.extraPreviewKeyHandler = extraPreviewKeyHandler
     it.extraMenuContent = extraMenuContent

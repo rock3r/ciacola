@@ -30,8 +30,8 @@ import kotlinx.coroutines.delay
  */
 class PresenterWindow(
     val controller: PresenterController,
-    val currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
-    val onRestoreStageFocus: () -> Boolean = { false },
+    var currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
+    var onRestoreStageFocus: () -> Boolean = { false },
 ) : EaselWindow {
     override val name: String = "Presenter"
     override var visible: Boolean by mutableStateOf(false)
@@ -177,6 +177,15 @@ fun rememberPresenterWindow(
         )
     }.also {
         it.animatic = animatic
+        it.speakerNotesProvider = speakerNotesProvider
+        it.isStudioOpenProvider = isStudioOpenProvider
+        it.isInspectOpenProvider = isInspectOpenProvider
+        it.hasUnbakedOverridesProvider = hasUnbakedOverridesProvider
+        it.openAuthoringToolsProvider = openAuthoringToolsProvider
+        it.unbakedDomainsProvider = unbakedDomainsProvider
+        it.onEnterCleanShowModeAction = onEnterCleanShowMode
+        it.isExternalTextInputActiveProvider = isExternalTextInputActiveProvider
+        it.onRestoreStageFocus = { onRestoreStageFocus() }
     }
 
     return remember(controller) {
@@ -185,5 +194,8 @@ fun rememberPresenterWindow(
             currentPresetProvider = currentPresetProvider,
             onRestoreStageFocus = onRestoreStageFocus,
         )
+    }.also {
+        it.currentPresetProvider = currentPresetProvider
+        it.onRestoreStageFocus = onRestoreStageFocus
     }
 }

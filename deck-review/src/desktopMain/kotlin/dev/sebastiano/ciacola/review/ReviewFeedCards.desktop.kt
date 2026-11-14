@@ -43,6 +43,7 @@ import dev.bnorm.storyboard.Storyboard
 import dev.sebastiano.ciacola.ui.iconKey
 import dev.sebastiano.ciacola.ui.labelText
 import dev.sebastiano.ciacola.ui.rememberReviewStatusPalette
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
@@ -201,6 +202,7 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                         modifier = Modifier
                             .weight(1f)
                             .focusRequester(convIdFocusRequester)
+                            .trackAuthoringTextInputFocus()
                             .testTag("ciacola-review-panel-conv-id-input"),
                     )
                     OutlinedButton(

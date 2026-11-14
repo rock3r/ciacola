@@ -219,6 +219,7 @@ fun main() = application {
             bakeGradleTaskHint = reviewStore.config.gradleTaskHint,
             motionPathPreview = motionPathPreview,
             stageSelection = stageSelection,
+            externalTimingKey = designOverrides.motion,
         )
 
         val studioWorkspace = remember(

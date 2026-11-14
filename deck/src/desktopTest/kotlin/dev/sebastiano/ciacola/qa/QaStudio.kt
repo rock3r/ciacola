@@ -36,6 +36,9 @@ import dev.sebastiano.ciacola.inspector.element.rememberElementEditorController
 import dev.sebastiano.ciacola.inspector.lint.DeckLintController
 import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintController
 import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintStageDecorator
+import dev.sebastiano.ciacola.presenter.PresenterController
+import dev.sebastiano.ciacola.presenter.PresenterWindow
+import dev.sebastiano.ciacola.presenter.rememberPresenterWindow
 import dev.sebastiano.ciacola.rememberHotReloadStoryboard
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.ReviewStageCoordinator
@@ -201,6 +204,8 @@ class QaStudio internal constructor(
     val elementController: ElementEditorController,
     val lintController: DeckLintController,
     val studioWorkspace: StudioWorkspaceController,
+    val presenterWindow: PresenterWindow,
+    val presenter: PresenterController,
     val review: ReviewStageCoordinator,
     val reviewStore: ReviewCommentStore,
     val timelineWindow: TimelineStudioWindow,
@@ -209,6 +214,7 @@ class QaStudio internal constructor(
     val loopClock: DeckLoopClock,
     val motionPathPreview: MotionPathPreviewState,
     val stageSelection: TimelineStageSelection,
+    val textInputTracker: AuthoringTextInputFocusTracker,
     val workspaceRoot: Path,
     val storyboardDir: Path,
     val worker: String,
@@ -694,6 +700,8 @@ fun launchStudio(
     val elementControllerRef = AtomicReference<ElementEditorController?>(null)
     val lintControllerRef = AtomicReference<DeckLintController?>(null)
     val workspaceRef = AtomicReference<StudioWorkspaceController?>(null)
+    val presenterWindowRef = AtomicReference<PresenterWindow?>(null)
+    val textInputTrackerRef = AtomicReference<AuthoringTextInputFocusTracker?>(null)
     val presetHolder = AtomicReference(preset)
     val presetSetterRef = AtomicReference<((DeckThemePreset) -> Unit)?>(null)
 
@@ -713,7 +721,7 @@ fun launchStudio(
                 activePreset = next
             }
 
-            val textInputTracker = remember { AuthoringTextInputFocusTracker() }
+            val textInputTracker = remember { AuthoringTextInputFocusTracker() }.also(textInputTrackerRef::set)
             val stageInspectionRegistry = remember { StageInspectionRegistry() }.also(inspectionRegistryRef::set)
             val elementController = rememberElementEditorController(
                 overridesStore = elementStore,
@@ -735,10 +743,6 @@ fun launchStudio(
             val reviewStageCoordinator = rememberReviewStageCoordinator().also(reviewRef::set)
 
             val structuralRev = overridesStore.structuralRevision
-            val paramRev = overridesStore.parameterRevision
-            val currentOverrides = remember(structuralRev, paramRev) { overridesStore.data() }
-            val elementRev = elementStore.revision
-            val currentElementOverrides = remember(elementRev) { elementStore.data() }
 
             var workspaceHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
 
@@ -757,9 +761,6 @@ fun launchStudio(
                 activePreset,
                 reviewStageCoordinator,
                 structuralRev,
-                paramRev,
-                designRev,
-                elementRev,
             ) {
                 createFoundationDeck(
                     theme = baseHostTheme,
@@ -769,9 +770,20 @@ fun launchStudio(
                         reviewStageCoordinator.stageDecorator +
                         elementController.stageDecorator +
                         lintStageDecorator,
-                    timelineOverrides = currentOverrides,
-                    elementOverrides = currentElementOverrides,
-                    designOverrides = designOverrides,
+                    timelineOverrides = overridesStore.data(),
+                    timelineOverridesProvider = {
+                        overridesStore.parameterRevision
+                        overridesStore.structuralRevision
+                        overridesStore.data()
+                    },
+                    elementOverridesProvider = {
+                        elementStore.revision
+                        elementStore.data()
+                    },
+                    designOverridesProvider = {
+                        designStore.revision
+                        designStore.overridesFor(activePreset)
+                    },
                 ).also { built ->
                     presetRegistry.record(built, activePreset)
                 }
@@ -803,6 +815,7 @@ fun launchStudio(
                 bakeGradleTaskHint = reviewStore.config.gradleTaskHint,
                 motionPathPreview = motionPathPreview,
                 stageSelection = stageSelection,
+                externalTimingKey = designOverrides.motion,
             ).also { ctrl ->
                 if (controllerRef.compareAndSet(null, ctrl)) {
                     ctrl.dockedInStoryWindow = timelineDocked
@@ -824,11 +837,14 @@ fun launchStudio(
                 workspaceRef.set(it)
             }
 
+            var presenterWinHolder by remember { mutableStateOf<PresenterWindow?>(null) }
+
             val isAnyTextInputActive = {
                 textInputTracker.hasFocusedTextInput ||
                     elementController.inlineEditingElementId != null ||
                     reviewStageCoordinator.pendingSelection != null ||
-                    reviewStageCoordinator.selectedPinCommentId != null
+                    reviewStageCoordinator.selectedPinCommentId != null ||
+                    presenterWinHolder?.controller?.jumpDialogOpen == true
             }
             studioWorkspace.isTextInputActiveProvider = isAnyTextInputActive
 
@@ -858,9 +874,43 @@ fun launchStudio(
                 elementController.isExternalTextInputActive = isAnyTextInputActive
                 elementController.currentSceneIndexProvider = { animatic.targetIndex.sceneIndex }
                 elementController.currentBeatIndexProvider = { animatic.targetIndex.frameIndex }
+                elementController.isStageSettlingProvider = { animatic.scrubSettling }
                 elementController.isDarkThemeProvider = { activePreset == DeckThemePreset.StageDark }
             }
             StudioWorkspaceSyncEffects(studioWorkspace)
+
+            val presenterWindow = rememberPresenterWindow(
+                animatic = animatic,
+                currentPresetProvider = {
+                    presetRegistry.presetFor(presenterWinHolder?.controller?.animatic?.storyboard, fallback = activePreset)
+                },
+                isStudioOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
+                isInspectOpenProvider = { reviewStageCoordinator.inspectModeEnabled },
+                hasUnbakedOverridesProvider = {
+                    overridesStore.structuralRevision
+                    overridesStore.parameterRevision
+                    elementStore.revision
+                    designStore.revision
+                    overridesStore.data().hasOverrides ||
+                        elementStore.data().hasOverrides ||
+                        designStore.data().hasOverrides
+                },
+                onEnterCleanShowMode = {
+                    timelineController.dockedInStoryWindow = false
+                    timelineController.detachedWindowVisible = false
+                    elementController.cancelInlineEdit(restoreStageFocus = false)
+                    elementController.selectElement(null)
+                    reviewStageCoordinator.inspectModeEnabled = false
+                    reviewStageCoordinator.dismissActivePopups()
+                },
+                isExternalTextInputActiveProvider = isAnyTextInputActive,
+                onRestoreStageFocus = {
+                    runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
+                },
+            ).also {
+                presenterWinHolder = it
+                presenterWindowRef.set(it)
+            }
 
             val studioWindow = rememberTimelineStudioWindow(
                 controller = timelineController,
@@ -906,7 +956,7 @@ fun launchStudio(
                 reviewWindowRef.set(it)
             }
 
-            val fullDecorator = slideReviewWindow.decorator + studioWindow.decorator
+            val fullDecorator = presenterWindow.decorator + slideReviewWindow.decorator + studioWindow.decorator
 
             CompositionLocalProvider(LocalAuthoringTextInputTracker provides textInputTracker) {
                 MaterialTheme(colors = materialColors, typography = materialTypography) {
@@ -994,6 +1044,8 @@ fun launchStudio(
         elementController = checkNotNull(elementControllerRef.get()),
         lintController = checkNotNull(lintControllerRef.get()),
         studioWorkspace = checkNotNull(workspaceRef.get()),
+        presenterWindow = checkNotNull(presenterWindowRef.get()),
+        presenter = checkNotNull(presenterWindowRef.get()).controller,
         review = checkNotNull(reviewRef.get()),
         reviewStore = reviewStore,
         timelineWindow = checkNotNull(timelineWindowRef.get()),
@@ -1002,6 +1054,7 @@ fun launchStudio(
         loopClock = checkNotNull(loopClockRef.get()),
         motionPathPreview = checkNotNull(motionPathRef.get()),
         stageSelection = checkNotNull(stageSelectionRef.get()),
+        textInputTracker = checkNotNull(textInputTrackerRef.get()),
         workspaceRoot = tempRoot,
         storyboardDir = storyboardDir,
         worker = resolvedWorker,

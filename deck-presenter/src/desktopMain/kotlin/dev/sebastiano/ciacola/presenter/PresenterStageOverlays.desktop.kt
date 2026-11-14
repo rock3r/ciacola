@@ -52,6 +52,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -391,6 +392,7 @@ internal fun QuickSlideJumpOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
+                    .trackAuthoringTextInputFocus()
                     .testTag("ciacola-presenter-jump-input"),
             )
 

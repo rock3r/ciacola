@@ -188,7 +188,7 @@ private fun mergeElementPatch(base: ElementPatch?, beat: ElementPatch?): Element
 fun DeckMagicText(
     transition: Transition<AnnotatedString>,
     modifier: Modifier = Modifier.fillMaxWidth(),
-    style: TextStyle = DeckDesign.body,
+    style: TextStyle = LocalDeckTheme.current.typography.body,
     elementId: String? = null,
     label: String? = null,
     kind: String = "MagicText",
@@ -277,6 +277,48 @@ fun DeckMagicText(
     var innerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
+    fun publishMagicTextSnapshot(coordsNow: LayoutCoordinates?, outerNow: LayoutCoordinates?) {
+        if (!shouldInspect || snapshotElementId == null || registry == null) return
+        val baseFontSizeSp = if (style.fontSize.isSp) style.fontSize.value else 16f
+        registry.recordMetadata(
+            meta = StageElementMetadata(
+                elementId = snapshotElementId,
+                supportsText = true,
+                defaultText = transition.targetState.text,
+                defaultTextColor = baseTextColor,
+                defaultFontSizeSp = baseFontSizeSp,
+                defaultFontWeight = style.fontWeight?.weight ?: 400,
+            ),
+            owner = ownerToken,
+        )
+        val bounds = resolveStageBounds(coordsNow, rootHolder)
+        if (bounds != null) {
+            val overflowed = outerNow != null && coordsNow != null &&
+                outerNow.isAttached && coordsNow.isAttached &&
+                (coordsNow.size.width > outerNow.size.width + 2 || coordsNow.size.height > outerNow.size.height + 2)
+            registry.record(
+                snapshot = StageNodeSnapshot(
+                    elementId = snapshotElementId,
+                    kind = kind,
+                    label = label ?: currentText.take(48).ifBlank { snapshotElementId },
+                    sceneIndex = sceneCtx?.sceneIndex ?: 0,
+                    beatIndex = beatIndex,
+                    stageBounds = bounds,
+                    resolvedText = currentText,
+                    hasVisualOverflow = overflowed,
+                    effectiveForeground = resolvedColor,
+                    effectiveBackground = effectiveBg,
+                    effectiveFontSizeSp = effectiveFontSizeSp,
+                    isEditable = true,
+                ),
+                owner = ownerToken,
+                alphaProvider = { stageAlphaProvider() },
+                coordinatesProvider = { innerCoords },
+                stageRootProvider = { rootHolder?.coordinates },
+            )
+        }
+    }
+
     if (shouldInspect && snapshotElementId != null) {
         DisposableEffect(registry, snapshotElementId) {
             onDispose { registry?.remove(snapshotElementId, ownerToken) }
@@ -286,44 +328,7 @@ fun DeckMagicText(
         val stageRootNow = rootHolder?.coordinates
         SideEffect {
             stageRootNow
-            val baseFontSizeSp = if (style.fontSize.isSp) style.fontSize.value else 16f
-            registry?.recordMetadata(
-                meta = StageElementMetadata(
-                    elementId = snapshotElementId,
-                    supportsText = true,
-                    defaultText = transition.targetState.text,
-                    defaultTextColor = baseTextColor,
-                    defaultFontSizeSp = baseFontSizeSp,
-                    defaultFontWeight = style.fontWeight?.weight ?: 400,
-                ),
-                owner = ownerToken,
-            )
-            val bounds = resolveStageBounds(coordsNow, rootHolder)
-            if (bounds != null) {
-                val overflowed = outerNow != null && coordsNow != null &&
-                    outerNow.isAttached && coordsNow.isAttached &&
-                    (coordsNow.size.width > outerNow.size.width + 2 || coordsNow.size.height > outerNow.size.height + 2)
-                registry?.record(
-                    snapshot = StageNodeSnapshot(
-                        elementId = snapshotElementId,
-                        kind = kind,
-                        label = label ?: currentText.take(48).ifBlank { snapshotElementId },
-                        sceneIndex = sceneCtx?.sceneIndex ?: 0,
-                        beatIndex = beatIndex,
-                        stageBounds = bounds,
-                        resolvedText = currentText,
-                        hasVisualOverflow = overflowed,
-                        effectiveForeground = resolvedColor,
-                        effectiveBackground = effectiveBg,
-                        effectiveFontSizeSp = effectiveFontSizeSp,
-                        isEditable = true,
-                    ),
-                    owner = ownerToken,
-                    alphaProvider = { stageAlphaProvider() },
-                    coordinatesProvider = { innerCoords },
-                    stageRootProvider = { rootHolder?.coordinates },
-                )
-            }
+            publishMagicTextSnapshot(coordsNow, outerNow)
         }
     }
 
@@ -354,7 +359,10 @@ fun DeckMagicText(
 
     val taggedModifier = modifier
         .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
-        .onPlaced { outerCoords = it }
+        .onPlaced { coords ->
+            outerCoords = coords
+            publishMagicTextSnapshot(innerCoords, coords)
+        }
         .reviewTarget(
             kind = kind,
             label = currentText.take(48).ifBlank { label ?: "MagicText" },
@@ -369,7 +377,10 @@ fun DeckMagicText(
                 .wrapContentSize(Alignment.TopStart)
                 .then(offsetMod)
                 .then(boxDecoMod)
-                .onPlaced { innerCoords = it }
+                .onPlaced { coords ->
+                    innerCoords = coords
+                    publishMagicTextSnapshot(coords, outerCoords)
+                }
                 .timelineTarget(trackId),
             effectiveStyle,
         )

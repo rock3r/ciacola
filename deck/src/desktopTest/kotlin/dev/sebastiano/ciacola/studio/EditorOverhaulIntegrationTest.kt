@@ -234,9 +234,6 @@ class EditorOverhaulIntegrationTest {
             val sb = rememberHotReloadStoryboard(
                 preset,
                 structuralRev,
-                paramRev,
-                designRev,
-                elementRev,
             ) {
                 createFoundationDeck(
                     theme = baseHostTheme,
@@ -246,9 +243,20 @@ class EditorOverhaulIntegrationTest {
                         reviewCoordinator.stageDecorator +
                         elementController.stageDecorator +
                         lintDecorator,
-                    timelineOverrides = timelineOverrides,
-                    elementOverrides = elementOverrides,
-                    designOverrides = designOverrides,
+                    timelineOverrides = timelineStore.data(),
+                    timelineOverridesProvider = {
+                        timelineStore.parameterRevision
+                        timelineStore.structuralRevision
+                        timelineStore.data()
+                    },
+                    elementOverridesProvider = {
+                        elementStore.revision
+                        elementStore.data()
+                    },
+                    designOverridesProvider = {
+                        designStore.revision
+                        designStore.overridesFor(preset)
+                    },
                 )
             }
 
@@ -293,6 +301,7 @@ class EditorOverhaulIntegrationTest {
             SideEffect {
                 elementController.currentSceneIndexProvider = { animatic.targetIndex.sceneIndex }
                 elementController.currentBeatIndexProvider = { animatic.targetIndex.frameIndex }
+                elementController.isStageSettlingProvider = { animatic.scrubSettling }
                 stageSelection.pickingSuppressed = {
                     workspace.isStudioOpen && workspace.activeTab == StudioInspectorTab.Element
                 }
