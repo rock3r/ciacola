@@ -112,9 +112,11 @@ fun main() = application {
             }
         }
         val stageInspectionRegistry = remember { StageInspectionRegistry() }
+        var animaticHolder by remember { mutableStateOf<dev.bnorm.storyboard.easel.Animatic?>(null) }
         val elementController = rememberElementEditorController(
             overridesStore = elementOverridesStore,
             inspectionRegistry = stageInspectionRegistry,
+            isStageSettlingProvider = { animaticHolder?.scrubSettling == true },
         )
         val lintController = rememberDeckLintController()
 
@@ -209,7 +211,7 @@ fun main() = application {
         val animatic = rememberAnimatic(
             fileName = "animatic",
             storyboard = { storyboard },
-        )
+        ).also { animaticHolder = it }
         val timelineController = rememberTimelineStudioController(
             animatic = animatic,
             overridesStore = timelineOverridesStore,
@@ -220,6 +222,7 @@ fun main() = application {
             motionPathPreview = motionPathPreview,
             stageSelection = stageSelection,
             externalTimingKey = designOverrides.motion,
+            externalInEditGesture = designSystemStore.isInEditGesture,
         )
 
         val studioWorkspace = remember(

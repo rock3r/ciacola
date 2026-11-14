@@ -267,13 +267,15 @@ class ElementEditorController(
 fun rememberElementEditorController(
     overridesStore: ElementOverridesStore,
     inspectionRegistry: StageInspectionRegistry = remember { StageInspectionRegistry() },
-    isStageSettlingProvider: () -> Boolean = { false },
+    isStageSettlingProvider: (() -> Boolean)? = null,
 ): ElementEditorController = remember(overridesStore, inspectionRegistry) {
     ElementEditorController(
         overridesStore = overridesStore,
         inspectionRegistry = inspectionRegistry,
-        isStageSettlingProvider = isStageSettlingProvider,
+        isStageSettlingProvider = isStageSettlingProvider ?: { false },
     )
 }.also {
-    it.isStageSettlingProvider = isStageSettlingProvider
+    if (isStageSettlingProvider != null) {
+        it.isStageSettlingProvider = isStageSettlingProvider
+    }
 }

@@ -65,6 +65,18 @@ class HumanRealisticInteractionSpectreTest {
                 assertTrue(controller.detachedWindowVisible)
                 assertFalse(controller.dockedInStoryWindow)
 
+                // Verify arrow keys work IMMEDIATELY inside the freshly opened F6 window without clicking first!
+                humanKeyTap(detachedIn, KeyEvent.VK_RIGHT)
+                automator.waitUntil(description = "immediate F6 Right arrow advances to S1:B2", timeout = 5.seconds) {
+                    animatic.targetIndex.sceneIndex == 0 && animatic.targetIndex.frameIndex == 1
+                }
+                settle()
+                humanKeyTap(detachedIn, KeyEvent.VK_LEFT)
+                automator.waitUntil(description = "immediate F6 Left arrow returns to S1:B1", timeout = 5.seconds) {
+                    animatic.targetIndex.sceneIndex == 0 && animatic.targetIndex.frameIndex == 0
+                }
+                settle()
+
                 val canvas = automator.waitForNode(tag = "ciacola-timeline-canvas", timeout = 5.seconds)
                 val startRulerPt = detachedRulerPoint(canvas, detachedWin, timeMs = 12)
                 val targetMidSegmentMs = 185

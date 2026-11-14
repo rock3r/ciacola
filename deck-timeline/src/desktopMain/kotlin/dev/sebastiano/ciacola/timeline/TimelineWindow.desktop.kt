@@ -649,6 +649,11 @@ class TimelineStudioWindow(
         var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
         InstallSpaceResetOnWindowFocusLoss(controller)
+        LaunchedEffect(Unit) {
+            if (!suppressShortcutsProvider()) {
+                runCatching { rootFocusRequester.requestFocus() }
+            }
+        }
         LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
             if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
                 runCatching { rootFocusRequester.requestFocus() }

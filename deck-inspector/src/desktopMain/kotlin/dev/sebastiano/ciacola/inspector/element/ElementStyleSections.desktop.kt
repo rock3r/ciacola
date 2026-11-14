@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -233,6 +234,7 @@ internal fun ElementStepperSliderRow(
     val focusRingColor = rememberAccessibleFocusRingColor()
     val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
     var sliderDragging by remember(gestureKey) { mutableStateOf(false) }
+    var sliderHadFocus by remember(gestureKey) { mutableStateOf(false) }
     var localDragValue by remember(gestureKey) { mutableFloatStateOf(clampedExternal) }
     val latestOnGestureEnd by rememberUpdatedState(onGestureEnd)
     val canDecrease = value > valueRange.start + 1e-4f
@@ -346,6 +348,17 @@ internal fun ElementStepperSliderRow(
             valueRange = valueRange,
             modifier = Modifier
                 .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                    if (focusState.hasFocus) {
+                        sliderHadFocus = true
+                    } else if (sliderHadFocus) {
+                        sliderHadFocus = false
+                        if (sliderDragging) {
+                            sliderDragging = false
+                            latestOnGestureEnd()
+                        }
+                    }
+                }
                 .designActivatableFocus(focusRingColor)
                 .testTag("$testTagPrefix-slider"),
         )

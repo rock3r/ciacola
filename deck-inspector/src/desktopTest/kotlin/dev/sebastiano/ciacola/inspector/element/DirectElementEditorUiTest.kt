@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -30,6 +32,9 @@ import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.text.style.TextOverflow
@@ -536,5 +541,153 @@ class DirectElementEditorUiTest {
         runOnIdle { activeScene = 1 }
         waitForIdle()
         onNodeWithTag("ciacola-element-missing-on-beat", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun rememberElementEditorControllerDoesNotClobberSettlingProviderDuringSamePassRootRecomposition() =
+        runComposeUiTest {
+            val dir = Files.createTempDirectory("ciacola-el-same-pass-settle")
+            val store = ElementOverridesStore(dir)
+            val registry = StageInspectionRegistry()
+            var settling by mutableStateOf(false)
+            lateinit var controller: ElementEditorController
+
+            registry.recordMetadata(
+                StageElementMetadata(
+                    elementId = "s1:prose:b0",
+                    supportsText = true,
+                    defaultText = "Settled prose",
+                    defaultFontSizeSp = 30f,
+                ),
+            )
+            registry.record(
+                StageNodeSnapshot(
+                    elementId = "s1:prose:b0",
+                    kind = "MagicText",
+                    label = "Prose",
+                    sceneIndex = 0,
+                    beatIndex = 0,
+                    stageBounds = Rect(40f, 120f, 800f, 220f),
+                    resolvedText = "Settled prose",
+                    effectiveFontSizeSp = 30f,
+                    isEditable = true,
+                    effectiveAlpha = 1f,
+                ),
+            )
+
+            setContent {
+                // Read store.revision in the root scope alongside rememberElementEditorController()
+                // (omitting isStageSettlingProvider) + SideEffect assignment + ElementEditorPanel in
+                // the same pass — matching Main.kt's recomposition topology.
+                val rootRev = store.revision
+                check(rootRev >= 0)
+                val ctrl = rememberElementEditorController(
+                    overridesStore = store,
+                    inspectionRegistry = registry,
+                )
+                controller = ctrl
+                SideEffect {
+                    ctrl.editorActive = true
+                    ctrl.currentSceneIndexProvider = { 0 }
+                    ctrl.currentBeatIndexProvider = { 0 }
+                    ctrl.isStageSettlingProvider = { settling }
+                }
+                DeckThemeProvider(DeckThemes.stageDark()) {
+                    Box(Modifier.width(340.dp)) {
+                        CiacolaJewelTheme(isDark = true) {
+                            ElementEditorPanel(controller = ctrl)
+                        }
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithTag("ciacola-element-picker-s1:prose:b0").performClick()
+            waitForIdle()
+            assertEquals("s1:prose:b0", controller.selectedElementId)
+            onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true).assertExists()
+
+            // Simulate a slider tick landing mid-settle while registry is empty: both the root scope
+            // (reading store.revision) and ElementEditorPanel recompose in the same pass BEFORE SideEffect!
+            runOnIdle {
+                settling = true
+                registry.clear()
+                store.updateElement("s1:prose:b0", coalesce = true, coalesceKey = "fontsize:s1:prose:b0") {
+                    it.copy(fontSizeSp = 64f)
+                }
+            }
+            waitForIdle()
+
+            assertTrue(controller.isSelectedElementOnCurrentBeat())
+            assertTrue(controller.slidesNodesForCurrentSlide().isNotEmpty())
+            onNodeWithTag("ciacola-element-missing-on-beat", useUnmergedTree = true).assertDoesNotExist()
+            onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true).assertExists()
+        }
+
+    @Test
+    fun sliderEndsGestureAndUnpinsLocalDragValueWhenKeyboardFocusLeavesBeforeKeyUp() = runComposeUiTest {
+        val dir = Files.createTempDirectory("ciacola-el-slider-focus-loss")
+        val store = ElementOverridesStore(dir)
+        val registry = StageInspectionRegistry()
+        registry.recordMetadata(
+            StageElementMetadata(
+                elementId = "s1:prose:b0",
+                supportsText = true,
+                defaultText = "Prose",
+                defaultFontSizeSp = 30f,
+            ),
+        )
+        registry.record(
+            StageNodeSnapshot(
+                elementId = "s1:prose:b0",
+                kind = "MagicText",
+                label = "Prose",
+                sceneIndex = 0,
+                beatIndex = 0,
+                stageBounds = Rect(40f, 120f, 800f, 220f),
+                resolvedText = "Prose",
+                effectiveFontSizeSp = 30f,
+                isEditable = true,
+                effectiveAlpha = 1f,
+            ),
+        )
+        val controller = ElementEditorController(overridesStore = store, inspectionRegistry = registry).apply {
+            editorActive = true
+            selectElement("s1:prose:b0")
+        }
+
+        setContent {
+            DeckThemeProvider(DeckThemes.stageDark()) {
+                Box(Modifier.width(340.dp)) {
+                    CiacolaJewelTheme(isDark = true) {
+                        ElementEditorPanel(controller = controller)
+                    }
+                }
+            }
+        }
+        waitForIdle()
+
+        val slider = onNodeWithTag("ciacola-element-fontsize-slider", useUnmergedTree = true)
+        slider.performScrollTo().requestFocus()
+        waitForIdle()
+
+        // Hold Right Arrow down without releasing KeyUp, then move focus away to another control.
+        slider.performKeyInput {
+            keyDown(Key.DirectionRight)
+        }
+        waitForIdle()
+        val nudgedSp = store.patchFor("s1:prose:b0")?.fontSizeSp
+        assertNotNull(nudgedSp)
+        assertTrue(nudgedSp > 30f)
+
+        onNodeWithTag("ciacola-element-weight-600", useUnmergedTree = true).requestFocus()
+        waitForIdle()
+
+        // Undo must revert fontSizeSp back to null AND unpin the Slider's ProgressBarRangeInfo.current back to 30f!
+        runOnIdle { assertTrue(store.undo()) }
+        waitForIdle()
+        assertNull(store.patchFor("s1:prose:b0")?.fontSizeSp)
+        val rangeAfterUndo = slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        assertEquals(30f, rangeAfterUndo.current, 0.5f)
     }
 }

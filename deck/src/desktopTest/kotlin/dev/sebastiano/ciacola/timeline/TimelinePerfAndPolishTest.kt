@@ -38,6 +38,7 @@ import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.createFoundationDeck
 import dev.sebastiano.ciacola.effects.DottedLeaderRow
+import dev.sebastiano.ciacola.inspector.design.DesignSystemStore
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
@@ -413,5 +414,71 @@ class TimelinePerfAndPolishTest {
             controller.snapshot.totalDurationMs > initialDuration,
             "Timeline snapshot must refresh after endEditGesture()",
         )
+    }
+
+    @Test
+    fun externalInEditGestureDefersTimelineReindexingDuringDesignMotionGesture() = runComposeUiTest {
+        val tempDir = Files.createTempDirectory("ciacola-design-gesture-defer")
+        val timelineStore = TimelineOverridesStore(storyboardDir = tempDir)
+        val designStore = DesignSystemStore(storyboardDir = tempDir)
+        val loopClock = DeckLoopClock()
+        lateinit var controller: TimelineStudioController
+
+        setContent {
+            val designRev = designStore.revision
+            val designOverrides = remember(designRev) { designStore.overridesFor(DeckThemePreset.StageDark) }
+            val deck = remember {
+                createFoundationDeck(
+                    includeKeynoteEffectsLab = false,
+                    designOverridesProvider = {
+                        designStore.revision
+                        designStore.overridesFor(DeckThemePreset.StageDark)
+                    },
+                )
+            }
+            val animatic = rememberAnimatic(storyboard = { deck })
+            controller = rememberTimelineStudioController(
+                animatic = animatic,
+                overridesStore = timelineStore,
+                loopClock = loopClock,
+                externalTimingKey = designOverrides.motion,
+                externalInEditGesture = designStore.isInEditGesture,
+            )
+        }
+
+        try {
+            waitForIdle()
+            assertTrue(controller.snapshot.stateSpans.isNotEmpty())
+            val initialDuration = controller.snapshot.totalDurationMs
+            assertFalse(designStore.isInEditGesture)
+
+            runOnIdle {
+                designStore.beginEditGesture()
+                assertTrue(designStore.isInEditGesture)
+                designStore.updateMotion(DeckThemePreset.StageDark, coalesce = true, coalesceKey = "motion:dissolve") {
+                    it.copy(dissolveDurationMs = 1_200)
+                }
+            }
+            mainClock.advanceTimeBy(450)
+            waitForIdle()
+            assertEquals(
+                initialDuration,
+                controller.snapshot.totalDurationMs,
+                "Offscreen re-indexing must stay deferred while designStore.isInEditGesture is true",
+            )
+
+            runOnIdle {
+                designStore.endEditGesture()
+                assertFalse(designStore.isInEditGesture)
+            }
+            mainClock.advanceTimeBy(450)
+            waitForIdle()
+            assertTrue(
+                controller.snapshot.totalDurationMs > initialDuration,
+                "Timeline snapshot must refresh once designStore.endEditGesture() completes",
+            )
+        } finally {
+            designStore.close()
+        }
     }
 }

@@ -321,6 +321,7 @@ internal fun TimelineTransportBar(
                     0f
                 }
                 var zoomDragging by remember(surface) { mutableStateOf(false) }
+                var zoomHadFocus by remember(surface) { mutableStateOf(false) }
                 var localZoomValue by remember(surface) { mutableFloatStateOf(sliderValue) }
                 LaunchedEffect(sliderValue, zoomDragging) {
                     if (!zoomDragging) {
@@ -340,7 +341,17 @@ internal fun TimelineTransportBar(
                     onValueChangeFinished = {
                         zoomDragging = false
                     },
-                    modifier = Modifier.width(84.dp).testTag("ciacola-timeline-zoom-slider"),
+                    modifier = Modifier
+                        .width(84.dp)
+                        .onFocusChanged { focusState ->
+                            if (focusState.hasFocus) {
+                                zoomHadFocus = true
+                            } else if (zoomHadFocus) {
+                                zoomHadFocus = false
+                                zoomDragging = false
+                            }
+                        }
+                        .testTag("ciacola-timeline-zoom-slider"),
                 )
                 TransportIconButton(AllIconsKeys.General.ZoomIn, "Zoom in", "Zoom In (=, or Alt+wheel)", "ciacola-timeline-zoom-in") {
                     viewport.markSurfaceActive(surface)

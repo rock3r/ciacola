@@ -651,6 +651,7 @@ fun rememberTimelineStudioController(
     motionPathPreview: MotionPathPreviewState = remember { MotionPathPreviewState() },
     stageSelection: TimelineStageSelection = remember { TimelineStageSelection() },
     externalTimingKey: Any? = Unit,
+    externalInEditGesture: Boolean = false,
 ): TimelineStudioController {
     val controller = remember(overridesStore, loopClock, motionPathPreview, stageSelection) {
         TimelineStudioController(
@@ -681,8 +682,9 @@ fun rememberTimelineStudioController(
         overridesStore.parameterRevision,
         overridesStore.isInEditGesture,
         externalTimingKey,
+        externalInEditGesture,
     ) {
-        val inGesture = overridesStore.isInEditGesture
+        val inGesture = overridesStore.isInEditGesture || externalInEditGesture
         if (inGesture && controller.snapshot.stateSpans.isNotEmpty()) return@LaunchedEffect
         // The first index (empty snapshot) runs immediately; edits are coalesced (a new key cancels
         // this effect while it waits).

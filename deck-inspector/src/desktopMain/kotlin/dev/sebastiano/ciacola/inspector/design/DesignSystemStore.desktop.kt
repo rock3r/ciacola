@@ -117,6 +117,9 @@ class DesignSystemStore(
     var revision by mutableIntStateOf(0)
         private set
 
+    var isInEditGesture by mutableStateOf(false)
+        private set
+
     init {
         reloadFromDiskIfChanged(notifyRevision = false)
     }
@@ -155,6 +158,7 @@ class DesignSystemStore(
             gestureSnapshotRecorded = false
         }
         activeGestureDepth++
+        isInEditGesture = true
     }
 
     fun endEditGesture() {
@@ -164,6 +168,7 @@ class DesignSystemStore(
                 if (activeGestureDepth == 0) {
                     gestureSnapshotRecorded = false
                     lastCoalesceKey = null
+                    isInEditGesture = false
                     if (pendingPersist) {
                         return@synchronized preparePersistLocked(debounce = false)
                     }
@@ -439,6 +444,7 @@ class DesignSystemStore(
             activeGestureDepth = 0
             gestureSnapshotRecorded = false
             lastCoalesceKey = null
+            isInEditGesture = false
             if (redoStack.size >= MAX_UNDO_HISTORY) {
                 redoStack.removeFirst()
             }
@@ -459,6 +465,7 @@ class DesignSystemStore(
             activeGestureDepth = 0
             gestureSnapshotRecorded = false
             lastCoalesceKey = null
+            isInEditGesture = false
             if (undoStack.size >= MAX_UNDO_HISTORY) {
                 undoStack.removeFirst()
             }

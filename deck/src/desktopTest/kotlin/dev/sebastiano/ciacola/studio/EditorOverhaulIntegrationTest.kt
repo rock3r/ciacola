@@ -195,9 +195,11 @@ class EditorOverhaulIntegrationTest {
         setContent {
             uiScope = rememberCoroutineScope()
             registry = remember { StageInspectionRegistry() }
+            var animaticHolder by remember { mutableStateOf<dev.bnorm.storyboard.easel.Animatic?>(null) }
             elementController = rememberElementEditorController(
                 overridesStore = elementStore,
                 inspectionRegistry = registry,
+                isStageSettlingProvider = { animaticHolder?.scrubSettling == true },
             )
             lintController = rememberDeckLintController()
 
@@ -274,7 +276,7 @@ class EditorOverhaulIntegrationTest {
                 }
             }
 
-            val animatic = rememberAnimatic(storyboard = { sb })
+            val animatic = rememberAnimatic(storyboard = { sb }).also { animaticHolder = it }
             val timelineController = rememberTimelineStudioController(
                 animatic = animatic,
                 overridesStore = timelineStore,
@@ -283,6 +285,8 @@ class EditorOverhaulIntegrationTest {
                 bakeWorkspaceRoot = tempDir,
                 motionPathPreview = motionPath,
                 stageSelection = stageSelection,
+                externalTimingKey = designOverrides.motion,
+                externalInEditGesture = designStore.isInEditGesture,
             )
 
             workspace = remember(timelineController) {

@@ -726,6 +726,7 @@ fun launchStudio(
             val elementController = rememberElementEditorController(
                 overridesStore = elementStore,
                 inspectionRegistry = stageInspectionRegistry,
+                isStageSettlingProvider = { animaticRef.get()?.scrubSettling == true },
             ).also(elementControllerRef::set)
             val lintController = rememberDeckLintController().also(lintControllerRef::set)
 
@@ -742,7 +743,11 @@ fun launchStudio(
             val stageSelection = remember { TimelineStageSelection() }.also(stageSelectionRef::set)
             val reviewStageCoordinator = rememberReviewStageCoordinator().also(reviewRef::set)
 
+            // Match Main.kt root revision reads so QaStudio exercises identical root recompositions.
+            val elementRev = elementStore.revision
             val structuralRev = overridesStore.structuralRevision
+            val paramRev = overridesStore.parameterRevision
+            check(elementRev >= 0 && paramRev >= 0)
 
             var workspaceHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
 
@@ -816,6 +821,7 @@ fun launchStudio(
                 motionPathPreview = motionPathPreview,
                 stageSelection = stageSelection,
                 externalTimingKey = designOverrides.motion,
+                externalInEditGesture = designStore.isInEditGesture,
             ).also { ctrl ->
                 if (controllerRef.compareAndSet(null, ctrl)) {
                     ctrl.dockedInStoryWindow = timelineDocked

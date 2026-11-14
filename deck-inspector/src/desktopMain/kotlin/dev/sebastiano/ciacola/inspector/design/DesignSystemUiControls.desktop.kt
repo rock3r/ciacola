@@ -276,6 +276,7 @@ internal fun DesignSliderRow(
     val focusRingColor = rememberAccessibleFocusRingColor()
     val clampedExternal = value.coerceIn(valueRange.start, valueRange.endInclusive)
     var sliderDragging by remember(gestureKey) { mutableStateOf(false) }
+    var sliderHadFocus by remember(gestureKey) { mutableStateOf(false) }
     var localDragValue by remember(gestureKey) { mutableFloatStateOf(clampedExternal) }
     val latestOnGestureEnd by rememberUpdatedState(onGestureEnd)
     val latestOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
@@ -367,6 +368,18 @@ internal fun DesignSliderRow(
             valueRange = valueRange,
             modifier = Modifier
                 .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                    if (focusState.hasFocus) {
+                        sliderHadFocus = true
+                    } else if (sliderHadFocus) {
+                        sliderHadFocus = false
+                        if (sliderDragging) {
+                            sliderDragging = false
+                            latestOnGestureEnd()
+                            latestOnValueChangeFinished()
+                        }
+                    }
+                }
                 .designActivatableFocus(focusRingColor)
                 .testTag("$testTagPrefix-slider"),
         )
