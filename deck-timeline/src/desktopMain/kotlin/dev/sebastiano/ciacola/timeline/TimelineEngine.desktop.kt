@@ -177,17 +177,23 @@ data class DeckTimelineSnapshot(
     }
 
     /**
-     * Time of `(stateIndex, fraction)`. A settled Value state (`fraction == 0`) maps to the end of
-     * its click hold, i.e. the event-beat line where the next click's animation starts.
+     * Time of `(stateIndex, fraction)`. A settled Value state (`fraction == 0`) maps to the start
+     * of its click hold, matching its [EventBeatLine.timeMs] and keeping the playhead safely on
+     * that beat rather than on an outgoing zero-duration boundary cliff.
      */
     fun timeMsForStateFraction(stateIndex: Int, fraction: Float): Int {
         if (stateSpans.isEmpty()) return 0
+        val clampedFrac = fraction.coerceIn(0f, 1f)
+        if (clampedFrac <= 0f) {
+            val hold = stateSpans.firstOrNull { it.stateIndex == stateIndex && it.isHold }
+            if (hold != null) return hold.startMs
+        }
         val segment = stateSpans.firstOrNull { it.stateIndex == stateIndex && !it.isHold }
         if (segment != null) {
-            return segment.startMs + (fraction.coerceIn(0f, 1f) * segment.durationMs).toInt()
+            return segment.startMs + (clampedFrac * segment.durationMs).toInt()
         }
         val hold = stateSpans.lastOrNull { it.stateIndex == stateIndex && it.isHold }
-        if (hold != null) return hold.startMs + hold.durationMs
+        if (hold != null) return hold.startMs
         val fallback = stateSpans.lastOrNull { it.stateIndex <= stateIndex } ?: stateSpans.first()
         return fallback.startMs + fallback.durationMs
     }
@@ -673,30 +679,35 @@ fun indexDeckTimeline(
     for (i in rawStates.indices) {
         val st = rawStates[i]
         val isValue = !st.isStart && !st.isEnd
+        val holdStartMs = cursorMs
         if (isValue) {
             valueStateIndex[st.sceneIndex to st.frameIndex] = i
-            beatStartTimeMap[st.sceneIndex to st.frameIndex] = cursorMs
+            beatStartTimeMap[st.sceneIndex to st.frameIndex] = holdStartMs
             // Click hold: the slide rests on this beat until the presenter clicks.
-            stateSpans += StateTimeSpan(i, st.sceneIndex, st.frameIndex, cursorMs, CLICK_HOLD_MS, isBoundary = false, isHold = true)
+            stateSpans += StateTimeSpan(i, st.sceneIndex, st.frameIndex, holdStartMs, CLICK_HOLD_MS, isBoundary = false, isHold = true)
             cursorMs += CLICK_HOLD_MS
         }
         if (st.isStart) startStateIndex[st.sceneIndex] = i
-        if (i == rawStates.lastIndex) break
 
-        val next = rawStates[i + 1]
-        val duration = segmentDurationMs[i]
-        segmentStart[i] = cursorMs
+        val hasNext = i < rawStates.lastIndex
+        val next = if (hasNext) rawStates[i + 1] else null
+        val duration = if (hasNext) segmentDurationMs[i] else 0
+        if (hasNext) {
+            segmentStart[i] = cursorMs
+        }
         if (isValue) {
             val sceneFrames = storyboard.scenes.getOrNull(st.sceneIndex)?.frames
             val currentVf = sceneFrames?.getOrNull(st.frameIndex) as? VirtualizedFrame<*>
-            val nextVf = if (!next.isEnd) sceneFrames?.getOrNull(next.frameIndex) as? VirtualizedFrame<*> else null
-            val isInjectedBeatLine = if (currentVf != null || nextVf != null) {
-                (currentVf?.isInjected == true) || (!next.isEnd && nextVf?.isInjected == true)
+            val isInjectedBeatLine = if (currentVf != null) {
+                currentVf.isInjected
             } else {
-                val injectedSet = overrides.sceneBeats[st.sceneIndex]?.injectedAfterBeats.orEmpty()
-                !next.isEnd && (st.frameIndex + 1) in injectedSet.map { it + 1 }
+                overrides.sceneBeats[st.sceneIndex]
+                    ?.let { resolveVirtualBeatToBaseBeat(it, st.frameIndex).second }
+                    ?: false
             }
-            val beatSegmentDuration = if (next.isEnd) {
+            val beatSegmentDuration = if (!hasNext) {
+                0
+            } else if (next!!.isEnd) {
                 var total = duration
                 var boundaryIdx = i + 1
                 while (boundaryIdx < rawStates.lastIndex && (rawStates[boundaryIdx].isEnd || rawStates[boundaryIdx].isStart)) {
@@ -707,22 +718,25 @@ fun indexDeckTimeline(
             } else {
                 duration
             }
+            // Emit the event-beat line at the start of the value state's hold span (not on the
+            // outgoing cliff), including the final beat of the last slide.
             eventBeats += EventBeatLine(
                 beatGlobalIndex = beatCounter++,
                 stateIndex = i,
                 sceneIndex = st.sceneIndex,
                 frameIndex = st.frameIndex,
-                timeMs = cursorMs,
+                timeMs = holdStartMs,
                 segmentDurationMs = beatSegmentDuration,
-                isSlideBoundary = next.isEnd,
+                isSlideBoundary = next?.isEnd == true,
                 isInjected = isInjectedBeatLine,
             )
         }
+        if (!hasNext) break
         if (st.isEnd) {
             // Scene s and s+1 are both on stage for the whole End -> Start segment.
             sceneEndTime[st.sceneIndex] = cursorMs + duration
             sceneOverlapOut[st.sceneIndex] = duration
-            sceneStartTime[next.sceneIndex] = cursorMs
+            sceneStartTime[next!!.sceneIndex] = cursorMs
             sceneOverlapIn[next.sceneIndex] = duration
         }
         stateSpans += StateTimeSpan(i, st.sceneIndex, st.frameIndex, cursorMs, duration, isBoundary = st.isEnd || st.isStart)

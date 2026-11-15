@@ -7,6 +7,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -19,22 +21,32 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.overlay.EaselOverlay
 import dev.bnorm.storyboard.easel.overlay.OverlayNavigation
 import dev.bnorm.storyboard.easel.overview.EaselOverview
+import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.plus
+import dev.sebastiano.ciacola.DeckCatalog
+import dev.sebastiano.ciacola.DeckEntry
+import dev.sebastiano.ciacola.authoring.DeckHostParams
 import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.inspector.DeckElementOverridesFile
+import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
+import dev.sebastiano.ciacola.inspector.LocalStageInteractiveRegistry
+import dev.sebastiano.ciacola.inspector.StageDragPreview
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.StageInteractiveRegistry
 import dev.sebastiano.ciacola.inspector.design.DesignSystemStore
 import dev.sebastiano.ciacola.inspector.element.ElementEditorController
 import dev.sebastiano.ciacola.inspector.element.ElementOverridesStore
 import dev.sebastiano.ciacola.inspector.element.rememberElementEditorController
 import dev.sebastiano.ciacola.inspector.lint.DeckLintController
-import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintController
 import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintStageDecorator
 import dev.sebastiano.ciacola.presenter.PresenterController
 import dev.sebastiano.ciacola.presenter.PresenterWindow
@@ -45,14 +57,24 @@ import dev.sebastiano.ciacola.review.ReviewStageCoordinator
 import dev.sebastiano.ciacola.review.SlideReviewWindow
 import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
+import dev.sebastiano.ciacola.studio.DeckSwitcherDropdown
 import dev.sebastiano.ciacola.studio.StudioInspectorTab
 import dev.sebastiano.ciacola.studio.StudioUnifiedInspectorPane
 import dev.sebastiano.ciacola.studio.StudioWorkspaceController
 import dev.sebastiano.ciacola.studio.StudioWorkspaceSyncEffects
+import dev.sebastiano.ciacola.studio.loadPersistedInspectorWidthDp
+import dev.sebastiano.ciacola.studio.persistActiveDeckId
+import dev.sebastiano.ciacola.studio.persistInspectorWidthDp
+import dev.sebastiano.ciacola.studio.rememberDeckMenuWindow
+import dev.sebastiano.ciacola.studio.resolveInitialDeckId
+import dev.sebastiano.ciacola.studio.storyboardDirForDeck
+import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.DesignSystemOverrides
 import dev.sebastiano.ciacola.theme.withOverrides
 import dev.sebastiano.ciacola.timeline.DeckLoopClock
+import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
 import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
 import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
 import dev.sebastiano.ciacola.timeline.TimelineStageSelection
@@ -93,6 +115,23 @@ import org.junit.rules.TestRule
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
 
+/** Builds a custom [Storyboard] inside [QaStudio] with full Studio decorator and override wiring. */
+data class QaStoryboardRequest(
+    val theme: DeckTheme,
+    val bundledPreset: DeckThemePreset,
+    val includeKeynoteEffectsLab: Boolean = true,
+    val stageDecorator: ContentDecorator,
+    val timelineOverrides: DeckTimelineOverridesFile,
+    val elementOverrides: DeckElementOverridesFile,
+    val designOverrides: DesignSystemOverrides,
+    val timelineOverridesProvider: () -> DeckTimelineOverridesFile,
+    val elementOverridesProvider: () -> DeckElementOverridesFile,
+    val designOverridesProvider: () -> DesignSystemOverrides,
+)
+
+typealias QaDeckBuildParams = QaStoryboardRequest
+typealias QaStoryboardFactory = (QaStoryboardRequest) -> Storyboard
+
 /** Builds a focus-safe Spectre [ComposeAutomatorRule] backed by [RobotDriver.synthetic]. */
 fun qaAutomatorRule(): ComposeAutomatorRule = ComposeAutomatorRule(
     factory = { ComposeAutomator.inProcess(robotDriver = RobotDriver.synthetic()) },
@@ -119,6 +158,8 @@ class QaStudioRule : TestRule {
         detachedWindowPosition: WindowPosition = WindowPosition(120.dp, 520.dp),
         includeKeynoteEffectsLab: Boolean = true,
         includeOverlayNavigation: Boolean = false,
+        deckId: String? = null,
+        storyboardFactory: QaStoryboardFactory? = null,
         worker: String? = null,
         qaRoot: File = QaPaths.qaRoot(),
         evidenceDir: File? = null,
@@ -135,6 +176,8 @@ class QaStudioRule : TestRule {
         detachedWindowPosition = detachedWindowPosition,
         includeKeynoteEffectsLab = includeKeynoteEffectsLab,
         includeOverlayNavigation = includeOverlayNavigation,
+        deckId = deckId,
+        storyboardFactory = storyboardFactory,
         worker = worker,
         qaRoot = qaRoot,
         evidenceDir = evidenceDir,
@@ -197,21 +240,21 @@ class QaStudio internal constructor(
     val automator: ComposeAutomator,
     val window: ComposeWindow,
     val controller: TimelineStudioController,
-    val overridesStore: TimelineOverridesStore,
+    private val overridesStoreRef: AtomicReference<TimelineOverridesStore?>,
     val designStore: DesignSystemStore,
-    val elementStore: ElementOverridesStore,
-    val stageInspectionRegistry: StageInspectionRegistry,
-    val elementController: ElementEditorController,
-    val lintController: DeckLintController,
+    private val elementStoreRef: AtomicReference<ElementOverridesStore?>,
+    private val stageInspectionRegistryRef: AtomicReference<StageInspectionRegistry?>,
+    private val elementControllerRef: AtomicReference<ElementEditorController?>,
+    private val lintControllerRef: AtomicReference<DeckLintController?>,
     val studioWorkspace: StudioWorkspaceController,
     val presenterWindow: PresenterWindow,
     val presenter: PresenterController,
     val review: ReviewStageCoordinator,
-    val reviewStore: ReviewCommentStore,
+    private val reviewStoreRef: AtomicReference<ReviewCommentStore?>,
     val timelineWindow: TimelineStudioWindow,
-    val reviewWindow: SlideReviewWindow,
-    val animatic: Animatic,
-    val loopClock: DeckLoopClock,
+    private val reviewWindowRef: AtomicReference<SlideReviewWindow?>,
+    private val animaticRef: AtomicReference<Animatic?>,
+    private val loopClockRef: AtomicReference<DeckLoopClock?>,
     val motionPathPreview: MotionPathPreviewState,
     val stageSelection: TimelineStageSelection,
     val textInputTracker: AuthoringTextInputFocusTracker,
@@ -226,13 +269,53 @@ class QaStudio internal constructor(
     private val storyWindowRef: AtomicReference<ComposeWindow?>,
     private val detachedTimelineWindowRef: AtomicReference<ComposeWindow?>,
     private val reviewPanelWindowRef: AtomicReference<ComposeWindow?>,
+    private val presenterComposeWindowRef: AtomicReference<ComposeWindow?>,
     private val presetReader: () -> DeckThemePreset,
     private val presetUpdater: (DeckThemePreset) -> Unit,
+    private val activeDeckReader: () -> DeckEntry,
+    private val deckSwitcher: (DeckEntry) -> Unit,
     private val exitAppRef: AtomicReference<(() -> Unit)?>,
     private val appThread: Thread,
+    val deckId: String? = null,
 ) : AutoCloseable {
 
     private val closed = AtomicBoolean(false)
+
+    val overridesStore: TimelineOverridesStore
+        get() = checkNotNull(overridesStoreRef.get()) { "TimelineOverridesStore is not active" }
+
+    val elementStore: ElementOverridesStore
+        get() = checkNotNull(elementStoreRef.get()) { "ElementOverridesStore is not active" }
+
+    val stageInspectionRegistry: StageInspectionRegistry
+        get() = checkNotNull(stageInspectionRegistryRef.get()) { "StageInspectionRegistry is not active" }
+
+    val elementController: ElementEditorController
+        get() = checkNotNull(elementControllerRef.get()) { "ElementEditorController is not active" }
+
+    val lintController: DeckLintController
+        get() = checkNotNull(lintControllerRef.get()) { "DeckLintController is not active" }
+
+    val reviewStore: ReviewCommentStore
+        get() = checkNotNull(reviewStoreRef.get()) { "ReviewCommentStore is not active" }
+
+    val reviewWindow: SlideReviewWindow
+        get() = checkNotNull(reviewWindowRef.get()) { "SlideReviewWindow is not active" }
+
+    val loopClock: DeckLoopClock
+        get() = checkNotNull(loopClockRef.get()) { "DeckLoopClock is not active" }
+
+    /** Currently active catalog deck entry. */
+    val activeDeck: DeckEntry
+        get() = activeDeckReader()
+
+    /** Active deck's per-deck `.storyboard` directory. */
+    val activeDeckStoryboardDir: Path
+        get() = storyboardDirForDeck(storyboardDir, activeDeck.id)
+
+    /** Live [Animatic] instance (tracks structural rebuilds and deck switches). */
+    val animatic: Animatic
+        get() = checkNotNull(animaticRef.get()) { "Animatic is not active" }
 
     /** Synthetic AWT input dispatcher across all Ciacola windows in this test JVM. */
     val input: SyntheticInput by lazy { SyntheticInput() }
@@ -244,6 +327,14 @@ class QaStudio internal constructor(
     /** Current Review sidecar [ComposeWindow], or `null` when hidden. */
     val reviewPanelWindow: ComposeWindow?
         get() = reviewPanelWindowRef.get()
+
+    /** Current Presenter View [ComposeWindow], or `null` when hidden. */
+    val presenterComposeWindow: ComposeWindow?
+        get() = presenterComposeWindowRef.get()
+
+    /** Alias for [presenterComposeWindow] used by QA suites. */
+    val presenterPanelWindow: ComposeWindow?
+        get() = presenterComposeWindowRef.get()
 
     /** Active theme preset (`StageDark` or `KeynoteLight`). */
     val preset: DeckThemePreset
@@ -265,6 +356,13 @@ class QaStudio internal constructor(
     /** Switches between [DeckThemePreset.StageDark] and [DeckThemePreset.KeynoteLight] live. */
     suspend fun setThemePreset(newPreset: DeckThemePreset) {
         onUi { presetUpdater(newPreset) }
+        settle()
+    }
+
+    /** Switches the active catalog deck live and waits for Compose and timeline indexing to settle. */
+    suspend fun selectDeck(targetDeckId: String) {
+        val entry = DeckCatalog.byId(targetDeckId)
+        onUi { deckSwitcher(entry) }
         settle()
     }
 
@@ -373,6 +471,26 @@ class QaStudio internal constructor(
         }
         settle()
         return checkNotNull(reviewPanelWindowRef.get())
+    }
+
+    /** Opens the standalone Presenter View window (`F2` mode) and returns its [ComposeWindow]. */
+    suspend fun openPresenterWindow(): ComposeWindow {
+        onUi { presenterWindow.visible = true }
+        automator.waitUntil(description = "presenter window showing", timeout = 10.seconds) {
+            val w = presenterComposeWindowRef.get()
+            w != null && w.isShowing && findSkiaLayer(w) != null
+        }
+        settle()
+        return checkNotNull(presenterComposeWindowRef.get())
+    }
+
+    /** Closes the standalone Presenter View window if open. */
+    suspend fun closePresenterWindow() {
+        onUi { presenterWindow.visible = false }
+        automator.waitUntil(description = "presenter window closed", timeout = 5.seconds) {
+            presenterComposeWindowRef.get() == null
+        }
+        settle()
     }
 
     /** Scrubs to the settled rest beat `(sceneIndex, frameIndex)` and waits for the stage to match. */
@@ -633,12 +751,19 @@ class QaStudio internal constructor(
         val exitApp = exitAppRef.getAndSet(null)
         val detached = detachedTimelineWindowRef.getAndSet(null)
         val reviewWin = reviewPanelWindowRef.getAndSet(null)
+        val presenterWin = presenterComposeWindowRef.getAndSet(null)
         val story = storyWindowRef.getAndSet(null)
-        EventQueue.invokeLater {
+        val disposeAll = {
             runCatching { exitApp?.invoke() }
-            runCatching { detached?.dispose() }
-            runCatching { reviewWin?.dispose() }
-            runCatching { story?.dispose() }
+            runCatching { detached?.isVisible = false; detached?.dispose() }
+            runCatching { reviewWin?.isVisible = false; reviewWin?.dispose() }
+            runCatching { presenterWin?.isVisible = false; presenterWin?.dispose() }
+            runCatching { story?.isVisible = false; story?.dispose() }
+        }
+        if (EventQueue.isDispatchThread()) {
+            disposeAll()
+        } else {
+            runCatching { EventQueue.invokeAndWait { disposeAll() } }
         }
         appThread.join(3_000)
         runCatching { workspaceRoot.toFile().deleteRecursively() }
@@ -666,6 +791,8 @@ fun launchStudio(
     detachedWindowPosition: WindowPosition = WindowPosition(120.dp, 520.dp),
     includeKeynoteEffectsLab: Boolean = true,
     includeOverlayNavigation: Boolean = false,
+    deckId: String? = null,
+    storyboardFactory: QaStoryboardFactory? = null,
     worker: String? = null,
     qaRoot: File = QaPaths.qaRoot(),
     evidenceDir: File? = null,
@@ -686,6 +813,7 @@ fun launchStudio(
     val storyWindowRef = AtomicReference<ComposeWindow?>(null)
     val detachedTimelineWindowRef = AtomicReference<ComposeWindow?>(null)
     val reviewPanelWindowRef = AtomicReference<ComposeWindow?>(null)
+    val presenterComposeWindowRef = AtomicReference<ComposeWindow?>(null)
     val exitAppRef = AtomicReference<(() -> Unit)?>(null)
 
     val controllerRef = AtomicReference<TimelineStudioController?>(null)
@@ -702,13 +830,19 @@ fun launchStudio(
     val workspaceRef = AtomicReference<StudioWorkspaceController?>(null)
     val presenterWindowRef = AtomicReference<PresenterWindow?>(null)
     val textInputTrackerRef = AtomicReference<AuthoringTextInputFocusTracker?>(null)
+    val overridesStoreRef = AtomicReference<TimelineOverridesStore?>(null)
+    val elementStoreRef = AtomicReference<ElementOverridesStore?>(null)
+    val reviewStoreRef = AtomicReference<ReviewCommentStore?>(null)
     val presetHolder = AtomicReference(preset)
     val presetSetterRef = AtomicReference<((DeckThemePreset) -> Unit)?>(null)
+    val initialDeckId = resolveInitialDeckId(
+        rootStoryboardDir = storyboardDir,
+        systemPropertyOverride = deckId ?: System.getProperty("ciacola.deck"),
+    )
+    val activeDeckHolder = AtomicReference(DeckCatalog.byId(initialDeckId))
+    val deckSwitcherRef = AtomicReference<((DeckEntry) -> Unit)?>(null)
 
-    val overridesStore = TimelineOverridesStore(storyboardDir = storyboardDir)
     val designStore = DesignSystemStore(storyboardDir = storyboardDir)
-    val elementStore = ElementOverridesStore(storyboardDir = storyboardDir)
-    val reviewStore = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
 
     val hostThread = thread(name = "ciacola-qa-studio-host", isDaemon = true) {
         application(exitProcessOnExit = false) {
@@ -720,15 +854,35 @@ fun launchStudio(
                 presetHolder.set(next)
                 activePreset = next
             }
+            var activeDeckId by remember { mutableStateOf(initialDeckId) }
+            val activeDeck = remember(activeDeckId) { DeckCatalog.byId(activeDeckId) }
+            activeDeckHolder.set(activeDeck)
+            val deckStoryboardDir = remember(storyboardDir, activeDeck.id) {
+                storyboardDirForDeck(storyboardDir, activeDeck.id)
+            }
+
+            val overridesStore = remember(deckStoryboardDir) {
+                TimelineOverridesStore(storyboardDir = deckStoryboardDir)
+            }.also(overridesStoreRef::set)
+            val elementStore = remember(deckStoryboardDir) {
+                ElementOverridesStore(storyboardDir = deckStoryboardDir)
+            }.also(elementStoreRef::set)
+            val reviewStore = remember(deckStoryboardDir, tempRoot) {
+                ReviewCommentStore(storyboardDir = deckStoryboardDir, workspaceRoot = tempRoot)
+            }.also(reviewStoreRef::set)
+            DisposableEffect(elementStore) {
+                onDispose { elementStore.close() }
+            }
 
             val textInputTracker = remember { AuthoringTextInputFocusTracker() }.also(textInputTrackerRef::set)
-            val stageInspectionRegistry = remember { StageInspectionRegistry() }.also(inspectionRegistryRef::set)
+            val stageInspectionRegistry = remember(activeDeck.id) { StageInspectionRegistry() }.also(inspectionRegistryRef::set)
+            val stageInteractiveRegistry = remember(activeDeck.id) { StageInteractiveRegistry() }
             val elementController = rememberElementEditorController(
                 overridesStore = elementStore,
                 inspectionRegistry = stageInspectionRegistry,
                 isStageSettlingProvider = { animaticRef.get()?.scrubSettling == true },
             ).also(elementControllerRef::set)
-            val lintController = rememberDeckLintController().also(lintControllerRef::set)
+            val lintController = remember(activeDeck.id) { DeckLintController() }.also(lintControllerRef::set)
 
             val designRev = designStore.revision
             val designOverrides = remember(activePreset, designRev) { designStore.overridesFor(activePreset) }
@@ -738,7 +892,7 @@ fun launchStudio(
             }
             val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
             val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
-            val loopClock = remember { DeckLoopClock() }.also(loopClockRef::set)
+            val loopClock = remember(activeDeck.id) { DeckLoopClock() }.also(loopClockRef::set)
             val motionPathPreview = remember { MotionPathPreviewState() }.also(motionPathRef::set)
             val stageSelection = remember { TimelineStageSelection() }.also(stageSelectionRef::set)
             val reviewStageCoordinator = rememberReviewStageCoordinator().also(reviewRef::set)
@@ -763,54 +917,124 @@ fun launchStudio(
                 isInspectionVisible = { workspaceHolder?.isLinterVisible == true },
             )
             val storyboard = rememberHotReloadStoryboard(
+                activeDeck.id,
                 activePreset,
                 reviewStageCoordinator,
                 structuralRev,
             ) {
-                createFoundationDeck(
-                    theme = baseHostTheme,
-                    bundledPreset = activePreset,
-                    includeKeynoteEffectsLab = includeKeynoteEffectsLab,
-                    stageDecorator = timelineStageDecorator +
-                        reviewStageCoordinator.stageDecorator +
-                        elementController.stageDecorator +
-                        lintStageDecorator,
-                    timelineOverrides = overridesStore.data(),
-                    timelineOverridesProvider = {
-                        overridesStore.parameterRevision
-                        overridesStore.structuralRevision
-                        overridesStore.data()
-                    },
-                    elementOverridesProvider = {
-                        elementStore.revision
-                        elementStore.data()
-                    },
-                    designOverridesProvider = {
-                        designStore.revision
-                        designStore.overridesFor(activePreset)
-                    },
-                ).also { built ->
-                    presetRegistry.record(built, activePreset)
+                val combinedStageDecorator = timelineStageDecorator +
+                    reviewStageCoordinator.stageDecorator +
+                    elementController.stageDecorator +
+                    lintStageDecorator
+                val timelineProvider = {
+                    overridesStore.parameterRevision
+                    overridesStore.structuralRevision
+                    overridesStore.data()
                 }
+                val elementProvider = {
+                    elementStore.revision
+                    elementStore.data()
+                }
+                val designProvider = {
+                    designStore.revision
+                    designStore.overridesFor(activePreset)
+                }
+                val built = if (storyboardFactory != null) {
+                    storyboardFactory(
+                        QaStoryboardRequest(
+                            theme = baseHostTheme,
+                            bundledPreset = activePreset,
+                            includeKeynoteEffectsLab = includeKeynoteEffectsLab,
+                            stageDecorator = combinedStageDecorator,
+                            timelineOverrides = overridesStore.data(),
+                            elementOverrides = elementStore.data(),
+                            designOverrides = designOverrides,
+                            timelineOverridesProvider = timelineProvider,
+                            elementOverridesProvider = elementProvider,
+                            designOverridesProvider = designProvider,
+                        ),
+                    )
+                } else if (activeDeck.id == DeckCatalog.FOUNDATION_ID) {
+                    createFoundationDeck(
+                        theme = baseHostTheme,
+                        bundledPreset = activePreset,
+                        includeKeynoteEffectsLab = includeKeynoteEffectsLab,
+                        stageDecorator = combinedStageDecorator,
+                        timelineOverrides = overridesStore.data(),
+                        timelineOverridesProvider = timelineProvider,
+                        elementOverridesProvider = elementProvider,
+                        designOverridesProvider = designProvider,
+                    )
+                } else {
+                    activeDeck.create(
+                        DeckHostParams(
+                            theme = baseHostTheme,
+                            bundledPreset = activePreset,
+                            stageDecorator = combinedStageDecorator,
+                            timelineOverrides = overridesStore.data(),
+                            timelineOverridesProvider = timelineProvider,
+                            elementOverridesProvider = elementProvider,
+                            designOverridesProvider = designProvider,
+                        ),
+                    )
+                }
+                built.also { presetRegistry.record(it, activePreset) }
             }
             val buildAuditStoryboardForPreset: (DeckThemePreset) -> Storyboard = remember(
+                activeDeck,
                 overridesStore,
                 elementStore,
                 designStore,
+                storyboardFactory,
             ) {
                 { targetPreset ->
+                    val targetTheme = DeckThemes.forPreset(targetPreset)
                     val targetDesignOverrides = designStore.overridesFor(targetPreset)
-                    createFoundationDeck(
-                        theme = DeckThemes.forPreset(targetPreset),
-                        bundledPreset = targetPreset,
-                        includeKeynoteEffectsLab = includeKeynoteEffectsLab,
-                        timelineOverrides = overridesStore.data(),
-                        elementOverrides = elementStore.data(),
-                        designOverrides = targetDesignOverrides,
-                    )
+                    if (storyboardFactory != null) {
+                        val tl = overridesStore.data()
+                        val el = elementStore.data()
+                        storyboardFactory(
+                            QaStoryboardRequest(
+                                theme = targetTheme,
+                                bundledPreset = targetPreset,
+                                includeKeynoteEffectsLab = includeKeynoteEffectsLab,
+                                stageDecorator = ContentDecorator.None,
+                                timelineOverrides = tl,
+                                elementOverrides = el,
+                                designOverrides = targetDesignOverrides,
+                                timelineOverridesProvider = { tl },
+                                elementOverridesProvider = { el },
+                                designOverridesProvider = { targetDesignOverrides },
+                            ),
+                        )
+                    } else if (activeDeck.id == DeckCatalog.FOUNDATION_ID) {
+                        createFoundationDeck(
+                            theme = targetTheme,
+                            bundledPreset = targetPreset,
+                            includeKeynoteEffectsLab = includeKeynoteEffectsLab,
+                            timelineOverrides = overridesStore.data(),
+                            elementOverrides = elementStore.data(),
+                            designOverrides = targetDesignOverrides,
+                        )
+                    } else {
+                        activeDeck.create(
+                            DeckHostParams(
+                                theme = targetTheme,
+                                bundledPreset = targetPreset,
+                                timelineOverrides = overridesStore.data(),
+                                elementOverrides = elementStore.data(),
+                                designOverrides = targetDesignOverrides,
+                            ),
+                        )
+                    }
                 }
             }
-            val animatic = rememberAnimatic(storyboard = { storyboard }).also(animaticRef::set)
+            val animatic = key(activeDeck.id) {
+                rememberAnimatic(
+                    initialIndex = Storyboard.Index(0, 0),
+                    storyboard = { storyboard },
+                )
+            }.also(animaticRef::set)
             val timelineController = rememberTimelineStudioController(
                 animatic = animatic,
                 overridesStore = overridesStore,
@@ -828,7 +1052,7 @@ fun launchStudio(
                     ctrl.detachedWindowVisible = timelineDetached
                 }
             }
-            val studioWorkspace = remember(timelineController) {
+            val studioWorkspace = remember(timelineController, designStore) {
                 StudioWorkspaceController(
                     timelineController = timelineController,
                     timelineOverridesStore = overridesStore,
@@ -837,11 +1061,36 @@ fun launchStudio(
                     elementController = elementController,
                     lintController = lintController,
                     stageInspectionRegistry = stageInspectionRegistry,
+                    initialInspectorWidthDp = loadPersistedInspectorWidthDp(storyboardDir),
                 )
             }.also {
+                it.updateForDeckSwitch(
+                    newTimelineOverridesStore = overridesStore,
+                    newElementOverridesStore = elementStore,
+                    newElementController = elementController,
+                    newLintController = lintController,
+                    newStageInspectionRegistry = stageInspectionRegistry,
+                )
+                it.onInspectorWidthPersisted = { widthDp ->
+                    persistInspectorWidthDp(storyboardDir, widthDp)
+                }
                 workspaceHolder = it
                 workspaceRef.set(it)
             }
+
+            fun switchToDeck(target: DeckEntry) {
+                if (target.id == activeDeckId) return
+                elementController.commitInlineEdit(restoreStageFocus = false)
+                elementController.selectElement(null)
+                timelineController.exitLoopSubComp()
+                timelineController.stopPlayback()
+                timelineController.selectTrack(null)
+                reviewStageCoordinator.dismissActivePopups()
+                persistActiveDeckId(storyboardDir, target.id)
+                activeDeckHolder.set(target)
+                activeDeckId = target.id
+            }
+            deckSwitcherRef.set(::switchToDeck)
 
             var presenterWinHolder by remember { mutableStateOf<PresenterWindow?>(null) }
 
@@ -853,6 +1102,20 @@ fun launchStudio(
                     presenterWinHolder?.controller?.jumpDialogOpen == true
             }
             studioWorkspace.isTextInputActiveProvider = isAnyTextInputActive
+            studioWorkspace.onTogglePresenter = {
+                presenterWinHolder?.let { it.visible = !it.visible }
+            }
+            studioWorkspace.onToggleDockedTimeline = {
+                timelineController.dockedInStoryWindow = !timelineController.dockedInStoryWindow
+            }
+            studioWorkspace.onToggleDetachedTimeline = {
+                val next = !timelineController.detachedWindowVisible
+                if (next) timelineController.dockedInStoryWindow = false
+                timelineController.detachedWindowVisible = next
+            }
+            studioWorkspace.onSelectDeckByIndex = { idx ->
+                DeckCatalog.entries.getOrNull(idx)?.let(::switchToDeck)
+            }
 
             val reviewOwnsStageClick = {
                 reviewStageCoordinator.inspectModeEnabled ||
@@ -878,8 +1141,8 @@ fun launchStudio(
                 }
                 elementController.isStagePointOverHud = reviewStageCoordinator::isStagePointOverHud
                 elementController.isExternalTextInputActive = isAnyTextInputActive
-                elementController.currentSceneIndexProvider = { animatic.targetIndex.sceneIndex }
-                elementController.currentBeatIndexProvider = { animatic.targetIndex.frameIndex }
+                elementController.currentSceneIndexProvider = { animatic.presentedIndex.sceneIndex }
+                elementController.currentBeatIndexProvider = { animatic.presentedIndex.frameIndex }
                 elementController.isStageSettlingProvider = { animatic.scrubSettling }
                 elementController.isDarkThemeProvider = { activePreset == DeckThemePreset.StageDark }
             }
@@ -913,6 +1176,9 @@ fun launchStudio(
                 onRestoreStageFocus = {
                     runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
                 },
+                extraPreviewKeyHandler = { ev, _ ->
+                    studioWorkspace.handleStudioPreviewKey(ev)
+                },
             ).also {
                 presenterWinHolder = it
                 presenterWindowRef.set(it)
@@ -927,7 +1193,7 @@ fun launchStudio(
                 onReturnFocusToStage = {
                     runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
                 },
-                inspectorSlot = {
+                trailingPane = {
                     StudioUnifiedInspectorPane(
                         workspace = studioWorkspace,
                         animatic = animatic,
@@ -941,11 +1207,18 @@ fun launchStudio(
                         scope = appScope,
                     )
                 },
+                leadingToolbarContent = {
+                    DeckSwitcherDropdown(
+                        activeDeck = activeDeck,
+                        onSelectDeck = ::switchToDeck,
+                    )
+                },
                 extraPreviewKeyHandler = { ev, _ ->
                     studioWorkspace.handleStudioPreviewKey(ev)
                 },
             ).also(timelineWindowRef::set)
             var reviewWinHolder by remember { mutableStateOf<SlideReviewWindow?>(null) }
+            val prevReviewVisible = reviewWinHolder?.visible == true
             val slideReviewWindow = rememberSlideReviewWindow(
                 animatic = animatic,
                 store = reviewStore,
@@ -958,17 +1231,37 @@ fun launchStudio(
                     timelineController.dockedInStoryWindow = !timelineController.dockedInStoryWindow
                 },
             ).also {
+                if (reviewWinHolder != null && reviewWinHolder !== it) {
+                    it.visible = prevReviewVisible
+                }
                 reviewWinHolder = it
                 reviewWindowRef.set(it)
             }
+            val deckMenuWindow = rememberDeckMenuWindow(
+                activeDeckProvider = { activeDeck },
+                onSelectDeck = ::switchToDeck,
+                animaticProvider = { animatic },
+                isTextInputActiveProvider = isAnyTextInputActive,
+                isStudioOpenProvider = { studioWorkspace.isStudioOpen },
+                onBeforeNavigate = { presenterWinHolder?.controller?.clearCurtain() },
+                extraPreviewKeyHandler = { ev -> workspaceHolder?.handleStudioPreviewKey(ev) == true },
+            )
 
-            val fullDecorator = presenterWindow.decorator + slideReviewWindow.decorator + studioWindow.decorator
+            // DeckMenuWindow sits outermost as window-level key capture + focus guard; Studio wraps
+            // Review so the Stage Review HUD sits inside the Stage pane to the left of the Inspector.
+            val fullDecorator = deckMenuWindow.decorator +
+                presenterWindow.decorator +
+                studioWindow.decorator +
+                slideReviewWindow.decorator
 
-            CompositionLocalProvider(LocalAuthoringTextInputTracker provides textInputTracker) {
+            CompositionLocalProvider(
+                LocalAuthoringTextInputTracker provides textInputTracker,
+                LocalStageInteractiveRegistry provides stageInteractiveRegistry,
+            ) {
                 MaterialTheme(colors = materialColors, typography = materialTypography) {
                     Window(
                         onCloseRequest = ::exitApplication,
-                        title = "Ciacola - Story",
+                        title = "${animatic.storyboard.title} - Story",
                         state = rememberWindowState(position = windowPosition, size = windowSize),
                     ) {
                         window.isAutoRequestFocus = false
@@ -976,15 +1269,20 @@ fun launchStudio(
                         if (storyWindowRef.compareAndSet(null, window)) {
                             readyLatch.countDown()
                         }
-                        Box(Modifier.fillMaxSize()) {
-                            fullDecorator.decorate {
-                                EaselOverview(animatic) {
-                                    if (includeOverlayNavigation) {
-                                        EaselOverlay(overlay = { OverlayNavigation(animatic) }) {
+                        val overviewVisibility = rememberOverviewVisibility()
+                        CompositionLocalProvider(
+                            LocalOverviewOpen provides overviewVisibility.isVisible,
+                        ) {
+                            Box(Modifier.fillMaxSize()) {
+                                fullDecorator.decorate {
+                                    EaselOverview(animatic, visibility = overviewVisibility) {
+                                        if (includeOverlayNavigation) {
+                                            EaselOverlay(overlay = { OverlayNavigation(animatic) }) {
+                                                Easel(animatic)
+                                            }
+                                        } else {
                                             Easel(animatic)
                                         }
-                                    } else {
-                                        Easel(animatic)
                                     }
                                 }
                             }
@@ -1027,6 +1325,24 @@ fun launchStudio(
                             slideReviewWindow.Content()
                         }
                     }
+
+                    if (presenterWindow.visible) {
+                        Window(
+                            onCloseRequest = { presenterWindow.visible = false },
+                            title = "Ciacola - Presenter",
+                            state = rememberWindowState(
+                                position = WindowPosition(140.dp, 90.dp),
+                                size = DpSize(1120.dp, 680.dp),
+                            ),
+                        ) {
+                            window.isAutoRequestFocus = false
+                            DisposableEffect(window) {
+                                presenterComposeWindowRef.set(window)
+                                onDispose { presenterComposeWindowRef.compareAndSet(window, null) }
+                            }
+                            presenterWindow.Content()
+                        }
+                    }
                 }
             }
         }
@@ -1043,21 +1359,21 @@ fun launchStudio(
         automator = automator,
         window = checkNotNull(storyWindowRef.get()),
         controller = checkNotNull(controllerRef.get()),
-        overridesStore = overridesStore,
+        overridesStoreRef = overridesStoreRef,
         designStore = designStore,
-        elementStore = elementStore,
-        stageInspectionRegistry = checkNotNull(inspectionRegistryRef.get()),
-        elementController = checkNotNull(elementControllerRef.get()),
-        lintController = checkNotNull(lintControllerRef.get()),
+        elementStoreRef = elementStoreRef,
+        stageInspectionRegistryRef = inspectionRegistryRef,
+        elementControllerRef = elementControllerRef,
+        lintControllerRef = lintControllerRef,
         studioWorkspace = checkNotNull(workspaceRef.get()),
         presenterWindow = checkNotNull(presenterWindowRef.get()),
         presenter = checkNotNull(presenterWindowRef.get()).controller,
         review = checkNotNull(reviewRef.get()),
-        reviewStore = reviewStore,
+        reviewStoreRef = reviewStoreRef,
         timelineWindow = checkNotNull(timelineWindowRef.get()),
-        reviewWindow = checkNotNull(reviewWindowRef.get()),
-        animatic = checkNotNull(animaticRef.get()),
-        loopClock = checkNotNull(loopClockRef.get()),
+        reviewWindowRef = reviewWindowRef,
+        animaticRef = animaticRef,
+        loopClockRef = loopClockRef,
         motionPathPreview = checkNotNull(motionPathRef.get()),
         stageSelection = checkNotNull(stageSelectionRef.get()),
         textInputTracker = checkNotNull(textInputTrackerRef.get()),
@@ -1072,9 +1388,13 @@ fun launchStudio(
         storyWindowRef = storyWindowRef,
         detachedTimelineWindowRef = detachedTimelineWindowRef,
         reviewPanelWindowRef = reviewPanelWindowRef,
+        presenterComposeWindowRef = presenterComposeWindowRef,
         presetReader = presetHolder::get,
         presetUpdater = { next -> presetSetterRef.get()?.invoke(next) },
+        activeDeckReader = activeDeckHolder::get,
+        deckSwitcher = { entry -> deckSwitcherRef.get()?.invoke(entry) },
         exitAppRef = exitAppRef,
         appThread = hostThread,
+        deckId = deckId,
     )
 }

@@ -9,11 +9,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
-fun Modifier.onStoryNavigation(animatic: Animatic): Modifier {
+fun Modifier.onStoryNavigation(
+    animatic: Animatic,
+    isTextInputActive: () -> Boolean = { false },
+): Modifier {
     val coroutineScope = rememberCoroutineScope()
     var job by remember { mutableStateOf<Job?>(null) }
 
     fun handle(event: KeyEvent): Boolean {
+        if (isTextInputActive()) return false
         when (event.type) {
             KeyEventType.KeyDown -> {
                 when (event.key) {

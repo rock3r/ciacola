@@ -28,9 +28,11 @@ object DeckLintRules {
         semanticsTextNodes: List<LintTextNodeCandidate> = emptyList(),
         stageWidth: Float = STAGE_WIDTH_PX,
         stageHeight: Float = STAGE_HEIGHT_PX,
+        fontScale: Float? = null,
     ): LintSlideInput {
         val surfaces = mutableListOf<LintSurfaceCandidate>()
         val textSnapshots = mutableListOf<StageNodeSnapshot>()
+        val tokenizedContainers = mutableListOf<StageNodeSnapshot>()
 
         for (snapshot in stageSnapshots) {
             if (snapshot.effectiveAlpha <= INVISIBLE_ALPHA_THRESHOLD) continue
@@ -58,17 +60,29 @@ object DeckLintRules {
                     isFullBleedSurface = isFullBleed,
                 )
             }
+            if (isTokenizedTextKind(snapshot.kind) && isSurfaceKind) {
+                tokenizedContainers += snapshot
+            }
             if (snapshot.resolvedText.isNotBlank() && !isSurfaceKind) {
                 textSnapshots += snapshot
             }
         }
 
+        val resolvedFontScale = (
+            fontScale
+                ?: semanticsTextNodes.firstOrNull { it.fontScale > 0f && it.fontScale != 1f }?.fontScale
+                ?: semanticsTextNodes.firstOrNull { it.fontScale > 0f }?.fontScale
+                ?: 1f
+            ).coerceAtLeast(0.1f)
+
         val mergedText = mergeTextCandidates(
             stageSnapshots = textSnapshots,
+            tokenizedContainers = tokenizedContainers,
             semanticsNodes = semanticsTextNodes,
             surfaces = surfaces,
             stageWidth = stageWidth,
             stageHeight = stageHeight,
+            defaultFontScale = resolvedFontScale,
         )
 
         return LintSlideInput(
@@ -77,6 +91,7 @@ object DeckLintRules {
             sceneTitle = sceneTitle,
             stageWidth = stageWidth,
             stageHeight = stageHeight,
+            fontScale = resolvedFontScale,
             textNodes = mergedText,
             surfaces = surfaces,
         )
@@ -281,8 +296,14 @@ object DeckLintRules {
         val fg = node.effectiveForeground ?: return null
         val bgOpaque = resolvedBg.copy(alpha = 1f)
 
-        val isLargeText = node.fontSizeSp >= WCAG_LARGE_TEXT_SP ||
-            (node.isBold && node.fontSizeSp >= WCAG_LARGE_BOLD_TEXT_SP)
+        val effectiveFontScale = if (node.fontScale > 0f && node.fontScale != 1f) {
+            node.fontScale
+        } else {
+            input.fontScale.coerceAtLeast(0.1f)
+        }
+        val effectiveFontSizeSp = node.fontSizeSp * effectiveFontScale
+        val isLargeText = effectiveFontSizeSp >= WCAG_LARGE_TEXT_SP ||
+            (node.isBold && effectiveFontSizeSp >= WCAG_LARGE_BOLD_TEXT_SP)
         val requiredRatio = if (isLargeText) WCAG_LARGE_TEXT_RATIO else WCAG_NORMAL_TEXT_RATIO
 
         // Stage effectiveAlpha (< 0.99f) reflects build entrance or intentional keynoteSpotlight dimming;
@@ -351,14 +372,20 @@ object DeckLintRules {
         node: LintTextNodeCandidate,
     ): DeckLintIssue? {
         if (!node.isTextNode) return null
-        if (node.fontSizeSp <= 0f || node.fontSizeSp >= TINY_TEXT_MIN_SP) return null
+        val effectiveFontScale = if (node.fontScale > 0f && node.fontScale != 1f) {
+            node.fontScale
+        } else {
+            input.fontScale.coerceAtLeast(0.1f)
+        }
+        val effectiveFontSizeSp = node.fontSizeSp * effectiveFontScale
+        if (effectiveFontSizeSp <= 0f || effectiveFontSizeSp >= TINY_TEXT_MIN_SP) return null
 
         val fixes = buildList {
             if (node.elementId != null && node.isEditable) {
                 add(
                     LintQuickFix(
                         label = "Bump to 16sp",
-                        tooltip = "Increase font size from ${formatSp(node.fontSizeSp)} sp to 16 sp",
+                        tooltip = "Increase font size from ${formatSp(effectiveFontSizeSp)} sp to 16 sp",
                         patch = ElementPatch(elementId = node.elementId, fontSizeSp = 16f),
                     ),
                 )
@@ -378,7 +405,7 @@ object DeckLintRules {
             textSnippet = abbreviate(node.text, 64),
             stageBounds = node.stageBounds,
             title = "Text too small for stage (< ${TINY_TEXT_MIN_SP.roundToInt()} sp)",
-            detail = "Effective font size ${formatSp(node.fontSizeSp)} sp < ${TINY_TEXT_MIN_SP.roundToInt()} sp minimum",
+            detail = "Effective font size ${formatSp(effectiveFontSizeSp)} sp < ${TINY_TEXT_MIN_SP.roundToInt()} sp minimum",
             quickFixes = fixes,
         )
     }
@@ -497,14 +524,28 @@ object DeckLintRules {
         return best
     }
 
+    private fun isTokenizedTextKind(kind: String): Boolean =
+        kind.contains("MagicText", ignoreCase = true) || kind.contains("WarpCode", ignoreCase = true)
+
+    private fun isChildTokenInside(containerBounds: Rect, childBounds: Rect): Boolean {
+        val inflated = containerBounds.inflate(8f)
+        if (inflated.contains(childBounds.center)) return true
+        val inter = inflated.intersect(childBounds)
+        if (inter.width <= 0f || inter.height <= 0f) return false
+        val childArea = childBounds.width * childBounds.height
+        return childArea > 0f && (inter.width * inter.height) / childArea >= 0.6f
+    }
+
     private fun mergeTextCandidates(
         stageSnapshots: List<StageNodeSnapshot>,
+        tokenizedContainers: List<StageNodeSnapshot>,
         semanticsNodes: List<LintTextNodeCandidate>,
         surfaces: List<LintSurfaceCandidate>,
         stageWidth: Float,
         stageHeight: Float,
+        defaultFontScale: Float,
     ): List<LintTextNodeCandidate> {
-        if (stageSnapshots.isEmpty()) return semanticsNodes
+        if (stageSnapshots.isEmpty() && tokenizedContainers.isEmpty()) return semanticsNodes
         if (semanticsNodes.isEmpty()) {
             return stageSnapshots.map { snap ->
                 val bg = snap.effectiveBackground ?: findEnclosingSurfaceBackground(snap.stageBounds, surfaces)
@@ -518,6 +559,7 @@ object DeckLintRules {
                     hasVisualOverflow = snap.hasVisualOverflow,
                     hasEllipsis = snap.hasEllipsis,
                     fontSizeSp = snap.effectiveFontSizeSp ?: 0f,
+                    fontScale = defaultFontScale,
                     effectiveAlpha = snap.effectiveAlpha,
                     effectiveForeground = snap.effectiveForeground,
                     opaqueForeground = snap.effectiveForeground,
@@ -531,7 +573,94 @@ object DeckLintRules {
         val usedSemanticsIndices = HashSet<Int>()
         val merged = mutableListOf<LintTextNodeCandidate>()
 
+        // 1. Collapse tokenized text snapshots (MagicText / WarpCode) so per-word/per-token
+        //    child semantics never duplicate or overlap-spam diagnostics.
         for (snap in stageSnapshots) {
+            if (!isTokenizedTextKind(snap.kind)) continue
+            val childIndices = semanticsNodes.indices.filter { idx ->
+                idx !in usedSemanticsIndices && isChildTokenInside(snap.stageBounds, semanticsNodes[idx].stageBounds)
+            }
+            usedSemanticsIndices.addAll(childIndices)
+            val children = childIndices.map { semanticsNodes[it] }
+            val snapBg = snap.effectiveBackground
+                ?: children.firstNotNullOfOrNull { it.effectiveBackground }
+                ?: findEnclosingSurfaceBackground(snap.stageBounds, surfaces)
+            val childFontScale = children.firstOrNull { it.fontScale > 0f && it.fontScale != 1f }?.fontScale
+                ?: children.firstOrNull { it.fontScale > 0f }?.fontScale
+                ?: defaultFontScale
+            val anyOverflow = snap.hasVisualOverflow || children.any { it.hasVisualOverflow }
+            val anyEllipsis = snap.hasEllipsis || children.any { it.hasEllipsis }
+            val maxOverflowPx = children.maxOfOrNull { it.overflowPx } ?: 0f
+            val childBold = children.isNotEmpty() && children.all { it.isBold }
+            merged += LintTextNodeCandidate(
+                elementId = snap.elementId,
+                kind = snap.kind,
+                label = snap.label.ifBlank { snap.elementId },
+                text = snap.resolvedText.ifBlank { children.joinToString(" ") { it.text } },
+                stageBounds = snap.stageBounds,
+                unclippedStageBounds = snap.stageBounds,
+                hasVisualOverflow = anyOverflow,
+                overflowPx = maxOverflowPx,
+                hasEllipsis = anyEllipsis,
+                fontSizeSp = snap.effectiveFontSizeSp ?: children.firstOrNull { it.fontSizeSp > 0f }?.fontSizeSp ?: 0f,
+                fontScale = childFontScale,
+                isBold = childBold,
+                effectiveAlpha = snap.effectiveAlpha,
+                effectiveForeground = snap.effectiveForeground ?: children.firstNotNullOfOrNull { it.effectiveForeground },
+                opaqueForeground = snap.effectiveForeground ?: children.firstNotNullOfOrNull { it.opaqueForeground },
+                effectiveBackground = snapBg,
+                isEditable = snap.isEditable,
+                isFullBleedSurface = isFullBleedBounds(snap.stageBounds, stageWidth, stageHeight),
+            )
+        }
+
+        // 2. Collapse child token semantics inside tokenized surface containers (e.g. WarpCodeCard).
+        for (container in tokenizedContainers) {
+            val childIndices = semanticsNodes.indices.filter { idx ->
+                idx !in usedSemanticsIndices && isChildTokenInside(container.stageBounds, semanticsNodes[idx].stageBounds)
+            }
+            if (childIndices.isEmpty()) continue
+            usedSemanticsIndices.addAll(childIndices)
+            val children = childIndices.map { semanticsNodes[it] }
+            val containerBg = container.effectiveBackground
+                ?: children.firstNotNullOfOrNull { it.effectiveBackground }
+                ?: findEnclosingSurfaceBackground(container.stageBounds, surfaces)
+            val worstContrastChild = if (containerBg != null) {
+                children.filter { it.effectiveForeground != null }.minByOrNull { child ->
+                    contrastRatio(child.effectiveForeground!!.copy(alpha = 1f), containerBg.copy(alpha = 1f))
+                }
+            } else {
+                children.firstOrNull { it.effectiveForeground != null }
+            }
+            val childFontScale = children.firstOrNull { it.fontScale > 0f && it.fontScale != 1f }?.fontScale
+                ?: children.firstOrNull { it.fontScale > 0f }?.fontScale
+                ?: defaultFontScale
+            merged += LintTextNodeCandidate(
+                elementId = container.elementId,
+                kind = container.kind,
+                label = container.label.ifBlank { container.elementId },
+                text = container.resolvedText.ifBlank { children.joinToString(" ") { it.text }.take(120) },
+                stageBounds = container.stageBounds,
+                unclippedStageBounds = container.stageBounds,
+                hasVisualOverflow = container.hasVisualOverflow || children.any { it.hasVisualOverflow },
+                overflowPx = children.maxOfOrNull { it.overflowPx } ?: 0f,
+                hasEllipsis = container.hasEllipsis || children.any { it.hasEllipsis },
+                fontSizeSp = container.effectiveFontSizeSp
+                    ?: children.filter { it.fontSizeSp > 0f }.minOfOrNull { it.fontSizeSp }
+                    ?: 0f,
+                fontScale = childFontScale,
+                effectiveAlpha = container.effectiveAlpha,
+                effectiveForeground = container.effectiveForeground ?: worstContrastChild?.effectiveForeground,
+                opaqueForeground = container.effectiveForeground ?: worstContrastChild?.opaqueForeground,
+                effectiveBackground = containerBg,
+                isEditable = container.isEditable,
+                isFullBleedSurface = isFullBleedBounds(container.stageBounds, stageWidth, stageHeight),
+            )
+        }
+
+        // 3. Merge remaining non-tokenized editable text snapshots with their matching semantics.
+        for (snap in stageSnapshots) {
+            if (isTokenizedTextKind(snap.kind)) continue
             val matchIdx = findMatchingSemanticsIndex(snap, semanticsNodes, usedSemanticsIndices)
             val snapBg = snap.effectiveBackground ?: findEnclosingSurfaceBackground(snap.stageBounds, surfaces)
             if (matchIdx != null) {
@@ -547,6 +676,7 @@ object DeckLintRules {
                     hasVisualOverflow = sem.hasVisualOverflow || snap.hasVisualOverflow,
                     hasEllipsis = sem.hasEllipsis || snap.hasEllipsis,
                     fontSizeSp = snap.effectiveFontSizeSp ?: sem.fontSizeSp,
+                    fontScale = sem.fontScale,
                     effectiveAlpha = minOf(sem.effectiveAlpha, snap.effectiveAlpha),
                     effectiveForeground = snap.effectiveForeground ?: sem.effectiveForeground,
                     opaqueForeground = snap.effectiveForeground ?: sem.opaqueForeground,
@@ -564,6 +694,7 @@ object DeckLintRules {
                     hasVisualOverflow = snap.hasVisualOverflow,
                     hasEllipsis = snap.hasEllipsis,
                     fontSizeSp = snap.effectiveFontSizeSp ?: 0f,
+                    fontScale = defaultFontScale,
                     effectiveAlpha = snap.effectiveAlpha,
                     effectiveForeground = snap.effectiveForeground,
                     opaqueForeground = snap.effectiveForeground,

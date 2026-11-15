@@ -44,8 +44,17 @@ val jbr25 = javaToolchains.launcherFor {
     vendor = JvmVendorSpec.JETBRAINS
 }
 
+val requestedDeckProp = providers.systemProperty("ciacola.deck")
+    .orElse(providers.gradleProperty("ciacola.deck"))
+
 tasks.named<Test>("desktopTest") {
     exclude("**/*SpectreTest.class")
+    listOf("CIACOLA_RENDER_WS3_PNGS").forEach { key ->
+        providers.environmentVariable(key).orNull?.let { environment(key, it) }
+    }
+    listOf("ciacola.renderWs3Pngs", "ciacola.deck").forEach { key ->
+        providers.systemProperty(key).orNull?.let { systemProperty(key, it) }
+    }
 }
 
 val sckRecording = providers.gradleProperty("ciacola.sckRecording")
@@ -77,6 +86,7 @@ tasks.register<Test>("spectreTest") {
     listOf("ciacola.qa.worker", "ciacola.qa.root").forEach { key ->
         providers.systemProperty(key).orNull?.let { systemProperty(key, it) }
     }
+    requestedDeckProp.orNull?.let { systemProperty("ciacola.deck", it) }
     outputs.upToDateWhen { false }
 }
 
@@ -95,5 +105,6 @@ compose.desktop {
 afterEvaluate {
     tasks.withType<JavaExec>().configureEach {
         workingDir = rootProject.projectDir
+        requestedDeckProp.orNull?.let { systemProperty("ciacola.deck", it) }
     }
 }

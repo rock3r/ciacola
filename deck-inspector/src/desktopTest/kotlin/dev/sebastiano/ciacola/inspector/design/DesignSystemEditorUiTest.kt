@@ -10,10 +10,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasStateDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
@@ -107,7 +109,9 @@ class DesignSystemEditorUiTest {
         onNodeWithTag("design-editor-copy-kotlin", useUnmergedTree = true).performClick()
         waitForIdle()
         assertTrue(copiedText.contains("DesignSystemOverrides("))
-        onNodeWithText("Copied ✓", useUnmergedTree = true).assertExists()
+        onNodeWithTag("design-editor-copy-kotlin", useUnmergedTree = true)
+            .assert(hasStateDescription("Copied ✓"))
+        onNodeWithContentDescription("Copied ✓", useUnmergedTree = true).assertExists()
 
         // Switch preset to KeynoteLight: StageDark overrides remain untouched and KeynoteLight starts clean.
         onNodeWithTag("design-preset-keynote-light", useUnmergedTree = true).performClick()

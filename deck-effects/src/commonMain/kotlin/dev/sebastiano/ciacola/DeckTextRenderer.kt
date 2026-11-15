@@ -34,8 +34,11 @@ import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.modifier.modifierLocalConsumer
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Frame
 import dev.bnorm.storyboard.SceneScope
@@ -53,7 +56,9 @@ import dev.sebastiano.ciacola.effects.resolveStageBounds
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.LocalActiveBeatIndex
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
+import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.LocalStageParentElementId
 import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
 import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
@@ -243,13 +248,15 @@ fun DeckMagicText(
     )
 
     val overrideText = effectivePatch?.text
-    val effectiveTransition = if (overrideText != null && transition.targetState.text != overrideText) {
-        val targetRef = transition.targetState
-        transition.createChildTransition("element-text-override") { state ->
-            if (state == targetRef) AnnotatedString(overrideText) else state
+    val targetRef = transition.targetState
+    // Create the child transition unconditionally so toggling an element override never swaps
+    // Transition identities mid-segment (which would remount MagicText mid-flight).
+    val effectiveTransition = transition.createChildTransition("element-text-override") { state ->
+        if (overrideText != null && state == targetRef && state.text != overrideText) {
+            AnnotatedString(overrideText)
+        } else {
+            state
         }
-    } else {
-        transition
     }
 
     val currentText = effectiveTransition.targetState.text
@@ -269,6 +276,9 @@ fun DeckMagicText(
     val effectiveBg = if (hasBoxDeco) compositeBackgroundOver(boxFill, parentBg) else parentBg
 
     val registry = LocalStageInspectionRegistry.current
+    val dragPreview = LocalStageDragPreview.current
+    val parentElementId = LocalStageParentElementId.current
+    val anchorRegistry = dev.sebastiano.ciacola.effects.LocalStageAnchorRegistry.current
     val overviewOpen = LocalOverviewOpen.current
     val rootHolder = LocalStageRootCoordinates.current
     val shouldInspect = snapshotElementId != null && registry != null && !overviewOpen
@@ -277,8 +287,14 @@ fun DeckMagicText(
     var innerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
 
+    if (elementId != null && anchorRegistry != null) {
+        DisposableEffect(anchorRegistry, elementId) {
+            onDispose { anchorRegistry.remove(elementId, ownerToken) }
+        }
+    }
+
     fun publishMagicTextSnapshot(coordsNow: LayoutCoordinates?, outerNow: LayoutCoordinates?) {
-        if (!shouldInspect || snapshotElementId == null || registry == null) return
+        if (!shouldInspect) return
         val baseFontSizeSp = if (style.fontSize.isSp) style.fontSize.value else 16f
         registry.recordMetadata(
             meta = StageElementMetadata(
@@ -310,6 +326,7 @@ fun DeckMagicText(
                     effectiveBackground = effectiveBg,
                     effectiveFontSizeSp = effectiveFontSizeSp,
                     isEditable = true,
+                    parentElementId = parentElementId,
                 ),
                 owner = ownerToken,
                 alphaProvider = { stageAlphaProvider() },
@@ -319,24 +336,34 @@ fun DeckMagicText(
         }
     }
 
-    if (shouldInspect && snapshotElementId != null) {
+    if (shouldInspect) {
         DisposableEffect(registry, snapshotElementId) {
-            onDispose { registry?.remove(snapshotElementId, ownerToken) }
+            onDispose { registry.remove(snapshotElementId, ownerToken) }
         }
         val coordsNow = innerCoords
         val outerNow = outerCoords
-        val stageRootNow = rootHolder?.coordinates
+        dev.sebastiano.ciacola.effects.observeStageRootCoordinates(rootHolder)
         SideEffect {
-            stageRootNow
             publishMagicTextSnapshot(coordsNow, outerNow)
         }
     }
 
-    val offsetMod = if (effectivePatch?.offsetXDp != null || effectivePatch?.offsetYDp != null) {
-        Modifier.offset(
-            x = (effectivePatch.offsetXDp ?: 0f).dp,
-            y = (effectivePatch.offsetYDp ?: 0f).dp,
-        )
+    val baseOffsetXDp = effectivePatch?.offsetXDp ?: 0f
+    val baseOffsetYDp = effectivePatch?.offsetYDp ?: 0f
+    val offsetMod = if (baseOffsetXDp != 0f || baseOffsetYDp != 0f || dragPreview != null) {
+        Modifier.offset {
+            val previewDelta = if (dragPreview != null) {
+                val snapDelta = snapshotElementId?.let { dragPreview.offsetFor(it) } ?: DpOffset.Zero
+                if (snapDelta != DpOffset.Zero) snapDelta
+                else elementId?.let { dragPreview.offsetFor(it) } ?: DpOffset.Zero
+            } else {
+                DpOffset.Zero
+            }
+            IntOffset(
+                x = (baseOffsetXDp.dp + previewDelta.x).roundToPx(),
+                y = (baseOffsetYDp.dp + previewDelta.y).roundToPx(),
+            )
+        }
     } else {
         Modifier
     }
@@ -369,8 +396,9 @@ fun DeckMagicText(
             textSnippet = currentText,
         )
     // The timeline target wraps the text's own bounds (not the filled slot) so stage picking and
-    // the selection highlight hug the visible prose.
-    Box(taggedModifier) {
+    // the selection highlight hug the visible prose. Merging descendants exposes the animated
+    // tokens as one coherent phrase in the merged accessibility tree.
+    Box(taggedModifier.semantics(mergeDescendants = true) {}) {
         LocalDeckTextRenderer.current.AnimatedText(
             effectiveTransition,
             Modifier
@@ -379,6 +407,9 @@ fun DeckMagicText(
                 .then(boxDecoMod)
                 .onPlaced { coords ->
                     innerCoords = coords
+                    if (elementId != null) {
+                        anchorRegistry?.record(elementId, coords, ownerToken)
+                    }
                     publishMagicTextSnapshot(coords, outerCoords)
                 }
                 .timelineTarget(trackId),

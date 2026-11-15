@@ -252,7 +252,10 @@ private fun TextStyle.withOverride(
 
 private fun DeckTypography.withOverrides(o: TypographyTokenOverrides): DeckTypography {
     if (o == TypographyTokenOverrides()) return this
-    val scale = (o.globalFontScale ?: 1f).coerceIn(0.5f, 2.5f)
+    // Global font scaling is applied once at the stage root via LocalDensity.fontScale in
+    // deckRootDecorator so every `.sp` text (including dense cards and inline overrides) scales
+    // uniformly without double-scaling token sizes here.
+    val scale = 1f
     return copy(
         hero = hero.withOverride(o.hero, scale),
         title = title.withOverride(o.title, scale),

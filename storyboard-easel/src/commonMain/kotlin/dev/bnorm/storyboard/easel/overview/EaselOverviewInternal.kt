@@ -44,6 +44,7 @@ internal fun EaselOverviewInternal(
     isVisible: Boolean,
     onExitOverview: (Storyboard.Index) -> Unit,
     modifier: Modifier = Modifier,
+    useSharedElement: Boolean = true,
     onDismiss: () -> Unit = {},
 ) {
     fun onClick(columnIndex: Int, itemIndex: Int, item: OverviewState.StateItem<*>) {
@@ -78,6 +79,7 @@ internal fun EaselOverviewInternal(
                     storyboard = animatic.storyboard,
                     column = column,
                     isVisible = isVisible,
+                    useSharedElement = useSharedElement,
                     verticalPaddingDp = verticalPaddingDp,
                     itemSize = itemSize,
                     isCurrentColumn = isCurrentColumn,
@@ -164,6 +166,7 @@ private fun OverviewLazyColumn(
     storyboard: Storyboard,
     column: OverviewState.SceneColumn<*>,
     isVisible: Boolean,
+    useSharedElement: Boolean,
     verticalPaddingDp: Dp,
     itemSize: DpSize,
     isCurrentColumn: Boolean,
@@ -206,9 +209,9 @@ private fun OverviewLazyColumn(
                 ScenePreview(
                     storyboard = storyboard,
                     index = item.index,
-                    modifier = when (isCurrentIndex) {
-                        false -> Modifier
-                        true -> Modifier.sharedElement(rememberSharedContentState(OverviewCurrentItemKey))
+                    modifier = when {
+                        isCurrentIndex && useSharedElement -> Modifier.sharedElement(rememberSharedContentState(OverviewCurrentItemKey))
+                        else -> Modifier
                     },
                     sceneMode = if (isVisible && isCurrentIndex) SceneMode.Story else SceneMode.Preview,
                 )

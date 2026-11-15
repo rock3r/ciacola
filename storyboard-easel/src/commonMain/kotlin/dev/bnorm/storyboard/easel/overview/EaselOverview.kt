@@ -98,7 +98,17 @@ fun EaselOverview(
         SharedTransitionLayout {
             AnimatedContent(
                 targetState = overviewVisible,
-                transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) }
+                transitionSpec = {
+                    if (targetState) {
+                        fadeIn(tween(durationMillis = 180, delayMillis = 90)) togetherWith
+                            fadeOut(tween(durationMillis = 90))
+                    } else {
+                        // Exiting overview: fade the overview layer completely to alpha 0 before
+                        // revealing the story layer so thumbnails never ghost behind the active slide.
+                        fadeIn(tween(durationMillis = 150, delayMillis = 100)) togetherWith
+                            fadeOut(tween(durationMillis = 90))
+                    }
+                },
             ) { isOverview ->
                 if (isOverview) {
                     val isVisible = transition.currentState == EnterExitState.Visible &&
@@ -108,6 +118,7 @@ fun EaselOverview(
                             animatic = animatic,
                             overviewState = overviewState,
                             isVisible = isVisible,
+                            useSharedElement = overviewVisible,
                             onExitOverview = {
                                 job?.cancel()
                                 job = coroutineScope.launch {

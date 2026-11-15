@@ -68,6 +68,7 @@ class DeckLintController {
     var selectedIssueId by mutableStateOf<String?>(null)
     var hoveredIssueId by mutableStateOf<String?>(null)
     var showStageOverlay by mutableStateOf(true)
+    var isStageSettled by mutableStateOf(true)
 
     var currentSceneIndex by mutableIntStateOf(0)
         private set
@@ -100,18 +101,29 @@ class DeckLintController {
         get() = activeScopeIssues.count { it.severity == LintSeverity.Warning }
 
     val activeBeatOverlayIssues: List<DeckLintIssue>
-        get() = activeScopeIssues.filter {
-            it.sceneIndex == currentSceneIndex && it.beatIndex == currentBeatIndex
+        get() = if (!isStageSettled) {
+            emptyList()
+        } else {
+            activeScopeIssues.filter {
+                it.sceneIndex == currentSceneIndex && it.beatIndex == currentBeatIndex
+            }
         }
 
     val highlightedIssueId: String?
         get() = hoveredIssueId ?: selectedIssueId
 
     fun updateActiveLocation(sceneIndex: Int, beatIndex: Int, sceneTitle: String = currentSceneTitle) {
+        val locationChanged = currentSceneIndex != sceneIndex || currentBeatIndex != beatIndex
         currentSceneIndex = sceneIndex
         currentBeatIndex = beatIndex
         if (sceneTitle.isNotBlank()) {
             currentSceneTitle = sceneTitle
+        }
+        if (locationChanged) {
+            currentBeatIssues = emptyList()
+            if (selectedIssueId != null && activeScopeIssues.none { it.id == selectedIssueId }) {
+                selectedIssueId = null
+            }
         }
     }
 
@@ -137,6 +149,7 @@ class DeckLintController {
         }
         val stageSnapshots = registry?.nodesForSlide(sceneIndex, beatIndex).orEmpty()
         val semantics = semanticsTextNodes ?: SemanticsSlideScanner.scanLiveWindows(
+            stageRootCoordinates = stageRootCoordinates,
             stageBoundsInRoot = stageBoundsInRoot,
             pixelBuffer = pixelBuffer,
             stageWidth = stageWidth,

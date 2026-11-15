@@ -43,7 +43,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
@@ -94,14 +93,16 @@ import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.typography
 
-/** Complete After Effects Timeline Studio panel (Transport + Synchronized Tracks + Inspector). */
+/** Complete After Effects Timeline Studio panel (Transport + Synchronized Tracks + optional Inspector). */
 @Composable
 fun TimelineStudioPanel(
     controller: TimelineStudioController,
     isDark: Boolean,
     modifier: Modifier = Modifier,
     surface: TimelineSurface = TimelineSurface.Docked,
+    showBlockInspector: Boolean = true,
     inspectorSlot: (@Composable () -> Unit)? = null,
+    leadingToolbarContent: (@Composable () -> Unit)? = null,
 ) {
     val focusState = LocalStudioA11yFocusState.current ?: remember { StudioA11yFocusState() }
     val panelFocusRequester = remember { FocusRequester() }
@@ -130,7 +131,11 @@ fun TimelineStudioPanel(
                     .focusable()
                     .testTag("ciacola-timeline-studio"),
             ) {
-                TimelineTransportBar(controller = controller, surface = surface)
+                TimelineTransportBar(
+                    controller = controller,
+                    surface = surface,
+                    leadingToolbarContent = leadingToolbarContent,
+                )
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
             controller.overridesStore.structuralRevision
             if (controller.isPlayheadOnInjectedVirtualBeat()) {
@@ -160,7 +165,7 @@ fun TimelineStudioPanel(
                 )
                 if (inspectorSlot != null) {
                     inspectorSlot()
-                } else {
+                } else if (showBlockInspector) {
                     Divider(Orientation.Vertical, Modifier.fillMaxHeight())
                     TimelineBlockInspector(controller = controller)
                 }
@@ -192,9 +197,19 @@ internal fun TimelineStudioController.handleStudioKey(
         focusState.swallowNextEscapeKeyUp = false
         return true
     }
-    if (event.type == KeyEventType.KeyDown && event.key == Key.F5) {
+    if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed && event.key == Key.F5) {
         dockedInStoryWindow = !dockedInStoryWindow
         if (!dockedInStoryWindow) {
+            spaceHeld = false
+            spaceUsedForPan = false
+        }
+        return true
+    }
+    if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed && event.key == Key.F6) {
+        val next = !detachedWindowVisible
+        if (next) dockedInStoryWindow = false
+        detachedWindowVisible = next
+        if (!authoringActive) {
             spaceHeld = false
             spaceUsedForPan = false
         }
@@ -455,7 +470,9 @@ class TimelineStudioWindow(
     var currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     var suppressShortcutsProvider: () -> Boolean = { false },
     var onReturnFocusToStage: (() -> Unit)? = null,
+    var trailingPane: (@Composable () -> Unit)? = null,
     var inspectorSlot: (@Composable () -> Unit)? = null,
+    var leadingToolbarContent: (@Composable () -> Unit)? = null,
     var extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
     var extraMenuContent: (@Composable MenuScope.() -> Unit)? = null,
 ) : EaselWindow {
@@ -471,12 +488,17 @@ class TimelineStudioWindow(
      * Stage-space decorator that provides [LocalDeckLoopClock] and [LocalMotionPathPreviewState],
      * and draws curved shared-element motion-path previews on the `1920x1080` slide canvas.
      */
-    val stageDecorator: ContentDecorator = createTimelineStageDecorator(
-        loopClock = controller.loopClock,
-        motionPathPreview = controller.motionPathPreview,
-        overridesStore = controller.overridesStore,
-        stageSelection = controller.stageSelection,
-    )
+    val stageDecorator: ContentDecorator = ContentDecorator { content ->
+        val inner = remember(controller.loopClock, controller.overridesStore) {
+            createTimelineStageDecorator(
+                loopClock = controller.loopClock,
+                motionPathPreview = controller.motionPathPreview,
+                overridesStore = controller.overridesStore,
+                stageSelection = controller.stageSelection,
+            )
+        }
+        inner.decorate(content)
+    }
 
     override val decorator: ContentDecorator = ContentDecorator { content ->
         val scope = rememberCoroutineScope()
@@ -487,6 +509,7 @@ class TimelineStudioWindow(
         val studioFocusState = remember { StudioA11yFocusState() }
         var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
+        val hoistedPane = trailingPane ?: inspectorSlot
         InstallSpaceResetOnWindowFocusLoss(controller)
         LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
             if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
@@ -514,7 +537,7 @@ class TimelineStudioWindow(
         }
 
         CompositionLocalProvider(LocalStudioA11yFocusState provides studioFocusState) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .onSizeChanged { totalHeightPx = it.height.toFloat().coerceAtLeast(240f) }
@@ -538,60 +561,86 @@ class TimelineStudioWindow(
                     },
             ) {
                 if (controller.dockedInStoryWindow) {
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(controller.splitFraction.coerceIn(0.28f, 0.78f)),
+                            .weight(1f)
+                            .fillMaxHeight(),
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(controller.splitFraction.coerceIn(0.28f, 0.78f)),
+                        ) {
+                            StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
+                                content()
+                            }
+                        }
+                        CiacolaJewelTheme(isDark = isDark) {
+                            val splitHoverSource = remember { MutableInteractionSource() }
+                            val splitHovered by splitHoverSource.collectIsHoveredAsState()
+                            val splitBg = if (splitHovered) {
+                                JewelTheme.globalColors.outlines.focused
+                            } else {
+                                JewelTheme.globalColors.borders.normal
+                            }
+                            @OptIn(ExperimentalFoundationApi::class)
+                            Tooltip(tooltip = { Text("Drag to resize stage preview and Studio split (double-click to reset)") }) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(5.dp)
+                                        .background(splitBg)
+                                        .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR)))
+                                        .combinedClickable(
+                                            interactionSource = splitHoverSource,
+                                            indication = null,
+                                            onClick = {},
+                                            onDoubleClick = { controller.splitFraction = 0.54f },
+                                        )
+                                        .pointerInput(Unit) {
+                                            detectVerticalDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                val deltaFrac = dragAmount / totalHeightPx
+                                                controller.splitFraction =
+                                                    (controller.splitFraction + deltaFrac).coerceIn(0.28f, 0.78f)
+                                            }
+                                        }
+                                        .testTag("ciacola-studio-horizontal-splitter"),
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight((1f - controller.splitFraction).coerceIn(0.22f, 0.72f)),
+                        ) {
+                            TimelineStudioPanel(
+                                controller = controller,
+                                isDark = isDark,
+                                surface = TimelineSurface.Docked,
+                                showBlockInspector = hoistedPane == null,
+                                inspectorSlot = null,
+                                leadingToolbarContent = leadingToolbarContent,
+                            )
+                        }
+                    }
+                    if (hoistedPane != null) {
+                        CiacolaJewelTheme(isDark = isDark) {
+                            Row(modifier = Modifier.fillMaxHeight()) {
+                                hoistedPane()
+                            }
+                        }
+                    }
+                } else if (controller.detachedWindowVisible && hoistedPane != null) {
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
                         StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
                             content()
                         }
                     }
                     CiacolaJewelTheme(isDark = isDark) {
-                        val splitHoverSource = remember { MutableInteractionSource() }
-                        val splitHovered by splitHoverSource.collectIsHoveredAsState()
-                        val splitBg = if (splitHovered) {
-                            JewelTheme.globalColors.outlines.focused
-                        } else {
-                            JewelTheme.globalColors.borders.normal
+                        Row(modifier = Modifier.fillMaxHeight()) {
+                            hoistedPane()
                         }
-                        @OptIn(ExperimentalFoundationApi::class)
-                        Tooltip(tooltip = { Text("Drag to resize stage preview and Studio split (double-click to reset)") }) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(5.dp)
-                                    .background(splitBg)
-                                    .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR)))
-                                    .combinedClickable(
-                                        interactionSource = splitHoverSource,
-                                        indication = null,
-                                        onClick = {},
-                                        onDoubleClick = { controller.splitFraction = 0.54f },
-                                    )
-                                    .pointerInput(Unit) {
-                                        detectVerticalDragGestures { change, dragAmount ->
-                                            change.consume()
-                                            val deltaFrac = dragAmount / totalHeightPx
-                                            controller.splitFraction =
-                                                (controller.splitFraction + deltaFrac).coerceIn(0.28f, 0.78f)
-                                        }
-                                    }
-                                    .testTag("ciacola-studio-horizontal-splitter"),
-                            )
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight((1f - controller.splitFraction).coerceIn(0.22f, 0.72f)),
-                    ) {
-                        TimelineStudioPanel(
-                            controller = controller,
-                            isDark = isDark,
-                            surface = TimelineSurface.Docked,
-                            inspectorSlot = inspectorSlot,
-                        )
                     }
                 } else {
                     Box(Modifier.fillMaxSize()) {
@@ -607,8 +656,8 @@ class TimelineStudioWindow(
     @Composable
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
-        // No accelerator: F5 is handled by handleStudioKey on onPreviewKeyEvent, and a Swing menu
-        // accelerator would fire in addition to it and double-toggle dockedInStoryWindow.
+        // No accelerators: F5 and F6 are handled by onPreviewKeyEvent, and Swing menu
+        // accelerators would fire in addition to them and double-toggle visibility.
         CheckboxItem(
             text = "Dock Timeline Studio in Story Window (F5)",
             checked = controller.dockedInStoryWindow,
@@ -616,10 +665,10 @@ class TimelineStudioWindow(
             controller.dockedInStoryWindow = it
         }
         CheckboxItem(
-            text = "Show Detached Timeline Window",
+            text = "Show Detached Timeline Window (F6)",
             checked = visible,
-            shortcut = KeyShortcut(Key.F6),
         ) {
+            if (it) controller.dockedInStoryWindow = false
             visible = it
         }
         val extraMenu = extraMenuContent
@@ -648,6 +697,7 @@ class TimelineStudioWindow(
         val studioFocusState = remember { StudioA11yFocusState() }
         var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
+        val hoistedPane = trailingPane ?: inspectorSlot
         InstallSpaceResetOnWindowFocusLoss(controller)
         LaunchedEffect(Unit) {
             if (!suppressShortcutsProvider()) {
@@ -686,7 +736,9 @@ class TimelineStudioWindow(
                     controller = controller,
                     isDark = isDark,
                     surface = TimelineSurface.Detached,
-                    inspectorSlot = inspectorSlot,
+                    showBlockInspector = hoistedPane == null,
+                    inspectorSlot = null,
+                    leadingToolbarContent = leadingToolbarContent,
                 )
             }
         }
@@ -699,7 +751,9 @@ fun rememberTimelineStudioWindow(
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     suppressShortcutsProvider: () -> Boolean = { false },
     onReturnFocusToStage: (() -> Unit)? = null,
+    trailingPane: (@Composable () -> Unit)? = null,
     inspectorSlot: (@Composable () -> Unit)? = null,
+    leadingToolbarContent: (@Composable () -> Unit)? = null,
     extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
     extraMenuContent: (@Composable MenuScope.() -> Unit)? = null,
 ): TimelineStudioWindow = remember(controller) {
@@ -708,7 +762,9 @@ fun rememberTimelineStudioWindow(
         currentPresetProvider = currentPresetProvider,
         suppressShortcutsProvider = suppressShortcutsProvider,
         onReturnFocusToStage = onReturnFocusToStage,
+        trailingPane = trailingPane,
         inspectorSlot = inspectorSlot,
+        leadingToolbarContent = leadingToolbarContent,
         extraPreviewKeyHandler = extraPreviewKeyHandler,
         extraMenuContent = extraMenuContent,
     )
@@ -716,7 +772,9 @@ fun rememberTimelineStudioWindow(
     it.currentPresetProvider = currentPresetProvider
     it.suppressShortcutsProvider = suppressShortcutsProvider
     it.onReturnFocusToStage = onReturnFocusToStage
+    it.trailingPane = trailingPane
     it.inspectorSlot = inspectorSlot
+    it.leadingToolbarContent = leadingToolbarContent
     it.extraPreviewKeyHandler = extraPreviewKeyHandler
     it.extraMenuContent = extraMenuContent
 }

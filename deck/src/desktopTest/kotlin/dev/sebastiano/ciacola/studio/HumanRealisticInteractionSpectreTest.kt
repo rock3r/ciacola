@@ -58,9 +58,11 @@ class HumanRealisticInteractionSpectreTest {
                 settle()
                 val initialStoryboard = animatic.storyboard
 
-                // 1. Open Detached "Ciacola - Timeline" (F6 mode) and obtain its dedicated AWT input handle.
+                // 1. Open Detached "Ciacola - Timeline" (F6 mode) and obtain dedicated AWT input handles
+                //    for both the detached Timeline window and the Story window (which hosts the hoisted inspector).
                 val detachedWin = openDetachedTimeline()
                 val detachedIn = inputFor(detachedWin)
+                val storyIn = inputFor(window)
                 assertEquals("Ciacola - Timeline", detachedWin.title)
                 assertTrue(controller.detachedWindowVisible)
                 assertFalse(controller.dockedInStoryWindow)
@@ -97,23 +99,23 @@ class HumanRealisticInteractionSpectreTest {
                 )
                 assertEquals(0, animatic.targetIndex.sceneIndex)
 
-                // 3. Switch to Element tab and click Prose in the slide element picker via real AWT clicks.
+                // 3. Switch to Element tab and click Prose in the hoisted Story-window inspector via real AWT clicks.
                 val elementTab = automator.waitForNode(tag = "ciacola-studio-tab-element", timeout = 5.seconds)
-                humanClick(detachedIn, elementTab.centerOnScreen)
+                humanClick(storyIn, elementTab.centerOnScreen)
                 settle()
                 assertEquals(StudioInspectorTab.Element, studioWorkspace.activeTab)
 
                 val proseChip = automator.waitForNode(tag = "ciacola-element-picker-s1:prose:b0", timeout = 5.seconds)
-                humanClick(detachedIn, proseChip.centerOnScreen)
+                humanClick(storyIn, proseChip.centerOnScreen)
                 settle()
                 assertEquals("s1:prose:b0", elementController.selectedElementId)
                 assertNull(automator.findOneByTestTag("ciacola-element-missing-on-beat"))
 
                 val sliderNode = scrollIntoViewIfNeeded(
-                    input = detachedIn,
+                    input = storyIn,
                     scrollContainerTag = "ciacola-element-editor-panel",
                     targetTag = "ciacola-element-fontsize-slider",
-                    viewportBoundsProvider = { detachedWin.screenBounds() },
+                    viewportBoundsProvider = { window.screenBounds() },
                 )
                 val sliderBounds = checkNotNull(sliderNode.boundsOnScreen)
                 val initialFontSize = stageInspectionRegistry.nodes["s1:prose:b0"]?.effectiveFontSizeSp ?: 30f
@@ -146,9 +148,9 @@ class HumanRealisticInteractionSpectreTest {
 
                 // 4. Press on the Font Size thumb -> 30 steps right -> 350 ms stationary human pause
                 //    while holding button down -> 20 steps left -> release!
-                detachedIn.mouseMove(thumbStart.x, thumbStart.y)
+                storyIn.mouseMove(thumbStart.x, thumbStart.y)
                 delay(20)
-                detachedIn.mousePress(InputEvent.BUTTON1_DOWN_MASK)
+                storyIn.mousePress(InputEvent.BUTTON1_DOWN_MASK)
                 try {
                     delay(16)
                     assertInvariantsEveryStep("press")
@@ -156,7 +158,7 @@ class HumanRealisticInteractionSpectreTest {
                     for (step in 1..30) {
                         val x = lerpInt(thumbStart.x, dragRightTarget.x, step, 30)
                         val y = lerpInt(thumbStart.y, dragRightTarget.y, step, 30)
-                        detachedIn.mouseMove(x, y)
+                        storyIn.mouseMove(x, y)
                         delay(16)
                         assertInvariantsEveryStep("right-$step")
                         rightwardFontSamples += currentProseFontSp()
@@ -173,13 +175,13 @@ class HumanRealisticInteractionSpectreTest {
                     for (step in 1..20) {
                         val x = lerpInt(dragRightTarget.x, dragLeftTarget.x, step, 20)
                         val y = lerpInt(dragRightTarget.y, dragLeftTarget.y, step, 20)
-                        detachedIn.mouseMove(x, y)
+                        storyIn.mouseMove(x, y)
                         delay(16)
                         assertInvariantsEveryStep("left-$step")
                         leftwardFontSamples += currentProseFontSp()
                     }
                 } finally {
-                    detachedIn.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                    storyIn.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                 }
                 delay(32)
                 settle()
@@ -248,23 +250,23 @@ class HumanRealisticInteractionSpectreTest {
                     "Returning to Slide 1 must keep s1:prose selected without missing-on-beat flash",
                 )
 
-                // 6. Also verify detached-window hex typing never loses focus (TimelineWindow.Content rootHadFocus guard).
+                // 6. Also verify hoisted inspector hex typing in detached mode never loses focus.
                 val detachedHexNode = scrollIntoViewIfNeeded(
-                    input = detachedIn,
+                    input = storyIn,
                     scrollContainerTag = "ciacola-element-editor-panel",
                     targetTag = "ciacola-element-textcolor-hex",
-                    viewportBoundsProvider = { detachedWin.screenBounds() },
+                    viewportBoundsProvider = { window.screenBounds() },
                 )
                 val detachedHexBounds = checkNotNull(detachedHexNode.boundsOnScreen)
                 humanClick(
-                    detachedIn,
+                    storyIn,
                     Point(detachedHexBounds.x + detachedHexBounds.width - 12, detachedHexBounds.y + detachedHexBounds.height / 2),
                 )
                 automator.waitUntil(description = "detached hex focused", timeout = 5.seconds) {
                     automator.findOneByTestTag("ciacola-element-textcolor-hex")?.isFocused == true
                 }
                 repeat(6) {
-                    humanKeyTap(detachedIn, KeyEvent.VK_BACK_SPACE)
+                    humanKeyTap(storyIn, KeyEvent.VK_BACK_SPACE)
                     delay(16)
                     automator.waitForIdle()
                     assertTrue(
@@ -273,7 +275,7 @@ class HumanRealisticInteractionSpectreTest {
                     )
                 }
                 listOf(KeyEvent.VK_3, KeyEvent.VK_8, KeyEvent.VK_B, KeyEvent.VK_D, KeyEvent.VK_F, KeyEvent.VK_8).forEach { kc ->
-                    humanKeyTap(detachedIn, kc)
+                    humanKeyTap(storyIn, kc)
                     delay(16)
                     automator.waitForIdle()
                     assertTrue(
@@ -570,6 +572,9 @@ class HumanRealisticInteractionSpectreTest {
                 humanClick(storyIn, typoSubTab.centerOnScreen)
                 settle()
 
+                val unscaledProseHeight = checkNotNull(
+                    stageInspectionRegistry.nodes["s1:prose:b0"]?.stageBounds,
+                ).height
                 val scaleSlider = automator.waitForNode(tag = "design-typo-global-scale-slider", timeout = 5.seconds)
                 val scaleBounds = checkNotNull(scaleSlider.boundsOnScreen)
                 val scaleStart = sliderPointForValue(scaleBounds, value = 1.00f, min = 0.75f, max = 1.50f)
@@ -590,10 +595,12 @@ class HumanRealisticInteractionSpectreTest {
                     appliedScale > 1.15f,
                     "Expected Global Font Scale > 1.15x after 25-step drag, got $appliedScale (samples=$observedScales)",
                 )
-                val scaledProseSp = stageInspectionRegistry.nodes["s1:prose:b0"]?.effectiveFontSizeSp ?: 30f
+                val scaledProseHeight = checkNotNull(
+                    stageInspectionRegistry.nodes["s1:prose:b0"]?.stageBounds,
+                ).height
                 assertTrue(
-                    scaledProseSp > 34f,
-                    "Expected Slide 1 Prose font size to scale live with Global Font Scale (> 34 sp), got $scaledProseSp sp",
+                    scaledProseHeight > unscaledProseHeight * 1.12f,
+                    "Expected Slide 1 Prose stage height to scale live via LocalDensity.fontScale (unscaled=$unscaledProseHeight, scaled=$scaledProseHeight, scale=$appliedScale)",
                 )
                 assertTrue(designStore.canUndo, "Expected Global Font Scale drag to record undo state")
 

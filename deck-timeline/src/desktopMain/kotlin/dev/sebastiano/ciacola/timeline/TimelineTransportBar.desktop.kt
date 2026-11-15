@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -50,11 +51,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
@@ -71,13 +75,18 @@ import org.jetbrains.jewel.ui.component.HorizontalScrollbar
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
 import org.jetbrains.jewel.ui.component.OutlinedButton
+import org.jetbrains.jewel.ui.component.SegmentedControl
+import org.jetbrains.jewel.ui.component.SegmentedControlButtonData
 import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.component.VerticalScrollbar
+import org.jetbrains.jewel.ui.component.styling.SegmentedControlButtonMetrics
+import org.jetbrains.jewel.ui.component.styling.SegmentedControlButtonStyle
 import org.jetbrains.jewel.ui.icon.IconKey
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
+import org.jetbrains.jewel.ui.theme.segmentedControlButtonStyle
 import org.jetbrains.jewel.ui.typography
 
 internal val SLIDE_RIBBON_HEIGHT = 26.dp
@@ -171,6 +180,7 @@ internal fun TimelineTransportBar(
     controller: TimelineStudioController,
     modifier: Modifier = Modifier,
     surface: TimelineSurface = TimelineSurface.Docked,
+    leadingToolbarContent: (@Composable () -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
@@ -178,7 +188,7 @@ internal fun TimelineTransportBar(
     val secondaryCaptionColor = studioSecondaryTextColor(isDark)
     val activeSubLoopId = controller.loopClock.activeSubCompLoopId
     val nowMs = controller.currentPlayheadTimeMs
-    val idx = controller.animatic.targetIndex
+    val idx = controller.animatic.presentedIndex
     val sceneBeatsCount = controller.animatic.storyboard.scenes.getOrNull(idx.sceneIndex)?.frames?.size ?: 1
     controller.overridesStore.parameterRevision
     controller.overridesStore.structuralRevision
@@ -199,6 +209,10 @@ internal fun TimelineTransportBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            if (leadingToolbarContent != null) {
+                leadingToolbarContent()
+                Divider(Orientation.Vertical, Modifier.height(18.dp).padding(horizontal = 2.dp))
+            }
             TransportIconButton(AllIconsKeys.General.ChevronLeft, "Previous beat", "Previous Beat ([)", "ciacola-timeline-prev-beat") {
                 controller.stepBeat(-1)
             }
@@ -485,9 +499,38 @@ internal fun TimelineMultiTrackArea(
     val focusState = LocalStudioA11yFocusState.current
     val density = LocalDensity.current
     val rowHeightPx = with(density) { TRACK_ROW_HEIGHT.toPx() }
-    val trackIds = remember(snapshot.tracks) { snapshot.tracks.map { it.trackId } }
+    val activeSceneIndex = controller.animatic.presentedIndex.sceneIndex
+    val displayedTracks = remember(snapshot.tracks, controller.trackFilter, activeSceneIndex) {
+        controller.visibleTracks(activeSceneIndex)
+    }
+    val trackIds = remember(displayedTracks) { displayedTracks.map { it.trackId } }
     val rowFocusRequesters = remember(trackIds) { List(trackIds.size) { FocusRequester() } }
     var layerColumnHeightPx by remember { mutableFloatStateOf(0f) }
+    var lastAutoScrolledScene by remember(snapshot) { mutableStateOf(activeSceneIndex) }
+    var lastFilter by remember { mutableStateOf(controller.trackFilter) }
+
+    LaunchedEffect(activeSceneIndex, controller.trackFilter, snapshot, rowHeightPx, layerColumnHeightPx) {
+        val filterChanged = controller.trackFilter != lastFilter
+        lastFilter = controller.trackFilter
+        if (controller.trackFilter == TimelineTrackFilter.CurrentSlide) {
+            viewport.verticalScroll.scrollTo(0)
+            lastAutoScrolledScene = activeSceneIndex
+            return@LaunchedEffect
+        }
+        if ((!filterChanged && activeSceneIndex == lastAutoScrolledScene) || controller.isScrubDragging) {
+            return@LaunchedEffect
+        }
+        lastAutoScrolledScene = activeSceneIndex
+        val firstRowIdx = displayedTracks.indexOfFirst { it.sceneIndex == activeSceneIndex }
+        if (firstRowIdx >= 0) {
+            val rowTop = (firstRowIdx * rowHeightPx).roundToInt()
+            val visH = layerColumnHeightPx.roundToInt().coerceAtLeast(rowHeightPx.roundToInt())
+            val curScroll = viewport.verticalScroll.value
+            if (filterChanged || rowTop < curScroll || rowTop + rowHeightPx > curScroll + visH) {
+                viewport.verticalScroll.animateScrollTo(rowTop.coerceAtLeast(0))
+            }
+        }
+    }
 
     Row(modifier = modifier.fillMaxSize()) {
         Column(
@@ -501,19 +544,72 @@ internal fun TimelineMultiTrackArea(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(HEADER_TOTAL_HEIGHT)
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
                 verticalArrangement = Arrangement.SpaceEvenly,
             ) {
                 Text(
                     text = "SLIDES & OVERLAPS",
                     style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
                     color = secondaryLayerColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = "EVENT BEATS / LAYERS",
-                    style = JewelTheme.typography.small,
-                    color = secondaryLayerColor,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "TRACKS",
+                        style = JewelTheme.typography.small,
+                        color = secondaryLayerColor,
+                        maxLines = 1,
+                    )
+                    val baseBtnStyle = JewelTheme.segmentedControlButtonStyle
+                    val compactBtnStyle = remember(baseBtnStyle) {
+                        SegmentedControlButtonStyle(
+                            colors = baseBtnStyle.colors,
+                            metrics = SegmentedControlButtonMetrics(
+                                cornerSize = baseBtnStyle.metrics.cornerSize,
+                                segmentedButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                minSize = DpSize(24.dp, 20.dp),
+                                borderWidth = baseBtnStyle.metrics.borderWidth,
+                            ),
+                        )
+                    }
+                    SegmentedControl(
+                        buttons = listOf(
+                            SegmentedControlButtonData(
+                                selected = controller.trackFilter == TimelineTrackFilter.All,
+                                onSelect = { controller.trackFilter = TimelineTrackFilter.All },
+                                content = {
+                                    Text(
+                                        text = "All",
+                                        maxLines = 1,
+                                        modifier = Modifier
+                                            .semantics(mergeDescendants = true) {}
+                                            .testTag("ciacola-timeline-filter-all"),
+                                    )
+                                },
+                            ),
+                            SegmentedControlButtonData(
+                                selected = controller.trackFilter == TimelineTrackFilter.CurrentSlide,
+                                onSelect = { controller.trackFilter = TimelineTrackFilter.CurrentSlide },
+                                content = {
+                                    Text(
+                                        text = "Current slide",
+                                        maxLines = 1,
+                                        modifier = Modifier
+                                            .semantics(mergeDescendants = true) {}
+                                            .testTag("ciacola-timeline-filter-current"),
+                                    )
+                                },
+                            ),
+                        ),
+                        buttonStyle = compactBtnStyle,
+                        textStyle = JewelTheme.typography.small,
+                    )
+                }
             }
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
 
@@ -525,7 +621,7 @@ internal fun TimelineMultiTrackArea(
                     .verticalScroll(viewport.verticalScroll)
                     .testTag("ciacola-timeline-layer-headers"),
             ) {
-                snapshot.tracks.forEachIndexed { rowIdx, track ->
+                displayedTracks.forEachIndexed { rowIdx, track ->
                     val isSelected = controller.isTrackRowSelected(track.trackId)
                     val loopBlock = track.blocks.firstOrNull { it.loopId != null }
                     val isRowOverridden = if (loopBlock?.loopId != null) {
@@ -569,7 +665,7 @@ internal fun TimelineMultiTrackArea(
                                     !ev.isKeyCtrlPressed && !ev.isKeyMetaPressed && !ev.isKeyAltPressed
                                 ) {
                                     val nextIdx = when (ev.key) {
-                                        Key.DirectionDown -> (rowIdx + 1).coerceAtMost(snapshot.tracks.lastIndex)
+                                        Key.DirectionDown -> (rowIdx + 1).coerceAtMost(displayedTracks.lastIndex)
                                         Key.DirectionUp -> (rowIdx - 1).coerceAtLeast(0)
                                         else -> return@onKeyEvent false
                                     }
@@ -623,13 +719,28 @@ internal fun TimelineMultiTrackArea(
                                     )
                                 }
                             }
-                            Tooltip(tooltip = { Text(fullLoopTooltip) }) {
+                            var labelOverflows by remember(track.trackId, displayRowLabel) { mutableStateOf(false) }
+                            val showTooltip = labelOverflows || displayRowLabel != fullLoopTooltip
+                            val labelColor = if (isSelected || isRowOverridden) globalColors.text.normal else secondaryLayerColor
+                            if (showTooltip) {
+                                Tooltip(tooltip = { Text(fullLoopTooltip) }) {
+                                    Text(
+                                        text = displayRowLabel,
+                                        style = JewelTheme.typography.small,
+                                        color = labelColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        onTextLayout = { labelOverflows = it.hasVisualOverflow },
+                                    )
+                                }
+                            } else {
                                 Text(
                                     text = displayRowLabel,
                                     style = JewelTheme.typography.small,
-                                    color = if (isSelected || isRowOverridden) globalColors.text.normal else secondaryLayerColor,
+                                    color = labelColor,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    onTextLayout = { labelOverflows = it.hasVisualOverflow },
                                 )
                             }
                         }
@@ -667,6 +778,7 @@ internal fun TimelineMultiTrackArea(
                 controller = controller,
                 snapshot = snapshot,
                 surface = surface,
+                displayedTracks = displayedTracks,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP),

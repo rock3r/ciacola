@@ -52,12 +52,12 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
+import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Outline
-import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
@@ -176,12 +176,12 @@ internal fun PreShowReadinessBanner(
 
         if (readiness.hasClosableAuthoringTools) {
             Tooltip(tooltip = { Text("Close all open Studio, Design System, Linter, and Inspect panels") }) {
-                DefaultButton(
+                CiacolaPrimaryButton(
+                    text = "Enter Clean Show Mode",
                     onClick = onEnterCleanShowMode,
+                    textStyle = JewelTheme.typography.small,
                     modifier = Modifier.testTag("ciacola-presenter-clean-show-button"),
-                ) {
-                    Text("Enter Clean Show Mode", style = JewelTheme.typography.small)
-                }
+                )
             }
         } else {
             Tooltip(tooltip = { Text("Keep live overrides active and hide this notice") }) {
@@ -418,12 +418,11 @@ internal fun QuickSlideJumpOverlay(
                     Text("Cancel")
                 }
                 Spacer(Modifier.width(8.dp))
-                DefaultButton(
+                CiacolaPrimaryButton(
+                    text = "Jump",
                     onClick = ::submitJump,
                     modifier = Modifier.testTag("ciacola-presenter-jump-confirm"),
-                ) {
-                    Text("Jump")
-                }
+                )
             }
         }
     }

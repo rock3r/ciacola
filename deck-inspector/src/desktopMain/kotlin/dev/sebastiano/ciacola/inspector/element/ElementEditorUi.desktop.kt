@@ -50,13 +50,13 @@ import dev.sebastiano.ciacola.inspector.design.ModifiedDotBadge
 import dev.sebastiano.ciacola.inspector.design.designActivatableFocus
 import dev.sebastiano.ciacola.inspector.design.toArgbLong
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
-import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.GroupHeader
 import org.jetbrains.jewel.ui.component.InfoText
@@ -218,6 +218,16 @@ fun ElementEditorPanel(
                 meta = selectedMeta,
                 store = store,
             )
+
+            val shaderUniforms = selectedSnapshot?.shaderUniforms.orEmpty()
+            if (shaderUniforms.isNotEmpty()) {
+                ShaderUniformsSection(
+                    elementId = selectedId,
+                    uniforms = shaderUniforms,
+                    patch = patch,
+                    store = store,
+                )
+            }
         }
 
         VerticalScrollbar(
@@ -297,8 +307,9 @@ private fun SlideElementPicker(
     onSelect: (String?) -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
+    val entries = remember(nodes) { StageSelectionModel.buildPickerHierarchy(nodes) }
     GroupHeader("Slide Elements (${nodes.size}):")
-    if (nodes.isEmpty()) {
+    if (entries.isEmpty()) {
         InfoText("No editable elements detected on this beat yet.")
         return
     }
@@ -306,16 +317,20 @@ private fun SlideElementPicker(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        nodes.forEach { node ->
+        entries.forEach { entry ->
+            val node = entry.node
             val isSelected = node.elementId == selectedElementId
             val isEdited = node.elementId in overriddenIds
+            val displayLabel = node.label.ifBlank { node.elementId }
+            var labelOverflows by remember(node.elementId, displayLabel) { mutableStateOf(false) }
+            val indentStart = (8 + entry.depth.coerceAtMost(4) * 14).dp
             val rowBg = if (isSelected) {
                 focusRingColor.copy(alpha = 0.16f)
             } else {
                 globalColors.panelBackground
             }
             val rowBorder = if (isSelected) focusRingColor else globalColors.borders.normal.copy(alpha = 0.6f)
-            Tooltip(tooltip = { Text("Select ${node.elementId} (${node.kind})") }) {
+            val rowContent: @Composable () -> Unit = {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -325,7 +340,7 @@ private fun SlideElementPicker(
                         .border(1.dp, rowBorder, RoundedCornerShape(5.dp))
                         .pointerHoverIcon(PointerIcon.Hand)
                         .clickable { onSelect(node.elementId) }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(start = indentStart, end = 8.dp, top = 5.dp, bottom = 5.dp)
                         .semantics {
                             role = Role.RadioButton
                             selected = isSelected
@@ -335,17 +350,26 @@ private fun SlideElementPicker(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    if (entry.depth > 0) {
+                        Text(
+                            text = "└",
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.info,
+                            maxLines = 1,
+                        )
+                    }
                     if (isEdited) {
                         ModifiedDotBadge(tooltip = "${node.elementId} has overrides")
                     }
                     Text(
-                        text = node.label.ifBlank { node.elementId },
+                        text = displayLabel,
                         style = JewelTheme.typography.small.copy(
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         ),
                         color = globalColors.text.normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { layout -> labelOverflows = layout.hasVisualOverflow },
                         modifier = Modifier.weight(1f),
                     )
                     Text(
@@ -355,6 +379,13 @@ private fun SlideElementPicker(
                         maxLines = 1,
                     )
                 }
+            }
+            if (labelOverflows) {
+                Tooltip(tooltip = { Text("$displayLabel (${node.elementId} · ${node.kind})") }) {
+                    rowContent()
+                }
+            } else {
+                rowContent()
             }
         }
     }
@@ -435,14 +466,14 @@ private fun SelectedElementHeader(
         ) {
             if (canInlineEdit) {
                 Tooltip(tooltip = { Text("Edit text directly on the stage (or double-click element)") }) {
-                    DefaultButton(
+                    CiacolaPrimaryButton(
+                        text = "Edit Text",
                         onClick = onEditInline,
+                        textStyle = JewelTheme.typography.small,
                         modifier = Modifier
                             .designActivatableFocus(focusRingColor)
                             .testTag("ciacola-element-edit-inline"),
-                    ) {
-                        Text("Edit Text", style = JewelTheme.typography.small)
-                    }
+                    )
                 }
             }
             Tooltip(tooltip = { Text("Copy clean ElementPatch Kotlin snippet to clipboard") }) {
@@ -645,9 +676,12 @@ private fun TypographySection(
                 }
                 Tooltip(tooltip = { Text("Font weight $weight") }) {
                     if (selected) {
-                        DefaultButton(onClick = onClick, modifier = pillMod) {
-                            Text(label, style = JewelTheme.typography.small, maxLines = 1)
-                        }
+                        CiacolaPrimaryButton(
+                            text = label,
+                            onClick = onClick,
+                            textStyle = JewelTheme.typography.small,
+                            modifier = pillMod,
+                        )
                     } else {
                         OutlinedButton(onClick = onClick, modifier = pillMod) {
                             Text(label, style = JewelTheme.typography.small, maxLines = 1)

@@ -503,6 +503,14 @@ class ElementOverridesStore(
             patch.paddingDp?.let { add("paddingDp = ${formatFloatLiteral(it)}") }
             patch.offsetXDp?.let { add("offsetXDp = ${formatFloatLiteral(it)}") }
             patch.offsetYDp?.let { add("offsetYDp = ${formatFloatLiteral(it)}") }
+            if (patch.uniforms.isNotEmpty()) {
+                val entries = patch.uniforms.entries
+                    .sortedBy { it.key }
+                    .joinToString(", ") { (name, value) ->
+                        "\"${escapeKotlinString(name)}\" to ${formatFloatLiteral(value)}"
+                    }
+                add("uniforms = mapOf($entries)")
+            }
         }
         return buildString {
             appendLine("ElementPatch(")
@@ -517,7 +525,11 @@ class ElementOverridesStore(
         "0x" + (argb and 0xFFFFFFFFL).toString(16).uppercase().padStart(8, '0') + "L"
 
     private fun formatFloatLiteral(value: Float): String {
-        val formatted = if (value % 1f == 0f) "${value.toInt()}.0" else "%.2f".format(value).trimEnd('0').trimEnd('.')
+        val formatted = if (value % 1f == 0f) {
+            "${value.toInt()}.0"
+        } else {
+            "%.2f".format(java.util.Locale.US, value).trimEnd('0').trimEnd('.')
+        }
         return "${formatted}f"
     }
 

@@ -40,6 +40,7 @@ import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.SceneMode
 import dev.bnorm.storyboard.easel.rememberSharedContentState
 import dev.bnorm.storyboard.easel.sharedBounds
+import dev.bnorm.storyboard.easel.sharedElement
 import kotlin.math.hypot
 import kotlinx.serialization.Serializable
 
@@ -462,6 +463,18 @@ fun createArcBoundsTransform(
 }
 
 /**
+ * Controls how [Modifier.deckSharedBounds] renders a shared surface during cross-slide transitions.
+ *
+ * - [CrossfadeBounds]: Compose `sharedBounds` crossfading outgoing and incoming content.
+ * - [SingleSurface]: Compose `sharedElement` morphing a single remeasured surface without
+ *   crossfade opacity dips or scaled-bitmap content distortion.
+ */
+enum class SharedMode {
+    CrossfadeBounds,
+    SingleSurface,
+}
+
+/**
  * Shared-element modifier that automatically registers cross-slide spans in the After Effects
  * timeline and honors live duration, curve, and curved spatial-arc overrides.
  */
@@ -473,6 +486,7 @@ fun Modifier.deckSharedBounds(
     label: String = sharedKey,
     defaultDurationMs: Int = 420,
     currentBeatInScene: Int = 0,
+    mode: SharedMode = SharedMode.CrossfadeBounds,
 ): Modifier {
     val trackId = "shared:$sharedKey"
     val overrides = LocalTimelineOverrides.current.tracks[trackId]
@@ -520,13 +534,23 @@ fun Modifier.deckSharedBounds(
         },
     )
 
-    return this.sharedBounds(
-        sharedContentState = rememberSharedContentState(sharedKey),
-        enter = fadeIn(tween(effectiveDuration, delayMillis = effectiveDelay)),
-        exit = fadeOut(tween(effectiveDuration, delayMillis = effectiveDelay)),
-        boundsTransform = boundsTransform,
-        resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(ContentScale.FillWidth, Alignment.Center),
-    ).timelineTarget(trackId)
+    val sharedState = rememberSharedContentState(sharedKey)
+    val sharedModifier = when (mode) {
+        SharedMode.CrossfadeBounds -> this.sharedBounds(
+            sharedContentState = sharedState,
+            enter = fadeIn(tween(effectiveDuration, delayMillis = effectiveDelay)),
+            exit = fadeOut(tween(effectiveDuration, delayMillis = effectiveDelay)),
+            boundsTransform = boundsTransform,
+            resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(ContentScale.FillWidth, Alignment.Center),
+        )
+
+        SharedMode.SingleSurface -> this.sharedElement(
+            sharedContentState = sharedState,
+            boundsTransform = boundsTransform,
+        )
+    }
+
+    return sharedModifier.timelineTarget(trackId)
 }
 
 /**

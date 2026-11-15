@@ -126,8 +126,7 @@ fun <S> Transition<S>.DeterministicStateHost(
     contentKey: (S) -> Any? = { it },
     content: @Composable AnimatedVisibilityScope.(S) -> Unit,
 ) {
-    val from = currentState
-    val to = targetState
+    val (from, to) = stableSegment()
     val activeStates = remember(from, to) {
         if (contentKey(from) == contentKey(to)) {
             listOf(to)

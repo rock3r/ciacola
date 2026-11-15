@@ -5,17 +5,12 @@ import java.awt.Component
 import java.awt.Container
 import java.awt.EventQueue
 import java.awt.image.BufferedImage
-import java.awt.image.DataBufferInt
 import java.io.File
-import java.io.FileOutputStream
 import java.lang.ref.Reference
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.time.Instant
-import java.util.Locale
 import javax.imageio.ImageIO
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -36,6 +31,10 @@ import dev.sebastiano.spectre.recording.screencapturekit.asTitledWindow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skiko.SkiaLayer
 import org.jetbrains.skiko.toBufferedImage
 
@@ -208,11 +207,15 @@ internal suspend fun <T> runOnEdt(block: () -> T): T {
     }
 }
 
-internal fun captureSkiaWindowFrameOnEdt(window: ComposeWindow): BufferedImage? {
+internal fun captureSkiaBitmapOnEdt(window: ComposeWindow): Bitmap? {
     check(EventQueue.isDispatchThread()) { "SkiaLayer capture must execute on the AWT EDT" }
     if (!window.isDisplayable || !window.isShowing) return null
     val layer = findSkiaLayer(window) ?: return null
-    val bitmap = layer.screenshot() ?: return null
+    return layer.screenshot()
+}
+
+internal fun captureSkiaWindowFrameOnEdt(window: ComposeWindow): BufferedImage? {
+    val bitmap = captureSkiaBitmapOnEdt(window) ?: return null
     return try {
         // Normalize Skiko's custom ColorModel raster to standard TYPE_INT_ARGB so JBR's
         // PNGImageWriter never hits ArrayIndexOutOfBoundsException on semi-transparent pixels.
@@ -269,6 +272,9 @@ suspend fun saveScreenshot(
     return target
 }
 
+@Volatile
+private var sckUnavailableInJvm: Boolean = false
+
 /**
  * Captures frames of [window]'s [SkiaLayer] in the background at [fps] while [block] runs,
  * then encodes both `.mp4` (H.264 `yuv420p`) and `.gif` (`<= maxGifWidthPx` wide) via `ffmpeg`
@@ -298,7 +304,7 @@ suspend fun record(
 
     // Prefer Spectre's native ScreenCaptureKit AutoRecorder (zero AWT-EDT overhead, 60fps hardware
     // window capture with the macOS purple semaphore indicator) whenever UIElement accessory mode is off.
-    if (!System.getProperty("apple.awt.UIElement").equals("true", ignoreCase = true)) {
+    if (!sckUnavailableInJvm && !System.getProperty("apple.awt.UIElement").equals("true", ignoreCase = true)) {
         val sckRecording = runCatching {
             recordWithSpectreScreenCaptureKit(
                 window = window,
@@ -312,173 +318,218 @@ suspend fun record(
                 block = block,
             )
         }.onFailure { err ->
+            sckUnavailableInJvm = true
+            if (mp4File.exists() && mp4File.length() == 0L) {
+                mp4File.delete()
+            }
             System.err.println("Spectre ScreenCaptureKit recording unavailable (${err.message}); falling back to SkiaLayer capture")
         }.getOrNull()
         if (sckRecording != null) return sckRecording
     }
 
-    val tempDir = withContext(Dispatchers.IO) { Files.createTempDirectory("ciacola-qa-rec-") }
+    // Real-time SkiaLayer -> ffmpeg pipe encoder: EDT only calls layer.screenshot() (~3-8 ms),
+    // pixel readback and H.264 encoding run completely off-EDT on Dispatchers.IO with zero giant
+    // rawvideo temp files and wall-clock-accurate CFR timestamps.
+    val initialBitmap = captureSkiaBitmap(window = window, settleDelayMs = 16L)
+    val width = initialBitmap.width
+    val height = initialBitmap.height
+    val rgbaInfo = ImageInfo(width, height, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
+    val rowBytes = width * 4
 
-    try {
-        val initialFrame = screenshot(window = window, settleDelayMs = 16L)
-        val width = initialFrame.width
-        val height = initialFrame.height
-        val rawFile = tempDir.resolve("frames.argb").toFile()
-
-        val frameChannel = Channel<BufferedImage>(
-            capacity = 8,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
-        var writtenFrames = 0
-        val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-        val writerJob = bgScope.launch {
-            FileOutputStream(rawFile).channel.use { fileChannel ->
-                val directBuffer = ByteBuffer.allocateDirect(width * height * 4)
-                    .order(ByteOrder.BIG_ENDIAN)
-                var scratchImage: BufferedImage? = null
-
-                fun writeImg(image: BufferedImage) {
-                    val argb = if (
-                        image.width == width &&
-                        image.height == height &&
-                        image.type == BufferedImage.TYPE_INT_ARGB
-                    ) {
-                        image
-                    } else {
-                        val canvas = scratchImage
-                            ?: BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).also {
-                                scratchImage = it
-                            }
-                        val g = canvas.createGraphics()
-                        try {
-                            g.clearRect(0, 0, width, height)
-                            g.drawImage(image, 0, 0, width, height, null)
-                        } finally {
-                            g.dispose()
-                        }
-                        canvas
-                    }
-                    val pixels = (argb.raster.dataBuffer as DataBufferInt).data
-                    directBuffer.clear()
-                    directBuffer.asIntBuffer().put(pixels)
-                    directBuffer.limit(pixels.size * 4)
-                    while (directBuffer.hasRemaining()) {
-                        fileChannel.write(directBuffer)
-                    }
-                    writtenFrames++
-                }
-
-                for (frame in frameChannel) {
-                    writeImg(frame)
-                }
-                if (writtenFrames == 1) {
-                    // Duplicate single frame so short blocks still encode a valid stream.
-                    writeImg(initialFrame)
-                }
+    val ffmpegCmd = listOf(
+        resolveFfmpegBinary(),
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+        "-use_wallclock_as_timestamps", "1",
+        "-f", "rawvideo",
+        "-pix_fmt", "rgba",
+        "-video_size", "${width}x${height}",
+        "-i", "pipe:0",
+        "-vf", "scale='min(1920,iw)':-2:flags=fast_bilinear,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-fps_mode", "cfr",
+        "-r", fps.toString(),
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "19",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        mp4File.absolutePath,
+    )
+    val ffmpegProc = withContext(Dispatchers.IO) {
+        ProcessBuilder(ffmpegCmd).redirectErrorStream(true).start()
+    }
+    val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    val ffmpegOutputBuilder = StringBuilder()
+    val stderrDrainJob = bgScope.launch {
+        runCatching {
+            ffmpegProc.inputStream.bufferedReader(StandardCharsets.UTF_8).use { reader ->
+                ffmpegOutputBuilder.append(reader.readText())
             }
-        }
-
-        frameChannel.send(initialFrame)
-        val startNanos = System.nanoTime()
-
-        val samplerJob = CoroutineScope(Dispatchers.Default + SupervisorJob()).launch {
-            val intervalNanos = 1_000_000_000L / fps
-            var nextDeadline = System.nanoTime() + intervalNanos
-            while (isActive) {
-                val sleepMs = (nextDeadline - System.nanoTime()) / 1_000_000L
-                if (sleepMs > 0L) delay(sleepMs)
-                nextDeadline += intervalNanos
-                val now = System.nanoTime()
-                if (nextDeadline < now - intervalNanos) {
-                    nextDeadline = now + intervalNanos
-                }
-                val captured = runCatching { runOnEdt { captureSkiaWindowFrameOnEdt(window) } }.getOrNull()
-                if (captured != null) {
-                    frameChannel.trySend(captured)
-                }
-            }
-        }
-
-        var blockFailure: Throwable? = null
-        try {
-            block()
-        } catch (t: Throwable) {
-            blockFailure = t
-        } finally {
-            samplerJob.cancel()
-            samplerJob.join()
-        }
-
-        if (blockFailure != null) {
-            frameChannel.close()
-            writerJob.join()
-            bgScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
-            throw blockFailure
-        }
-
-        runCatching { runOnEdt { captureSkiaWindowFrameOnEdt(window) } }
-            .getOrNull()
-            ?.let { frameChannel.send(it) }
-        frameChannel.close()
-        writerJob.join()
-        bgScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
-
-        val elapsedSeconds = ((System.nanoTime() - startNanos) / 1_000_000_000.0)
-            .coerceAtLeast(1.0 / fps)
-        val effectiveFps = if (writtenFrames >= 3) {
-            ((writtenFrames - 1) / elapsedSeconds).coerceIn(1.0, fps.toDouble())
-        } else {
-            fps.toDouble()
-        }
-        val fpsArg = String.format(Locale.US, "%.2f", effectiveFps)
-
-        withContext(Dispatchers.IO) {
-            runFfmpeg(
-                "-y",
-                "-f", "rawvideo",
-                "-pix_fmt", "argb",
-                "-video_size", "${width}x${height}",
-                "-framerate", fpsArg,
-                "-i", rawFile.absolutePath,
-                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                mp4File.absolutePath,
-            )
-            runFfmpeg(
-                "-y",
-                "-f", "rawvideo",
-                "-pix_fmt", "argb",
-                "-video_size", "${width}x${height}",
-                "-framerate", fpsArg,
-                "-i", rawFile.absolutePath,
-                "-vf", "scale='min($maxGifWidthPx,iw)':-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
-                "-loop", "0",
-                gifFile.absolutePath,
-            )
-        }
-
-        check(mp4File.isFile && mp4File.length() > 0L) { "MP4 output missing or empty: $mp4File" }
-        check(gifFile.isFile && gifFile.length() > 0L) { "GIF output missing or empty: $gifFile" }
-
-        return QaRecording(
-            name = stem,
-            mp4 = mp4File,
-            gif = gifFile,
-            mp4EvidencePath = QaPaths.toEvidenceRelativePath(mp4File, worker = worker, qaRoot = qaRoot),
-            gifEvidencePath = QaPaths.toEvidenceRelativePath(gifFile, worker = worker, qaRoot = qaRoot),
-            frameCount = writtenFrames,
-            effectiveFps = effectiveFps,
-        )
-    } finally {
-        withContext(Dispatchers.IO) {
-            runCatching { tempDir.toFile().deleteRecursively() }
         }
     }
+
+    val frameChannel = Channel<Bitmap>(
+        capacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = { dropped ->
+            runCatching {
+                Reference.reachabilityFence(dropped)
+                dropped.close()
+            }
+        },
+    )
+    var writtenFrames = 0
+    var lastBytes: ByteArray? = null
+    val writerJob = bgScope.launch {
+        val out = ffmpegProc.outputStream
+        try {
+            for (bitmap in frameChannel) {
+                val bytes = try {
+                    if (bitmap.width == width && bitmap.height == height) {
+                        bitmap.readPixels(rgbaInfo, rowBytes, 0, 0)
+                    } else {
+                        null
+                    }
+                } finally {
+                    Reference.reachabilityFence(bitmap)
+                    bitmap.close()
+                }
+                if (bytes != null) {
+                    lastBytes = bytes
+                    out.write(bytes)
+                    writtenFrames++
+                }
+            }
+            if (writtenFrames == 1) {
+                // Duplicate single frame so short blocks still encode a valid stream.
+                lastBytes?.let {
+                    out.write(it)
+                    writtenFrames++
+                }
+            }
+            out.flush()
+        } catch (_: Throwable) {
+            // If block failed or ffmpeg exited early, remaining queued bitmaps are closed below.
+        } finally {
+            runCatching { out.close() }
+        }
+    }
+
+    frameChannel.send(initialBitmap)
+    val startNanos = System.nanoTime()
+
+    val captureFps = fps.coerceAtMost(18)
+    val samplerScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    val samplerJob = samplerScope.launch {
+        val minPeriodMs = (1_000L / captureFps).coerceAtLeast(50L)
+        while (isActive) {
+            val captureStartNs = System.nanoTime()
+            val captured = runCatching {
+                runOnEdt {
+                    if (window.isDisplayable && window.isShowing) {
+                        findSkiaLayer(window)?.screenshot()
+                    } else {
+                        null
+                    }
+                }
+            }.getOrNull()
+            if (captured != null) {
+                val result = frameChannel.trySend(captured)
+                if (!result.isSuccess) {
+                    runCatching {
+                        Reference.reachabilityFence(captured)
+                        captured.close()
+                    }
+                }
+            }
+            val captureElapsedMs = (System.nanoTime() - captureStartNs) / 1_000_000L
+            // Always yield EDT breathing room >= capture cost (and >= 45 ms) so synthetic
+            // pointer drags and <= 420 ms double-clicks never starve the AWT EDT.
+            val yieldMs = maxOf(minPeriodMs - captureElapsedMs, captureElapsedMs, 45L)
+            delay(yieldMs)
+        }
+    }
+
+    var blockFailure: Throwable? = null
+    try {
+        block()
+    } catch (t: Throwable) {
+        blockFailure = t
+    } finally {
+        samplerJob.cancel()
+        samplerJob.join()
+        samplerScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+    }
+
+    if (blockFailure != null) {
+        frameChannel.close()
+        writerJob.join()
+        runCatching { ffmpegProc.destroyForcibly() }
+        stderrDrainJob.join()
+        bgScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        throw blockFailure
+    }
+
+    runCatching {
+        runOnEdt {
+            if (window.isDisplayable && window.isShowing) findSkiaLayer(window)?.screenshot() else null
+        }
+    }.getOrNull()?.let { frameChannel.send(it) }
+    frameChannel.close()
+    writerJob.join()
+    val exit = withContext(Dispatchers.IO) { ffmpegProc.waitFor() }
+    stderrDrainJob.join()
+    bgScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+    check(exit == 0) {
+        "ffmpeg pipe exited with code $exit:\n$ffmpegOutputBuilder"
+    }
+
+    val elapsedSeconds = ((System.nanoTime() - startNanos) / 1_000_000_000.0)
+        .coerceAtLeast(1.0 / fps)
+    val effectiveFps = if (writtenFrames >= 3) {
+        ((writtenFrames - 1) / elapsedSeconds).coerceIn(1.0, fps.toDouble())
+    } else {
+        fps.toDouble()
+    }
+
+    withContext(Dispatchers.IO) {
+        runFfmpeg(
+            "-y",
+            "-i", mp4File.absolutePath,
+            "-vf", "fps=${fps.coerceAtMost(15)},scale='min($maxGifWidthPx,iw)':-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "-loop", "0",
+            gifFile.absolutePath,
+        )
+    }
+
+    check(mp4File.isFile && mp4File.length() > 0L) { "MP4 output missing or empty: $mp4File" }
+    check(gifFile.isFile && gifFile.length() > 0L) { "GIF output missing or empty: $gifFile" }
+
+    return QaRecording(
+        name = stem,
+        mp4 = mp4File,
+        gif = gifFile,
+        mp4EvidencePath = QaPaths.toEvidenceRelativePath(mp4File, worker = worker, qaRoot = qaRoot),
+        gifEvidencePath = QaPaths.toEvidenceRelativePath(gifFile, worker = worker, qaRoot = qaRoot),
+        frameCount = writtenFrames,
+        effectiveFps = effectiveFps,
+    )
+}
+
+private suspend fun captureSkiaBitmap(
+    window: ComposeWindow,
+    settleDelayMs: Long = 16L,
+): Bitmap {
+    if (settleDelayMs > 0L) delay(settleDelayMs)
+    repeat(6) { attempt ->
+        val captured = runOnEdt {
+            if (window.isDisplayable && window.isShowing) findSkiaLayer(window)?.screenshot() else null
+        }
+        if (captured != null) return captured
+        if (attempt < 5) delay(30L)
+    }
+    error("No SkiaLayer bitmap available for window '${window.title}'")
 }
 
 private suspend fun recordWithSpectreScreenCaptureKit(
@@ -493,24 +544,45 @@ private suspend fun recordWithSpectreScreenCaptureKit(
     block: suspend () -> Unit,
 ): QaRecording {
     val recorder = AutoRecorder()
-    val options = RecordingOptions(frameRate = fps.coerceIn(1, 60))
-    val startNanos = System.nanoTime()
-    val handle = withContext(Dispatchers.IO) {
-        recorder.startWindow(
-            window = window.asTitledWindow(),
-            output = mp4File.toPath(),
-            options = options,
-        )
+    val effectiveFps = fps.coerceIn(1, 60)
+    val options = RecordingOptions(frameRate = effectiveFps, captureCursor = false)
+    val nudgeScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    val nudgeIntervalMs = (1_000L / effectiveFps).coerceAtLeast(16L)
+    val redrawNudgeJob = nudgeScope.launch {
+        while (isActive) {
+            EventQueue.invokeLater {
+                if (window.isDisplayable && window.isShowing) {
+                    window.repaint()
+                    findSkiaLayer(window)?.needRender()
+                }
+            }
+            delay(nudgeIntervalMs)
+        }
     }
+
+    val startNanos = System.nanoTime()
     var blockFailure: Throwable? = null
     try {
-        block()
-    } catch (t: Throwable) {
-        blockFailure = t
-    } finally {
-        withContext(Dispatchers.IO) {
-            runCatching { handle.stop() }
+        val handle = withContext(Dispatchers.IO) {
+            recorder.startWindow(
+                window = window.asTitledWindow(),
+                output = mp4File.toPath(),
+                options = options,
+            )
         }
+        try {
+            block()
+        } catch (t: Throwable) {
+            blockFailure = t
+        } finally {
+            withContext(Dispatchers.IO) {
+                runCatching { handle.stop() }
+            }
+        }
+    } finally {
+        redrawNudgeJob.cancel()
+        redrawNudgeJob.join()
+        nudgeScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
     }
     if (blockFailure != null) throw blockFailure
 
@@ -521,7 +593,7 @@ private suspend fun recordWithSpectreScreenCaptureKit(
         runFfmpeg(
             "-y",
             "-i", mp4File.absolutePath,
-            "-vf", "fps=${fps.coerceAtMost(24)},scale='min($maxGifWidthPx,iw)':-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "-vf", "fps=${effectiveFps.coerceAtMost(15)},scale='min($maxGifWidthPx,iw)':-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
             "-loop", "0",
             gifFile.absolutePath,
         )
@@ -530,7 +602,7 @@ private suspend fun recordWithSpectreScreenCaptureKit(
         "GIF output missing or empty: $gifFile"
     }
     val elapsedSeconds = ((System.nanoTime() - startNanos) / 1_000_000_000.0).coerceAtLeast(0.1)
-    val approxFrames = (elapsedSeconds * fps).toInt().coerceAtLeast(1)
+    val approxFrames = (elapsedSeconds * effectiveFps).toInt().coerceAtLeast(1)
     return QaRecording(
         name = name,
         mp4 = mp4File,
@@ -538,7 +610,7 @@ private suspend fun recordWithSpectreScreenCaptureKit(
         mp4EvidencePath = QaPaths.toEvidenceRelativePath(mp4File, worker = worker, qaRoot = qaRoot),
         gifEvidencePath = QaPaths.toEvidenceRelativePath(gifFile, worker = worker, qaRoot = qaRoot),
         frameCount = approxFrames,
-        effectiveFps = fps.toDouble(),
+        effectiveFps = effectiveFps.toDouble(),
     )
 }
 

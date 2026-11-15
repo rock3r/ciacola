@@ -144,8 +144,8 @@ class MotionAndContrastFixesTest {
                 observedEarlyB2ToB3 = true
                 // During the fade-out half of S1:B2 -> B3, "." must stay attached to "state." on line 1,
                 // never detached onto line 2 below "state".
-                val stateNodes = onAllNodes(androidx.compose.ui.test.hasText("state", substring = false)).fetchSemanticsNodes()
-                val periodNodes = onAllNodes(androidx.compose.ui.test.hasText(".", substring = false)).fetchSemanticsNodes()
+                val stateNodes = onAllNodes(androidx.compose.ui.test.hasText("state", substring = false), useUnmergedTree = true).fetchSemanticsNodes()
+                val periodNodes = onAllNodes(androidx.compose.ui.test.hasText(".", substring = false), useUnmergedTree = true).fetchSemanticsNodes()
                 if (stateNodes.isNotEmpty() && periodNodes.size == 1) {
                     val stateBounds = stateNodes.single().boundsInRoot
                     val periodBounds = periodNodes.single().boundsInRoot

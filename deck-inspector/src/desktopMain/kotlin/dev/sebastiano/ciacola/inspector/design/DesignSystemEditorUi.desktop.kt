@@ -1,23 +1,21 @@
 package dev.sebastiano.ciacola.inspector.design
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +33,9 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -45,7 +46,6 @@ import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.ReducedMotionMode
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
-import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import kotlinx.coroutines.Job
@@ -54,21 +54,20 @@ import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
-import org.jetbrains.jewel.ui.component.OutlinedButton
-import org.jetbrains.jewel.ui.component.Text
-import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.component.VerticalScrollbar
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
-import org.jetbrains.jewel.ui.typography
 
 /**
  * Sections available inside [DesignSystemEditorPanel].
  */
-enum class DesignSystemTab(val label: String) {
-    Colors("Colors"),
-    Typography("Typography"),
-    Styles("Surfaces & Effects"),
-    Motion("Motion Tokens"),
+enum class DesignSystemTab(
+    val label: String,
+    val shortLabel: String = label,
+) {
+    Colors("Colors", "Colors"),
+    Typography("Typography", "Type"),
+    Styles("Surfaces & Effects", "Surfaces"),
+    Motion("Motion Tokens", "Motion"),
 }
 
 internal val DefaultClipboardWriter: (String) -> Unit = { text ->
@@ -82,7 +81,6 @@ internal val DefaultClipboardWriter: (String) -> Unit = { text ->
  * (with WCAG 2.1 contrast badges and 1-click Fix AA), typography scales & roles, surface/effect
  * geometry, and motion tokens.
  */
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun DesignSystemEditorPanel(
     store: DesignSystemStore,
@@ -108,7 +106,6 @@ fun DesignSystemEditorPanel(
 
     CiacolaJewelTheme(isDark = isDark) {
         val globalColors = JewelTheme.globalColors
-        val focusRingColor = rememberAccessibleFocusRingColor()
         val scrollState = rememberScrollState()
 
         Column(
@@ -137,15 +134,38 @@ fun DesignSystemEditorPanel(
                 }
                 .testTag("design-system-editor-panel"),
         ) {
-            // Top Header: Preset Switcher, Undo/Redo, Copy Kotlin, Reset Preset
+            // Compact 2-row header: one 36.dp toolbar + one non-wrapping 4-tab row.
+            // Mouse-wheel scroll events over the header forward directly into scrollState so the
+            // entire Theme pane scrolls smoothly with no wheel dead zone.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .pointerInput(scrollState) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Final)
+                                if (event.type == PointerEventType.Scroll) {
+                                    val deltaY = event.changes.fold(0f) { acc, change ->
+                                        if (change.isConsumed) acc else acc + change.scrollDelta.y
+                                    }
+                                    if (deltaY != 0f) {
+                                        event.changes.forEach { it.consume() }
+                                        val scrollPx = deltaY * 64.dp.toPx()
+                                        scope.launch { scrollState.scrollBy(scrollPx) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .testTag("design-editor-compact-header"),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .testTag("design-editor-toolbar"),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -155,23 +175,25 @@ fun DesignSystemEditorPanel(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         DesignTogglePill(
-                            label = "Stage Dark",
+                            label = "Dark",
                             tooltip = "Switch active deck preset to Stage Dark",
                             selected = currentPreset == DeckThemePreset.StageDark,
                             testTag = "design-preset-stage-dark",
+                            compact = true,
                             onClick = { onSelectPreset(DeckThemePreset.StageDark) },
                         )
                         DesignTogglePill(
-                            label = "Keynote Light",
+                            label = "Light",
                             tooltip = "Switch active deck preset to Keynote Light",
                             selected = currentPreset == DeckThemePreset.KeynoteLight,
                             testTag = "design-preset-keynote-light",
+                            compact = true,
                             onClick = { onSelectPreset(DeckThemePreset.KeynoteLight) },
                         )
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         DesignTooltipIconButton(
@@ -190,16 +212,16 @@ fun DesignSystemEditorPanel(
                             enabled = store.canRedo,
                             onClick = { store.redo() },
                         )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Tooltip(tooltip = { Text("Copy paste-ready DeckThemes / DesignSystemOverrides Kotlin snippet to clipboard") }) {
-                        OutlinedButton(
+                        DesignTooltipIconButton(
+                            icon = if (copiedConfirmation) AllIconsKeys.General.GreenCheckmark else AllIconsKeys.Actions.Copy,
+                            contentDescription = if (copiedConfirmation) "Copied ✓" else "Copy Kotlin",
+                            tooltip = if (copiedConfirmation) {
+                                "Copied Kotlin snippet to clipboard"
+                            } else {
+                                "Copy paste-ready DeckThemes / DesignSystemOverrides Kotlin snippet to clipboard"
+                            },
+                            testTag = "design-editor-copy-kotlin",
+                            stateDescription = if (copiedConfirmation) "Copied ✓" else "Copy Kotlin",
                             onClick = {
                                 val snippet = store.exportKotlinSnippet(currentPreset, baseTheme)
                                 clipboardWriter(snippet)
@@ -210,47 +232,39 @@ fun DesignSystemEditorPanel(
                                     copiedConfirmation = false
                                 }
                             },
-                            modifier = Modifier
-                                .designActivatableFocus(focusRingColor)
-                                .testTag("design-editor-copy-kotlin"),
-                        ) {
-                            Text(
-                                text = if (copiedConfirmation) "Copied ✓" else "Copy Kotlin",
-                                style = JewelTheme.typography.small,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-
-                    Tooltip(tooltip = { Text("Reset all overrides for ${currentPreset.name} back to defaults") }) {
-                        OutlinedButton(
-                            onClick = { store.resetAllForPreset(currentPreset) },
+                        )
+                        DesignTooltipIconButton(
+                            icon = AllIconsKeys.Actions.Rollback,
+                            contentDescription = "Reset Preset",
+                            tooltip = "Reset all overrides for ${currentPreset.name} back to defaults",
+                            testTag = "design-editor-reset-preset",
                             enabled = overrides.hasOverrides,
-                            modifier = Modifier
-                                .designActivatableFocus(focusRingColor)
-                                .testTag("design-editor-reset-preset"),
-                        ) {
-                            Text("Reset Preset", style = JewelTheme.typography.small, maxLines = 1)
-                        }
+                            onClick = { store.resetAllForPreset(currentPreset) },
+                        )
                     }
                 }
 
-                // 4 Sub-Tabs
-                FlowRow(
+                // Single non-wrapping 4-tab row
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .selectableGroup(),
+                        .selectableGroup()
+                        .testTag("design-editor-tab-row"),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     DesignSystemTab.entries.forEach { tab ->
-                        DesignTogglePill(
-                            label = tab.label,
-                            tooltip = "Show ${tab.label} editor",
-                            selected = selectedTab == tab,
-                            testTag = "design-tab-${tab.name.lowercase()}",
-                            onClick = { selectedTab = tab },
-                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            DesignTogglePill(
+                                label = tab.shortLabel,
+                                tooltip = "Show ${tab.label} editor",
+                                selected = selectedTab == tab,
+                                testTag = "design-tab-${tab.name.lowercase()}",
+                                modifier = Modifier.fillMaxWidth(),
+                                compact = true,
+                                onClick = { selectedTab = tab },
+                            )
+                        }
                     }
                 }
             }

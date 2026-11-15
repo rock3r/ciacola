@@ -109,8 +109,8 @@ private fun MagicTextInternal(
 ) {
     // The correspondence plan is a pure function of the (from, to) pair, so a seek renders the same
     // frame no matter which states were visited before (timeline scrubbing depends on this).
-    val from = transition.currentState
     val to = transition.targetState
+    val from = if (transition.isSegmentActive) transition.currentState else to
     val plan = remember(from, to) {
         MagicTextPlanner.plan(from.flatMap { toLines(it) }, to.flatMap { toLines(it) })
     }
@@ -162,7 +162,7 @@ private fun MagicTextInternal(
                             else EnterTransition.None,
                         exit =
                             if (crossFade) fadeOut(tween(moveSpan, delayMillis = moveDelay, easing = moveEasing))
-                            else ExitTransition.None,
+                            else fadeOut(snap()),
                         boundsTransform = { _, _ ->
                             tween(moveSpan, delayMillis = moveDelay, easing = moveEasing)
                         },
@@ -192,6 +192,16 @@ private fun MagicTextInternal(
         }
     }
 }
+
+@Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
+private val Transition<*>.isSegmentActive: Boolean
+    get() {
+        var root: Transition<*> = this
+        while (root.parentTransition != null) {
+            root = root.parentTransition!!
+        }
+        return root.currentState != root.targetState
+    }
 
 @Composable
 private fun WrappingTokenLine(
@@ -348,8 +358,8 @@ private fun <S> Transition<S>.SeekSafeTokenHost(
     modifier: Modifier = Modifier,
     content: @Composable AnimatedVisibilityScope.(S) -> Unit,
 ) {
-    val from = currentState
     val to = targetState
+    val from = if (isSegmentActive) currentState else to
     val active = if (from == to) listOf(to) else listOf(from, to)
     // Driven by the incoming branch's fresh `EnterExitState` transition (`PreEnter -> Visible`),
     // whose initial and target states differ from birth so `SeekableTransitionState.seekTo` never

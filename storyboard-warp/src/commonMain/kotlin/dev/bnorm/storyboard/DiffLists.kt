@@ -35,22 +35,27 @@ fun buildDiffList(codeBlocks: List<CodeBlock>, language: Language): List<DiffCon
     parsed.first().forEach { token ->
         keys.assignKey(token)
     }
+    val lineCounts = codeBlocks.map { countCodeLines(it.code()) }
     val parsedPairs = parsed.zipWithNext()
     parsedPairs.forEachIndexed { index, (previous, current) ->
         val states = diff(previous, current, keys)
         if (index == 0) {
-            diffResult += beforeViewOf(states)
-            diffResult += afterViewOf(states)
+            diffResult += beforeViewOf(states, lineCount = lineCounts[index])
+            diffResult += afterViewOf(states, lineCount = lineCounts[index + 1])
         } else {
             // For later slides only build the incremental state
-            diffResult += afterViewOf(states)
+            diffResult += afterViewOf(states, lineCount = lineCounts[index + 1])
         }
     }
     return diffResult
 }
 
+private fun countCodeLines(code: String): Int {
+    if (code.isEmpty()) return 0
+    return code.count { it == '\n' } + 1
+}
 
-internal fun afterViewOf(states: List<State>): DiffContents {
+internal fun afterViewOf(states: List<State>, lineCount: Int = -1): DiffContents {
     // This is the after state.
     // This means we only show inserts and matches.
     val filtered = states.filter { state -> state is State.Match || state is State.Insert }
@@ -62,12 +67,14 @@ internal fun afterViewOf(states: List<State>): DiffContents {
             else -> throw IllegalStateException("Should never happen")
         }
     }
-    // Sort by the startIndex so they are ordered correctly
-    val sortedArray: Array<List<State>> = Array(rows.size) { emptyList() }
-    rows.forEach { (rowIdx, states) ->
-        val tokens = states.sortedBy { state ->
+    val maxRowIdx = rows.keys.maxOrNull() ?: -1
+    val totalRows = maxOf(lineCount, maxRowIdx + 1, 0)
+    // Sort by the startIndex so they are ordered correctly; blank lines remain empty rows.
+    val sortedArray: Array<List<State>> = Array(totalRows) { emptyList() }
+    rows.forEach { (rowIdx, rowStates) ->
+        val tokens = rowStates.sortedBy { state ->
             when (state) {
-                // Pick the previous state for the start index
+                // Pick the current state for the start index
                 is State.Match -> state.current.startIndex
                 is State.Insert -> state.token.startIndex
                 else -> throw IllegalStateException("Should never happen")
@@ -78,7 +85,7 @@ internal fun afterViewOf(states: List<State>): DiffContents {
     return DiffContents(rows = sortedArray.asList())
 }
 
-internal fun beforeViewOf(states: List<State>): DiffContents {
+internal fun beforeViewOf(states: List<State>, lineCount: Int = -1): DiffContents {
     // This is the before state.
     // This means we only show deletes, and matches.
     val filtered = states.filter { state -> state is State.Match || state is State.Delete }
@@ -90,10 +97,12 @@ internal fun beforeViewOf(states: List<State>): DiffContents {
             else -> throw IllegalStateException("Should never happen")
         }
     }
-    // Sort by the startIndex so they are ordered correctly
-    val sortedArray: Array<List<State>> = Array(rows.size) { emptyList() }
-    rows.forEach { (rowIdx, states) ->
-        val tokens = states.sortedBy { state ->
+    val maxRowIdx = rows.keys.maxOrNull() ?: -1
+    val totalRows = maxOf(lineCount, maxRowIdx + 1, 0)
+    // Sort by the startIndex so they are ordered correctly; blank lines remain empty rows.
+    val sortedArray: Array<List<State>> = Array(totalRows) { emptyList() }
+    rows.forEach { (rowIdx, rowStates) ->
+        val tokens = rowStates.sortedBy { state ->
             when (state) {
                 // Pick the previous state for the start index
                 is State.Match -> state.previous.startIndex

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
+import dev.sebastiano.ciacola.inspector.StageShaderUniformSpec
 import dev.sebastiano.ciacola.inspector.design.DesignTooltipIconButton
 import dev.sebastiano.ciacola.inspector.design.ModifiedDotBadge
 import dev.sebastiano.ciacola.inspector.design.designActivatableFocus
@@ -35,6 +36,8 @@ import dev.sebastiano.ciacola.inspector.design.toArgbLong
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.GroupHeader
@@ -211,6 +214,61 @@ internal fun SpacingAndPositionSection(
         },
         onReset = { store.updateElement(elementId) { it.copy(offsetYDp = null) } },
     )
+}
+
+@Composable
+internal fun ShaderUniformsSection(
+    elementId: String,
+    uniforms: List<StageShaderUniformSpec>,
+    patch: ElementPatch,
+    store: ElementOverridesStore,
+) {
+    if (uniforms.isEmpty()) return
+    GroupHeader("Shader Uniforms:")
+
+    for (spec in uniforms) {
+        val lo = min(spec.min, spec.max)
+        val hi = max(spec.min, spec.max).let { if (it <= lo) lo + 1f else it }
+        val range = lo..hi
+        val overriddenValue = patch.uniforms[spec.name]
+        val currentValue = (overriddenValue ?: spec.default).coerceIn(lo, hi)
+        val span = hi - lo
+        val step = (span / 40f).coerceAtLeast(0.01f)
+        val valueText = if (span >= 20f) {
+            "%.1f".format(Locale.US, currentValue)
+        } else {
+            "%.2f".format(Locale.US, currentValue)
+        }
+
+        ElementStepperSliderRow(
+            label = spec.name,
+            value = currentValue,
+            valueText = valueText,
+            valueRange = range,
+            step = step,
+            isOverridden = overriddenValue != null,
+            resetTooltip = "Reset ${spec.name} to ${"%.2f".format(Locale.US, spec.default)}",
+            testTagPrefix = "ciacola-element-uniform-${spec.name}",
+            gestureKey = "ciacola-element-uniform:$elementId:${spec.name}",
+            onGestureStart = { store.beginEditGesture() },
+            onGestureEnd = { store.endEditGesture() },
+            onValueChanged = { next, coalesce ->
+                val clamped = next.coerceIn(lo, hi)
+                store.updateElement(
+                    elementId = elementId,
+                    coalesce = coalesce,
+                    coalesceKey = "uniform:$elementId:${spec.name}",
+                ) { current ->
+                    current.copy(uniforms = current.uniforms + (spec.name to clamped))
+                }
+            },
+            onReset = {
+                store.updateElement(elementId) { current ->
+                    current.copy(uniforms = current.uniforms - spec.name)
+                }
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

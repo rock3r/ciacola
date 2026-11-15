@@ -32,27 +32,32 @@ class QaDeckFixesSpectreTest {
         )
         with(studio) {
             settle()
+            val singleLineStageBounds = checkNotNull(
+                stageInspectionRegistry.nodes["s1:prose:b0"]?.stageBounds,
+            ) { "Missing s1:prose:b0 stage bounds" }
+
             onUi { controller.animatic.jumpTo(Storyboard.Index(0, 2)) }
             settle()
             val viewport = checkNotNull(
                 automator.findOneByTestTag("ciacola-preview-viewport")?.boundsOnScreen,
             ) { "Missing ciacola-preview-viewport" }
 
-            val firstWord = stageText("The", exact = true).boundsOnScreen
-            val navWord = stageText("navigation", exact = true).boundsOnScreen
-            val modelWord = stageText("model", exact = true).boundsOnScreen
+            val mergedProseBounds = stageText("model", exact = true).boundsOnScreen
+            val wrappedStageBounds = checkNotNull(
+                stageInspectionRegistry.nodes["s1:prose:b2"]?.stageBounds,
+            ) { "Missing s1:prose:b2 stage bounds" }
 
             assertTrue(
-                navWord.x + navWord.width <= viewport.x + viewport.width,
-                "Expected 'navigation' (${navWord.x + navWord.width}) inside stage right edge (${viewport.x + viewport.width})",
+                mergedProseBounds.x + mergedProseBounds.width <= viewport.x + viewport.width,
+                "Expected merged prose (${mergedProseBounds.x + mergedProseBounds.width}) inside stage right edge (${viewport.x + viewport.width})",
             )
             assertTrue(
-                modelWord.x + modelWord.width <= viewport.x + viewport.width,
-                "Expected 'model' (${modelWord.x + modelWord.width}) inside stage right edge (${viewport.x + viewport.width})",
+                wrappedStageBounds.right <= 1920f,
+                "Expected s1:prose:b2 stage right edge (${wrappedStageBounds.right}) <= 1920",
             )
             assertTrue(
-                modelWord.y > firstWord.y + firstWord.height / 2,
-                "Expected 'model' (y=${modelWord.y}) to wrap onto a line below 'The' (y=${firstWord.y})",
+                wrappedStageBounds.height >= singleLineStageBounds.height * 1.6f,
+                "Expected Beat 3 prose (height=${wrappedStageBounds.height}) to wrap onto multiple lines vs single-line Beat 1 (height=${singleLineStageBounds.height})",
             )
         }
     }

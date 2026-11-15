@@ -36,6 +36,7 @@ data class ElementPatch(
     val paddingDp: Float? = null,
     val offsetXDp: Float? = null,
     val offsetYDp: Float? = null,
+    val uniforms: Map<String, Float> = emptyMap(),
 ) {
     val isEmpty: Boolean
         get() = text == null &&
@@ -48,7 +49,8 @@ data class ElementPatch(
             cornerRadiusDp == null &&
             paddingDp == null &&
             offsetXDp == null &&
-            offsetYDp == null
+            offsetYDp == null &&
+            uniforms.isEmpty()
 }
 
 /**
@@ -65,6 +67,17 @@ data class DeckElementOverridesFile(
 }
 
 val LocalElementOverrides = staticCompositionLocalOf { DeckElementOverridesFile() }
+
+/**
+ * Metadata for an inspector-tunable float shader uniform exposed by a stage shader element.
+ */
+@Immutable
+data class StageShaderUniformSpec(
+    val name: String,
+    val default: Float,
+    val min: Float,
+    val max: Float,
+)
 
 /**
  * Lightweight snapshot of a rendered stage element in 1920x1080 stage coordinates, used by the
@@ -86,6 +99,8 @@ data class StageNodeSnapshot(
     val effectiveFontSizeSp: Float? = null,
     val isEditable: Boolean = true,
     val effectiveAlpha: Float = 1f,
+    val parentElementId: String? = null,
+    val shaderUniforms: List<StageShaderUniformSpec> = emptyList(),
 )
 
 /**

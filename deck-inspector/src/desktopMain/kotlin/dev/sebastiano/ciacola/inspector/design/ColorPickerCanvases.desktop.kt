@@ -1,7 +1,6 @@
 package dev.sebastiano.ciacola.inspector.design
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -37,10 +36,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import org.jetbrains.jewel.foundation.theme.JewelTheme
-import org.jetbrains.jewel.ui.component.Text
-import org.jetbrains.jewel.ui.component.Tooltip
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SaturationValueCanvas(
     tokenId: String,
@@ -60,80 +56,78 @@ internal fun SaturationValueCanvas(
     val focusRequester = remember { FocusRequester() }
     val hueColor = hsvToColor(hsv.hue, 1f, 1f, 1f)
 
-    Tooltip(tooltip = { Text("Drag or use arrow keys to adjust $label saturation and brightness") }) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(112.dp)
-                .clip(RoundedCornerShape(5.dp))
-                .border(1.dp, globalColors.borders.normal, RoundedCornerShape(5.dp))
-                .focusRequester(focusRequester)
-                .designActivatableFocus(focusRingColor, cornerRadius = 5.dp, makeFocusable = true)
-                .onPreviewKeyEvent { ev ->
-                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val step = 0.05f
-                    when (ev.key) {
-                        Key.DirectionLeft -> {
-                            latestOnSatValChanged((latestHsv.saturation - step).coerceIn(0f, 1f), latestHsv.value, false)
-                            true
-                        }
-                        Key.DirectionRight -> {
-                            latestOnSatValChanged((latestHsv.saturation + step).coerceIn(0f, 1f), latestHsv.value, false)
-                            true
-                        }
-                        Key.DirectionUp -> {
-                            latestOnSatValChanged(latestHsv.saturation, (latestHsv.value + step).coerceIn(0f, 1f), false)
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            latestOnSatValChanged(latestHsv.saturation, (latestHsv.value - step).coerceIn(0f, 1f), false)
-                            true
-                        }
-                        else -> false
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(112.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(5.dp))
+            .focusRequester(focusRequester)
+            .designActivatableFocus(focusRingColor, cornerRadius = 5.dp, makeFocusable = true)
+            .onPreviewKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val step = 0.05f
+                when (ev.key) {
+                    Key.DirectionLeft -> {
+                        latestOnSatValChanged((latestHsv.saturation - step).coerceIn(0f, 1f), latestHsv.value, false)
+                        true
                     }
+                    Key.DirectionRight -> {
+                        latestOnSatValChanged((latestHsv.saturation + step).coerceIn(0f, 1f), latestHsv.value, false)
+                        true
+                    }
+                    Key.DirectionUp -> {
+                        latestOnSatValChanged(latestHsv.saturation, (latestHsv.value + step).coerceIn(0f, 1f), false)
+                        true
+                    }
+                    Key.DirectionDown -> {
+                        latestOnSatValChanged(latestHsv.saturation, (latestHsv.value - step).coerceIn(0f, 1f), false)
+                        true
+                    }
+                    else -> false
                 }
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        runCatching { focusRequester.requestFocus() }
-                        val w = size.width.toFloat().coerceAtLeast(1f)
-                        val h = size.height.toFloat().coerceAtLeast(1f)
-                        latestOnGestureStart()
-                        try {
+            }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    runCatching { focusRequester.requestFocus() }
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    val h = size.height.toFloat().coerceAtLeast(1f)
+                    latestOnGestureStart()
+                    try {
+                        latestOnSatValChanged(
+                            (down.position.x / w).coerceIn(0f, 1f),
+                            (1f - down.position.y / h).coerceIn(0f, 1f),
+                            true,
+                        )
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull() ?: break
+                            if (!ch.pressed) break
+                            ch.consume()
                             latestOnSatValChanged(
-                                (down.position.x / w).coerceIn(0f, 1f),
-                                (1f - down.position.y / h).coerceIn(0f, 1f),
+                                (ch.position.x / w).coerceIn(0f, 1f),
+                                (1f - ch.position.y / h).coerceIn(0f, 1f),
                                 true,
                             )
-                            while (true) {
-                                val ev = awaitPointerEvent()
-                                val ch = ev.changes.firstOrNull() ?: break
-                                if (!ch.pressed) break
-                                ch.consume()
-                                latestOnSatValChanged(
-                                    (ch.position.x / w).coerceIn(0f, 1f),
-                                    (1f - ch.position.y / h).coerceIn(0f, 1f),
-                                    true,
-                                )
-                            }
-                        } finally {
-                            latestOnGestureEnd()
                         }
+                    } finally {
+                        latestOnGestureEnd()
                     }
                 }
-                .testTag(testTag)
-                .semantics {
-                    contentDescription = "$label saturation and brightness picker"
-                    stateDescription = "Saturation ${(hsv.saturation * 100).toInt()}%, Brightness ${(hsv.value * 100).toInt()}%"
-                },
-        ) {
-            drawRect(Brush.horizontalGradient(listOf(Color.White, hueColor)))
-            drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
-            val thumb = Offset(hsv.saturation * size.width, (1f - hsv.value) * size.height)
-            drawCircle(color = Color.Black.copy(alpha = 0.65f), radius = 6.5f, center = thumb, style = Stroke(width = 2.5f))
-            drawCircle(color = Color.White, radius = 5.5f, center = thumb, style = Stroke(width = 2f))
-        }
+            }
+            .testTag(testTag)
+            .semantics {
+                contentDescription = "$label saturation and brightness picker"
+                stateDescription = "Saturation ${(hsv.saturation * 100).toInt()}%, Brightness ${(hsv.value * 100).toInt()}%"
+            },
+    ) {
+        drawRect(Brush.horizontalGradient(listOf(Color.White, hueColor)))
+        drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
+        val thumb = Offset(hsv.saturation * size.width, (1f - hsv.value) * size.height)
+        drawCircle(color = Color.Black.copy(alpha = 0.65f), radius = 6.5f, center = thumb, style = Stroke(width = 2.5f))
+        drawCircle(color = Color.White, radius = 5.5f, center = thumb, style = Stroke(width = 2f))
     }
 }
 
@@ -159,7 +153,6 @@ internal fun HueSliderBar(
         )
     }
     HorizontalColorChannelBar(
-        tooltip = "Drag or use Left/Right arrows to adjust $label hue",
         testTag = testTag,
         contentDescriptionText = "$label hue slider",
         stateDescriptionText = "${hue.toInt()} degrees",
@@ -188,7 +181,6 @@ internal fun AlphaSliderBar(
 ) {
     val opaque = color.copy(alpha = 1f)
     HorizontalColorChannelBar(
-        tooltip = "Drag or use Left/Right arrows to adjust $label opacity",
         testTag = testTag,
         contentDescriptionText = "$label alpha slider",
         stateDescriptionText = "${(alpha * 100).toInt()} percent",
@@ -204,10 +196,8 @@ internal fun AlphaSliderBar(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HorizontalColorChannelBar(
-    tooltip: String,
     testTag: String,
     contentDescriptionText: String,
     stateDescriptionText: String,
@@ -228,66 +218,64 @@ private fun HorizontalColorChannelBar(
     val latestOnFractionChanged by rememberUpdatedState(onFractionChanged)
     val focusRequester = remember { FocusRequester() }
 
-    Tooltip(tooltip = { Text(tooltip) }) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(16.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
-                .focusRequester(focusRequester)
-                .designActivatableFocus(focusRingColor, cornerRadius = 4.dp, makeFocusable = true)
-                .onPreviewKeyEvent { ev ->
-                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val delta = when (ev.key) {
-                        Key.DirectionLeft -> -keyStepFraction
-                        Key.DirectionRight -> keyStepFraction
-                        else -> return@onPreviewKeyEvent false
-                    }
-                    val next = if (wrapAround) {
-                        ((latestFraction + delta) + 1f) % 1f
-                    } else {
-                        (latestFraction + delta).coerceIn(0f, 1f)
-                    }
-                    latestOnFractionChanged(next, false)
-                    true
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(16.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
+            .focusRequester(focusRequester)
+            .designActivatableFocus(focusRingColor, cornerRadius = 4.dp, makeFocusable = true)
+            .onPreviewKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val delta = when (ev.key) {
+                    Key.DirectionLeft -> -keyStepFraction
+                    Key.DirectionRight -> keyStepFraction
+                    else -> return@onPreviewKeyEvent false
                 }
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
-                        runCatching { focusRequester.requestFocus() }
-                        val w = size.width.toFloat().coerceAtLeast(1f)
-                        latestOnGestureStart()
-                        try {
-                            latestOnFractionChanged((down.position.x / w).coerceIn(0f, 1f), true)
-                            while (true) {
-                                val ev = awaitPointerEvent()
-                                val ch = ev.changes.firstOrNull() ?: break
-                                if (!ch.pressed) break
-                                ch.consume()
-                                latestOnFractionChanged((ch.position.x / w).coerceIn(0f, 1f), true)
-                            }
-                        } finally {
-                            latestOnGestureEnd()
+                val next = if (wrapAround) {
+                    ((latestFraction + delta) + 1f) % 1f
+                } else {
+                    (latestFraction + delta).coerceIn(0f, 1f)
+                }
+                latestOnFractionChanged(next, false)
+                true
+            }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    runCatching { focusRequester.requestFocus() }
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    latestOnGestureStart()
+                    try {
+                        latestOnFractionChanged((down.position.x / w).coerceIn(0f, 1f), true)
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull() ?: break
+                            if (!ch.pressed) break
+                            ch.consume()
+                            latestOnFractionChanged((ch.position.x / w).coerceIn(0f, 1f), true)
                         }
+                    } finally {
+                        latestOnGestureEnd()
                     }
                 }
-                .testTag(testTag)
-                .semantics {
-                    contentDescription = contentDescriptionText
-                    stateDescription = stateDescriptionText
-                },
-        ) {
-            if (showCheckerboard) {
-                CheckerboardBackground(Modifier.fillMaxSize())
             }
-            Canvas(Modifier.fillMaxSize()) {
-                drawGradient()
-                val x = fraction.coerceIn(0f, 1f) * size.width
-                drawLine(Color.Black.copy(alpha = 0.7f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 4f)
-                drawLine(Color.White, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
-            }
+            .testTag(testTag)
+            .semantics {
+                contentDescription = contentDescriptionText
+                stateDescription = stateDescriptionText
+            },
+    ) {
+        if (showCheckerboard) {
+            CheckerboardBackground(Modifier.fillMaxSize())
+        }
+        Canvas(Modifier.fillMaxSize()) {
+            drawGradient()
+            val x = fraction.coerceIn(0f, 1f) * size.width
+            drawLine(Color.Black.copy(alpha = 0.7f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 4f)
+            drawLine(Color.White, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
         }
     }
 }

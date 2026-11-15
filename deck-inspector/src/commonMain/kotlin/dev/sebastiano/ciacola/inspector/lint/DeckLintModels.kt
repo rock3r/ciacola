@@ -103,6 +103,7 @@ data class LintTextNodeCandidate(
     val maxLineWidthPx: Float = stageBounds.width,
     val fontSizePx: Float = 0f,
     val fontSizeSp: Float = 0f,
+    val fontScale: Float = 1f,
     val isBold: Boolean = false,
     val effectiveAlpha: Float = 1f,
     val effectiveForeground: Color? = null,
@@ -141,6 +142,7 @@ data class LintSlideInput(
     val sceneTitle: String = "",
     val stageWidth: Float = STAGE_WIDTH_PX,
     val stageHeight: Float = STAGE_HEIGHT_PX,
+    val fontScale: Float = 1f,
     val textNodes: List<LintTextNodeCandidate> = emptyList(),
     val surfaces: List<LintSurfaceCandidate> = emptyList(),
 )

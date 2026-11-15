@@ -6,6 +6,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,11 +36,20 @@ enum class TimelineBakeStatus {
     Error,
 }
 
+/** Filter applied to the Timeline Studio multi-track list and canvas. */
+enum class TimelineTrackFilter {
+    All,
+    CurrentSlide,
+}
+
 /**
  * Quiet time after an override edit before the deck is re-indexed. Re-indexing runs offscreen
  * scenes on the UI thread (~200 ms), so bursts of stepper clicks or slider moves are coalesced.
  */
 private const val INDEX_DEBOUNCE_MS = 300L
+
+/** Threshold above one 60 Hz frame (~16.67 ms) for flagging an in-place duration mismatch. */
+private const val DURATION_TRIPWIRE_THRESHOLD_MS = 17L
 
 /**
  * Whether a scrub step to `(stateIndex, fraction)` can seek in place: it stays strictly inside the
@@ -90,14 +100,18 @@ fun computeBlockPreviewRangeMs(
 @Stable
 class TimelineStudioController(
     initialAnimatic: Animatic,
-    val overridesStore: TimelineOverridesStore,
-    val loopClock: DeckLoopClock,
+    overridesStore: TimelineOverridesStore,
+    loopClock: DeckLoopClock,
     initialBakeDispatcher: AgentBakeDispatcher? = null,
     initialBakeWorkspaceRoot: Path = overridesStore.storyboardDir.toAbsolutePath().parent ?: Path.of("").toAbsolutePath(),
     initialBakeGradleTaskHint: String = ":deck:reload",
     val motionPathPreview: MotionPathPreviewState = MotionPathPreviewState(),
     val stageSelection: TimelineStageSelection = TimelineStageSelection(),
 ) {
+    var overridesStore: TimelineOverridesStore by mutableStateOf(overridesStore)
+        internal set
+    var loopClock: DeckLoopClock by mutableStateOf(loopClock)
+        internal set
     var bakeDispatcher: AgentBakeDispatcher? by mutableStateOf(initialBakeDispatcher)
         internal set
     var bakeWorkspaceRoot: Path = initialBakeWorkspaceRoot
@@ -119,6 +133,44 @@ class TimelineStudioController(
     val authoringActive: Boolean get() = dockedInStoryWindow || detachedWindowVisible
 
     var splitFraction by mutableFloatStateOf(0.56f)
+
+    var trackFilter by mutableStateOf(TimelineTrackFilter.All)
+
+    /**
+     * Visible-for-testing tripwire counter incremented whenever an in-place scrub seek observes an
+     * active segment duration diverging from the indexed [StateTimeSpan] duration by more than one
+     * frame (17 ms). Never auto-rebuilds.
+     */
+    var durationTripwireCount by mutableIntStateOf(0)
+        internal set
+
+    /**
+     * Tracks visible in the layer header list and multi-track canvas under [trackFilter].
+     */
+    fun visibleTracks(activeSceneIndex: Int = animatic.presentedIndex.sceneIndex): List<TimelineTrackRow> =
+        when (trackFilter) {
+            TimelineTrackFilter.All -> snapshot.tracks
+            TimelineTrackFilter.CurrentSlide -> snapshot.tracks.filter { row ->
+                row.sceneIndex == activeSceneIndex ||
+                    (row.category == TrackCategory.SharedElement &&
+                        row.blocks.any { activeSceneIndex in it.sceneIndex..it.endSceneIndex }) ||
+                    (row.sceneIndex == null &&
+                        row.blocks.any { activeSceneIndex in it.sceneIndex..it.endSceneIndex })
+            }
+        }
+
+    internal fun resetForDeckSwitch(
+        nextOverridesStore: TimelineOverridesStore,
+        nextLoopClock: DeckLoopClock,
+    ) {
+        stopPlayback()
+        exitLoopSubComp()
+        selectTrack(null)
+        lastRequested = null
+        overridesStore = nextOverridesStore
+        loopClock = nextLoopClock
+        syncLoopPeriodsFromStore()
+    }
 
     /** Canonical selected track (stagger items resolve to their group) for the Inspector. */
     var selectedTrackId by mutableStateOf<String?>(null)
@@ -166,6 +218,10 @@ class TimelineStudioController(
     private var lastRequested by mutableStateOf<ScrubRequest?>(null)
     var isScrubDragging by mutableStateOf(false)
         private set
+
+    /** True while [scrubToTimeMs] has queued a request not yet finished by [runScrubWorker]. */
+    val hasPendingScrubRequest: Boolean
+        get() = appliedScrubSequence < scrubSequence
 
     fun beginScrubDrag() {
         isScrubDragging = true
@@ -242,7 +298,7 @@ class TimelineStudioController(
 
     fun isPlayheadOnInjectedVirtualBeat(): Boolean {
         if (loopClock.activeSubCompLoopId != null) return false
-        val idx = animatic.targetIndex
+        val idx = animatic.presentedIndex
         val rawFrame = animatic.storyboard.scenes.getOrNull(idx.sceneIndex)?.frames?.getOrNull(idx.frameIndex)
         if (rawFrame is VirtualizedFrame<*>) {
             return rawFrame.isInjected
@@ -363,36 +419,43 @@ class TimelineStudioController(
                 appliedScrubSequence = maxOf(appliedScrubSequence, request.sequence)
                 return@collect
             }
-            val curDesc = a.stateDescriptors.getOrNull(a.activeFromStateIndex)
-            val reqDesc = a.stateDescriptors.getOrNull(request.stateIndex)
-            val sameSegmentInPlace = scrubStepIsInPlace(
-                a.activeFromStateIndex,
-                a.activeToStateIndex,
-                request.stateIndex,
-                request.fraction,
+            val prevEndpoint = ScrubStepEndpoint.fromActiveAnimatic(
+                animatic = a,
+                lastFraction = previous?.takeIf { it.stateIndex == a.activeFromStateIndex }?.fraction
+                    ?: a.activeFraction,
             )
-            val sameSlideDrag = !sameSegmentInPlace &&
-                isScrubDragging &&
-                curDesc != null &&
-                reqDesc != null &&
-                curDesc.sceneIndex == reqDesc.sceneIndex &&
-                !curDesc.isBoundaryStart &&
-                !curDesc.isBoundaryEnd &&
-                !reqDesc.isBoundaryStart &&
-                !reqDesc.isBoundaryEnd
-            val inPlace = !shouldForceRebuild && (sameSegmentInPlace || sameSlideDrag)
-            val enteringFromSettledStart = a.activeFromStateIndex == request.stateIndex &&
-                a.activeToStateIndex == request.stateIndex &&
-                request.fraction > 0f
-            val crossedIntraSlideBeat = sameSlideDrag && !enteringFromSettledStart
-            val reversedWithinSegment = sameSegmentInPlace &&
-                previous != null &&
-                previous.stateIndex == request.stateIndex &&
-                request.fraction < previous.fraction - 1e-4f
-            a.seekToSegment(request.stateIndex, request.fraction, rebuildScene = !inPlace)
+            val nextEndpoint = ScrubStepEndpoint.fromStateIndex(
+                animatic = a,
+                stateIndex = request.stateIndex,
+                fraction = request.fraction,
+            )
+            val decision = scrubStepPolicy(
+                prev = prevEndpoint,
+                next = nextEndpoint,
+                dragging = isScrubDragging,
+                forceRebuild = shouldForceRebuild,
+            )
+            a.seekToSegment(request.stateIndex, request.fraction, rebuildScene = !decision.inPlace)
+            if (decision.inPlace && request.fraction > 0f) {
+                val indexedMs = snapshot.stateSpans
+                    .firstOrNull { !it.isHold && it.stateIndex == request.stateIndex }
+                    ?.durationMs
+                val actualMs = a.activeSegmentDurationNanos / 1_000_000L
+                if (indexedMs != null &&
+                    indexedMs > 0 &&
+                    actualMs > 0L &&
+                    abs(actualMs - indexedMs.toLong()) > DURATION_TRIPWIRE_THRESHOLD_MS
+                ) {
+                    durationTripwireCount++
+                    System.err.println(
+                        "TimelineStudio duration tripwire: state=${request.stateIndex} " +
+                            "indexed=${indexedMs}ms active=${actualMs}ms (in-place seek, no auto-rebuild)"
+                    )
+                }
+            }
             restingNeedsRebuild = when {
-                !inPlace -> false
-                crossedIntraSlideBeat || reversedWithinSegment -> true
+                !decision.inPlace -> false
+                decision.crossedIntraSlideBeat || decision.reversedWithinSegment -> true
                 else -> restingNeedsRebuild
             }
             lastApplied = request
@@ -446,7 +509,8 @@ class TimelineStudioController(
                 val targetEndMs = endMs.toDouble()
                 var expectedFrom = -1
                 var expectedTo = -1
-                var expectedIndex: Storyboard.Index? = null
+                var expectedCurrentIndex: Storyboard.Index? = null
+                var expectedTargetIndex: Storyboard.Index? = null
                 var isFirstFrame = true
 
                 fun isExternallyPreempted(): Boolean {
@@ -454,8 +518,13 @@ class TimelineStudioController(
                     if (animatic.activeFromStateIndex != expectedFrom || animatic.activeToStateIndex != expectedTo) {
                         return true
                     }
-                    val idx = expectedIndex
-                    return idx != null && (animatic.currentIndex != idx || animatic.targetIndex != idx)
+                    if (expectedCurrentIndex != null && animatic.currentIndex != expectedCurrentIndex) {
+                        return true
+                    }
+                    if (expectedTargetIndex != null && animatic.targetIndex != expectedTargetIndex) {
+                        return true
+                    }
+                    return false
                 }
 
                 while (true) {
@@ -506,11 +575,8 @@ class TimelineStudioController(
                     }
                     expectedFrom = targetFrom
                     expectedTo = targetTo
-                    expectedIndex = if (activeSpan.isHold) {
-                        Storyboard.Index(activeSpan.sceneIndex, activeSpan.frameIndex)
-                    } else {
-                        null
-                    }
+                    expectedCurrentIndex = animatic.currentIndex
+                    expectedTargetIndex = animatic.targetIndex
 
                     if (playTimeMs >= targetEndMs) break
                 }
@@ -559,7 +625,7 @@ class TimelineStudioController(
     }
 
     fun insertEventBeatAtPlayhead() {
-        val targetIdx = animatic.targetIndex
+        val targetIdx = animatic.presentedIndex
         overridesStore.insertBeatAfter(
             sceneIndex = targetIdx.sceneIndex,
             beatIndex = targetIdx.frameIndex,
@@ -567,7 +633,7 @@ class TimelineStudioController(
     }
 
     fun removeEventBeatAtPlayhead() {
-        val targetIdx = animatic.targetIndex
+        val targetIdx = animatic.presentedIndex
         val sceneBeatsCount = animatic.storyboard.scenes.getOrNull(targetIdx.sceneIndex)?.frames?.size ?: 1
         if (sceneBeatsCount <= 1) return
         overridesStore.removeInjectedBeat(
@@ -579,10 +645,27 @@ class TimelineStudioController(
     fun enterLoopSubComp(scope: CoroutineScope, loopId: String, sceneIndex: Int? = null) {
         stopPlayback()
         if (sceneIndex != null) {
-            val slide = snapshot.slides.getOrNull(sceneIndex)
-            if (slide != null) {
-                // Park the master playhead on the loop's slide (after its entrance).
-                scrubToTimeMs(slide.startMs + slide.overlapInMs + 1)
+            val alreadyOnScene = animatic.presentedIndex.sceneIndex == sceneIndex
+            if (!alreadyOnScene) {
+                // Jumping from another slide: park on the beat where the loop block is active
+                // (or the slide's last beat so beat-gated loops animate when scrubbed).
+                val slideBeats = snapshot.eventBeats.filter { it.sceneIndex == sceneIndex }
+                val loopBlock = snapshot.tracks
+                    .firstOrNull { it.trackId == "loop:$loopId" }
+                    ?.blocks
+                    ?.firstOrNull { it.sceneIndex == sceneIndex }
+                val targetBeat = loopBlock
+                    ?.takeIf { it.triggerBeatInScene > 0 }
+                    ?.let { blk -> slideBeats.firstOrNull { it.frameIndex == blk.triggerBeatInScene } }
+                    ?: slideBeats.lastOrNull()
+                if (targetBeat != null) {
+                    scrubToTimeMs(targetBeat.timeMs)
+                } else {
+                    val slide = snapshot.slides.getOrNull(sceneIndex)
+                    if (slide != null) {
+                        scrubToTimeMs(slide.startMs + slide.overlapInMs + 1)
+                    }
+                }
             }
         }
         loopClock.enterSubComp(loopId)
@@ -653,7 +736,7 @@ fun rememberTimelineStudioController(
     externalTimingKey: Any? = Unit,
     externalInEditGesture: Boolean = false,
 ): TimelineStudioController {
-    val controller = remember(overridesStore, loopClock, motionPathPreview, stageSelection) {
+    val controller = remember(motionPathPreview, stageSelection) {
         TimelineStudioController(
             initialAnimatic = animatic,
             overridesStore = overridesStore,
@@ -664,6 +747,9 @@ fun rememberTimelineStudioController(
             motionPathPreview = motionPathPreview,
             stageSelection = stageSelection,
         )
+    }
+    if (controller.overridesStore !== overridesStore || controller.loopClock !== loopClock) {
+        controller.resetForDeckSwitch(overridesStore, loopClock)
     }
     controller.animatic = animatic
     controller.bakeDispatcher = bakeDispatcher
@@ -676,8 +762,10 @@ fun rememberTimelineStudioController(
             controller.syncLoopPeriodsFromStore()
         }
     }
+    var lastIndexedStore by remember(controller) { mutableStateOf<TimelineOverridesStore?>(null) }
     LaunchedEffect(
         animatic.storyboard,
+        overridesStore,
         overridesStore.structuralRevision,
         overridesStore.parameterRevision,
         overridesStore.isInEditGesture,
@@ -685,34 +773,38 @@ fun rememberTimelineStudioController(
         externalInEditGesture,
     ) {
         val inGesture = overridesStore.isInEditGesture || externalInEditGesture
-        if (inGesture && controller.snapshot.stateSpans.isNotEmpty()) return@LaunchedEffect
-        // The first index (empty snapshot) runs immediately; edits are coalesced (a new key cancels
-        // this effect while it waits).
-        if (controller.snapshot.stateSpans.isNotEmpty()) delay(INDEX_DEBOUNCE_MS)
+        if (inGesture && controller.snapshot.stateSpans.isNotEmpty() && lastIndexedStore === overridesStore) {
+            return@LaunchedEffect
+        }
+        // First index or deck switch runs immediately; in-deck edits are coalesced.
+        if (controller.snapshot.stateSpans.isNotEmpty() && lastIndexedStore === overridesStore) {
+            delay(INDEX_DEBOUNCE_MS)
+        }
         controller.refreshSnapshot(animatic.storyboard)
+        lastIndexedStore = overridesStore
     }
     LaunchedEffect(controller) {
         controller.runScrubWorker()
     }
     // While authoring, ambient loops follow the master playhead (AE pre-comp semantics), so the
     // stage always shows exactly the frame under the playhead; otherwise they free-run.
-    LaunchedEffect(controller) {
+    LaunchedEffect(controller, loopClock) {
         snapshotFlow {
             if (controller.authoringActive) controller.currentPlayheadTimeMs.toLong() else null
-        }.collect { loopClock.masterTimeMillis = it }
+        }.collect { controller.loopClock.masterTimeMillis = it }
     }
-    LaunchedEffect(controller) {
+    LaunchedEffect(controller, loopClock) {
         snapshotFlow { controller.authoringActive }.collect { authoring ->
             stageSelection.pickingEnabled = authoring
             // A sub-comp freezes every ambient loop; it must not outlive the studio.
-            if (!authoring && loopClock.activeSubCompLoopId != null) controller.exitLoopSubComp()
+            if (!authoring && controller.loopClock.activeSubCompLoopId != null) controller.exitLoopSubComp()
         }
     }
-    LaunchedEffect(controller, controller.authoringActive, controller.bakeStatus) {
+    LaunchedEffect(controller, overridesStore, controller.authoringActive, controller.bakeStatus) {
         if (!controller.authoringActive && controller.bakeStatus != TimelineBakeStatus.Sent) return@LaunchedEffect
         while (true) {
             delay(750L)
-            overridesStore.reloadFromDiskIfChanged(notifyRevisions = true)
+            controller.overridesStore.reloadFromDiskIfChanged(notifyRevisions = true)
         }
     }
     return controller

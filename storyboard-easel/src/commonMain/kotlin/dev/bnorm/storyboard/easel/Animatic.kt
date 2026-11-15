@@ -1,12 +1,6 @@
 package dev.bnorm.storyboard.easel
 
-import androidx.compose.animation.core.AnimationVector
-import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.AnimationVector2D
-import androidx.compose.animation.core.AnimationVector3D
-import androidx.compose.animation.core.AnimationVector4D
 import androidx.compose.animation.core.SeekableTransitionState
-import androidx.compose.animation.core.TargetBasedAnimation
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.rememberTransition
 import androidx.compose.runtime.*
@@ -193,32 +187,7 @@ class Animatic internal constructor(
      * end values differ. A `Transition` otherwise also counts the full `tween` duration of every
      * animation that does not change in this segment, which would play as dead time after a click.
      */
-    fun effectiveDurationNanos(): Long = transition.effectiveDurationNanos()
-
-    private fun Transition<*>.effectiveDurationNanos(): Long {
-        if (currentState == targetState) return 0L
-        var longest = 0L
-        for (state in animations) {
-            if (state.animation.changesValue()) longest = maxOf(longest, state.animation.durationNanos)
-        }
-        for (child in transitions) longest = maxOf(longest, child.effectiveDurationNanos())
-        return longest
-    }
-
-    private fun <T, V : AnimationVector> TargetBasedAnimation<T, V>.changesValue(): Boolean {
-        val from = typeConverter.convertToVector(initialValue).components()
-        val to = typeConverter.convertToVector(targetValue).components()
-        if (from == null || to == null) return initialValue != targetValue
-        return from.indices.any { abs(from[it] - to[it]) > 1e-3f }
-    }
-
-    private fun AnimationVector.components(): FloatArray? = when (this) {
-        is AnimationVector1D -> floatArrayOf(value)
-        is AnimationVector2D -> floatArrayOf(v1, v2)
-        is AnimationVector3D -> floatArrayOf(v1, v2, v3)
-        is AnimationVector4D -> floatArrayOf(v1, v2, v3, v4)
-        else -> null
-    }
+    fun effectiveDurationNanos(): Long = transition.effectiveSegmentDurationNanos()
 
     /** Converts a fraction of the effective duration into a `SeekableTransitionState` fraction. */
     private fun transitionFractionFor(effectiveFraction: Float): Float {
@@ -334,6 +303,12 @@ class Animatic internal constructor(
     private var sceneCleanlySettled = true
 
     /**
+     * `true` after [jumpTo] snaps [transitionState] without waiting for composition frames, so the
+     * next segment start (`seekTo(0f, to)`) gives the jumped-to state two resting frames first.
+     */
+    private var needsRestFrame = false
+
+    /**
      * Seeks to [fraction] of the segment starting at [fromStateIndex]. A newer call supersedes an
      * older one that has not finished yet, so the last request always wins.
      *
@@ -360,7 +335,9 @@ class Animatic internal constructor(
         }
 
         val fromState = states[segment]
-        val alreadySettledAtFrom = transitionState.currentState == fromState && transitionState.targetState == fromState
+        val alreadySettledAtFrom = !needsRestFrame &&
+            transitionState.currentState == fromState &&
+            transitionState.targetState == fromState
         if (clampedFraction <= 0f && alreadySettledAtFrom && sceneCleanlySettled) {
             currentState = resolveBackwardValueState(segment)
             targetState = if (fromState.frame is Frame.Value) fromState else resolveForwardValueState((segment + 1).coerceAtMost(states.lastIndex))
@@ -387,6 +364,7 @@ class Animatic internal constructor(
             if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
                 transitionState.snapTo(fromState)
             }
+            needsRestFrame = false
             withFrameNanos { } // recompose the fresh subtree at `from`
             withFrameNanos { } // let its SideEffects observe the settled state
             // 2. Seek the freshly composed subtree straight to the requested position.
@@ -447,6 +425,7 @@ class Animatic internal constructor(
         val result = LongArray((states.size - 1).coerceAtLeast(0))
         if (result.isEmpty()) return@exclusive result
         transitionState.snapTo(states.first())
+        needsRestFrame = false
         currentState = states.first()
         targetState = states.first()
         withFrameNanos { }
@@ -484,6 +463,12 @@ class Animatic internal constructor(
                 // shared-bounds keys (e.g. MagicText tokens inserted in the intermediate beat) lay out
                 // and record their source bounds before the next segment mounts its target.
                 ts.snapTo(ts.targetState)
+                needsRestFrame = false
+                liveFramePresented = false
+                withFrameNanos { }
+                withFrameNanos { }
+            } else if (needsRestFrame) {
+                needsRestFrame = false
                 liveFramePresented = false
                 withFrameNanos { }
                 withFrameNanos { }
@@ -536,19 +521,69 @@ class Animatic internal constructor(
                 ts.seekTo((played / total).toFloat().coerceIn(0f, 1f), segmentTarget)
                 scrubSettling = wasSettling
             }
-            ts.snapTo(to)
+            if (ts.currentState == to && ts.targetState != to) {
+                if (measureOnly) snapToResting(to) else withPresentedFrameFrozen { snapToResting(to) }
+            } else {
+                ts.snapTo(to)
+                needsRestFrame = false
+            }
         } finally {
             scrubSettling = wasSettling
         }
         return effective
     }
 
+    /**
+     * Snaps [transitionState] to [state] without leaving child [Transition] animations stale.
+     *
+     * Compose's `SeekableTransitionState.snapTo(thirdState)` sets `resetSnapValue = -3f` before
+     * composition, which child transitions overwrite to `-2f` during `updateTarget()`, and
+     * `snapTo(targetState)` / `snapTo(currentState)` mid-seek can run before child transitions
+     * have composed or evaluated at the destination endpoint. Stepping through `seekTo(0f, ...)`
+     * on a `SnapCurrent` or `seekTo(1f, state)` + composition frame on a forward/third-state snap
+     * ensures every child and grandchild animation evaluates at [state] before `snapTo(state)`.
+     */
+    private suspend fun snapTransitionCleanly(state: LinkedState<*>) {
+        val ts = transitionState
+        if (renderFrameClock != null && (ts.currentState != state || ts.targetState != state)) {
+            if (state == ts.currentState) {
+                ts.seekTo(0f, ts.targetState)
+                withFrameNanos { }
+            } else {
+                if (state != ts.targetState && ts.currentState != ts.targetState) {
+                    ts.seekTo(0f, ts.targetState)
+                    withFrameNanos { }
+                    ts.snapTo(ts.currentState)
+                    withFrameNanos { }
+                }
+                ts.seekTo(1f, state)
+                withFrameNanos { }
+                ts.seekTo(1f, state)
+            }
+        }
+        ts.snapTo(state)
+    }
+
+    /**
+     * Snaps [transitionState] to [state] and holds two frames at rest so every child transition
+     * recomposes cleanly at rest and shared-bounds anchors record their resting geometry before
+     * any subsequent `seekTo(0f, next)`.
+     */
+    private suspend fun snapToResting(state: LinkedState<*>) {
+        val ts = transitionState
+        if (ts.currentState == state && ts.targetState == state && !needsRestFrame) return
+        snapTransitionCleanly(state)
+        needsRestFrame = false
+        withFrameNanos { }
+        withFrameNanos { }
+    }
+
     private suspend fun seekInPlace(segment: Int, fraction: Float) {
         val fromState = states[segment]
         if (segment == states.lastIndex) {
-            if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
+            if (transitionState.currentState != fromState || transitionState.targetState != fromState || needsRestFrame) {
                 sceneCleanlySettled = false
-                transitionState.snapTo(fromState)
+                withPresentedFrameFrozen { snapToResting(fromState) }
             }
             val settled = resolveBackwardValueState(segment)
             currentState = settled
@@ -561,9 +596,9 @@ class Animatic internal constructor(
             // Resting at the start of a segment is the settled `from` state (what the audience sees
             // before the click). Targeting the next state at play time 0 is not equivalent: shared
             // bounds have not started yet, so moved elements would already sit at their targets.
-            if (transitionState.currentState != fromState || transitionState.targetState != fromState) {
+            if (transitionState.currentState != fromState || transitionState.targetState != fromState || needsRestFrame) {
                 sceneCleanlySettled = false
-                transitionState.snapTo(fromState)
+                withPresentedFrameFrozen { snapToResting(fromState) }
             }
             currentState = resolveBackwardValueState(segment)
             targetState = if (fromState.frame is Frame.Value) fromState else resolveForwardValueState(segment + 1)
@@ -576,14 +611,13 @@ class Animatic internal constructor(
             // delayed by a non-zero play time (see Transition.TransitionAnimationState.updateAnimation).
             // Those settle frames are not presentable, so the last presented frame stays up.
             val wasCleanlySettled = sceneCleanlySettled &&
+                !needsRestFrame &&
                 transitionState.currentState == fromState &&
                 transitionState.targetState == fromState
             sceneCleanlySettled = false
             withPresentedFrameFrozen {
-                if (transitionState.currentState != fromState) {
-                    transitionState.snapTo(fromState)
-                    withFrameNanos { }
-                    withFrameNanos { }
+                if (transitionState.currentState != fromState || transitionState.targetState != fromState || needsRestFrame) {
+                    snapToResting(fromState)
                 }
                 currentState = resolveBackwardValueState(segment)
                 targetState = resolveForwardValueState(segment + 1)
@@ -665,6 +699,17 @@ class Animatic internal constructor(
     val targetIndex: Storyboard.Index get() = targetState.index
 
     /**
+     * Storyboard index visibly presented on stage: [currentIndex] when resting at the start of a
+     * segment (`activeFraction <= 0f`), otherwise [targetIndex].
+     */
+    val presentedIndex: Storyboard.Index
+        get() = if (activeFraction <= 0f) currentIndex else targetIndex
+
+    /** Effective duration of the active transition segment in nanoseconds (0 when resting). */
+    val activeSegmentDurationNanos: Long
+        get() = effectiveDurationNanos()
+
+    /**
      * Advances to the next resting state in [direction], animating every intermediate segment.
      * Pressing again while animating snaps the running advance to its target and continues (or
      * reverses it), exactly like the original navigation model. Segments are animated by seeking
@@ -697,6 +742,7 @@ class Animatic internal constructor(
                 // Snap to the target and let it compose and lay out its settled anchors (e.g.
                 // canonical shared-bounds keys) before seeking the next segment.
                 transitionState.snapTo(targetState)
+                needsRestFrame = false
                 currentState = targetState
                 liveFramePresented = false
                 withFrameNanos { }
@@ -749,9 +795,19 @@ class Animatic internal constructor(
             jumpIndex--
         }
 
-        targetState = states[jumpIndex]
-        transitionState.snapTo(targetState)
-        currentState = targetState
+        val target = states[jumpIndex]
+        val changed = transitionState.currentState != target || transitionState.targetState != target
+        // Note: setting targetState before the suspending snapTransitionCleanly call is intentional;
+        // if a newer navigation cancels jumpTo mid-snap via exclusive {}, advanceLocked sees
+        // currentState != targetState and cleanly snaps to targetState (or reverses) before proceeding.
+        targetState = target
+        if (changed && renderFrameClock != null) {
+            withPresentedFrameFrozen { snapTransitionCleanly(target) }
+        } else {
+            transitionState.snapTo(target)
+        }
+        currentState = target
+        if (changed) needsRestFrame = true
         true
     } ?: true
 

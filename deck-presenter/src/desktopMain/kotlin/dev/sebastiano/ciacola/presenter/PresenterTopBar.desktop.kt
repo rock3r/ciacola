@@ -119,6 +119,27 @@ internal fun PresenterTopControlBar(
                     onClick = { controller.step(scope, AdvanceDirection.Forward) },
                 )
 
+                val deckTitle = controller.animatic.storyboard.title.ifBlank { "Untitled Deck" }
+                Tooltip(tooltip = { Text("Active deck: $deckTitle") }) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = deckTitle,
+                            style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                            color = globalColors.text.normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = 150.dp)
+                                .testTag("ciacola-presenter-deck-title"),
+                        )
+                    }
+                }
+
                 Text(
                     text = slideLabel,
                     style = JewelTheme.typography.medium.copy(
@@ -138,7 +159,7 @@ internal fun PresenterTopControlBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
-                            .widthIn(max = 200.dp)
+                            .widthIn(max = 180.dp)
                             .testTag("ciacola-presenter-scene-title"),
                     )
                 }

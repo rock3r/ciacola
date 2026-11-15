@@ -1,5 +1,7 @@
 package dev.sebastiano.ciacola.presenter
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -7,9 +9,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.KeyShortcut
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuScope
@@ -21,6 +33,7 @@ import dev.bnorm.storyboard.easel.EaselWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Window as AwtWindow
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 
 /**
@@ -32,6 +45,7 @@ class PresenterWindow(
     val controller: PresenterController,
     var currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     var onRestoreStageFocus: () -> Boolean = { false },
+    var extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
 ) : EaselWindow {
     override val name: String = "Presenter"
     override var visible: Boolean by mutableStateOf(false)
@@ -59,12 +73,22 @@ class PresenterWindow(
         val displays = controller.availableDisplays
         val readiness = controller.readinessStatus()
 
-        CheckboxItem(
-            text = "Show Presenter View",
-            checked = visible,
-            shortcut = KeyShortcut(Key.F2),
-        ) {
-            visible = it
+        if (extraPreviewKeyHandler != null) {
+            // No Swing accelerator when F2 is routed via onPreviewKeyEvent (avoids double-toggle).
+            CheckboxItem(
+                text = "Show Presenter View (F2)",
+                checked = visible,
+            ) {
+                visible = it
+            }
+        } else {
+            CheckboxItem(
+                text = "Show Presenter View",
+                checked = visible,
+                shortcut = KeyShortcut(Key.F2),
+            ) {
+                visible = it
+            }
         }
         Separator()
         Item(
@@ -133,9 +157,42 @@ class PresenterWindow(
 
     @Composable
     override fun Content() {
+        val scope = rememberCoroutineScope()
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
         CiacolaJewelTheme(isDark = isDark) {
-            PresenterDashboard(controller = controller)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onPreviewKeyEvent { ev ->
+                        if (extraPreviewKeyHandler?.invoke(ev, scope) == true) {
+                            return@onPreviewKeyEvent true
+                        }
+                        if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val unmodified = !ev.isCtrlPressed && !ev.isMetaPressed && !ev.isAltPressed && !ev.isShiftPressed
+                        if (unmodified && ev.key == Key.F2) {
+                            visible = false
+                            return@onPreviewKeyEvent true
+                        }
+                        if (!controller.jumpDialogOpen && !controller.isExternalTextInputActive &&
+                            !ev.isCtrlPressed && !ev.isMetaPressed && !ev.isAltPressed
+                        ) {
+                            when (ev.key) {
+                                Key.DirectionRight, Key.DirectionDown, Key.PageDown -> {
+                                    controller.step(scope, AdvanceDirection.Forward)
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.DirectionLeft, Key.DirectionUp, Key.PageUp, Key.Backspace -> {
+                                    controller.step(scope, AdvanceDirection.Backward)
+                                    return@onPreviewKeyEvent true
+                                }
+                                else -> Unit
+                            }
+                        }
+                        false
+                    },
+            ) {
+                PresenterDashboard(controller = controller)
+            }
         }
     }
 }
@@ -160,6 +217,7 @@ fun rememberPresenterWindow(
     isExternalTextInputActiveProvider: () -> Boolean = { false },
     onRestoreStageFocus: () -> Boolean = { false },
     displayRouter: DisplayRoutingAdapter = remember { AwtDisplayRouter() },
+    extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
 ): PresenterWindow {
     val controller = remember {
         PresenterController(
@@ -193,9 +251,11 @@ fun rememberPresenterWindow(
             controller = controller,
             currentPresetProvider = currentPresetProvider,
             onRestoreStageFocus = onRestoreStageFocus,
+            extraPreviewKeyHandler = extraPreviewKeyHandler,
         )
     }.also {
         it.currentPresetProvider = currentPresetProvider
         it.onRestoreStageFocus = onRestoreStageFocus
+        it.extraPreviewKeyHandler = extraPreviewKeyHandler
     }
 }

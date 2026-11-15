@@ -45,11 +45,24 @@ class DesignSystemOverridesTest {
         val customized = base.withOverrides(overrides)
         assertEquals(Color(0xFF33AAFFL), customized.colors.accent)
         assertEquals(0.25f, customized.colors.spotlightDimAlpha)
-        assertEquals(84f * 1.1f, customized.typography.title.fontSize.value, 1e-3f)
+        // globalFontScale flows via LocalDensity.fontScale at the stage root rather than
+        // pre-multiplying token sp sizes here (preventing double-scaling).
+        assertEquals(84f, customized.typography.title.fontSize.value, 1e-3f)
+        assertEquals(base.typography.body.fontSize.value, customized.typography.body.fontSize.value, 1e-3f)
         assertEquals(800, customized.typography.title.fontWeight?.weight)
         assertEquals(80f, customized.styles.slidePadding.value)
         assertEquals(28f, customized.styles.codeCard.cornerRadius.value)
         assertEquals(420, customized.motion.fadeMoveDurationMs)
         assertEquals(70, customized.motion.staggerStepMs)
+    }
+
+    @Test
+    fun denseTypographyTokensHaveExpectedBaselineSizes() {
+        val typography = DeckThemes.stageDark().typography
+        assertEquals(22f, typography.cardTitle.fontSize.value, 1e-3f)
+        assertEquals(18f, typography.cardBody.fontSize.value, 1e-3f)
+        assertEquals(18f, typography.codeCompact.fontSize.value, 1e-3f)
+        assertEquals(15f, typography.caption.fontSize.value, 1e-3f)
+        assertEquals(typography.monoFontFamily, typography.codeCompact.fontFamily)
     }
 }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,14 +54,15 @@ import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
+import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
+import org.jetbrains.jewel.foundation.theme.LocalContentColor
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.CircularProgressIndicator
-import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
@@ -108,17 +110,25 @@ fun DeckLintPanel(
     val isSettled = currentIndex == targetIndex && !animatic.scrubSettling
     val registrySnapshotKey = stageInspectionRegistry?.nodes?.entries?.hashCode() ?: 0
 
+    SideEffect {
+        controller.isStageSettled = isSettled
+    }
+
     // Live reactive evaluation of the settled beat when Lint/Authoring is active.
+    // Always sync active location BEFORE the settled early-return so stale overlay boxes from
+    // prior slides never persist during scrubs or transitions.
     LaunchedEffect(
         isActive,
         currentIndex,
+        targetIndex,
         isSettled,
         registrySnapshotKey,
         fallbackBackground,
         externalRevisionKey,
     ) {
-        if (!isActive || !isSettled) return@LaunchedEffect
+        controller.isStageSettled = isSettled
         controller.updateActiveLocation(currentIndex.sceneIndex, currentIndex.frameIndex)
+        if (!isActive || !isSettled) return@LaunchedEffect
         delay(120L)
         controller.refreshActiveBeat(
             registry = stageInspectionRegistry,
@@ -317,7 +327,7 @@ private fun LintTopToolbar(
             Tooltip(tooltip = { Text("Sweep every slide and beat offscreen (preserves 60 fps UI)") }) {
                 val auditInteraction = remember { MutableInteractionSource() }
                 val auditFocused by auditInteraction.collectIsFocusedAsState()
-                DefaultButton(
+                CiacolaPrimaryButton(
                     onClick = onRunAudit,
                     enabled = !controller.isAuditing,
                     interactionSource = auditInteraction,
@@ -325,20 +335,22 @@ private fun LintTopToolbar(
                         .accessibleFocusRing(auditFocused, focusRingColor)
                         .testTag("ciacola-lint-audit-button"),
                 ) {
+                    val contentColor = LocalContentColor.current
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (controller.isAuditing) {
                             CircularProgressIndicator(Modifier.size(12.dp))
-                            Text("Auditing…")
+                            Text("Auditing…", color = contentColor)
                         } else {
                             Icon(
                                 key = AllIconsKeys.Actions.Refresh,
                                 contentDescription = null,
                                 modifier = Modifier.size(13.dp),
+                                tint = contentColor,
                             )
-                            Text("Audit Deck")
+                            Text("Audit Deck", color = contentColor)
                         }
                     }
                 }

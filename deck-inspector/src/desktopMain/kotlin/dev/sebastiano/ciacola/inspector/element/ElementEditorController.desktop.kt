@@ -7,16 +7,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.SceneMode
+import dev.sebastiano.ciacola.inspector.StageDragPreview
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.inspector.beatElementId
 import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
+import kotlin.math.abs
 
 internal const val MAX_ELEMENT_OFFSET_DP = 480f
 private val BEAT_SCOPED_ELEMENT_ID_REGEX = Regex("""^(.+):b(\d+)$""")
@@ -44,8 +54,22 @@ class ElementEditorController(
     var selectedElementId by mutableStateOf<String?>(null)
         private set
 
+    var selectionContextParentId by mutableStateOf<String?>(null)
+        internal set
+
     var hoveredElementId by mutableStateOf<String?>(null)
         internal set
+
+    var hoveredInteractiveId by mutableStateOf<String?>(null)
+        internal set
+
+    var activeDragElementId by mutableStateOf<String?>(null)
+        internal set
+
+    var activeSnapGuides by mutableStateOf<List<SnapGuideLine>>(emptyList())
+        internal set
+
+    val dragPreview: StageDragPreview = StageDragPreview()
 
     var inlineEditingElementId by mutableStateOf<String?>(null)
         private set
@@ -149,11 +173,32 @@ class ElementEditorController(
         return onBeat
     }
 
+    fun currentSelectionContext(): StageSelectionContext = StageSelectionContext(
+        contextParentId = selectionContextParentId,
+        selectedElementId = selectedElementId,
+    )
+
+    fun applySelectionContext(next: StageSelectionContext) {
+        selectionContextParentId = next.contextParentId
+        selectElementInternal(next.selectedElementId, syncContext = false)
+    }
+
     fun selectElement(elementId: String?) {
+        selectElementInternal(elementId, syncContext = true)
+    }
+
+    private fun selectElementInternal(elementId: String?, syncContext: Boolean) {
         if (inlineEditingElementId != null && inlineEditingElementId != elementId) {
             cancelInlineEdit(restoreStageFocus = false)
         }
         selectedElementId = elementId
+        if (syncContext) {
+            selectionContextParentId = if (elementId == null) {
+                null
+            } else {
+                StageSelectionModel.selectExplicit(elementId, slidesNodesForCurrentSlide()).contextParentId
+            }
+        }
         if (elementId == null) {
             lastSettledSelectionOnBeat = false
         } else if (!isStageSettlingProvider()) {
@@ -164,6 +209,52 @@ class ElementEditorController(
             )
         }
         onElementSelected?.invoke(elementId)
+    }
+
+    /**
+     * Pops one container level up when inside a container context, or clears selection at root.
+     * Returns `true` if Escape changed selection state.
+     */
+    fun popSelectionContextOrClear(): Boolean {
+        val next = StageSelectionModel.resolveEscape(
+            current = currentSelectionContext(),
+            nodes = slidesNodesForCurrentSlide(),
+        ) ?: return false
+        applySelectionContext(next)
+        return true
+    }
+
+    /**
+     * Commits an interactive stage drag delta as a single [ElementPatch] mutation and single undo
+     * entry, clearing the ephemeral [dragPreview] and snap guides.
+     */
+    fun commitDragOffset(elementId: String, deltaXDp: Float, deltaYDp: Float): Boolean {
+        dragPreview.clear(elementId)
+        activeDragElementId = null
+        activeSnapGuides = emptyList()
+        if (abs(deltaXDp) < 0.01f && abs(deltaYDp) < 0.01f) return false
+        overridesStore.beginEditGesture()
+        try {
+            overridesStore.updateElement(
+                elementId = elementId,
+                coalesce = false,
+                coalesceKey = "drag:$elementId",
+            ) { patch ->
+                patch.copy(
+                    offsetXDp = ((patch.offsetXDp ?: 0f) + deltaXDp).coerceIn(-MAX_ELEMENT_OFFSET_DP, MAX_ELEMENT_OFFSET_DP),
+                    offsetYDp = ((patch.offsetYDp ?: 0f) + deltaYDp).coerceIn(-MAX_ELEMENT_OFFSET_DP, MAX_ELEMENT_OFFSET_DP),
+                )
+            }
+        } finally {
+            overridesStore.endEditGesture()
+        }
+        return true
+    }
+
+    fun cancelActiveDrag() {
+        dragPreview.clear()
+        activeDragElementId = null
+        activeSnapGuides = emptyList()
     }
 
     fun canInlineEdit(elementId: String): Boolean {
@@ -246,6 +337,65 @@ class ElementEditorController(
     fun undo(): Boolean = overridesStore.undo()
 
     fun redo(): Boolean = overridesStore.redo()
+
+    /**
+     * Single element-stage key router shared by `StudioWorkspaceController` and standalone
+     * `StageDirectEditLayer` hosts:
+     * - `Esc` cancels an active stage drag first, otherwise pops one container level or clears selection.
+     * - Arrow keys (`1 dp`) / `Shift+Arrow` (`10 dp`) nudge the selected element on the current beat.
+     * - `⌘/Ctrl + Backspace/Delete` resets overrides on the selected element.
+     */
+    fun handleElementStageKeyEvent(
+        ev: KeyEvent,
+        includeUndoShortcuts: Boolean = false,
+        onEscapeHandled: () -> Unit = {},
+    ): Boolean {
+        if (!editorActive || inlineEditingElementId != null || isExternalTextInputActive()) return false
+        if (ev.type != KeyEventType.KeyDown || ev.isAltPressed) return false
+
+        if (!ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.Escape) {
+            if (activeDragElementId != null) {
+                cancelActiveDrag()
+                onEscapeHandled()
+                return true
+            }
+            if (popSelectionContextOrClear()) {
+                onEscapeHandled()
+                return true
+            }
+            return false
+        }
+
+        val hasSelectionOnBeat = selectedElementId != null && isSelectedElementOnCurrentBeat()
+        val step = if (ev.isShiftPressed) 10f else 1f
+        return when {
+            hasSelectionOnBeat && !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionLeft -> {
+                nudgeSelected(-step, 0f)
+                true
+            }
+            hasSelectionOnBeat && !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionRight -> {
+                nudgeSelected(step, 0f)
+                true
+            }
+            hasSelectionOnBeat && !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionUp -> {
+                nudgeSelected(0f, -step)
+                true
+            }
+            hasSelectionOnBeat && !ev.isMetaPressed && !ev.isCtrlPressed && ev.key == Key.DirectionDown -> {
+                nudgeSelected(0f, step)
+                true
+            }
+            hasSelectionOnBeat && (ev.isMetaPressed || ev.isCtrlPressed) && (ev.key == Key.Backspace || ev.key == Key.Delete) -> {
+                resetSelectedElement()
+                true
+            }
+            includeUndoShortcuts && (ev.isMetaPressed || ev.isCtrlPressed) && ev.key == Key.Z -> {
+                if (ev.isShiftPressed) redo() else undo()
+                true
+            }
+            else -> false
+        }
+    }
 
     /**
      * Stage [ContentDecorator] that wires [StageInspectionRegistry] for the live Story stage

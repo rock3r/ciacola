@@ -137,6 +137,30 @@ data class DeckTypography(
     val code: TextStyle,
     val codeEmphasis: TextStyle,
     val stamp: TextStyle,
+    val cardTitle: TextStyle = TextStyle(
+        fontFamily = displayFontFamily,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        fontWeight = FontWeight.SemiBold,
+    ),
+    val cardBody: TextStyle = TextStyle(
+        fontFamily = bodyFontFamily,
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
+        fontWeight = FontWeight.Normal,
+    ),
+    val codeCompact: TextStyle = TextStyle(
+        fontFamily = monoFontFamily,
+        fontSize = 18.sp,
+        lineHeight = 26.sp,
+        fontWeight = FontWeight.Normal,
+    ),
+    val caption: TextStyle = TextStyle(
+        fontFamily = bodyFontFamily,
+        fontSize = 15.sp,
+        lineHeight = 20.sp,
+        fontWeight = FontWeight.Normal,
+    ),
 )
 
 @Immutable
@@ -432,6 +456,30 @@ object DeckThemes {
             lineHeight = 58.sp,
             fontWeight = FontWeight.ExtraBold,
             letterSpacing = 1.sp,
+        ),
+        cardTitle = TextStyle(
+            fontFamily = displayFont,
+            fontSize = 22.sp,
+            lineHeight = 28.sp,
+            fontWeight = FontWeight.SemiBold,
+        ),
+        cardBody = TextStyle(
+            fontFamily = bodyFont,
+            fontSize = 18.sp,
+            lineHeight = 24.sp,
+            fontWeight = FontWeight.Normal,
+        ),
+        codeCompact = TextStyle(
+            fontFamily = monoFont,
+            fontSize = 18.sp,
+            lineHeight = 26.sp,
+            fontWeight = FontWeight.Normal,
+        ),
+        caption = TextStyle(
+            fontFamily = bodyFont,
+            fontSize = 15.sp,
+            lineHeight = 20.sp,
+            fontWeight = FontWeight.Normal,
         ),
     )
 

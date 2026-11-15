@@ -98,8 +98,12 @@ internal fun findShared(
 private const val PROSE_PUNCTUATION = ".,;:!?"
 
 private val PROSE_STOP_WORDS = setOf(
-    "a", "an", "the", "to", "of", "in", "on", "at", "by",
+    "a", "an", "the", "to", "of", "in", "with", "on", "at", "by",
     "for", "is", "are", "was", "be", "or", "and", "as", "it",
+)
+
+private val LOW_SIGNAL_STOP_WORDS = setOf(
+    "a", "an", "the", "to", "in", "of", "with", "for", "on", "at", "by", "is", "and", "or",
 )
 
 private fun MutableSharedText.isBlankToken(): Boolean =
@@ -111,8 +115,16 @@ private fun MutableSharedText.isWordToken(): Boolean =
 private fun MutableSharedText.isProsePunctuation(): Boolean =
     value.text.isNotEmpty() && value.text.all { it in PROSE_PUNCTUATION }
 
+private fun MutableSharedText.isSingleCharPunctuation(): Boolean {
+    val text = value.text
+    return text.length == 1 && !text[0].isLetterOrDigit() && !text[0].isWhitespace()
+}
+
 private fun MutableSharedText.isProseStopWord(): Boolean =
     value.text.lowercase() in PROSE_STOP_WORDS
+
+private fun MutableSharedText.isLowSignalMatch(): Boolean =
+    value.text.lowercase() in LOW_SIGNAL_STOP_WORDS || isSingleCharPunctuation()
 
 private fun MutableSharedText.adjacentWordOnLine(direction: Move): MutableSharedText? {
     var cursor = move(direction, stopOnLineBreaks = true)
@@ -177,12 +189,24 @@ private fun pruneUnanchoredProseMatches(
         }
     }
 
+    var commonSuffix = 0
+    while (
+        commonSuffix < beforeItems.size - commonPrefix &&
+        commonSuffix < afterItems.size - commonPrefix &&
+        beforeItems[beforeItems.size - 1 - commonSuffix].key != null &&
+        beforeItems[beforeItems.size - 1 - commonSuffix].key == afterItems[afterItems.size - 1 - commonSuffix].key
+    ) {
+        commonSuffix++
+    }
+    fun isExemptEdge(index: Int): Boolean =
+        index < commonPrefix || index >= beforeItems.size - commonSuffix
+
     val beforeWordCount = beforeItems.count { it.isWordToken() }
     val afterWordCount = afterItems.count { it.isWordToken() }
     if (beforeWordCount >= 3 && afterWordCount >= 3) {
         for (b in beforeItems) {
             val k = b.key ?: continue
-            if (b.index < commonPrefix || !b.isProseStopWord()) continue
+            if (isExemptEdge(b.index) || !b.isProseStopWord()) continue
             val a = afterByKey[k] ?: continue
             val bPrevWord = b.adjacentWordOnLine(Move.Previous)
             val aPrevWord = a.adjacentWordOnLine(Move.Previous)
@@ -199,9 +223,33 @@ private fun pruneUnanchoredProseMatches(
         }
     }
 
+    // Drop all-stopword / single-char-punctuation matches whose non-whitespace coverage is below
+    // 20% of the sentence, exempting tokens anchored inside the unchanged common prefix/suffix so
+    // stationary leading articles (e.g. "A" / "The") or unchanged endings never blink.
+    val beforeNonWsChars = beforeItems.sumOf { item -> item.value.text.count { !it.isWhitespace() } }
+    val afterNonWsChars = afterItems.sumOf { item -> item.value.text.count { !it.isWhitespace() } }
+    val totalNonWsChars = maxOf(beforeNonWsChars, afterNonWsChars)
+    val matchedNonWs = beforeItems.filter { it.key != null && !it.isBlankToken() && it.value.text != "\n" }
+    if (
+        totalNonWsChars > 0 &&
+        matchedNonWs.isNotEmpty() &&
+        matchedNonWs.all { it.isLowSignalMatch() }
+    ) {
+        val matchedChars = matchedNonWs.sumOf { item -> item.value.text.count { !it.isWhitespace() } }
+        if (matchedChars * 5 < totalNonWsChars) {
+            for (b in matchedNonWs) {
+                if (isExemptEdge(b.index)) continue
+                val k = b.key ?: continue
+                val a = afterByKey[k] ?: continue
+                b.unmatch(a)
+                afterByKey.remove(k)
+            }
+        }
+    }
+
     for (b in beforeItems) {
         val k = b.key ?: continue
-        if (b.index < commonPrefix || !b.isBlankToken()) continue
+        if (isExemptEdge(b.index) || !b.isBlankToken()) continue
         val a = afterByKey[k] ?: continue
         val leftMatched = b.prev != null && a.prev != null &&
             !b.prev!!.isBlankToken() && b.prev!!.key != null && b.prev!!.key == a.prev!!.key

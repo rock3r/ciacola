@@ -1,8 +1,16 @@
 package dev.sebastiano.ciacola.timeline
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -11,7 +19,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.graphics.toPixelMap
@@ -21,18 +31,44 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.bnorm.storyboard.Agsl
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.rememberAnimatic
+import dev.sebastiano.ciacola.DeckMagicText
+import dev.sebastiano.ciacola.authoring.DeckHostParams
+import dev.sebastiano.ciacola.authoring.ciacolaDeck
+import dev.sebastiano.ciacola.createEditableTextTransition
 import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.effects.CodeFit
+import dev.sebastiano.ciacola.effects.DeckEditableText
+import dev.sebastiano.ciacola.effects.DeckShaderUniformValue
+import dev.sebastiano.ciacola.effects.DeckSkslShader
+import dev.sebastiano.ciacola.effects.DeckWarpCodeCard
+import dev.sebastiano.ciacola.effects.LocalShaderUniformObserver
+import dev.sebastiano.ciacola.effects.LocalWarpSegmentObserver
+import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
+import dev.sebastiano.ciacola.theme.DeckThemePreset
+import dev.sebastiano.ciacola.theme.DeckThemes
+import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import dev.sebastiano.ciacola.theme.SlidePalette
 import java.io.File
+import java.nio.file.Files
 import javax.imageio.ImageIO
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -150,11 +186,16 @@ class ScrubPathIndependenceTest {
                 runOnIdle { scope.launch { pathAnimatic.seekToSegment(stateIdx, frac) } }
                 continue
             }
-            // With the timeline's in-segment policy, a step inside the segment the stage already
-            // shows seeks in place; anything else rebuilds the scene subtree.
-            val inPlace = inSegmentInPlace &&
-                scrubStepIsInPlace(pathAnimatic.activeFromStateIndex, pathAnimatic.activeToStateIndex, stateIdx, frac)
-            runOnUi(scope) { pathAnimatic.seekToSegment(stateIdx, frac, rebuildScene = !inPlace) }
+            // With the timeline's shared scrubStepPolicy, a drag step inside the active segment or
+            // across intra-slide beats seeks in place; slide crossings and non-drag clicks rebuild.
+            val decision = scrubStepPolicy(
+                prev = ScrubStepEndpoint.fromActiveAnimatic(pathAnimatic),
+                next = ScrubStepEndpoint.fromStateIndex(pathAnimatic, stateIdx, frac),
+                dragging = inSegmentInPlace,
+                forceRebuild = !inSegmentInPlace,
+            )
+            val rebuildScene = !decision.inPlace
+            runOnUi(scope) { pathAnimatic.seekToSegment(stateIdx, frac, rebuildScene = rebuildScene) }
             if (i !in checkpointIndices) continue
 
             // Independent oracle: a fresh composition settled on the segment's resting state, then a
@@ -279,6 +320,59 @@ class ScrubPathIndependenceTest {
             }
         }
         assertPathIndependent(ordered + ordered, checkpoints, rapidFire = false, inSegmentInPlace = true)
+    }
+
+    @Test
+    fun sameSlideDragBackToBeatStartCrossBeatAndReturnIsPathIndependent() {
+        val deck = frozenLoopDeck()
+        val snapshot = indexDeckTimeline(deck)
+        val slide0Beats = snapshot.eventBeats.filter { it.sceneIndex == 0 }
+        val slide0Spans = snapshot.stateSpans.filter { it.sceneIndex == 0 && !it.isHold && it.durationMs > 40 }
+        require(slide0Beats.size >= 3 && slide0Spans.size >= 2) {
+            "Expected Slide 1 to have at least 3 beats and 2 animated spans"
+        }
+        val b0Start = slide0Beats[0].timeMs
+        val b1Start = slide0Beats[1].timeMs
+        val b2Start = slide0Beats[2].timeMs
+        val seg0 = slide0Spans[0]
+        val seg1 = slide0Spans[1]
+
+        fun at(span: StateTimeSpan, frac: Float): Int = span.startMs + (span.durationMs * frac).toInt()
+
+        val leg = listOf(
+            // Drag forward into B1->B2, then pull back to B1 beat start (fraction 0)
+            b0Start,
+            at(seg0, 0.25f),
+            at(seg0, 0.55f),
+            at(seg0, 0.80f),
+            at(seg0, 0.40f),
+            b0Start,
+            // Now drag forward across B1->B2, through B2 hold, across B2->B3
+            at(seg0, 0.30f),
+            at(seg0, 0.70f),
+            b1Start,
+            at(seg1, 0.35f),
+            at(seg1, 0.75f),
+            b2Start,
+            // Return back across B2->B3 to B2 start, then back across B1->B2 to B1 start
+            at(seg1, 0.65f),
+            at(seg1, 0.25f),
+            b1Start,
+            at(seg0, 0.60f),
+            at(seg0, 0.20f),
+            b0Start,
+        )
+        val checkpoints = setOf(
+            b0Start,
+            at(seg0, 0.30f),
+            at(seg0, 0.60f),
+            b1Start,
+            at(seg1, 0.35f),
+            at(seg1, 0.65f),
+            b2Start,
+        )
+        // Mirror leg so checkpoints in the second half cover back-to-beat-start, cross-beat, and return.
+        assertPathIndependent(leg + leg, checkpoints, rapidFire = false, inSegmentInPlace = true)
     }
 
     @Test
@@ -518,5 +612,399 @@ class ScrubPathIndependenceTest {
             compareAt("back${steps++}")
         }
         if (failures.isNotEmpty()) fail("Settled navigation frames diverge:\n" + failures.joinToString("\n"))
+    }
+
+    private fun createMultiBeatShaderWarpScrubFixtureDeck(
+        stageDecorator: ContentDecorator,
+    ): Storyboard {
+        val colorEvolutionSksl = """
+            uniform float2 iResolution;
+            uniform float uStage;
+
+            half4 main(float2 fragCoord) {
+                vec2 uv = fragCoord / max(iResolution, vec2(1.0));
+                vec2 cell = floor(fragCoord / max(iResolution.x / 12.0, 8.0));
+                float checker = mod(cell.x + cell.y, 2.0);
+                vec3 transparentBg = mix(vec3(0.78, 0.79, 0.80), vec3(0.95, 0.96, 0.96), checker);
+                vec3 whiteCol = vec3(1.0, 1.0, 1.0);
+                vec3 redCol = vec3(0.96, 0.14, 0.14);
+                vec3 uvCol = vec3(uv.x, uv.y, 1.0);
+                vec3 c01 = mix(transparentBg, whiteCol, clamp(uStage, 0.0, 1.0));
+                vec3 c12 = mix(c01, redCol, clamp(uStage - 1.0, 0.0, 1.0));
+                vec3 c23 = mix(c12, uvCol, clamp(uStage - 2.0, 0.0, 1.0));
+                return half4(c23, 1.0);
+            }
+        """.trimIndent()
+
+        return ciacolaDeck(
+            id = "scrub-sync-fixture",
+            title = "Scrub Sync Fixture",
+            host = DeckHostParams(
+                theme = DeckThemes.keynoteLight(),
+                bundledPreset = DeckThemePreset.KeynoteLight,
+                stageDecorator = stageDecorator,
+            ),
+        ) {
+            slide(key = "intro", title = "Intro", beats = 1) {
+                val activeTheme = LocalDeckTheme.current
+                Box(Modifier.fillMaxSize().padding(64.dp)) {
+                    DeckEditableText(
+                        elementId = "scrub:s1:title",
+                        text = "Opening Slide",
+                        style = activeTheme.typography.title,
+                        color = activeTheme.colors.foreground,
+                    )
+                }
+            }
+            slide(key = "color-uv", title = "Color Evolution to UV", beats = 4) {
+                val activeTheme = LocalDeckTheme.current
+                val warpStep = rememberBeatTransition("scrub-s2-warp-step")
+                val shaderStage by animateByBeat("scrub-s2-shader-stage") { it.toFloat() }
+                val captionTransition = transition.createEditableTextTransition(
+                    "scrub:s2:caption",
+                    "scrub-s2-caption",
+                ) { step ->
+                    when (step) {
+                        0 -> AnnotatedString("Channels are 0.0..1.0 floats — 0.0 is transparent")
+                        1 -> AnnotatedString("Set RGBA to 1.0 for opaque solid white")
+                        2 -> AnnotatedString("Keep red at 1.0 to isolate a single channel")
+                        else -> buildAnnotatedString {
+                            append("Normalize by ")
+                            withStyle(SpanStyle(color = activeTheme.colors.accent, fontWeight = FontWeight.Bold)) {
+                                append("iResolution")
+                            }
+                            append(" for a smooth UV gradient")
+                        }
+                    }
+                }
+                val codeSnippets = remember {
+                    listOf(
+                        "half4 main(float2 fragCoord) {\n    return half4(0.0);\n}",
+                        "half4 main(float2 fragCoord) {\n    return half4(1.0, 1.0, 1.0, 1.0);\n}",
+                        "half4 main(float2 fragCoord) {\n    return half4(1.0, 0.0, 0.0, 1.0);\n}",
+                        "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    float2 uv = fragCoord.xy / iResolution.xy;\n    return half4(uv.x, uv.y, 1.0, 1.0);\n}",
+                    )
+                }
+                val rgbaTransition = transition.createEditableTextTransition(
+                    "scrub:s2:rgba-readout",
+                    "scrub-s2-rgba-readout",
+                ) { step ->
+                    when (step) {
+                        0 -> AnnotatedString("RGBA (0.0, 0.0, 0.0, 0.0)")
+                        1 -> AnnotatedString("RGBA (1.0, 1.0, 1.0, 1.0)")
+                        2 -> AnnotatedString("RGBA (1.0, 0.0, 0.0, 1.0)")
+                        else -> AnnotatedString("RGBA (uv.x, uv.y, 1.0, 1.0)")
+                    }
+                }
+                Column(Modifier.fillMaxSize().padding(56.dp), Arrangement.spacedBy(18.dp)) {
+                    Box(Modifier.fillMaxWidth().height(48.dp)) {
+                        DeckMagicText(
+                            transition = captionTransition,
+                            elementId = "scrub:s2:caption",
+                            label = "Color Evolution Headline",
+                            style = activeTheme.typography.heading.copy(
+                                fontSize = 32.sp,
+                                lineHeight = 38.sp,
+                                color = activeTheme.colors.foreground,
+                            ),
+                        )
+                    }
+                    Row(
+                        Modifier.weight(1f).fillMaxWidth(),
+                        Arrangement.spacedBy(22.dp),
+                        Alignment.CenterVertically,
+                    ) {
+                        DeckWarpCodeCard(
+                            codeStates = codeSnippets,
+                            stateTransition = warpStep,
+                            language = Agsl,
+                            textStyle = activeTheme.typography.codeCompact,
+                            elementId = "scrub:s2:code",
+                            highlightedLines = { step -> if (step < 3) setOf(1) else setOf(0, 3, 4) },
+                            fit = CodeFit.ShrinkToWidth(min = 0.82f),
+                            modifier = Modifier.weight(1f).testTag("scrub-s2-warp-code"),
+                        )
+                        Column(
+                            Modifier.width(316.dp),
+                            Arrangement.spacedBy(12.dp),
+                            Alignment.CenterHorizontally,
+                        ) {
+                            DeckSkslShader(
+                                id = "scrub:s2:shader",
+                                sksl = colorEvolutionSksl,
+                                label = "Live Color Evolution Preview",
+                                modifier = Modifier.size(252.dp).testTag("scrub-shader-color-uv"),
+                            ) {
+                                float("uStage", shaderStage)
+                            }
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                DeckMagicText(
+                                    transition = rgbaTransition,
+                                    modifier = Modifier.wrapContentWidth(),
+                                    elementId = "scrub:s2:rgba-readout",
+                                    label = "RGBA Channel Readout",
+                                    kind = "Code",
+                                    style = activeTheme.typography.codeCompact.copy(
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = activeTheme.colors.accent,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            slide(
+                key = "next-palette",
+                title = "Compose Host",
+                beats = 2,
+                palette = SlidePalette(
+                    canvas = Color(0xFFDCF2E8),
+                    ink = Color(0xFF14352B),
+                    accent = Color(0xFF0E7A5D),
+                ),
+            ) {
+                val activeTheme = LocalDeckTheme.current
+                Box(Modifier.fillMaxSize().padding(64.dp)) {
+                    DeckEditableText(
+                        elementId = "scrub:s3:title",
+                        text = byBeat("RuntimeShader Host — Beat 1", "RuntimeShader Host — Beat 2"),
+                        style = activeTheme.typography.title,
+                        color = Color(0xFF14352B),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun multiBeatShaderWarpAndMagicTextScrubWorkerMatchesFreshJumpAcrossBoundaryAndMidpoints() {
+        val tempDir = Files.createTempDirectory("ciacola-shader-warp-scrub-")
+        val frozenClock = DeckLoopClock().apply { scrubbedMillis = 0L }
+        val scrubDeck = createMultiBeatShaderWarpScrubFixtureDeck(
+            stageDecorator = ContentDecorator { content ->
+                CompositionLocalProvider(LocalDeckLoopClock provides frozenClock) { content() }
+            },
+        )
+        val snapshot = indexDeckTimeline(scrubDeck)
+        try {
+            runComposeUiTest {
+                mainClock.autoAdvance = false
+                val overridesStore = TimelineOverridesStore(tempDir)
+                val pathRegistry = StageInspectionRegistry()
+                val refRegistry = StageInspectionRegistry()
+                var pathUStage = -99f
+                var refUStage = -99f
+                var pathWarpSeg: Pair<Int, Int> = -1 to -1
+                var refWarpSeg: Pair<Int, Int> = -1 to -1
+
+                lateinit var pathAnimatic: Animatic
+                lateinit var refAnimatic: Animatic
+                lateinit var studioController: TimelineStudioController
+                lateinit var scope: CoroutineScope
+                var refGen by mutableIntStateOf(0)
+                var refInitialIndex by mutableStateOf(Storyboard.Index(1, 0))
+
+                setContent {
+                    scope = rememberCoroutineScope()
+                    Row {
+                        Box(Modifier.size(480.dp, 270.dp).testTag("s2-path")) {
+                            CompositionLocalProvider(
+                                LocalStageInspectionRegistry provides pathRegistry,
+                                LocalShaderUniformObserver provides { id, uniforms ->
+                                    if (id == "scrub:s2:shader") {
+                                        pathUStage = (uniforms["uStage"] as? DeckShaderUniformValue.FloatValue)?.value ?: -99f
+                                    }
+                                },
+                                LocalWarpSegmentObserver provides { id, fromIdx, toIdx ->
+                                    if (id == "scrub:s2:code") pathWarpSeg = fromIdx to toIdx
+                                },
+                            ) {
+                                pathAnimatic = rememberAnimatic(
+                                    initialIndex = Storyboard.Index(1, 3),
+                                    storyboard = { scrubDeck },
+                                )
+                                studioController = remember {
+                                    TimelineStudioController(
+                                        initialAnimatic = pathAnimatic,
+                                        overridesStore = overridesStore,
+                                        loopClock = frozenClock,
+                                    )
+                                }
+                                androidx.compose.runtime.LaunchedEffect(studioController) {
+                                    studioController.runScrubWorker()
+                                }
+                                Easel(pathAnimatic)
+                            }
+                        }
+                        key(refGen) {
+                            Box(Modifier.size(480.dp, 270.dp).testTag("s2-ref")) {
+                                CompositionLocalProvider(
+                                    LocalStageInspectionRegistry provides refRegistry,
+                                    LocalShaderUniformObserver provides { id, uniforms ->
+                                        if (id == "scrub:s2:shader") {
+                                            refUStage = (uniforms["uStage"] as? DeckShaderUniformValue.FloatValue)?.value ?: -99f
+                                        }
+                                    },
+                                    LocalWarpSegmentObserver provides { id, fromIdx, toIdx ->
+                                        if (id == "scrub:s2:code") refWarpSeg = fromIdx to toIdx
+                                    },
+                                ) {
+                                    refAnimatic = rememberAnimatic(
+                                        initialIndex = refInitialIndex,
+                                        storyboard = { scrubDeck },
+                                    )
+                                    Easel(refAnimatic)
+                                }
+                            }
+                        }
+                    }
+                }
+                repeat(6) { mainClock.advanceTimeByFrame() }
+                runOnIdle { studioController.refreshSnapshot(scrubDeck) }
+                repeat(2) { mainClock.advanceTimeByFrame() }
+
+                fun scrubStep(timeMs: Int, dragging: Boolean) {
+                    runOnIdle {
+                        if (dragging && !studioController.isScrubDragging) {
+                            studioController.beginScrubDrag()
+                        } else if (!dragging && studioController.isScrubDragging) {
+                            studioController.endScrubDrag()
+                        }
+                        studioController.scrubToTimeMs(timeMs)
+                    }
+                    var guard = 0
+                    while (guard++ < 600) {
+                        mainClock.advanceTimeByFrame()
+                        if (!studioController.hasPendingScrubRequest && !pathAnimatic.scrubSettling) {
+                            repeat(3) { mainClock.advanceTimeByFrame() }
+                            if (!studioController.hasPendingScrubRequest && !pathAnimatic.scrubSettling) break
+                        }
+                    }
+                    assertTrue(
+                        !studioController.hasPendingScrubRequest && !pathAnimatic.scrubSettling,
+                        "Scrub worker did not settle at t=${timeMs}ms within 600 frames",
+                    )
+                }
+
+                fun settledIndexFor(stateIdx: Int): Storyboard.Index {
+                    val d = pathAnimatic.stateDescriptors
+                        .last { it.stateIndex <= stateIdx && !it.isBoundaryStart && !it.isBoundaryEnd }
+                    return Storyboard.Index(d.sceneIndex, d.frameIndex)
+                }
+
+                fun activeTextOf(reg: StageInspectionRegistry, prefix: String): String =
+                    reg.nodes.values
+                        .filter { it.sceneIndex == 1 && it.elementId.startsWith(prefix) && it.effectiveAlpha > 0.05f }
+                        .maxByOrNull { it.beatIndex }
+                        ?.resolvedText
+                        .orEmpty()
+
+                fun assertMatchesFreshReference(label: String, timeMs: Int) {
+                    val (stateIdx, frac) = snapshot.stateFractionForTimeMs(timeMs)
+                    runOnIdle {
+                        refRegistry.clear()
+                        refInitialIndex = settledIndexFor(stateIdx)
+                        refGen++
+                    }
+                    repeat(6) { mainClock.advanceTimeByFrame() }
+                    runOnUi(scope) { refAnimatic.seekToSegment(stateIdx, frac, rebuildScene = true) }
+                    repeat(4) { mainClock.advanceTimeByFrame() }
+
+                    val pathImg = onNodeWithTag("s2-path").captureToImage()
+                    val refImg = onNodeWithTag("s2-ref").captureToImage()
+
+                    assertEquals(
+                        refUStage,
+                        pathUStage,
+                        2e-2f,
+                        "$label (t=${timeMs}ms, state=$stateIdx, frac=$frac): uStage uniform mismatch (expected=$refUStage, actual=$pathUStage)",
+                    )
+                    assertEquals(
+                        refWarpSeg.second,
+                        pathWarpSeg.second,
+                        "$label (t=${timeMs}ms): warp toIdx mismatch (expected=$refWarpSeg, actual=$pathWarpSeg)",
+                    )
+                    val expectedCaption = activeTextOf(refRegistry, "scrub:s2:caption")
+                    val actualCaption = activeTextOf(pathRegistry, "scrub:s2:caption")
+                    assertEquals(expectedCaption, actualCaption, "$label (t=${timeMs}ms): headline caption mismatch")
+
+                    val expectedReadout = activeTextOf(refRegistry, "scrub:s2:rgba-readout")
+                    val actualReadout = activeTextOf(pathRegistry, "scrub:s2:rgba-readout")
+                    assertEquals(expectedReadout, actualReadout, "$label (t=${timeMs}ms): RGBA readout mismatch")
+
+                    val d = diff(pathImg, refImg)
+                    if (d.differingPixels > d.total / 300) {
+                        dump("s2-$label-path", pathImg)
+                        dump("s2-$label-ref", refImg)
+                        fail(
+                            "$label (t=${timeMs}ms, state=$stateIdx, frac=${"%.2f".format(frac)}): " +
+                                "${d.differingPixels}/${d.total} px differ (max Δ=${"%.2f".format(d.maxChannelDelta)}, " +
+                                "pathUStage=$pathUStage, refUStage=$refUStage)"
+                        )
+                    }
+                }
+
+                val s2Bar = snapshot.slides.first { it.sceneIndex == 1 }
+                val s2HoldSpans = snapshot.stateSpans.filter { it.sceneIndex == 1 && it.isHold }
+                val s2AnimSpans = snapshot.stateSpans.filter { it.sceneIndex == 1 && !it.isHold && !it.isBoundary && it.durationMs > 40 }
+                assertEquals(4, s2HoldSpans.size, "Expected 4 beat holds on multi-beat scrub fixture")
+                assertEquals(3, s2AnimSpans.size, "Expected 3 intra-slide beat transitions on multi-beat scrub fixture")
+
+                val b1HoldMs = s2HoldSpans[0].startMs + s2HoldSpans[0].durationMs / 2
+                val b4HoldMs = s2HoldSpans[3].startMs + s2HoldSpans[3].durationMs / 2
+                val b4ToS3BoundaryMs = s2Bar.endMs - 60
+                val segB2ToB3 = s2AnimSpans[1]
+                val b2b3At25Ms = segB2ToB3.startMs + (segB2ToB3.durationMs * 0.25f).toInt()
+                val b2b3At75Ms = segB2ToB3.startMs + (segB2ToB3.durationMs * 0.75f).toInt()
+
+                // (i) Backward drag from B4 to B1, sampled at B2->B3 75%, B2->B3 25%, and the B1 hold.
+                val backSteps = 20
+                for (step in 0..backSteps) {
+                    val t = b4ToS3BoundaryMs + ((b1HoldMs - b4ToS3BoundaryMs) * step) / backSteps
+                    scrubStep(t, dragging = true)
+                }
+                scrubStep(b1HoldMs, dragging = true)
+                assertEquals(0f, pathUStage, 1e-2f, "S2:B1 hold after backward drag must bind uStage = 0.0")
+                assertMatchesFreshReference("back-b4-to-b1-hold", b1HoldMs)
+
+                // (iii) Forward drag through B2->B3 sampled at 25% and 75%.
+                for (t in listOf(
+                    s2AnimSpans[0].startMs + s2AnimSpans[0].durationMs / 2,
+                    s2HoldSpans[1].startMs + 20,
+                    b2b3At25Ms,
+                )) {
+                    scrubStep(t, dragging = true)
+                }
+                assertMatchesFreshReference("fwd-b2-to-b3-at-25pct", b2b3At25Ms)
+
+                scrubStep(b2b3At75Ms, dragging = true)
+                assertMatchesFreshReference("fwd-b2-to-b3-at-75pct", b2b3At75Ms)
+
+                // Also reverse inside B2->B3 back to 25% and back up to 75%.
+                scrubStep(b2b3At25Ms, dragging = true)
+                assertMatchesFreshReference("rev-b2-to-b3-at-25pct", b2b3At25Ms)
+                scrubStep(b2b3At75Ms, dragging = true)
+
+                // (ii) Continue forward drag from B2->B3 to B4 and end on the S2:B4 -> S3:B1 boundary hold.
+                val fwdTailSteps = 12
+                for (step in 1..fwdTailSteps) {
+                    val t = b2b3At75Ms + ((b4ToS3BoundaryMs - b2b3At75Ms) * step) / fwdTailSteps
+                    scrubStep(t, dragging = true)
+                }
+                scrubStep(b4HoldMs, dragging = true)
+                assertEquals(3f, pathUStage, 1e-2f, "S2:B4 hold after forward drag must bind uStage = 3.0")
+                assertMatchesFreshReference("fwd-b1-to-b4-hold", b4HoldMs)
+
+                scrubStep(b4ToS3BoundaryMs, dragging = true)
+                assertEquals(3f, pathUStage, 1e-2f, "S2:B4->S3:B1 boundary hold must bind uStage = 3.0, never 2.0")
+                assertMatchesFreshReference("fwd-s2b4-to-s3b1-boundary", b4ToS3BoundaryMs)
+                mainClock.autoAdvance = true
+            }
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
     }
 }

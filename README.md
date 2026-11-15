@@ -21,12 +21,13 @@ The desktop app presents five scenes with fourteen base states (beats). Together
 - a Keynote effects lab (builds, staggers, line draws, code morphs, and a magnifier loupe); and
 - a single 1920×1080 design system for type, colour, and spacing.
 
-Around the stage it adds an Easel overview grid, a Jewel Presenter window with speaker notes and
-display routing, a Ctrl-click slide review flow, selectable-text PDF and 60 fps MP4 video export,
-and a unified Studio workspace combining an After Effects-style Timeline Studio (`Motion`), Direct
-Stage Element & Inline Text Editor (`Element`), Live Design System & WCAG Contrast Editor (`Theme`),
-and Live Slide & Full-Deck Linter (`Lint`). See [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md)
-for how each piece works.
+Around the stage it adds an Easel overview grid, a deck catalog switcher (`DeckCatalog`, shipping
+`Foundation Deck` by default), a Jewel Presenter window with speaker
+notes and display routing, a Ctrl-click slide review flow, selectable-text PDF and 60 fps MP4 video
+export, and a unified Studio workspace combining an After Effects-style Timeline Studio (`Motion`),
+Direct Stage Element & Inline Text Editor (`Element`), Live Design System & WCAG Contrast Editor
+(`Theme`), and Live Slide & Full-Deck Linter (`Lint`). See
+[`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) for how each piece works.
 
 All visible copy is marked provisional on purpose.
 
@@ -50,7 +51,8 @@ remembered in `.storyboard/` at the repository root.
 | `←` `↑` `PgUp` `Backspace` | Previous beat |
 | `B` / `W` | Toggle blackout / whiteout curtain in Show Mode (`Esc`, `B`/`W`, click, or advancing clears it) |
 | `⌘G` | Jump to slide (`1..N`) |
-| `Esc` | Clear active popup/curtain, exit sub-comp / docked Timeline Studio, or toggle the Overview grid |
+| `⌘⌥1`..`⌘⌥9` | Switch active catalog deck (`Foundation Deck` by default) |
+| `Esc` | Clear active popup/curtain, exit selection context / sub-comp / docked Studio, or toggle the Overview grid |
 | `⌥⌘P` | Toggle fullscreen (**Easel ▸ Fullscreen**) |
 | `F2` | Show the Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
 | `F3` or hold `Ctrl` | Inspect mode for slide review; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
@@ -61,9 +63,12 @@ remembered in `.storyboard/` at the repository root.
 | `F8` | Focus the `Lint` tab in Studio (or toggle the Deck Linter sidecar window) |
 | `⌘Z` / `⇧⌘Z` | Context-aware Undo / Redo for the active Studio editor (`Motion`, `Element`, or `Theme`) |
 
-When Authoring mode is active, double-clicking editable text on the stage opens an inline text
-editor (`Enter` / `⌘Enter` saves, `Esc` cancels), and selecting an element on the `Element` tab
-enables `Arrow` (`1 dp`) / `Shift+Arrow` (`10 dp`) stage nudging.
+When Authoring mode is active on the `Element` tab, clicking elements uses container-first selection
+(double-click enters a container or opens an inline text editor on a text leaf; `Enter` / `⌘Enter`
+saves, `Esc` pops selection context or cancels), press-dragging moves elements with 6 px
+viewport-scaled alignment guides, and `Arrow` (`1 dp`) / `Shift+Arrow` (`10 dp`) nudges the
+selected element. Switch registered catalog decks at any time from the leftmost `Deck: <title> ▾`
+Studio dropdown, the macOS **Deck** menu (`⌘⌥1`..`⌘⌥9`), or `-Dciacola.deck=<id>` on launch.
 
 The **Theme** menu switches between `Stage Dark` and `Keynote Light` live, opens the Design System
 Editor (`F7`), and configures **Motion** (`System`, `Reduced Motion`, `Full Motion`, or
@@ -88,14 +93,15 @@ The current slide and build step survive a reload.
 
 | Path | Purpose |
 |---|---|
-| [`deck/`](deck/) | Desktop application root (`Main.kt`, `FoundationDeck.kt`, `HotReloadStoryboard.kt`), integration & Spectre tests |
-| [`deck-core/`](deck-core/) | Shared theme (`DeckTheme`, `DeckDesign`, `DesignSystemOverrides`), `StageElementContracts`, `ReducedMotion`, speaker notes, review/timeline contracts, and Jewel theme helpers |
-| [`deck-effects/`](deck-effects/) | Keynote effects kit, `AnimatedMeshBackdrop`, `DeckTextRenderer`, `DeckWarpCodeCard`, and Skia path trimming |
+| [`deck/`](deck/) | Desktop application root (`Main.kt`, `DeckCatalog.kt`, `FoundationDeck.kt`, `HotReloadStoryboard.kt`, `studio/`) and integration / Spectre tests |
+| [`deck-core/`](deck-core/) | Shared theme (`DeckTheme`, `SlidePalette`, `DeckDesign`, `DesignSystemOverrides`), `StageElementContracts`, `StageInteraction`, `ReducedMotion`, speaker notes, review/timeline contracts, and Jewel theme helpers |
+| [`deck-effects/`](deck-effects/) | Slide authoring DSL (`authoring/ciacolaDeck`), Keynote effects kit, `DeckSkslShader`, `ElementConnector`, `AnimatedMeshBackdrop`, `DeckTextRenderer`, `DeckWarpCodeCard`, and Skia path trimming |
 | [`deck-presenter/`](deck-presenter/) | Jewel Presenter View window, talk timer, display routing, and live stage curtains/quick jump |
 | [`deck-review/`](deck-review/) | Ctrl+Click slide review overlay, capture store, anchored popups, and `agentapi` dispatch |
-| [`deck-timeline/`](deck-timeline/) | After Effects Timeline Studio, offscreen indexer, inspector, and `AgentBakeDispatcher` integration |
-| [`deck-inspector/`](deck-inspector/) | Live design system inspector, direct element editor, and deck linter module |
-| [`storyboard-text/`](storyboard-text/) | Upstream MagicText with focused hardening and tests |
+| [`deck-timeline/`](deck-timeline/) | After Effects Timeline Studio, offscreen indexer, `scrubStepPolicy`, inspector, and `AgentBakeDispatcher` integration |
+| [`deck-inspector/`](deck-inspector/) | Full-height unified Studio inspector: live design system editor, container-first direct element drag/snap editor, shader uniform sliders, and deck linter |
+| [`storyboard-text/`](storyboard-text/) | Upstream MagicText with Unicode tokenization, private root-active segment walk, single-draw exit snap, and stopword match pruning (`stableSegment` lives in `storyboard-easel/`) |
+| [`storyboard-warp/`](storyboard-warp/) | Upstream code-diff parser (`Kotlin`, `Json`, `Xml`, plus `Agsl`) with blank-line-safe `DiffLists` |
 | [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) | Architecture, source notes, attribution, retained TODOs, and verification record |
 | [`docs/MAGIC-TEXT-V2-SEAM.md`](docs/MAGIC-TEXT-V2-SEAM.md) | Design boundary and fixtures for a future paragraph-layout renderer |
 

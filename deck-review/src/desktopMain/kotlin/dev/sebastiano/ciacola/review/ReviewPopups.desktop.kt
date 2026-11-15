@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
+import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.ReviewStatusPalette
 import dev.sebastiano.ciacola.ui.iconKey
 import dev.sebastiano.ciacola.ui.labelText
@@ -60,7 +61,6 @@ import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.Outline
-import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
@@ -377,13 +377,12 @@ internal fun AnchoredCommentComposerPopup(
                         ) {
                             Text("Queue")
                         }
-                        DefaultButton(
+                        CiacolaPrimaryButton(
+                            text = "Send",
                             enabled = hasNote && !submitting,
                             onClick = { submit(dispatchImmediate = true) },
                             modifier = Modifier.testTag("ciacola-review-send-button"),
-                        ) {
-                            Text("Send")
-                        }
+                        )
                     }
                 }
             }
@@ -663,12 +662,11 @@ internal fun AnchoredSelectedPinPopup(
                                 OutlinedButton(onClick = { confirmDiscard = false }) {
                                     Text("Keep")
                                 }
-                                DefaultButton(
+                                CiacolaPrimaryButton(
+                                    text = "Discard",
                                     onClick = onDelete,
                                     modifier = Modifier.testTag("ciacola-review-pin-confirm-discard"),
-                                ) {
-                                    Text("Discard")
-                                }
+                                )
                             }
                         }
                     }
@@ -721,12 +719,11 @@ internal fun AnchoredSelectedPinPopup(
                                         "Retry dispatching this comment to agent"
                                     }
                                     Tooltip(tooltip = { Text(tip) }) {
-                                        DefaultButton(
+                                        CiacolaPrimaryButton(
+                                            text = label,
                                             onClick = onRetry,
                                             modifier = Modifier.testTag("ciacola-review-pin-retry"),
-                                        ) {
-                                            Text(label)
-                                        }
+                                        )
                                     }
                                 } else {
                                     Tooltip(tooltip = { Text("Configure Target Agent Conversation ID") }) {

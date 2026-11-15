@@ -88,7 +88,7 @@ import org.jetbrains.jewel.ui.typography
 
 const val DEFAULT_STUDIO_INSPECTOR_WIDTH_DP = 388f
 const val MIN_STUDIO_INSPECTOR_WIDTH_DP = 320f
-const val MAX_STUDIO_INSPECTOR_WIDTH_DP = 560f
+const val MAX_STUDIO_INSPECTOR_WIDTH_DP = 520f
 
 /**
  * Tabs hosted inside the unified right-hand Studio Inspector pane when Timeline Studio (`F5`/`F6`)
@@ -130,16 +130,25 @@ enum class UndoDomain {
 @Stable
 class StudioWorkspaceController(
     val timelineController: TimelineStudioController,
-    val timelineOverridesStore: TimelineOverridesStore,
+    timelineOverridesStore: TimelineOverridesStore,
     val designSystemStore: DesignSystemStore,
-    val elementOverridesStore: ElementOverridesStore,
-    val elementController: ElementEditorController,
-    val lintController: DeckLintController,
-    val stageInspectionRegistry: StageInspectionRegistry,
+    elementOverridesStore: ElementOverridesStore,
+    elementController: ElementEditorController,
+    lintController: DeckLintController,
+    stageInspectionRegistry: StageInspectionRegistry,
     var isTextInputActiveProvider: () -> Boolean = { false },
+    initialInspectorWidthDp: Float = DEFAULT_STUDIO_INSPECTOR_WIDTH_DP,
 ) {
+    var timelineOverridesStore by mutableStateOf(timelineOverridesStore)
+    var elementOverridesStore by mutableStateOf(elementOverridesStore)
+    var elementController by mutableStateOf(elementController)
+    var lintController by mutableStateOf(lintController)
+    var stageInspectionRegistry by mutableStateOf(stageInspectionRegistry)
+
     var activeTab by mutableStateOf(StudioInspectorTab.Motion)
-    var inspectorWidthDp by mutableFloatStateOf(DEFAULT_STUDIO_INSPECTOR_WIDTH_DP)
+    var inspectorWidthDp by mutableFloatStateOf(
+        initialInspectorWidthDp.coerceIn(MIN_STUDIO_INSPECTOR_WIDTH_DP, MAX_STUDIO_INSPECTOR_WIDTH_DP),
+    )
     var lastEditedDomain by mutableStateOf(UndoDomain.Motion)
     var swallowNextEscapeKeyUp by mutableStateOf(false)
 
@@ -147,6 +156,26 @@ class StudioWorkspaceController(
     var setDesignSidecarVisible: (Boolean) -> Unit = {}
     var lintSidecarVisibleProvider: () -> Boolean = { false }
     var setLintSidecarVisible: (Boolean) -> Unit = {}
+
+    var onInspectorWidthPersisted: ((Float) -> Unit)? = null
+    var onTogglePresenter: (() -> Unit)? = null
+    var onToggleDockedTimeline: (() -> Unit)? = null
+    var onToggleDetachedTimeline: (() -> Unit)? = null
+    var onSelectDeckByIndex: ((Int) -> Unit)? = null
+
+    fun updateForDeckSwitch(
+        newTimelineOverridesStore: TimelineOverridesStore,
+        newElementOverridesStore: ElementOverridesStore,
+        newElementController: ElementEditorController,
+        newLintController: DeckLintController,
+        newStageInspectionRegistry: StageInspectionRegistry,
+    ) {
+        timelineOverridesStore = newTimelineOverridesStore
+        elementOverridesStore = newElementOverridesStore
+        elementController = newElementController
+        lintController = newLintController
+        stageInspectionRegistry = newStageInspectionRegistry
+    }
 
     val isStudioOpen: Boolean
         get() = timelineController.authoringActive
@@ -282,6 +311,29 @@ class StudioWorkspaceController(
 
         if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed) {
             when (event.key) {
+                Key.F2 -> {
+                    onTogglePresenter?.let {
+                        it()
+                        return true
+                    }
+                }
+                Key.F5 -> {
+                    onToggleDockedTimeline?.let {
+                        it()
+                        return true
+                    }
+                }
+                Key.F6 -> {
+                    val custom = onToggleDetachedTimeline
+                    if (custom != null) {
+                        custom()
+                    } else {
+                        val next = !timelineController.detachedWindowVisible
+                        if (next) timelineController.dockedInStoryWindow = false
+                        timelineController.detachedWindowVisible = next
+                    }
+                    return true
+                }
                 Key.F7 -> {
                     toggleDesignSystemEditor()
                     return true
@@ -293,44 +345,32 @@ class StudioWorkspaceController(
             }
         }
 
+        val deckSwitcherMod = (event.isMetaPressed || event.isCtrlPressed) && event.isAltPressed && !event.isShiftPressed
+        if (event.type == KeyEventType.KeyDown && deckSwitcherMod) {
+            val deckIndex = when (event.key) {
+                Key.One -> 0
+                Key.Two -> 1
+                Key.Three -> 2
+                else -> -1
+            }
+            if (deckIndex >= 0 && onSelectDeckByIndex != null) {
+                onSelectDeckByIndex?.invoke(deckIndex)
+                return true
+            }
+        }
+
         if (elementController.inlineEditingElementId != null) {
             return false
         }
 
-        val elementSelectionActive = elementController.editorActive &&
-            activeTab == StudioInspectorTab.Element &&
-            elementController.selectedElementId != null
-        val elementOnCurrentBeat = elementSelectionActive && elementController.isSelectedElementOnCurrentBeat()
-
-        if (elementSelectionActive && event.type == KeyEventType.KeyDown && !event.isAltPressed) {
-            val step = if (event.isShiftPressed) 10f else 1f
-            when {
-                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionLeft -> {
-                    elementController.nudgeSelected(-step, 0f)
-                    return true
-                }
-                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionRight -> {
-                    elementController.nudgeSelected(step, 0f)
-                    return true
-                }
-                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionUp -> {
-                    elementController.nudgeSelected(0f, -step)
-                    return true
-                }
-                elementOnCurrentBeat && !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.DirectionDown -> {
-                    elementController.nudgeSelected(0f, step)
-                    return true
-                }
-                !event.isMetaPressed && !event.isCtrlPressed && event.key == Key.Escape -> {
-                    swallowNextEscapeKeyUp = true
-                    elementController.selectElement(null)
-                    return true
-                }
-                elementOnCurrentBeat && (event.isMetaPressed || event.isCtrlPressed) && (event.key == Key.Backspace || event.key == Key.Delete) -> {
-                    elementController.resetSelectedElement()
-                    return true
-                }
-            }
+        if (activeTab == StudioInspectorTab.Element &&
+            elementController.handleElementStageKeyEvent(
+                ev = event,
+                includeUndoShortcuts = false,
+                onEscapeHandled = { swallowNextEscapeKeyUp = true },
+            )
+        ) {
+            return true
         }
 
         if (isAnyAuthoringToolOpen && event.type == KeyEventType.KeyDown && !event.isAltPressed) {
@@ -356,12 +396,11 @@ class StudioWorkspaceController(
 @Composable
 fun StudioWorkspaceSyncEffects(workspace: StudioWorkspaceController) {
     val studioOpen = workspace.isStudioOpen
-    val anyAuthoringOpen = workspace.isAnyAuthoringToolOpen
     val activeTab = workspace.activeTab
     val elementPicking = studioOpen && activeTab == StudioInspectorTab.Element
 
     SideEffect {
-        workspace.elementController.editorActive = anyAuthoringOpen
+        workspace.elementController.editorActive = elementPicking
         workspace.elementController.elementPickingEnabled = elementPicking
         workspace.elementController.onStageKeyHandler = { ev ->
             workspace.handleStudioPreviewKey(ev)
@@ -476,10 +515,16 @@ fun StudioUnifiedInspectorPane(
                     interactionSource = splitterHover,
                     indication = null,
                     onClick = {},
-                    onDoubleClick = { workspace.inspectorWidthDp = DEFAULT_STUDIO_INSPECTOR_WIDTH_DP },
+                    onDoubleClick = {
+                        workspace.inspectorWidthDp = DEFAULT_STUDIO_INSPECTOR_WIDTH_DP
+                        workspace.onInspectorWidthPersisted?.invoke(DEFAULT_STUDIO_INSPECTOR_WIDTH_DP)
+                    },
                 )
                 .pointerInput(density) {
-                    detectHorizontalDragGestures { change, dragAmount ->
+                    detectHorizontalDragGestures(
+                        onDragEnd = { workspace.onInspectorWidthPersisted?.invoke(workspace.inspectorWidthDp) },
+                        onDragCancel = { workspace.onInspectorWidthPersisted?.invoke(workspace.inspectorWidthDp) },
+                    ) { change, dragAmount ->
                         change.consume()
                         val deltaDp = with(density) { dragAmount.toDp().value }
                         workspace.inspectorWidthDp = (workspace.inspectorWidthDp - deltaDp)

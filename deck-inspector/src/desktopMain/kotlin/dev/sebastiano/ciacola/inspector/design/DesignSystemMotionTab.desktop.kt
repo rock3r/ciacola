@@ -35,6 +35,7 @@ import dev.sebastiano.ciacola.theme.DesignSystemOverrides
 import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.MotionTokenOverrides
 import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
+import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -42,7 +43,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
-import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.GroupHeader
 import org.jetbrains.jewel.ui.component.OutlinedButton
@@ -362,15 +362,15 @@ private fun MotionPreviewBox(resolvedTheme: DeckTheme) {
         }
 
         Tooltip(tooltip = { Text("Trigger live preview using FadeMove, Stagger, and Pop tokens") }) {
-            DefaultButton(
+            CiacolaPrimaryButton(
+                text = "Preview Motion ▶",
                 onClick = { playCounter++ },
+                textStyle = JewelTheme.typography.small,
                 modifier = Modifier
                     .height(26.dp)
                     .designActivatableFocus(focusRingColor)
                     .testTag("design-motion-preview-play"),
-            ) {
-                Text("Preview Motion ▶", style = JewelTheme.typography.small, maxLines = 1)
-            }
+            )
         }
     }
 }

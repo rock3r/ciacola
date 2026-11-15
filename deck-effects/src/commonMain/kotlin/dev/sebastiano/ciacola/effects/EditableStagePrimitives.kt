@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,10 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -36,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,7 +43,9 @@ import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.LocalActiveBeatIndex
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
+import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
+import dev.sebastiano.ciacola.inspector.LocalStageParentElementId
 import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
 import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
@@ -54,6 +55,16 @@ import dev.sebastiano.ciacola.inspector.StageRootCoordinatesHolder
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
+
+/**
+ * Non-snapshot placement holder so placement-phase drags update coordinates and registry bounds
+ * without triggering slide recompositions.
+ */
+private class StagePlacementRef {
+    var coords: LayoutCoordinates? = null
+    var layoutResult: TextLayoutResult? = null
+    var stageAlphaProvider: () -> Float = { 1f }
+}
 
 /**
  * Resolves the effective background colour for the current composition subtree, falling back to the
@@ -145,10 +156,13 @@ fun DeckEditableText(
     val theme = LocalDeckTheme.current
     val patch = LocalElementOverrides.current.patchFor(elementId)
     val registry = LocalStageInspectionRegistry.current
+    val anchorRegistry = LocalStageAnchorRegistry.current
     val sceneCtx = LocalActiveSceneTimeline.current
     val beatIndex = LocalActiveBeatIndex.current
     val overviewOpen = LocalOverviewOpen.current
     val rootHolder = LocalStageRootCoordinates.current
+    val dragPreview = LocalStageDragPreview.current
+    val parentElementId = LocalStageParentElementId.current?.takeIf { it != elementId }
     val parentBg = effectiveBackgroundColor()
 
     val resolvedText = patch?.text ?: text
@@ -176,18 +190,22 @@ fun DeckEditableText(
 
     val shouldInspect = recordSnapshot && registry != null && !overviewOpen
     val ownerToken = remember { Any() }
-    var lastCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var lastLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-    var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
+    val placementRef = remember { StagePlacementRef() }
+
+    if (!mergeWithExistingBox && anchorRegistry != null) {
+        DisposableEffect(anchorRegistry, elementId) {
+            onDispose { anchorRegistry.remove(elementId, ownerToken) }
+        }
+    }
 
     if (shouldInspect && !mergeWithExistingBox) {
         DisposableEffect(registry, elementId, shouldInspect) {
-            onDispose { registry?.remove(elementId, ownerToken) }
+            onDispose { registry.remove(elementId, ownerToken) }
         }
     }
 
     fun publishSnapshot(coords: LayoutCoordinates?, layout: TextLayoutResult?) {
-        if (!shouldInspect || registry == null) return
+        if (!shouldInspect) return
         val sceneIndex = sceneCtx?.sceneIndex ?: 0
         val defaultWeight = style.fontWeight?.weight ?: 400
         val defaultSizeSp = if (style.fontSize.isSp) style.fontSize.value else 16f
@@ -226,38 +244,41 @@ fun DeckEditableText(
             effectiveBackground = existingNode?.effectiveBackground ?: effectiveBg,
             effectiveFontSizeSp = resolvedFontSizeSp,
             isEditable = true,
+            parentElementId = existingNode?.parentElementId ?: parentElementId,
+            shaderUniforms = existingNode?.shaderUniforms ?: emptyList(),
         )
         if (mergeWithExistingBox) {
             registry.record(
                 snapshot = snapshot,
-                alphaProvider = { stageAlphaProvider() },
+                alphaProvider = { placementRef.stageAlphaProvider() },
             )
         } else {
             registry.record(
                 snapshot = snapshot,
                 owner = ownerToken,
-                alphaProvider = { stageAlphaProvider() },
-                coordinatesProvider = { lastCoords },
+                alphaProvider = { placementRef.stageAlphaProvider() },
+                coordinatesProvider = { placementRef.coords },
                 stageRootProvider = { rootHolder?.coordinates },
             )
         }
     }
 
     if (shouldInspect) {
-        val coordsNow = lastCoords
-        val layoutNow = lastLayoutResult
-        val stageRootNow = rootHolder?.coordinates
+        observeStageRootCoordinates(rootHolder)
         SideEffect {
-            stageRootNow
-            publishSnapshot(coordsNow, layoutNow)
+            publishSnapshot(placementRef.coords, placementRef.layoutResult)
         }
     }
 
-    val offsetModifier = if (!mergeWithExistingBox && (patch?.offsetXDp != null || patch?.offsetYDp != null)) {
-        Modifier.offset(
-            x = (patch.offsetXDp ?: 0f).dp,
-            y = (patch.offsetYDp ?: 0f).dp,
-        )
+    val baseOffsetXDp = patch?.offsetXDp ?: 0f
+    val baseOffsetYDp = patch?.offsetYDp ?: 0f
+    val offsetModifier = if (!mergeWithExistingBox) {
+        Modifier.offset {
+            val preview = dragPreview?.offsets?.get(elementId)
+            val totalX = baseOffsetXDp + (preview?.x?.value ?: 0f)
+            val totalY = baseOffsetYDp + (preview?.y?.value ?: 0f)
+            IntOffset(totalX.dp.roundToPx(), totalY.dp.roundToPx())
+        }
     } else {
         Modifier
     }
@@ -294,16 +315,19 @@ fun DeckEditableText(
         textAlign = textAlign,
         softWrap = softWrap,
         onTextLayout = { result ->
-            lastLayoutResult = result
-            publishSnapshot(lastCoords, result)
+            placementRef.layoutResult = result
+            publishSnapshot(placementRef.coords, result)
         },
         modifier = modifier
-            .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
+            .modifierLocalConsumer { placementRef.stageAlphaProvider = ModifierLocalStageAlpha.current }
             .then(offsetModifier)
             .then(boxDecoModifier)
             .onPlaced { coords ->
-                lastCoords = coords
-                publishSnapshot(coords, lastLayoutResult)
+                placementRef.coords = coords
+                if (!mergeWithExistingBox) {
+                    anchorRegistry?.record(elementId, coords, ownerToken)
+                }
+                publishSnapshot(coords, placementRef.layoutResult)
             }
             .then(reviewMod),
     )
@@ -325,38 +349,48 @@ fun Modifier.editableBox(
     defaultCornerRadius: Dp = 0.dp,
     defaultPadding: Dp = 0.dp,
     recordSnapshot: Boolean = true,
+    defaultPaddingValues: PaddingValues? = null,
 ): Modifier = composed {
     val theme = LocalDeckTheme.current
     val patch = LocalElementOverrides.current.patchFor(elementId)
     val registry = LocalStageInspectionRegistry.current
+    val anchorRegistry = LocalStageAnchorRegistry.current
     val sceneCtx = LocalActiveSceneTimeline.current
     val beatIndex = LocalActiveBeatIndex.current
     val overviewOpen = LocalOverviewOpen.current
     val rootHolder = LocalStageRootCoordinates.current
+    val dragPreview = LocalStageDragPreview.current
+    val parentElementId = LocalStageParentElementId.current?.takeIf { it != elementId }
     val parentBg = LocalEffectiveBackgroundColor.current.takeOrElse { theme.colors.background }
 
     val fillColor = patch?.fillColorArgb?.let(::Color) ?: defaultFill
     val borderColor = patch?.borderColorArgb?.let(::Color) ?: defaultBorderColor
     val borderWidth = (patch?.borderWidthDp ?: defaultBorderWidth.value).coerceAtLeast(0f).dp
     val cornerRadius = (patch?.cornerRadiusDp ?: defaultCornerRadius.value).coerceAtLeast(0f).dp
-    val padding = (patch?.paddingDp ?: defaultPadding.value).coerceAtLeast(0f).dp
-    val offsetX = (patch?.offsetXDp ?: 0f).dp
-    val offsetY = (patch?.offsetYDp ?: 0f).dp
+    val overriddenPaddingDp = patch?.paddingDp?.coerceAtLeast(0f)?.dp
+    val defaultPaddingDpValue = defaultPaddingValues?.calculateTopPadding()?.value ?: defaultPadding.value
+    val baseOffsetXDp = patch?.offsetXDp ?: 0f
+    val baseOffsetYDp = patch?.offsetYDp ?: 0f
 
     val effectiveBg = compositeBackgroundOver(fillColor, parentBg)
     val shouldInspect = recordSnapshot && registry != null && !overviewOpen
     val ownerToken = remember { Any() }
-    var lastCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var stageAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
+    val placementRef = remember { StagePlacementRef() }
+
+    if (anchorRegistry != null) {
+        DisposableEffect(anchorRegistry, elementId) {
+            onDispose { anchorRegistry.remove(elementId, ownerToken) }
+        }
+    }
 
     if (shouldInspect) {
         DisposableEffect(registry, elementId, shouldInspect) {
-            onDispose { registry?.remove(elementId, ownerToken) }
+            onDispose { registry.remove(elementId, ownerToken) }
         }
     }
 
     fun publishBoxSnapshot(coords: LayoutCoordinates?) {
-        if (!shouldInspect || registry == null) return
+        if (!shouldInspect) return
         val sceneIndex = sceneCtx?.sceneIndex ?: 0
         val existingMeta = registry.metadataFor(elementId)
         registry.recordMetadata(
@@ -366,7 +400,7 @@ fun Modifier.editableBox(
                 defaultBorderColor = defaultBorderColor.takeIf { it != Color.Unspecified },
                 defaultBorderWidthDp = defaultBorderWidth.value,
                 defaultCornerRadiusDp = defaultCornerRadius.value,
-                defaultPaddingDp = defaultPadding.value,
+                defaultPaddingDp = defaultPaddingDpValue,
             ),
             owner = ownerToken,
         )
@@ -387,22 +421,22 @@ fun Modifier.editableBox(
             effectiveBackground = effectiveBg,
             effectiveFontSizeSp = existing?.effectiveFontSizeSp,
             isEditable = true,
+            parentElementId = parentElementId,
+            shaderUniforms = existing?.shaderUniforms ?: emptyList(),
         )
         registry.record(
             snapshot = snapshot,
             owner = ownerToken,
-            alphaProvider = { stageAlphaProvider() },
-            coordinatesProvider = { lastCoords },
+            alphaProvider = { placementRef.stageAlphaProvider() },
+            coordinatesProvider = { placementRef.coords },
             stageRootProvider = { rootHolder?.coordinates },
         )
     }
 
     if (shouldInspect) {
-        val coordsNow = lastCoords
-        val stageRootNow = rootHolder?.coordinates
+        observeStageRootCoordinates(rootHolder)
         SideEffect {
-            stageRootNow
-            publishBoxSnapshot(coordsNow)
+            publishBoxSnapshot(placementRef.coords)
         }
     }
 
@@ -412,10 +446,16 @@ fun Modifier.editableBox(
         (borderWidth > 0.dp && borderColor != Color.Unspecified && borderColor.alpha > 0f)
 
     this
-        .modifierLocalConsumer { stageAlphaProvider = ModifierLocalStageAlpha.current }
-        .let { if (offsetX != 0.dp || offsetY != 0.dp) it.offset(x = offsetX, y = offsetY) else it }
+        .modifierLocalConsumer { placementRef.stageAlphaProvider = ModifierLocalStageAlpha.current }
+        .offset {
+            val preview = dragPreview?.offsets?.get(elementId)
+            val totalX = baseOffsetXDp + (preview?.x?.value ?: 0f)
+            val totalY = baseOffsetYDp + (preview?.y?.value ?: 0f)
+            IntOffset(totalX.dp.roundToPx(), totalY.dp.roundToPx())
+        }
         .onPlaced { coords ->
-            lastCoords = coords
+            placementRef.coords = coords
+            anchorRegistry?.record(elementId, coords, ownerToken)
             publishBoxSnapshot(coords)
         }
         .reviewTarget(kind = kind, label = label, isContainer = true)
@@ -428,12 +468,20 @@ fun Modifier.editableBox(
                 it
             }
         }
-        .let { if (padding > 0.dp) it.padding(padding) else it }
+        .let {
+            when {
+                overriddenPaddingDp != null -> if (overriddenPaddingDp > 0.dp) it.padding(overriddenPaddingDp) else it
+                defaultPaddingValues != null -> it.padding(defaultPaddingValues)
+                defaultPadding > 0.dp -> it.padding(defaultPadding)
+                else -> it
+            }
+        }
 }
 
 /**
  * Container composable applying [Modifier.editableBox] and updating [LocalEffectiveBackgroundColor]
- * for all descendants so nested text nodes report accurate contrast backgrounds.
+ * and [LocalStageParentElementId] for all descendants so nested text nodes report accurate contrast
+ * backgrounds and container-first selection hierarchy.
  */
 @Composable
 fun EditableBox(
@@ -447,6 +495,7 @@ fun EditableBox(
     defaultCornerRadius: Dp = 0.dp,
     defaultPadding: Dp = 0.dp,
     contentAlignment: Alignment = Alignment.TopStart,
+    defaultPaddingValues: PaddingValues? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val patch = LocalElementOverrides.current.patchFor(elementId)
@@ -461,10 +510,14 @@ fun EditableBox(
             defaultBorderWidth = defaultBorderWidth,
             defaultCornerRadius = defaultCornerRadius,
             defaultPadding = defaultPadding,
+            defaultPaddingValues = defaultPaddingValues,
         ),
         contentAlignment = contentAlignment,
     ) {
-        CompositionLocalProvider(LocalEffectiveBackgroundColor provides effectiveBg) {
+        CompositionLocalProvider(
+            LocalEffectiveBackgroundColor provides effectiveBg,
+            LocalStageParentElementId provides elementId,
+        ) {
             content()
         }
     }
@@ -472,7 +525,8 @@ fun EditableBox(
 
 /**
  * Standard deck surface card with rounded shape, optional border/padding, automatic
- * [LocalEffectiveBackgroundColor] propagation, and optional [elementId] editing support.
+ * [LocalEffectiveBackgroundColor] and [LocalStageParentElementId] propagation, and optional
+ * [elementId] editing support.
  */
 @Composable
 fun DeckSurfaceCard(
@@ -528,6 +582,63 @@ fun DeckSurfaceCard(
 }
 
 /**
+ * [DeckSurfaceCard] overload accepting asymmetric [PaddingValues] while preserving
+ * [LocalEffectiveBackgroundColor], [LocalStageParentElementId], and live [elementId] editing.
+ */
+@Composable
+fun DeckSurfaceCard(
+    modifier: Modifier = Modifier,
+    elementId: String? = null,
+    label: String = elementId ?: "Surface Card",
+    kind: String = "SurfaceCard",
+    fillColor: Color = LocalDeckTheme.current.colors.surface,
+    borderColor: Color = LocalDeckTheme.current.colors.border,
+    borderWidth: Dp = LocalDeckTheme.current.styles.codeCard.borderWidth,
+    cornerRadius: Dp = LocalDeckTheme.current.styles.codeCard.cornerRadius,
+    contentPadding: PaddingValues,
+    contentAlignment: Alignment = Alignment.TopStart,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    if (elementId != null) {
+        EditableBox(
+            elementId = elementId,
+            modifier = modifier,
+            label = label,
+            kind = kind,
+            defaultFill = fillColor,
+            defaultBorderColor = borderColor,
+            defaultBorderWidth = borderWidth,
+            defaultCornerRadius = cornerRadius,
+            defaultPaddingValues = contentPadding,
+            contentAlignment = contentAlignment,
+            content = content,
+        )
+    } else {
+        val parentBg = effectiveBackgroundColor()
+        val effectiveBg = compositeBackgroundOver(fillColor, parentBg)
+        val shape = RoundedCornerShape(cornerRadius)
+        Box(
+            modifier = modifier
+                .clip(shape)
+                .let { if (fillColor != Color.Unspecified && fillColor.alpha > 0f) it.background(fillColor, shape) else it }
+                .let {
+                    if (borderWidth > 0.dp && borderColor != Color.Unspecified && borderColor.alpha > 0f) {
+                        it.border(borderWidth, borderColor, shape)
+                    } else {
+                        it
+                    }
+                }
+                .padding(contentPadding),
+            contentAlignment = contentAlignment,
+        ) {
+            CompositionLocalProvider(LocalEffectiveBackgroundColor provides effectiveBg) {
+                content()
+            }
+        }
+    }
+}
+
+/**
  * Records a non-[DeckEditableText] text element (such as `DottedLeaderRow` trailing `BasicText` or
  * `DeckMagicText`) into [StageInspectionRegistry] and [StageElementMetadata].
  */
@@ -549,6 +660,16 @@ internal fun RecordStageTextInspection(
     alphaProvider: (() -> Float)? = null,
 ) {
     if (elementId == null) return
+    val anchorRegistry = LocalStageAnchorRegistry.current
+    val ownerToken = remember { Any() }
+    if (anchorRegistry != null) {
+        DisposableEffect(anchorRegistry, elementId) {
+            onDispose { anchorRegistry.remove(elementId, ownerToken) }
+        }
+        SideEffect {
+            anchorRegistry.record(elementId, coords, ownerToken)
+        }
+    }
     val registry = LocalStageInspectionRegistry.current ?: return
     val overviewOpen = LocalOverviewOpen.current
     if (overviewOpen) return
@@ -556,15 +677,14 @@ internal fun RecordStageTextInspection(
     val sceneCtx = LocalActiveSceneTimeline.current
     val beatIndex = LocalActiveBeatIndex.current
     val rootHolder = LocalStageRootCoordinates.current
-    val stageRootNow = rootHolder?.coordinates
-    val ownerToken = remember { Any() }
+    val parentElementId = LocalStageParentElementId.current?.takeIf { it != elementId }
+    observeStageRootCoordinates(rootHolder)
 
     DisposableEffect(registry, elementId) {
         onDispose { registry.remove(elementId, ownerToken) }
     }
 
     SideEffect {
-        stageRootNow
         registry.recordMetadata(
             meta = StageElementMetadata(
                 elementId = elementId,
@@ -593,6 +713,7 @@ internal fun RecordStageTextInspection(
                 effectiveBackground = effectiveBackground,
                 effectiveFontSizeSp = effectiveFontSizeSp,
                 isEditable = true,
+                parentElementId = parentElementId,
             ),
             owner = ownerToken,
             alphaProvider = alphaProvider,
@@ -600,4 +721,8 @@ internal fun RecordStageTextInspection(
             stageRootProvider = { rootHolder?.coordinates },
         )
     }
+}
+
+internal fun observeStageRootCoordinates(holder: StageRootCoordinatesHolder?) {
+    if (holder?.coordinates != null) return
 }

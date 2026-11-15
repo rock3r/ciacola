@@ -3,6 +3,8 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -29,14 +32,27 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import java.awt.Cursor
 import kotlin.math.roundToInt
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
@@ -220,6 +236,17 @@ fun TimelineBlockInspector(
                 onInc = {
                     controller.updateLoopPeriod(loopId, (currentPeriod + 500L).coerceAtMost(30_000L))
                 },
+                onCommitTypedValue = { raw ->
+                    parseNumericStepperInt(raw)?.let { parsed ->
+                        controller.updateLoopPeriod(loopId, parsed.toLong().coerceIn(500L, 30_000L))
+                    }
+                },
+                onDragStart = { controller.overridesStore.beginEditGesture() },
+                onDragEnd = { controller.overridesStore.endEditGesture() },
+                onDragSteps = { steps ->
+                    val next = (currentPeriod + steps * 100L).coerceIn(500L, 30_000L)
+                    controller.updateLoopPeriod(loopId, next)
+                },
             )
             InfoText("Enter the loop sub-composition to scrub harmonic channels directly on the slide canvas.")
             return@Column
@@ -271,6 +298,20 @@ fun TimelineBlockInspector(
                             it.copy(enterBeat = (effectiveBeat + 1).coerceIn(0, maxBeatInScene))
                         }
                     },
+                    onCommitTypedValue = { raw ->
+                        parseNumericStepperInt(raw)?.let { parsed ->
+                            controller.overridesStore.updateTrack(selectedRow.trackId) {
+                                it.copy(enterBeat = parsed.coerceIn(0, maxBeatInScene))
+                            }
+                        }
+                    },
+                    onDragStart = { controller.overridesStore.beginEditGesture() },
+                    onDragEnd = { controller.overridesStore.endEditGesture() },
+                    onDragSteps = { steps ->
+                        controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
+                            it.copy(enterBeat = (effectiveBeat + steps).coerceIn(0, maxBeatInScene))
+                        }
+                    },
                 )
             }
             NumericStepperRow(
@@ -292,6 +333,24 @@ fun TimelineBlockInspector(
                         it.copy(durationMs = stored)
                     }
                 },
+                onCommitTypedValue = { raw ->
+                    parseNumericStepperInt(raw)?.let { parsed ->
+                        val nextTotal = parsed.coerceIn(60 + staggerSpreadMs, 4_000 + staggerSpreadMs)
+                        val stored = (nextTotal - staggerSpreadMs).coerceIn(60, 4_000)
+                        controller.overridesStore.updateTrack(selectedRow.trackId) {
+                            it.copy(durationMs = stored)
+                        }
+                    }
+                },
+                onDragStart = { controller.overridesStore.beginEditGesture() },
+                onDragEnd = { controller.overridesStore.endEditGesture() },
+                onDragSteps = { steps ->
+                    val nextTotal = (effectiveDuration + steps * 25).coerceIn(60 + staggerSpreadMs, 4_000 + staggerSpreadMs)
+                    val stored = (nextTotal - staggerSpreadMs).coerceIn(60, 4_000)
+                    controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
+                        it.copy(durationMs = stored)
+                    }
+                },
             )
         NumericStepperRow(
             label = "Delay",
@@ -306,6 +365,20 @@ fun TimelineBlockInspector(
             onInc = {
                 controller.overridesStore.updateTrack(selectedRow.trackId) {
                     it.copy(delayMs = (effectiveDelay + 25).coerceAtMost(2_000))
+                }
+            },
+            onCommitTypedValue = { raw ->
+                parseNumericStepperInt(raw)?.let { parsed ->
+                    controller.overridesStore.updateTrack(selectedRow.trackId) {
+                        it.copy(delayMs = parsed.coerceIn(0, 2_000))
+                    }
+                }
+            },
+            onDragStart = { controller.overridesStore.beginEditGesture() },
+            onDragEnd = { controller.overridesStore.endEditGesture() },
+            onDragSteps = { steps ->
+                controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
+                    it.copy(delayMs = (effectiveDelay + steps * 15).coerceIn(0, 2_000))
                 }
             },
         )
@@ -325,6 +398,20 @@ fun TimelineBlockInspector(
                 onInc = {
                     controller.overridesStore.updateTrack(selectedRow.trackId) {
                         it.copy(staggerStepMs = (effStep + 15).coerceAtMost(600))
+                    }
+                },
+                onCommitTypedValue = { raw ->
+                    parseNumericStepperInt(raw)?.let { parsed ->
+                        controller.overridesStore.updateTrack(selectedRow.trackId) {
+                            it.copy(staggerStepMs = parsed.coerceIn(0, 600))
+                        }
+                    }
+                },
+                onDragStart = { controller.overridesStore.beginEditGesture() },
+                onDragEnd = { controller.overridesStore.endEditGesture() },
+                onDragSteps = { steps ->
+                    controller.overridesStore.updateTrack(selectedRow.trackId, coalesce = true) {
+                        it.copy(staggerStepMs = (effStep + steps * 10).coerceIn(0, 600))
                     }
                 },
             )
@@ -442,7 +529,7 @@ private fun LoopSubCompInspector(
             .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(INSPECTOR_WIDTH))
             .fillMaxHeight()
             .background(globalColors.panelBackground)
-            .padding(10.dp),
+            .padding(start = 10.dp, top = 10.dp, bottom = 10.dp, end = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         GroupHeader(if (isOverridden) "● Loop Sub-Composition:" else "Loop Sub-Composition:")
@@ -480,9 +567,29 @@ private fun LoopSubCompInspector(
             onInc = {
                 controller.updateLoopPeriod(loopId, (currentPeriod + 500L).coerceAtMost(30_000L))
             },
+            onCommitTypedValue = { raw ->
+                parseNumericStepperInt(raw)?.let { parsed ->
+                    controller.updateLoopPeriod(loopId, parsed.toLong().coerceIn(500L, 30_000L))
+                }
+            },
+            onDragStart = { controller.overridesStore.beginEditGesture() },
+            onDragEnd = { controller.overridesStore.endEditGesture() },
+            onDragSteps = { steps ->
+                controller.updateLoopPeriod(loopId, (currentPeriod + steps * 100L).coerceIn(500L, 30_000L))
+            },
         )
         InfoText("Scrubbing the sub-comp playhead drives rememberDeckLoopMillis directly on the live slide canvas.")
     }
+}
+
+private fun parseNumericStepperInt(raw: String): Int? {
+    val cleaned = raw.trim()
+        .removePrefix("B")
+        .removePrefix("b")
+        .removeSuffix("ms")
+        .removeSuffix("MS")
+        .trim()
+    return cleaned.toIntOrNull()
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -494,14 +601,68 @@ internal fun NumericStepperRow(
     incTag: String,
     onDec: () -> Unit,
     onInc: () -> Unit,
+    onCommitTypedValue: ((String) -> Unit)? = null,
+    onDragSteps: ((Int) -> Unit)? = null,
+    onDragStart: (() -> Unit)? = null,
+    onDragEnd: (() -> Unit)? = null,
 ) {
     val focusRingColor = rememberAccessibleFocusRingColor()
+    val globalColors = JewelTheme.globalColors
+    var editing by remember(decTag) { mutableStateOf(false) }
+    var draft by remember(decTag, valueText) { mutableStateOf(valueText) }
+    var inputHadFocus by remember(decTag) { mutableStateOf(false) }
+    val inputFocusRequester = remember(decTag) { FocusRequester() }
+    val latestOnDragSteps by rememberUpdatedState(onDragSteps)
+    val latestOnDragStart by rememberUpdatedState(onDragStart)
+    val latestOnDragEnd by rememberUpdatedState(onDragEnd)
+
+    LaunchedEffect(editing) {
+        if (editing) {
+            inputHadFocus = false
+            runCatching { inputFocusRequester.requestFocus() }
+        }
+    }
+
+    val labelModifier = if (onDragSteps != null) {
+        Modifier
+            .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR)))
+            .pointerInput(decTag) {
+                var accumPx = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        accumPx = 0f
+                        latestOnDragStart?.invoke()
+                    },
+                    onDragEnd = { latestOnDragEnd?.invoke() },
+                    onDragCancel = { latestOnDragEnd?.invoke() },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        accumPx += dragAmount
+                        val stepPx = 10f
+                        val steps = (accumPx / stepPx).toInt()
+                        if (steps != 0) {
+                            accumPx -= steps * stepPx
+                            latestOnDragSteps?.invoke(steps)
+                        }
+                    },
+                )
+            }
+            .testTag("$decTag-label")
+    } else {
+        Modifier.testTag("$decTag-label")
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth().height(26.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = JewelTheme.typography.small, color = JewelTheme.globalColors.text.info)
+        Text(
+            text = label,
+            style = JewelTheme.typography.small,
+            color = globalColors.text.info,
+            modifier = labelModifier,
+        )
         Row(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -517,13 +678,77 @@ internal fun NumericStepperRow(
                     Icon(AllIconsKeys.General.Remove, contentDescription = "Decrease $label", modifier = Modifier.size(12.dp))
                 }
             }
-            Text(
-                text = valueText,
-                style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
-                color = JewelTheme.globalColors.text.normal,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(58.dp).testTag("$decTag-value"),
-            )
+            if (editing && onCommitTypedValue != null) {
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    textStyle = JewelTheme.typography.small.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = globalColors.text.normal,
+                        textAlign = TextAlign.Center,
+                    ),
+                    cursorBrush = SolidColor(globalColors.outlines.focused),
+                    modifier = Modifier
+                        .width(58.dp)
+                        .border(1.dp, globalColors.outlines.focused, RoundedCornerShape(3.dp))
+                        .padding(horizontal = 3.dp, vertical = 2.dp)
+                        .focusRequester(inputFocusRequester)
+                        .studioTextInputFocus()
+                        .onFocusChanged { state ->
+                            if (state.isFocused) {
+                                inputHadFocus = true
+                            } else if (inputHadFocus && editing) {
+                                inputHadFocus = false
+                                editing = false
+                                onCommitTypedValue(draft)
+                            }
+                        }
+                        .onPreviewKeyEvent { ev ->
+                            if (ev.type == KeyEventType.KeyDown) {
+                                when (ev.key) {
+                                    Key.Enter, Key.NumPadEnter -> {
+                                        editing = false
+                                        onCommitTypedValue(draft)
+                                        true
+                                    }
+                                    Key.Escape -> {
+                                        editing = false
+                                        draft = valueText
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else {
+                                false
+                            }
+                        }
+                        .onKeyEvent { true }
+                        .testTag("$decTag-input"),
+                )
+            } else {
+                Text(
+                    text = valueText,
+                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                    color = globalColors.text.normal,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .width(58.dp)
+                        .then(
+                            if (onCommitTypedValue != null) {
+                                Modifier
+                                    .pointerHoverIcon(PointerIcon.Text)
+                                    .clickable {
+                                        draft = valueText.filter { it.isDigit() || it == '-' }
+                                        editing = true
+                                    }
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .testTag("$decTag-value"),
+                )
+            }
             Tooltip(tooltip = { Text("Increase $label") }) {
                 IconButton(
                     onClick = onInc,

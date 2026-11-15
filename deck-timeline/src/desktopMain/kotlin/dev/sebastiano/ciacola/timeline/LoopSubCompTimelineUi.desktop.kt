@@ -272,10 +272,11 @@ internal fun resolveTimelineBlockHit(
     headerTotalPx: Float,
     rowHeightPx: Float,
     liveOverrides: Map<String, TrackOverride>,
+    tracks: List<TimelineTrackRow> = snapshot.tracks,
 ): TimelineBlockHit? {
     if (pos.y <= headerTotalPx) return null
     val trackIdx = ((pos.y - headerTotalPx + viewport.verticalScroll.value) / rowHeightPx).toInt()
-    val hitRow = snapshot.tracks.getOrNull(trackIdx) ?: return null
+    val hitRow = tracks.getOrNull(trackIdx) ?: return null
     val pxPerMs = viewport.pxPerMs(surface)
     val hitBlock = hitRow.blocks.firstOrNull { blk ->
         val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(hitRow, blk, liveOverrides[blk.trackId])

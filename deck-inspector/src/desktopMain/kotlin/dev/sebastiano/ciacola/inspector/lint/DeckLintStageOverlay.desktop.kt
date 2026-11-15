@@ -168,6 +168,7 @@ fun StageLintHighlightOverlay(
 ) {
     if (
         !isInspectionVisible ||
+        !controller.isStageSettled ||
         LocalPresentingFullscreen.current ||
         LocalTimelineOffscreen.current ||
         LocalOverviewOpen.current ||

@@ -9,6 +9,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsOwner
@@ -102,6 +104,7 @@ internal object SemanticsSlideScanner {
         stageWidth: Float = STAGE_WIDTH_PX,
         stageHeight: Float = STAGE_HEIGHT_PX,
         fallbackBackground: Color? = null,
+        stageRootCoordinates: LayoutCoordinates? = null,
     ): List<LintTextNodeCandidate> {
         val windows = runCatching {
             AwtWindow.getWindows().filterIsInstance<ComposeWindow>().filter { it.isShowing }
@@ -114,6 +117,7 @@ internal object SemanticsSlideScanner {
             owners = owners,
             pixelBuffer = pixelBuffer,
             explicitStageRootBox = stageBoundsInRoot,
+            explicitStageRootCoordinates = stageRootCoordinates,
             stageWidth = stageWidth,
             stageHeight = stageHeight,
             fallbackBackground = fallbackBackground,
@@ -124,6 +128,7 @@ internal object SemanticsSlideScanner {
         owners: Collection<SemanticsOwner>,
         pixelBuffer: StagePixelBuffer?,
         explicitStageRootBox: Rect? = null,
+        explicitStageRootCoordinates: LayoutCoordinates? = null,
         stageWidth: Float = STAGE_WIDTH_PX,
         stageHeight: Float = STAGE_HEIGHT_PX,
         fallbackBackground: Color? = null,
@@ -134,6 +139,10 @@ internal object SemanticsSlideScanner {
         for (owner in owners) {
             val rootNode = owner.unmergedRootSemanticsNode
             val stageRootNode = findStageRoot(rootNode)
+            val stageRootCoords = explicitStageRootCoordinates?.takeIf { it.isAttached }
+                ?: runCatching { stageRootNode?.layoutInfo?.coordinates }.getOrNull()?.takeIf { it.isAttached }
+                ?: runCatching { rootNode.layoutInfo.coordinates }.getOrNull()?.takeIf { it.isAttached }
+
             val rootBox = explicitStageRootBox
                 ?: stageRootNode?.boundsInRoot?.takeIf { it.width > 1f && it.height > 1f }
                 ?: rootNode.boundsInRoot.takeIf { it.width > 1f && it.height > 1f }
@@ -141,11 +150,24 @@ internal object SemanticsSlideScanner {
 
             val scaleX = stageWidth / rootBox.width.coerceAtLeast(1f)
             val scaleY = stageHeight / rootBox.height.coerceAtLeast(1f)
+            val coordsScaleX = if (stageRootCoords != null && stageRootCoords.size.width > 0) {
+                stageWidth / stageRootCoords.size.width.toFloat()
+            } else {
+                scaleX
+            }
+            val coordsScaleY = if (stageRootCoords != null && stageRootCoords.size.height > 0) {
+                stageHeight / stageRootCoords.size.height.toFloat()
+            } else {
+                scaleY
+            }
             val startNode = stageRootNode ?: rootNode
 
             walkNode(
                 node = startNode,
                 ancestors = emptySet(),
+                stageRootCoords = stageRootCoords,
+                coordsScaleX = coordsScaleX,
+                coordsScaleY = coordsScaleY,
                 rootBox = rootBox,
                 scaleX = scaleX,
                 scaleY = scaleY,
@@ -175,6 +197,9 @@ internal object SemanticsSlideScanner {
     private fun walkNode(
         node: SemanticsNode,
         ancestors: Set<Int>,
+        stageRootCoords: LayoutCoordinates?,
+        coordsScaleX: Float,
+        coordsScaleY: Float,
         rootBox: Rect,
         scaleX: Float,
         scaleY: Float,
@@ -207,6 +232,9 @@ internal object SemanticsSlideScanner {
                         ancestors = ancestors,
                         layout = layout,
                         effectiveAlpha = effectiveAlpha,
+                        stageRootCoords = stageRootCoords,
+                        coordsScaleX = coordsScaleX,
+                        coordsScaleY = coordsScaleY,
                         rootBox = rootBox,
                         scaleX = scaleX,
                         scaleY = scaleY,
@@ -224,6 +252,9 @@ internal object SemanticsSlideScanner {
             walkNode(
                 node = child,
                 ancestors = nextAncestors,
+                stageRootCoords = stageRootCoords,
+                coordsScaleX = coordsScaleX,
+                coordsScaleY = coordsScaleY,
                 rootBox = rootBox,
                 scaleX = scaleX,
                 scaleY = scaleY,
@@ -242,6 +273,9 @@ internal object SemanticsSlideScanner {
         ancestors: Set<Int>,
         layout: TextLayoutResult,
         effectiveAlpha: Float,
+        stageRootCoords: LayoutCoordinates?,
+        coordsScaleX: Float,
+        coordsScaleY: Float,
         rootBox: Rect,
         scaleX: Float,
         scaleY: Float,
@@ -253,18 +287,66 @@ internal object SemanticsSlideScanner {
         val rawText = layout.layoutInput.text.text
         if (rawText.isBlank()) return null
 
-        val posInRoot = node.positionInRoot
-        val rawSize = Size(node.size.width.toFloat(), node.size.height.toFloat())
-        val unclippedRoot = Rect(posInRoot, rawSize)
-        val clippedRoot = node.boundsInRoot
+        val nodeCoords = runCatching { node.layoutInfo.coordinates }.getOrNull()?.takeIf { it.isAttached }
+        val canUseLocalBoundingBox = stageRootCoords != null &&
+            stageRootCoords.isAttached &&
+            nodeCoords != null &&
+            stageRootCoords.size.width > 0 &&
+            stageRootCoords.size.height > 0 &&
+            runCatching { stageRootCoords.findRootCoordinates() === nodeCoords.findRootCoordinates() }.getOrDefault(false)
 
-        val unclippedStage = mapRectToStage(unclippedRoot, rootBox, scaleX, scaleY)
-        val clippedStage = if (clippedRoot.width > 0.5f && clippedRoot.height > 0.5f) {
-            mapRectToStage(clippedRoot, rootBox, scaleX, scaleY)
+        val unclippedStage: Rect
+        val clippedStage: Rect
+        if (canUseLocalBoundingBox) {
+            val rawUnclipped = runCatching {
+                stageRootCoords!!.localBoundingBoxOf(nodeCoords!!, clipBounds = false)
+            }.getOrNull()
+            val rawClipped = runCatching {
+                stageRootCoords!!.localBoundingBoxOf(nodeCoords!!, clipBounds = true)
+            }.getOrNull()
+            if (rawUnclipped != null) {
+                unclippedStage = Rect(
+                    left = rawUnclipped.left * coordsScaleX,
+                    top = rawUnclipped.top * coordsScaleY,
+                    right = rawUnclipped.right * coordsScaleX,
+                    bottom = rawUnclipped.bottom * coordsScaleY,
+                )
+                clippedStage = if (rawClipped != null && rawClipped.width > 0.5f && rawClipped.height > 0.5f) {
+                    Rect(
+                        left = rawClipped.left * coordsScaleX,
+                        top = rawClipped.top * coordsScaleY,
+                        right = rawClipped.right * coordsScaleX,
+                        bottom = rawClipped.bottom * coordsScaleY,
+                    )
+                } else {
+                    unclippedStage
+                }
+            } else {
+                val mappedClipped = mapRectToStage(node.boundsInRoot, rootBox, scaleX, scaleY)
+                clippedStage = mappedClipped
+                unclippedStage = mappedClipped
+            }
         } else {
-            unclippedStage
+            // Fallback when coordinates are detached: map boundsInRoot cleanly without mixing
+            // scaled root positions with unscaled local SemanticsNode.size.
+            val mappedClipped = mapRectToStage(node.boundsInRoot, rootBox, scaleX, scaleY)
+            clippedStage = mappedClipped
+            unclippedStage = mappedClipped
         }
         val stageBounds = clippedStage
+
+        // Map local layout pixels into stage pixels consistently with unclippedStage so scaled
+        // preview stages (FixedSize placeWithLayer) never double-multiply text widths.
+        val glyphScaleX = if (layout.size.width > 0) {
+            unclippedStage.width / layout.size.width.toFloat()
+        } else {
+            coordsScaleX
+        }
+        val glyphScaleY = if (layout.size.height > 0) {
+            unclippedStage.height / layout.size.height.toFloat()
+        } else {
+            coordsScaleY
+        }
 
         // Compute tight glyph bounding box for pixel sampling around actual drawn text lines.
         val lineCount = layout.lineCount
@@ -279,12 +361,12 @@ internal object SemanticsSlideScanner {
             val r = layout.getLineRight(lineIdx)
             val t = layout.getLineTop(lineIdx)
             val b = layout.getLineBottom(lineIdx)
-            val w = (r - l).coerceAtLeast(0f) * scaleX
+            val w = (r - l).coerceAtLeast(0f) * glyphScaleX
             if (w > maxLineWidthPx) maxLineWidthPx = w
-            glyphLeft = minOf(glyphLeft, (posInRoot.x + l - rootBox.left) * scaleX)
-            glyphTop = minOf(glyphTop, (posInRoot.y + t - rootBox.top) * scaleY)
-            glyphRight = maxOf(glyphRight, (posInRoot.x + r - rootBox.left) * scaleX)
-            glyphBottom = maxOf(glyphBottom, (posInRoot.y + b - rootBox.top) * scaleY)
+            glyphLeft = minOf(glyphLeft, unclippedStage.left + l * glyphScaleX)
+            glyphTop = minOf(glyphTop, unclippedStage.top + t * glyphScaleY)
+            glyphRight = maxOf(glyphRight, unclippedStage.left + r * glyphScaleX)
+            glyphBottom = maxOf(glyphBottom, unclippedStage.top + b * glyphScaleY)
             if (layout.isLineEllipsized(lineIdx)) {
                 hasEllipsis = true
             }
@@ -296,12 +378,12 @@ internal object SemanticsSlideScanner {
         }
 
         val horizOverflowPx = if (layout.didOverflowWidth) {
-            (maxLineWidthPx - layout.size.width.toFloat() * scaleX).coerceAtLeast(0f)
+            (maxLineWidthPx - layout.size.width.toFloat() * glyphScaleX).coerceAtLeast(0f)
         } else {
             0f
         }
         val vertOverflowPx = if (layout.didOverflowHeight && lineCount > 0) {
-            ((layout.getLineBottom(lineCount - 1) - layout.size.height.toFloat()) * scaleY).coerceAtLeast(0f)
+            ((layout.getLineBottom(lineCount - 1) - layout.size.height.toFloat()) * glyphScaleY).coerceAtLeast(0f)
         } else {
             0f
         }
@@ -310,6 +392,7 @@ internal object SemanticsSlideScanner {
             (layout.didOverflowHeight && layout.layoutInput.maxLines < Int.MAX_VALUE && lineCount >= layout.layoutInput.maxLines)
 
         val density = layout.layoutInput.density.density.coerceAtLeast(1f)
+        val fontScale = layout.layoutInput.density.fontScale.coerceAtLeast(0.1f)
         val styleFontSize = layout.layoutInput.style.fontSize
         val spanFontSize = layout.layoutInput.text.spanStyles.firstOrNull { it.item.fontSize.isSp }?.item?.fontSize
         val effectiveSpUnit = when {
@@ -320,11 +403,15 @@ internal object SemanticsSlideScanner {
         val fontSizeSp = if (effectiveSpUnit.isSp) {
             effectiveSpUnit.value
         } else if (lineCount > 0) {
-            ((layout.getLineBottom(0) - layout.getLineTop(0)) * scaleY * 0.78f / density).coerceAtLeast(0f)
+            ((layout.getLineBottom(0) - layout.getLineTop(0)) * glyphScaleY * 0.78f / (density * fontScale)).coerceAtLeast(0f)
         } else {
             0f
         }
-        val fontSizePx = if (fontSizeSp > 0f) fontSizeSp * density else maxOf(1f, (tightGlyphRect.height / maxOf(1, lineCount)) * 0.78f)
+        val fontSizePx = if (fontSizeSp > 0f) {
+            fontSizeSp * fontScale * density
+        } else {
+            maxOf(1f, (tightGlyphRect.height / maxOf(1, lineCount)) * 0.78f)
+        }
         val isBold = (layout.layoutInput.style.fontWeight?.weight ?: 400) >= 700 ||
             layout.layoutInput.text.spanStyles.any { (it.item.fontWeight?.weight ?: 0) >= 700 }
 
@@ -358,6 +445,7 @@ internal object SemanticsSlideScanner {
             maxLineWidthPx = maxLineWidthPx,
             fontSizePx = fontSizePx,
             fontSizeSp = fontSizeSp,
+            fontScale = fontScale,
             isBold = isBold,
             effectiveAlpha = effectiveAlpha,
             effectiveForeground = resolvedFg,

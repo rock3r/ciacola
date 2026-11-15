@@ -1,9 +1,6 @@
 package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -27,6 +24,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.isAltPressed as isPointerAltPressed
 import androidx.compose.ui.input.pointer.isCtrlPressed as isPointerCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed as isPointerMetaPressed
@@ -75,7 +74,10 @@ fun computeSelectionChipOffset(
     val y = when {
         aboveY >= marginPx -> aboveY
         belowY + chipSize.height <= canvasSize.height - marginPx -> belowY
-        else -> (canvasSize.height - chipSize.height - marginPx).coerceAtLeast(marginPx)
+        else -> (anchor.top + gapPx).coerceIn(
+            marginPx,
+            (canvasSize.height - chipSize.height - marginPx).coerceAtLeast(marginPx),
+        )
     }
     return Offset(x, y)
 }
@@ -170,29 +172,82 @@ fun rememberTimelineStageDecorator(
 private fun LayoutCoordinates.sharesRootWith(other: LayoutCoordinates): Boolean =
     findRootCoordinates() === other.findRootCoordinates()
 
-/** Plain primary click (no modifiers, no drag) on the stage selects the topmost tagged element. */
+/**
+ * Plain primary click (no modifiers, no drag) on the stage selects the topmost tagged element.
+ * Runs on [PointerEventPass.Final] and yields whenever any interactive child consumes the pointer.
+ */
 private fun Modifier.stagePicking(selection: TimelineStageSelection): Modifier = composed {
     var ownCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     onGloballyPositioned { ownCoordinates = it }
         .pointerInput(selection) {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                if (down.isConsumed || !selection.pickingEnabled || selection.pickingSuppressed()) return@awaitEachGesture
-                val event = currentEvent
-                val mods = event.keyboardModifiers
-                if (!event.buttons.isPrimaryPressed || mods.isPointerCtrlPressed || mods.isPointerMetaPressed || mods.isPointerAltPressed || mods.isPointerShiftPressed) {
-                    return@awaitEachGesture
+            awaitPointerEventScope {
+                var pressPos: Offset? = null
+                var pointerId: PointerId? = null
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Final)
+                    if (!selection.pickingEnabled || selection.pickingSuppressed()) {
+                        pressPos = null
+                        pointerId = null
+                        continue
+                    }
+                    val anyConsumed = event.changes.any { it.isConsumed }
+                    when (event.type) {
+                        PointerEventType.Press -> {
+                            val mods = event.keyboardModifiers
+                            val change = event.changes.firstOrNull()
+                            if (anyConsumed ||
+                                change == null ||
+                                !event.buttons.isPrimaryPressed ||
+                                mods.isPointerCtrlPressed ||
+                                mods.isPointerMetaPressed ||
+                                mods.isPointerAltPressed ||
+                                mods.isPointerShiftPressed
+                            ) {
+                                pressPos = null
+                                pointerId = null
+                            } else {
+                                pressPos = change.position
+                                pointerId = change.id
+                            }
+                        }
+
+                        PointerEventType.Move -> {
+                            val start = pressPos
+                            val tracked = event.changes.firstOrNull { it.id == pointerId }
+                            if (anyConsumed ||
+                                start == null ||
+                                tracked == null ||
+                                (tracked.position - start).getDistance() > 6f
+                            ) {
+                                pressPos = null
+                                pointerId = null
+                            }
+                        }
+
+                        PointerEventType.Release -> {
+                            val start = pressPos
+                            val tracked = event.changes.firstOrNull { it.id == pointerId }
+                                ?: event.changes.firstOrNull()
+                            pressPos = null
+                            pointerId = null
+                            if (!anyConsumed &&
+                                start != null &&
+                                tracked != null &&
+                                (tracked.position - start).getDistance() <= 6f
+                            ) {
+                                val own = ownCoordinates
+                                if (own != null && own.isAttached) {
+                                    val hit = selection.targets.values
+                                        .filter { it.coordinates.isAttached && it.coordinates.sharesRootWith(own) }
+                                        .map { it to own.localBoundingBoxOf(it.coordinates, clipBounds = false) }
+                                        .filter { (_, bounds) -> bounds.contains(tracked.position) }
+                                        .minByOrNull { (_, bounds) -> bounds.width * bounds.height }
+                                    selection.onPick(hit?.let { selection.mostSpecificTrackId(it.first) })
+                                }
+                            }
+                        }
+                    }
                 }
-                val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
-                if ((up.position - down.position).getDistance() > 6f) return@awaitEachGesture
-                val own = ownCoordinates ?: return@awaitEachGesture
-                if (!own.isAttached) return@awaitEachGesture
-                val hit = selection.targets.values
-                    .filter { it.coordinates.isAttached && it.coordinates.sharesRootWith(own) }
-                    .map { it to own.localBoundingBoxOf(it.coordinates, clipBounds = false) }
-                    .filter { (_, bounds) -> bounds.contains(up.position) }
-                    .minByOrNull { (_, bounds) -> bounds.width * bounds.height }
-                selection.onPick(hit?.let { selection.mostSpecificTrackId(it.first) })
             }
         }
 }
@@ -262,10 +317,12 @@ private fun TimelineSelectionStageOverlay(selection: TimelineStageSelection) {
         )
         val chipPadH = 8.dp.toPx()
         val chipPadV = 4.dp.toPx()
+        val chipStroke = 1.5.dp.toPx()
         val chipW = layout.size.width + chipPadH * 2
         val chipH = layout.size.height + chipPadV * 2
+        val visualBorderAnchor = anchor.inflate(stroke / 2f + chipStroke / 2f)
         val chipPos = computeSelectionChipOffset(
-            anchor = anchor,
+            anchor = visualBorderAnchor,
             chipSize = Size(chipW, chipH),
             canvasSize = size,
             gapPx = 6.dp.toPx(),
@@ -273,7 +330,7 @@ private fun TimelineSelectionStageOverlay(selection: TimelineStageSelection) {
         )
         val chipCorner = CornerRadius(6.dp.toPx())
         drawRoundRect(STAGE_SELECTION_CHIP_FILL, chipPos, Size(chipW, chipH), chipCorner)
-        drawRoundRect(accent, chipPos, Size(chipW, chipH), chipCorner, style = Stroke(width = 1.5.dp.toPx()))
+        drawRoundRect(accent, chipPos, Size(chipW, chipH), chipCorner, style = Stroke(width = chipStroke))
         drawText(layout, topLeft = Offset(chipPos.x + chipPadH, chipPos.y + chipPadV))
     }
 }

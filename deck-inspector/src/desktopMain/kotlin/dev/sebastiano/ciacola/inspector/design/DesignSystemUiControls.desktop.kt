@@ -7,6 +7,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,10 +42,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
+import dev.sebastiano.ciacola.ui.rememberCiacolaPrimaryButtonStyle
 import org.jetbrains.jewel.foundation.theme.JewelTheme
+import org.jetbrains.jewel.foundation.theme.LocalContentColor as JewelLocalContentColor
 import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
@@ -51,9 +57,12 @@ import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
+import org.jetbrains.jewel.ui.component.styling.ButtonMetrics
+import org.jetbrains.jewel.ui.component.styling.ButtonStyle
 import org.jetbrains.jewel.ui.icon.IconKey
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
+import org.jetbrains.jewel.ui.theme.outlinedButtonStyle
 import org.jetbrains.jewel.ui.typography
 
 /**
@@ -94,6 +103,7 @@ internal fun DesignTooltipIconButton(
     enabled: Boolean = true,
     size: Dp = 24.dp,
     iconSize: Dp = 14.dp,
+    stateDescription: String? = null,
     onClick: () -> Unit,
 ) {
     val focusRingColor = rememberAccessibleFocusRingColor()
@@ -104,6 +114,11 @@ internal fun DesignTooltipIconButton(
             modifier = Modifier
                 .size(size)
                 .designActivatableFocus(focusRingColor)
+                .semantics {
+                    if (stateDescription != null) {
+                        this.stateDescription = stateDescription
+                    }
+                }
                 .testTag(testTag),
         ) {
             Icon(
@@ -116,7 +131,7 @@ internal fun DesignTooltipIconButton(
 }
 
 /**
- * Compact toggle pill backed by [DefaultButton] / [OutlinedButton] with radio semantics and [Tooltip].
+ * Compact toggle pill backed by [CiacolaPrimaryButton] / [OutlinedButton] with radio semantics and [Tooltip].
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -126,6 +141,7 @@ internal fun DesignTogglePill(
     selected: Boolean,
     testTag: String,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val focusRingColor = rememberAccessibleFocusRingColor()
@@ -137,14 +153,83 @@ internal fun DesignTogglePill(
             this.role = Role.RadioButton
             this.stateDescription = if (selected) "Selected" else "Not selected"
         }
+    val smallTextStyle = JewelTheme.typography.small
     Tooltip(tooltip = { Text(tooltip) }) {
-        if (selected) {
-            DefaultButton(onClick = onClick, modifier = pillModifier) {
-                Text(label, style = JewelTheme.typography.small, maxLines = 1)
+        if (compact) {
+            if (selected) {
+                val primaryResolved = rememberCiacolaPrimaryButtonStyle()
+                val compactPrimaryStyle = remember(primaryResolved) {
+                    val m = primaryResolved.style.metrics
+                    ButtonStyle(
+                        colors = primaryResolved.style.colors,
+                        metrics = ButtonMetrics(
+                            cornerSize = m.cornerSize,
+                            padding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                            minSize = DpSize(0.dp, 24.dp),
+                            borderWidth = m.borderWidth,
+                            focusOutlineExpand = m.focusOutlineExpand,
+                        ),
+                        focusOutlineAlignment = primaryResolved.style.focusOutlineAlignment,
+                    )
+                }
+                DefaultButton(
+                    onClick = onClick,
+                    modifier = pillModifier,
+                    style = compactPrimaryStyle,
+                    textStyle = smallTextStyle.copy(color = Color.Unspecified),
+                ) {
+                    val activeColor = JewelLocalContentColor.current
+                    CompositionLocalProvider(JewelLocalContentColor provides activeColor) {
+                        Text(
+                            text = label,
+                            style = smallTextStyle.copy(color = Color.Unspecified),
+                            color = activeColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            } else {
+                val baseOutlined = JewelTheme.outlinedButtonStyle
+                val compactOutlinedStyle = remember(baseOutlined) {
+                    val m = baseOutlined.metrics
+                    ButtonStyle(
+                        colors = baseOutlined.colors,
+                        metrics = ButtonMetrics(
+                            cornerSize = m.cornerSize,
+                            padding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                            minSize = DpSize(0.dp, 24.dp),
+                            borderWidth = m.borderWidth,
+                            focusOutlineExpand = m.focusOutlineExpand,
+                        ),
+                        focusOutlineAlignment = baseOutlined.focusOutlineAlignment,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onClick,
+                    modifier = pillModifier,
+                    style = compactOutlinedStyle,
+                ) {
+                    Text(
+                        text = label,
+                        style = smallTextStyle,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
+        } else if (selected) {
+            CiacolaPrimaryButton(
+                text = label,
+                onClick = onClick,
+                textStyle = smallTextStyle,
+                modifier = pillModifier,
+            )
         } else {
             OutlinedButton(onClick = onClick, modifier = pillModifier) {
-                Text(label, style = JewelTheme.typography.small, maxLines = 1)
+                Text(label, style = smallTextStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
         }
     }

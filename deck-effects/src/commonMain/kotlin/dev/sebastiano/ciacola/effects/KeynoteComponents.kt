@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,11 +43,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
@@ -54,17 +56,29 @@ import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.layout.decorated.Decoration
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
 import dev.sebastiano.ciacola.inspector.LocalElementOverrides
+import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
+import dev.sebastiano.ciacola.inspector.LocalStageParentElementId
 import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.review.reviewTarget
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
+import kotlin.math.abs
+import kotlin.math.acos
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 @Composable
 fun DottedLeaderRow(
@@ -78,10 +92,14 @@ fun DottedLeaderRow(
     // [highlightTrailing] when set.
     highlightProgress: (() -> Float)? = null,
     elementId: String? = null,
+    leadingStyle: TextStyle = LocalDeckTheme.current.typography.bodyEmphasis,
 ) {
     val theme = LocalDeckTheme.current
     val effectiveBg = effectiveBackgroundColor()
     val overrides = LocalElementOverrides.current
+    val dragPreview = LocalStageDragPreview.current
+    val parentElementId = LocalStageParentElementId.current
+    val childParentId = elementId ?: parentElementId
     val trailingId = elementId?.let { "$it:trailing" }
     val trailingPatch = trailingId?.let { overrides.patchFor(it) }
     val resolvedTrailingText = trailingPatch?.text ?: trailing
@@ -109,11 +127,14 @@ fun DottedLeaderRow(
         )
     }
 
-    val trailingOffsetMod = if (trailingPatch?.offsetXDp != null || trailingPatch?.offsetYDp != null) {
-        Modifier.offset(
-            x = (trailingPatch.offsetXDp ?: 0f).dp,
-            y = (trailingPatch.offsetYDp ?: 0f).dp,
-        )
+    val trailingOffsetMod = if (trailingId != null) {
+        Modifier.offset {
+            val drag = dragPreview?.offsetFor(trailingId) ?: DpOffset.Zero
+            IntOffset(
+                x = ((trailingPatch?.offsetXDp ?: 0f).dp + drag.x).roundToPx(),
+                y = ((trailingPatch?.offsetYDp ?: 0f).dp + drag.y).roundToPx(),
+            )
+        }
     } else {
         Modifier
     }
@@ -122,94 +143,132 @@ fun DottedLeaderRow(
         accent = theme.colors.accent,
         progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
     )
-    RecordStageTextInspection(
-        elementId = trailingId,
-        kind = "LeaderCode",
-        label = resolvedTrailingText,
-        defaultText = trailing,
-        resolvedText = resolvedTrailingText,
-        defaultTextColor = theme.colors.foreground,
-        effectiveForeground = effectiveTrailingColor,
-        effectiveBackground = effectiveBg,
-        defaultFontSizeSp = if (trailingStyle.fontSize.isSp) trailingStyle.fontSize.value else 16f,
-        effectiveFontSizeSp = resolvedTrailingFontSizeSp,
-        defaultFontWeight = trailingStyle.fontWeight?.weight ?: 400,
-        coords = trailingCoords,
-        layoutResult = trailingLayout,
-        alphaProvider = { trailingAlphaProvider() },
-    )
-
-    Layout(
-        modifier = rowBoxModifier
-            .modifierLocalConsumer { trailingAlphaProvider = ModifierLocalStageAlpha.current }
-            .fillMaxWidth(),
-        content = {
-            if (elementId != null) {
-                DeckEditableText(
-                    elementId = "$elementId:leading",
-                    text = leading,
-                    label = leading,
-                    kind = "LeaderLabel",
-                    style = theme.typography.bodyEmphasis,
-                    color = theme.colors.foreground,
-                )
-            } else {
-                Text(
-                    text = leading,
-                    style = theme.typography.bodyEmphasis,
-                    color = theme.colors.foreground,
-                )
-            }
-            Canvas(Modifier.widthIn(min = 36.dp).height(4.dp)) {
-                val dotEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 8.dp.toPx()), 0f)
-                drawLine(
-                    color = theme.colors.muted.copy(alpha = 0.65f),
-                    start = Offset(0f, size.height / 2f),
-                    end = Offset(size.width, size.height / 2f),
-                    strokeWidth = 2.5.dp.toPx(),
-                    cap = StrokeCap.Round,
-                    pathEffect = dotEffect,
-                )
-            }
-            BasicText(
-                text = resolvedTrailingText,
-                style = resolvedTrailingStyle,
-                color = {
-                    trailingOverrideColor ?: trailingHighlightColor(
-                        base = theme.colors.foreground,
-                        accent = theme.colors.accent,
-                        progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
-                    )
-                },
-                onTextLayout = { trailingLayout = it },
-                modifier = trailingModifier
-                    .then(trailingOffsetMod)
-                    .onPlaced { trailingCoords = it },
-            )
-        },
-    ) { measurables, constraints ->
-        val gapPx = 20.dp.roundToPx()
-        val minDotsPx = 36.dp.roundToPx()
-        val maxW = constraints.maxWidth
-        val loose = constraints.copy(minWidth = 0, minHeight = 0)
-        val trailingPlaceable = measurables[2].measure(loose)
-        val maxLeadingW = (maxW - trailingPlaceable.width - minDotsPx - gapPx * 2).coerceAtLeast(0)
-        val leadingPlaceable = measurables[0].measure(loose.copy(maxWidth = maxLeadingW))
-        val dotsW = (maxW - leadingPlaceable.width - trailingPlaceable.width - gapPx * 2)
-            .coerceAtLeast(minDotsPx.coerceAtMost((maxW - trailingPlaceable.width - gapPx).coerceAtLeast(0)))
-        val dotsPlaceable = measurables[1].measure(
-            Constraints(minWidth = dotsW, maxWidth = dotsW, minHeight = 0, maxHeight = loose.maxHeight),
+    CompositionLocalProvider(LocalStageParentElementId provides childParentId) {
+        RecordStageTextInspection(
+            elementId = trailingId,
+            kind = "LeaderCode",
+            label = resolvedTrailingText,
+            defaultText = trailing,
+            resolvedText = resolvedTrailingText,
+            defaultTextColor = theme.colors.foreground,
+            effectiveForeground = effectiveTrailingColor,
+            effectiveBackground = effectiveBg,
+            defaultFontSizeSp = if (trailingStyle.fontSize.isSp) trailingStyle.fontSize.value else 16f,
+            effectiveFontSizeSp = resolvedTrailingFontSizeSp,
+            defaultFontWeight = trailingStyle.fontWeight?.weight ?: 400,
+            coords = trailingCoords,
+            layoutResult = trailingLayout,
+            alphaProvider = { trailingAlphaProvider() },
         )
-        val rowHeight = maxOf(leadingPlaceable.height, dotsPlaceable.height, trailingPlaceable.height)
-            .coerceIn(constraints.minHeight, constraints.maxHeight)
-        val rowWidth = maxW.coerceIn(constraints.minWidth, constraints.maxWidth)
-        layout(rowWidth, rowHeight) {
-            leadingPlaceable.placeRelative(0, (rowHeight - leadingPlaceable.height) / 2)
-            dotsPlaceable.placeRelative(leadingPlaceable.width + gapPx, (rowHeight - dotsPlaceable.height) / 2)
-            trailingPlaceable.placeRelative(
-                (rowWidth - trailingPlaceable.width).coerceAtLeast(0),
-                (rowHeight - trailingPlaceable.height) / 2,
+
+        Layout(
+            modifier = rowBoxModifier
+                .modifierLocalConsumer { trailingAlphaProvider = ModifierLocalStageAlpha.current }
+                .fillMaxWidth(),
+            content = {
+                if (elementId != null) {
+                    DeckEditableText(
+                        elementId = "$elementId:leading",
+                        text = leading,
+                        label = leading,
+                        kind = "LeaderLabel",
+                        style = leadingStyle,
+                        color = theme.colors.foreground,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(
+                        text = leading,
+                        style = leadingStyle,
+                        color = theme.colors.foreground,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Canvas(Modifier.widthIn(min = 36.dp).height(4.dp)) {
+                    val dotEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 8.dp.toPx()), 0f)
+                    drawLine(
+                        color = theme.colors.muted.copy(alpha = 0.65f),
+                        start = Offset(0f, size.height / 2f),
+                        end = Offset(size.width, size.height / 2f),
+                        strokeWidth = 2.5.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        pathEffect = dotEffect,
+                    )
+                }
+                BasicText(
+                    text = resolvedTrailingText,
+                    style = resolvedTrailingStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    color = {
+                        trailingOverrideColor ?: trailingHighlightColor(
+                            base = theme.colors.foreground,
+                            accent = theme.colors.accent,
+                            progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
+                        )
+                    },
+                    onTextLayout = { trailingLayout = it },
+                    modifier = trailingModifier
+                        .then(trailingOffsetMod)
+                        .onPlaced { trailingCoords = it },
+                )
+            },
+        ) { measurables, constraints ->
+            val preferredGapPx = 20.dp.roundToPx()
+            val minGapPx = 10.dp.roundToPx()
+            val minDotsPx = 36.dp.roundToPx()
+            val tightDotsPx = 20.dp.roundToPx()
+            val preferredSeparatorPx = minDotsPx + preferredGapPx * 2
+            val tightSeparatorPx = tightDotsPx + minGapPx * 2
+            val maxW = constraints.maxWidth
+            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+            val leadingIntrinsicW = measurables[0].maxIntrinsicWidth(loose.maxHeight)
+            val trailingIntrinsicW = measurables[2].maxIntrinsicWidth(loose.maxHeight)
+            val bothFitUntruncated = leadingIntrinsicW + trailingIntrinsicW + tightSeparatorPx <= maxW
+
+            val leadingPlaceable: androidx.compose.ui.layout.Placeable
+            val trailingPlaceable: androidx.compose.ui.layout.Placeable
+            val gapPx: Int
+            val dotsW: Int
+            if (bothFitUntruncated) {
+                leadingPlaceable = measurables[0].measure(loose.copy(maxWidth = maxW))
+                trailingPlaceable = measurables[2].measure(loose.copy(maxWidth = maxW))
+                val remaining = (maxW - leadingPlaceable.width - trailingPlaceable.width).coerceAtLeast(0)
+                gapPx = ((remaining - minDotsPx) / 2).coerceIn(minGapPx.coerceAtMost(remaining / 2), preferredGapPx)
+                dotsW = (remaining - gapPx * 2).coerceAtLeast(0)
+            } else {
+                // Reserve up to 35% of row width for leading before measuring trailing so a long
+                // trailing code token can never crush the leading label into vertical columns,
+                // while preserving the full >=36dp dots + 20dp gap leader separator.
+                val minLeadingReserve = (maxW * 0.35f).roundToInt()
+                val reservedLeadingW = minOf(leadingIntrinsicW, minLeadingReserve)
+                val maxTrailingW = (maxW - reservedLeadingW - preferredSeparatorPx).coerceAtLeast(0)
+                trailingPlaceable = measurables[2].measure(loose.copy(maxWidth = maxTrailingW))
+                val maxLeadingW = (maxW - trailingPlaceable.width - preferredSeparatorPx).coerceAtLeast(0)
+                leadingPlaceable = measurables[0].measure(loose.copy(maxWidth = maxLeadingW))
+                gapPx = preferredGapPx
+                dotsW = (maxW - leadingPlaceable.width - trailingPlaceable.width - gapPx * 2)
+                    .coerceAtLeast(minDotsPx.coerceAtMost((maxW - leadingPlaceable.width - trailingPlaceable.width).coerceAtLeast(0)))
+            }
+            val dotsPlaceable = measurables[1].measure(
+                Constraints(minWidth = dotsW, maxWidth = dotsW, minHeight = 0, maxHeight = loose.maxHeight),
             )
+            val rowHeight = maxOf(leadingPlaceable.height, dotsPlaceable.height, trailingPlaceable.height)
+                .coerceIn(constraints.minHeight, constraints.maxHeight)
+            val rowWidth = maxW.coerceIn(constraints.minWidth, constraints.maxWidth)
+            layout(rowWidth, rowHeight) {
+                leadingPlaceable.placeRelative(0, (rowHeight - leadingPlaceable.height) / 2)
+                dotsPlaceable.placeRelative(leadingPlaceable.width + gapPx, (rowHeight - dotsPlaceable.height) / 2)
+                trailingPlaceable.placeRelative(
+                    (rowWidth - trailingPlaceable.width).coerceAtLeast(0),
+                    (rowHeight - trailingPlaceable.height) / 2,
+                )
+            }
         }
     }
 }
@@ -328,61 +387,174 @@ fun DetourSign(
             textSnippet = label,
         )
     }
-    Column(
-        modifier = columnMod,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(28.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(badge.diamondSize)
-                .rotate(45f)
-                .background(theme.colors.warning, signShape)
-                .border(badge.strokeWidth, Color(0xFF1E1B16), signShape),
-            contentAlignment = Alignment.Center,
+    val childParentId = elementId ?: LocalStageParentElementId.current
+    CompositionLocalProvider(LocalStageParentElementId provides childParentId) {
+        Column(
+            modifier = columnMod,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-            CompositionLocalProvider(LocalEffectiveBackgroundColor provides theme.colors.warning) {
-                if (elementId != null) {
-                    DeckEditableText(
-                        elementId = "$elementId:symbol",
-                        text = symbol,
-                        label = symbol,
-                        kind = "DetourSymbol",
-                        style = theme.typography.heading,
-                        color = Color(0xFF1E1B16),
-                        modifier = Modifier.rotate(-45f),
-                    )
-                } else {
-                    Text(
-                        text = symbol,
-                        style = theme.typography.heading,
-                        color = Color(0xFF1E1B16),
-                        modifier = Modifier.rotate(-45f),
-                    )
+            Box(
+                modifier = Modifier
+                    .size(badge.diamondSize)
+                    .rotate(45f)
+                    .background(theme.colors.warning, signShape)
+                    .border(badge.strokeWidth, Color(0xFF1E1B16), signShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                CompositionLocalProvider(LocalEffectiveBackgroundColor provides theme.colors.warning) {
+                    if (elementId != null) {
+                        DeckEditableText(
+                            elementId = "$elementId:symbol",
+                            text = symbol,
+                            label = symbol,
+                            kind = "DetourSymbol",
+                            style = theme.typography.heading,
+                            color = Color(0xFF1E1B16),
+                            modifier = Modifier.rotate(-45f),
+                        )
+                    } else {
+                        Text(
+                            text = symbol,
+                            style = theme.typography.heading,
+                            color = Color(0xFF1E1B16),
+                            modifier = Modifier.rotate(-45f),
+                        )
+                    }
                 }
             }
-        }
-        Spacer(Modifier.height(4.dp))
-        if (elementId != null) {
-            DeckEditableText(
-                elementId = "$elementId:label",
-                text = label,
-                label = label,
-                kind = "DetourLabel",
-                style = theme.typography.subheading,
-                color = theme.colors.foreground,
-            )
-        } else {
-            Text(
-                text = label,
-                style = theme.typography.subheading,
-                color = theme.colors.foreground,
-            )
+            Spacer(Modifier.height(4.dp))
+            if (elementId != null) {
+                DeckEditableText(
+                    elementId = "$elementId:label",
+                    text = label,
+                    label = label,
+                    kind = "DetourLabel",
+                    style = theme.typography.subheading,
+                    color = theme.colors.foreground,
+                )
+            } else {
+                Text(
+                    text = label,
+                    style = theme.typography.subheading,
+                    color = theme.colors.foreground,
+                )
+            }
         }
     }
 }
 
+/** Endpoint pair for one outer tangent ray connecting the source pill to the circular lens. */
+data class LoupeTangentSegment(
+    val pillPoint: Offset,
+    val lensPoint: Offset,
+)
+
+/**
+ * Computes the two outer supporting bitangents between a rounded rectangle ([pillRect] with
+ * [pillRadius]) and the circular loupe lens ([lensCenter], [lensRadius]).
+ *
+ * Returns `null` when the lens encloses or intersects the pill so closely that no outer tangent
+ * pair exists.
+ */
+fun computeLoupeOuterTangents(
+    pillRect: Rect,
+    pillRadius: Float,
+    lensCenter: Offset,
+    lensRadius: Float,
+): Pair<LoupeTangentSegment, LoupeTangentSegment>? {
+    if (pillRect.width <= 0.5f || pillRect.height <= 0.5f || lensRadius <= 0.5f) return null
+    val r = pillRadius.coerceIn(0f, minOf(pillRect.width, pillRect.height) / 2f)
+    val corners = arrayOf(
+        Offset(pillRect.left + r, pillRect.top + r),
+        Offset(pillRect.right - r, pillRect.top + r),
+        Offset(pillRect.right - r, pillRect.bottom - r),
+        Offset(pillRect.left + r, pillRect.bottom - r),
+    )
+    val axis = lensCenter - pillRect.center
+    var positiveSide: LoupeTangentSegment? = null
+    var negativeSide: LoupeTangentSegment? = null
+
+    for (corner in corners) {
+        val dx = lensCenter.x - corner.x
+        val dy = lensCenter.y - corner.y
+        val dist = hypot(dx, dy)
+        if (dist <= abs(lensRadius - r) + 1e-3f) continue
+        val baseAngle = atan2(dy, dx)
+        val cosAlpha = ((r - lensRadius) / dist).coerceIn(-1f, 1f)
+        val delta = acos(cosAlpha)
+        for (sign in intArrayOf(-1, 1)) {
+            val theta = baseAngle + sign * delta
+            val nx = cos(theta)
+            val ny = sin(theta)
+            val support = corner.x * nx + corner.y * ny
+            var isOuterSupport = true
+            for (other in corners) {
+                if (other.x * nx + other.y * ny > support + 0.5f) {
+                    isOuterSupport = false
+                    break
+                }
+            }
+            if (!isOuterSupport) continue
+            val segment = LoupeTangentSegment(
+                pillPoint = Offset(corner.x + nx * r, corner.y + ny * r),
+                lensPoint = Offset(lensCenter.x + nx * lensRadius, lensCenter.y + ny * lensRadius),
+            )
+            val sideCross = axis.x * ny - axis.y * nx
+            if (sideCross >= 0f) {
+                if (positiveSide == null) positiveSide = segment
+            } else {
+                if (negativeSide == null) negativeSide = segment
+            }
+        }
+    }
+    val first = negativeSide ?: return null
+    val second = positiveSide ?: return null
+    return first to second
+}
+
+/**
+ * Clamps [requestedZoom] so that the padded [targetSize] fits cleanly inside a circular lens of
+ * [usableLensRadiusPx] without slicing leading or trailing characters off the target.
+ */
+fun computeFittedLoupeZoom(
+    targetSize: Size,
+    requestedZoom: Float,
+    usableLensRadiusPx: Float,
+    padXPx: Float,
+    padYPx: Float,
+): Float {
+    if (usableLensRadiusPx <= 1f || targetSize.width <= 0.5f || targetSize.height <= 0.5f) {
+        return requestedZoom
+    }
+    val halfW = targetSize.width / 2f + padXPx
+    val halfH = targetSize.height / 2f + padYPx
+    val halfDiag = hypot(halfW, halfH)
+    if (halfDiag <= 0.5f) return requestedZoom
+    val maxFitZoom = usableLensRadiusPx / halfDiag
+    return minOf(requestedZoom, maxFitZoom).coerceAtLeast(0.5f)
+}
+
 private val LoupeIrisEasing = CubicBezierEasing(0.32f, 0f, 0.24f, 1f)
+
+/**
+ * Snapshot of [MagnifierLoupeStage]'s active geometry in stage-root coordinates, exposed to
+ * geometric layout tests via [LocalLoupeGeometryObserver].
+ */
+data class LoupeStageGeometrySnapshot(
+    val targetKey: Any,
+    val progress: Float,
+    val stageOrigin: Offset,
+    val pillRectInStage: Rect,
+    val pillRadius: Float,
+    val lensCenterInStage: Offset,
+    val lensRadius: Float,
+    val tangentsInStage: Pair<LoupeTangentSegment, LoupeTangentSegment>?,
+    val resolvedLensBackground: Color,
+)
+
+/** Optional test observer notified whenever [MagnifierLoupeStage] draws active loupe geometry. */
+val LocalLoupeGeometryObserver = compositionLocalOf<((LoupeStageGeometrySnapshot) -> Unit)?> { null }
 
 @Composable
 fun MagnifierLoupeStage(
@@ -394,9 +566,14 @@ fun MagnifierLoupeStage(
     loupePadding: PaddingValues = PaddingValues(end = 24.dp),
     decorations: List<Decoration> = emptyList(),
     zoom: Float = LocalDeckTheme.current.styles.loupe.defaultZoom,
+    lensBackgroundColor: Color = Color.Unspecified,
     content: @Composable DecorationScope.() -> Unit,
 ) {
     val theme = LocalDeckTheme.current
+    val effectiveBg = effectiveBackgroundColor()
+    val resolvedLensBg = lensBackgroundColor.takeOrElse { effectiveBg }
+    val rootHolder = dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates.current
+    val geometryObserver = LocalLoupeGeometryObserver.current
     val loupeStyle = theme.styles.loupe
     val specimenLayer = rememberGraphicsLayer()
     var stageCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -424,7 +601,7 @@ fun MagnifierLoupeStage(
                     .fillMaxSize()
                     .drawWithContent {
                         specimenLayer.record {
-                            drawRect(color = theme.colors.background)
+                            drawRect(color = effectiveBg)
                             this@drawWithContent.drawContent()
                         }
                         drawLayer(specimenLayer)
@@ -445,9 +622,10 @@ fun MagnifierLoupeStage(
 
             val edgeAlpha = (p / 0.18f).coerceIn(0f, 1f)
             val iris = LoupeIrisEasing.transform(p)
-            val padPx = 6.dp.toPx()
-            val halfW = (src.width / 2f + padPx) * iris
-            val halfH = (src.height / 2f + padPx) * iris
+            val padXPx = 8.dp.toPx()
+            val padYPx = 6.dp.toPx()
+            val halfW = (src.width / 2f + padXPx) * iris
+            val halfH = (src.height / 2f + padYPx) * iris
             val pillRect = Rect(
                 left = src.center.x - halfW,
                 top = src.center.y - halfH,
@@ -456,32 +634,61 @@ fun MagnifierLoupeStage(
             )
             val pillRadius = (pillRect.height / 2f).coerceAtMost(14.dp.toPx())
             val dstRadius = (dst.minDimension / 2f) * iris
-            val anchorX = if (dst.center.x >= src.center.x) {
-                (pillRect.right - pillRadius * 0.35f).coerceAtLeast(src.center.x)
-            } else {
-                (pillRect.left + pillRadius * 0.35f).coerceAtMost(src.center.x)
-            }
 
             val dash = PathEffect.dashPathEffect(
                 floatArrayOf(loupeStyle.connectorDashOn.toPx(), loupeStyle.connectorDashOff.toPx()),
                 0f,
             )
-            val topLine = Path().apply {
-                moveTo(anchorX, pillRect.top)
-                lineTo(dst.center.x, dst.center.y - dstRadius)
-            }
-            val bottomLine = Path().apply {
-                moveTo(anchorX, pillRect.bottom)
-                lineTo(dst.center.x, dst.center.y + dstRadius)
-            }
-            val trimmedTop = Path()
-            val trimmedBottom = Path()
-            trimPath(topLine, iris, trimmedTop)
-            trimPath(bottomLine, iris, trimmedBottom)
             val strokeColor = theme.colors.muted.copy(alpha = theme.colors.muted.alpha * edgeAlpha)
             val connectorStroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, pathEffect = dash)
-            drawPath(trimmedTop, color = strokeColor, style = connectorStroke)
-            drawPath(trimmedBottom, color = strokeColor, style = connectorStroke)
+            val tangents = computeLoupeOuterTangents(
+                pillRect = pillRect,
+                pillRadius = pillRadius,
+                lensCenter = dst.center,
+                lensRadius = dstRadius,
+            )
+            if (geometryObserver != null) {
+                val stageOrigin = resolveStageBounds(stageCoords, rootHolder)?.topLeft ?: Offset.Zero
+                val stageTangents = tangents?.let { (a, b) ->
+                    LoupeTangentSegment(
+                        pillPoint = a.pillPoint + stageOrigin,
+                        lensPoint = a.lensPoint + stageOrigin,
+                    ) to LoupeTangentSegment(
+                        pillPoint = b.pillPoint + stageOrigin,
+                        lensPoint = b.lensPoint + stageOrigin,
+                    )
+                }
+                geometryObserver(
+                    LoupeStageGeometrySnapshot(
+                        targetKey = targetKey,
+                        progress = p,
+                        stageOrigin = stageOrigin,
+                        pillRectInStage = pillRect.translate(stageOrigin),
+                        pillRadius = pillRadius,
+                        lensCenterInStage = dst.center + stageOrigin,
+                        lensRadius = dstRadius,
+                        tangentsInStage = stageTangents,
+                        resolvedLensBackground = resolvedLensBg,
+                    )
+                )
+            }
+            if (tangents != null) {
+                val (rayA, rayB) = tangents
+                val pathA = Path().apply {
+                    moveTo(rayA.pillPoint.x, rayA.pillPoint.y)
+                    lineTo(rayA.lensPoint.x, rayA.lensPoint.y)
+                }
+                val pathB = Path().apply {
+                    moveTo(rayB.pillPoint.x, rayB.pillPoint.y)
+                    lineTo(rayB.lensPoint.x, rayB.lensPoint.y)
+                }
+                val trimmedA = Path()
+                val trimmedB = Path()
+                trimPath(pathA, iris, trimmedA)
+                trimPath(pathB, iris, trimmedB)
+                drawPath(trimmedA, color = strokeColor, style = connectorStroke)
+                drawPath(trimmedB, color = strokeColor, style = connectorStroke)
+            }
             drawRoundRect(
                 color = strokeColor,
                 topLeft = pillRect.topLeft,
@@ -521,17 +728,35 @@ fun MagnifierLoupeStage(
                     val circle = Path().apply {
                         addOval(Rect(center = center, radius = radius))
                     }
+                    val padXPx = 5.dp.toPx()
+                    val padYPx = 4.dp.toPx()
+                    val usableRadius = (radius - loupeStyle.ringWidth.toPx() - 3.dp.toPx()).coerceAtLeast(1f)
+                    val effectiveZoom = computeFittedLoupeZoom(
+                        targetSize = src.size,
+                        requestedZoom = zoom,
+                        usableLensRadiusPx = usableRadius,
+                        padXPx = padXPx,
+                        padYPx = padYPx,
+                    )
                     clipPath(circle) {
-                        drawRect(color = theme.colors.background)
-                        val sample = loupeSampleClip(src, center, zoom, padPx = 4.dp.toPx())
+                        drawRect(color = effectiveBg)
+                        if (lensBackgroundColor != Color.Unspecified) {
+                            drawRect(color = lensBackgroundColor)
+                        }
+                        val sample = Rect(
+                            left = center.x + (src.left - padXPx - src.center.x) * effectiveZoom,
+                            top = center.y + (src.top - padYPx - src.center.y) * effectiveZoom,
+                            right = center.x + (src.right + padXPx - src.center.x) * effectiveZoom,
+                            bottom = center.y + (src.bottom + padYPx - src.center.y) * effectiveZoom,
+                        )
                         clipRect(sample.left, sample.top, sample.right, sample.bottom) {
                             withTransform({
-                                // Translate so src.center inside specimenLayer lands at loupe center, scaled by zoom
+                                // Translate so src.center inside specimenLayer lands at loupe center, scaled by effectiveZoom
                                 translate(
-                                    left = center.x - src.center.x * zoom,
-                                    top = center.y - src.center.y * zoom,
+                                    left = center.x - src.center.x * effectiveZoom,
+                                    top = center.y - src.center.y * effectiveZoom,
                                 )
-                                scale(scaleX = zoom, scaleY = zoom, pivot = Offset.Zero)
+                                scale(scaleX = effectiveZoom, scaleY = effectiveZoom, pivot = Offset.Zero)
                             }) {
                                 drawLayer(specimenLayer)
                             }
