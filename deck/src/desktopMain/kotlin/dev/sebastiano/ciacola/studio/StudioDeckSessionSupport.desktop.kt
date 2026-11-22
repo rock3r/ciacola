@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import dev.sebastiano.ciacola.DeckCatalog
 import dev.sebastiano.ciacola.DeckEntry
+import dev.sebastiano.ciacola.decks.DeckSource
 import dev.sebastiano.ciacola.document.CloseFlushResult
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckDocumentStore
@@ -226,6 +227,10 @@ fun saveSpeakerNote(store: DeckDocumentStore, slideId: String, beatIndex: Int, n
  * inline-text transactions, then commits an open speaker-notes draft into the outgoing store so the
  * flush that follows persists it (and nothing can land in the incoming deck).
  */
+/** Returns the directory containing [source] for resolving relative deck fonts, or `null` for bundled resources. */
+internal fun resolveDeckFontsDir(source: DeckSource): String? =
+    (source as? DeckSource.File)?.file?.toAbsolutePath()?.normalize()?.parent?.toString()
+
 internal fun pickDeckFileForCopyThemes(): Path? {
     val dialog = FileDialog(null as Frame?, "Copy themes from .deck.json", FileDialog.LOAD)
     dialog.isVisible = true

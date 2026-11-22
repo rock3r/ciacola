@@ -132,7 +132,8 @@ class SlideReviewSystemTest {
             fakeAgentApi.writeText(
                 """
                 #!/bin/sh
-                printf 'META=%s\nARGS=%s|%s|%s|%s\n' "${'$'}{ANTIGRAVITY_SOURCE_METADATA:-UNSET}" "${'$'}1" "${'$'}2" "${'$'}3" "${'$'}4" > "${dispatchLog.toAbsolutePath()}"
+                printf 'META=%s\nARGS=%s|%s|%s|%s\n' "${'$'}{ANTIGRAVITY_SOURCE_METADATA:-UNSET}" "${'$'}1" "${'$'}2" "${'$'}3" "${'$'}4" > "${dispatchLog.toAbsolutePath()}.tmp"
+                mv "${dispatchLog.toAbsolutePath()}.tmp" "${dispatchLog.toAbsolutePath()}"
                 """.trimIndent() + "\n"
             )
             Files.setPosixFilePermissions(fakeAgentApi, PosixFilePermissions.fromString("rwxr-xr-x"))
@@ -200,7 +201,7 @@ class SlideReviewSystemTest {
             }
 
             waitUntil(timeoutMillis = 5_000) {
-                store.comments.isNotEmpty() && dispatchLog.exists()
+                store.comments.firstOrNull()?.status == ReviewCommentStatus.Applying && dispatchLog.exists()
             }
 
             val saved = store.comments.single()

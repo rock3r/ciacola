@@ -334,4 +334,58 @@ class StudioUxPolishTest {
             tempRoot.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun resolveDeckFontsDirLoadsDeclaredFontsStoredAlongsideExternalDeck() {
+        val tempRoot = Files.createTempDirectory("studio-external-fonts-")
+        try {
+            val deckFile = tempRoot.resolve("custom.deck.json")
+            val fontsSubdir = Files.createDirectories(tempRoot.resolve("fonts"))
+            val bundledFontBytes = requireNotNull(
+                javaClass.classLoader.getResourceAsStream("fonts/Inter-Regular.ttf"),
+                { "Bundled Inter-Regular.ttf resource must exist" },
+            ).use { it.readAllBytes() }
+            Files.write(fontsSubdir.resolve("SidecarFont.ttf"), bundledFontBytes)
+
+            val doc = DeckDocument(
+                format = 1,
+                id = "external-fonts",
+                title = "External Fonts",
+                defaultTheme = "dark",
+                themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+                fonts = listOf(
+                    dev.sebastiano.ciacola.core.fonts.DeckFontDeclaration(
+                        family = "SidecarFont",
+                        src = "fonts/SidecarFont.ttf",
+                        weight = 400,
+                    ),
+                ),
+                slides = listOf(SlideSpec(id = "s0", title = "Slide 1", beats = listOf(BeatSpec()))),
+            )
+            Files.writeString(deckFile, CanonicalJson.print(doc))
+
+            val fileSource = dev.sebastiano.ciacola.decks.DeckSource.File(file = deckFile, assetsDir = null)
+            val resolvedDir = resolveDeckFontsDir(fileSource)
+            assertEquals(tempRoot.toAbsolutePath().normalize().toString(), resolvedDir)
+
+            val resolver = assertNotNull(
+                dev.sebastiano.ciacola.document.render.createDocumentFontResolver(doc, fontsDir = resolvedDir),
+            )
+            assertNotNull(
+                resolver.resolveFace(
+                    "SidecarFont",
+                    androidx.compose.ui.text.font.FontWeight.Normal,
+                    androidx.compose.ui.text.font.FontStyle.Normal,
+                ),
+                "Sidecar font alongside external deck must load",
+            )
+            assertNull(
+                resolveDeckFontsDir(
+                    dev.sebastiano.ciacola.decks.DeckSource.Resource("decks/foundation.deck.json", "decks/foundation.assets"),
+                ),
+            )
+        } finally {
+            tempRoot.toFile().deleteRecursively()
+        }
+    }
 }

@@ -108,6 +108,7 @@ import dev.sebastiano.ciacola.studio.rememberDeckMenuWindow
 import dev.sebastiano.ciacola.studio.rememberDocumentSyncGateWindow
 import dev.sebastiano.ciacola.studio.rememberStudioOverviewChromeStyle
 import dev.sebastiano.ciacola.studio.rememberStudioShellWindow
+import dev.sebastiano.ciacola.studio.resolveDeckFontsDir
 import dev.sebastiano.ciacola.studio.resolveInitialDeckId
 import dev.sebastiano.ciacola.studio.resolveSelectedThemeForDeck
 import dev.sebastiano.ciacola.studio.saveSpeakerNote
@@ -386,6 +387,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
             is DeckSource.Resource -> activeDeck.assetsResourceDir
         }
     }
+    val deckFontsDir: String? = remember(deckSource) { resolveDeckFontsDir(deckSource) }
 
     // Free-running ambient loop clock for Show Mode (paused under reducedMotion, user pause, or Studio scrub).
     var freeClockMs by remember(activeDeck.id) { mutableLongStateOf(0L) }
@@ -481,18 +483,11 @@ private fun ApplicationScope.CiacolaStudioApplication(
         specimens = activeDeck.specimens,
         reducedMotion = effectiveReducedMotion,
         assetsRootDir = assetsRootDir,
+        fontsDir = deckFontsDir,
         isEditMode = studioWorkspace.isStudioOpen,
         keyboardController = keyboardController,
-        onNodeClick = { _, nodeId ->
-            if (studioWorkspace.isElementPickingEnabled) {
-                elementController.selectNode(nodeId)
-            }
-        },
-        onNodeDoubleClick = { _, nodeId ->
-            if (studioWorkspace.isElementPickingEnabled) {
-                elementController.startInlineTextEdit(nodeId)
-            }
-        },
+        onNodeClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.selectNode(nodeId) },
+        onNodeDoubleClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.startInlineTextEdit(nodeId) },
         stageDecorator = reviewStageCoordinator.stageDecorator + directEditStageDecorator,
     )
 
@@ -501,6 +496,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         specimens = activeDeck.specimens,
         reducedMotion = effectiveReducedMotion,
         assetsRootDir = assetsRootDir,
+        fontsDir = deckFontsDir,
         isEditMode = false,
         keyboardController = null,
         stageDecorator = ContentDecorator.None,
