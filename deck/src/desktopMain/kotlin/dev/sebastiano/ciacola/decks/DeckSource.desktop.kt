@@ -217,7 +217,7 @@ fun openReadOnlyFileDeckStore(
         )
         return store
     }
-    val deckDir = file.parent
+    val deckDir = file.toAbsolutePath().normalize().parent
     val decoded = DeckDocumentCodec.decode(
         rawText = rawText,
         specimens = entry.specimens,

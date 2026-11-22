@@ -108,6 +108,7 @@ import dev.sebastiano.ciacola.studio.rememberDeckMenuWindow
 import dev.sebastiano.ciacola.studio.rememberDocumentSyncGateWindow
 import dev.sebastiano.ciacola.studio.rememberStudioOverviewChromeStyle
 import dev.sebastiano.ciacola.studio.rememberStudioShellWindow
+import dev.sebastiano.ciacola.studio.resolveDeckAssetsRootDir
 import dev.sebastiano.ciacola.studio.resolveDeckFontsDir
 import dev.sebastiano.ciacola.studio.resolveInitialDeckId
 import dev.sebastiano.ciacola.studio.resolveSelectedThemeForDeck
@@ -325,7 +326,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         DocumentDeckLintController(
             store = store,
             specimens = activeDeck.specimens,
-            deckDir = (deckSource as? DeckSource.File)?.file?.parent,
+            deckDir = (deckSource as? DeckSource.File)?.file?.toAbsolutePath()?.normalize()?.parent,
             assetsDir = (deckSource as? DeckSource.File)?.assetsDir,
             externalEditWarningsProvider = { fileSync?.externalEditLintWarnings.orEmpty() },
         )
@@ -382,10 +383,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
     }
 
     val assetsRootDir: String? = remember(deckSource, activeDeck) {
-        when (deckSource) {
-            is DeckSource.File -> deckSource.assetsDir?.toString()
-            is DeckSource.Resource -> activeDeck.assetsResourceDir
-        }
+        resolveDeckAssetsRootDir(deckSource, activeDeck.assetsResourceDir)
     }
     val deckFontsDir: String? = remember(deckSource) { resolveDeckFontsDir(deckSource) }
 

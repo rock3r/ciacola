@@ -222,14 +222,20 @@ fun saveSpeakerNote(store: DeckDocumentStore, slideId: String, beatIndex: Int, n
     }
 }
 
-/**
- * Runs before the outgoing deck is flushed for a deck switch or quit: cancels uncommitted drag and
- * inline-text transactions, then commits an open speaker-notes draft into the outgoing store so the
- * flush that follows persists it (and nothing can land in the incoming deck).
- */
 /** Returns the directory containing [source] for resolving relative deck fonts, or `null` for bundled resources. */
 internal fun resolveDeckFontsDir(source: DeckSource): String? =
     (source as? DeckSource.File)?.file?.toAbsolutePath()?.normalize()?.parent?.toString()
+
+/**
+ * Returns the asset root directory for [source]: for file-backed decks, uses the sibling
+ * `<stem>.assets` directory when present and falls back to the deck file's parent directory so
+ * images stored beside an external `.deck.json` render identically to the headless CLI.
+ */
+internal fun resolveDeckAssetsRootDir(source: DeckSource, fallbackResourceDir: String?): String? =
+    when (source) {
+        is DeckSource.File -> (source.assetsDir ?: source.file.toAbsolutePath().normalize().parent)?.toString()
+        is DeckSource.Resource -> fallbackResourceDir
+    }
 
 internal fun pickDeckFileForCopyThemes(): Path? {
     val dialog = FileDialog(null as Frame?, "Copy themes from .deck.json", FileDialog.LOAD)
@@ -239,6 +245,11 @@ internal fun pickDeckFileForCopyThemes(): Path? {
     return if (dir != null && file != null) Path.of(dir, file) else null
 }
 
+/**
+ * Runs before the outgoing deck is flushed for a deck switch or quit: cancels uncommitted drag and
+ * inline-text transactions, then commits an open speaker-notes draft into the outgoing store so the
+ * flush that follows persists it (and nothing can land in the incoming deck).
+ */
 internal fun prepareToLeaveDeck(
     workspace: StudioWorkspaceController,
     elementController: DocumentElementInspectorController,

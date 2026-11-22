@@ -7,7 +7,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -384,6 +386,54 @@ class StudioUxPolishTest {
                     dev.sebastiano.ciacola.decks.DeckSource.Resource("decks/foundation.deck.json", "decks/foundation.assets"),
                 ),
             )
+        } finally {
+            tempRoot.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resolveDeckAssetsRootDirFallsBackToExternalDeckDirectoryAndRendersSiblingImage() = runComposeUiTest {
+        val tempRoot = Files.createTempDirectory("studio-external-assets-")
+        try {
+            val deckFile = tempRoot.resolve("custom.deck.json")
+            val siblingImage = tempRoot.resolve("hero.png")
+            val img = java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            for (y in 0 until img.height) {
+                for (x in 0 until img.width) {
+                    img.setRGB(x, y, 0xFF33AA55.toInt())
+                }
+            }
+            javax.imageio.ImageIO.write(img, "png", siblingImage.toFile())
+
+            val fileWithoutAssetsDir = dev.sebastiano.ciacola.decks.DeckSource.File(file = deckFile, assetsDir = null)
+            val resolvedFallback = resolveDeckAssetsRootDir(fileWithoutAssetsDir, fallbackResourceDir = "decks/fallback.assets")
+            assertEquals(tempRoot.toAbsolutePath().normalize().toString(), resolvedFallback)
+
+            val assetsDir = Files.createDirectories(tempRoot.resolve("custom.assets"))
+            val fileWithAssetsDir = dev.sebastiano.ciacola.decks.DeckSource.File(file = deckFile, assetsDir = assetsDir)
+            assertEquals(assetsDir.toString(), resolveDeckAssetsRootDir(fileWithAssetsDir, fallbackResourceDir = null))
+
+            assertEquals(
+                "decks/foundation.assets",
+                resolveDeckAssetsRootDir(
+                    dev.sebastiano.ciacola.decks.DeckSource.Resource("decks/foundation.deck.json", "decks/foundation.assets"),
+                    fallbackResourceDir = "decks/foundation.assets",
+                ),
+            )
+
+            setContent {
+                dev.sebastiano.ciacola.document.render.DocumentImagePayloadView(
+                    deckId = "external-img",
+                    src = "hero.png",
+                    fit = "contain",
+                    tint = null,
+                    assetsRootDir = resolvedFallback,
+                    modifier = Modifier.size(64.dp),
+                )
+            }
+            waitForIdle()
+            onNodeWithContentDescription("hero.png").assertExists()
+            onNodeWithText("Missing image: hero.png").assertDoesNotExist()
         } finally {
             tempRoot.toFile().deleteRecursively()
         }

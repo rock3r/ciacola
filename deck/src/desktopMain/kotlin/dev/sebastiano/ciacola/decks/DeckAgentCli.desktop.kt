@@ -961,11 +961,11 @@ object DeckAgentCli {
         }
 
         val assetsRootDir = when (source) {
-            is DeckSource.File -> (source.assetsDir ?: source.file.parent)?.toString()
+            is DeckSource.File -> (source.assetsDir ?: source.file.toAbsolutePath().normalize().parent)?.toString()
             is DeckSource.Resource -> entry.assetsResourceDir
         }
         val fontsDir = when (source) {
-            is DeckSource.File -> source.file.parent?.toString()
+            is DeckSource.File -> source.file.toAbsolutePath().normalize().parent?.toString()
             is DeckSource.Resource -> decksDir?.toString()
         }
         val session = if (forVideo) {

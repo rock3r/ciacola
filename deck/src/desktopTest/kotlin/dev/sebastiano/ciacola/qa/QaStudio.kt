@@ -855,7 +855,8 @@ fun launchStudio(
             }
             val resolvedAssetsRootDir = remember(deckSource, activeDeck.id) {
                 when (deckSource) {
-                    is DeckSource.File -> deckSource.assetsDir?.toString() ?: activeDeck.assetsResourceDir
+                    is DeckSource.File -> (deckSource.assetsDir ?: deckSource.file.toAbsolutePath().normalize().parent)?.toString()
+                        ?: activeDeck.assetsResourceDir
                     is DeckSource.Resource -> deckSource.assetsResourceDir
                 }
             }

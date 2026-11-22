@@ -93,6 +93,12 @@ internal object DocumentAssetLoader {
                 val root = File(assetsRootDir)
                 add(File(root, "$deckId.assets/$src"))
                 add(File(root, src))
+                if (root.name.endsWith(".assets")) {
+                    root.parentFile?.let { parent ->
+                        add(File(parent, "$deckId.assets/$src"))
+                        add(File(parent, src))
+                    }
+                }
             }
             val decksProp = System.getProperty("ciacola.decks.dir")
             if (!decksProp.isNullOrBlank()) {
