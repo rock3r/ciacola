@@ -325,11 +325,13 @@ class DocumentMotionAndWarpTest {
 
             // 5. Mid-flight reversal (Forward -> reverse at 0.7 -> sample canonical 0.5 on way back)
             h.jumpAndSettle(Storyboard.Index(1, 0))
-            val revJob1 = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
-            var ticks = 0
-            while (!revJob1.isCompleted && ticks++ < 150) {
-                h.renderStep(10_000_000L)
-                if (!h.animatic.scrubSettling && h.animatic.activeFraction >= 0.72f) break
+            h.onUiThread {
+                val revJob1 = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
+                var ticks = 0
+                while (!revJob1.isCompleted && ticks++ < 150) {
+                    h.renderStep(10_000_000L)
+                    if (!h.animatic.scrubSettling && h.animatic.activeFraction >= 0.72f) break
+                }
             }
             val (revMid, _) = h.advanceAndCaptureAt(
                 direction = AdvanceDirection.Backward,
@@ -340,17 +342,19 @@ class DocumentMotionAndWarpTest {
 
             // 5b. Backward ← → ← reversal starting from resting beat 1
             h.jumpAndSettle(Storyboard.Index(1, 1))
-            val bLeg1 = h.scope.launch { h.animatic.advance(AdvanceDirection.Backward) }
-            ticks = 0
-            while (!bLeg1.isCompleted && ticks++ < 150) {
-                h.renderStep(10_000_000L)
-                if (!h.animatic.scrubSettling && h.animatic.activeFraction >= 0.35f) break
-            }
-            val bLeg2 = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
-            ticks = 0
-            while (!bLeg2.isCompleted && ticks++ < 150) {
-                h.renderStep(10_000_000L)
-                if (!h.animatic.scrubSettling && h.animatic.activeFraction <= 0.15f) break
+            h.onUiThread {
+                val bLeg1 = h.scope.launch { h.animatic.advance(AdvanceDirection.Backward) }
+                var ticks = 0
+                while (!bLeg1.isCompleted && ticks++ < 150) {
+                    h.renderStep(10_000_000L)
+                    if (!h.animatic.scrubSettling && h.animatic.activeFraction >= 0.35f) break
+                }
+                val bLeg2 = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
+                ticks = 0
+                while (!bLeg2.isCompleted && ticks++ < 150) {
+                    h.renderStep(10_000_000L)
+                    if (!h.animatic.scrubSettling && h.animatic.activeFraction <= 0.15f) break
+                }
             }
             val (bwdRevMid, bwdRevEffNanos) = h.advanceAndCaptureAt(
                 direction = AdvanceDirection.Backward,
@@ -671,21 +675,23 @@ class DocumentMotionAndWarpTest {
             assertColorNear(frameBefore.pixelColor(60, 60), 0xDC, 0x26, 0x26, label = "before param edit")
 
             // Property edit (same slideId & beatCount): MUST keep exact same Storyboard & NOT remount specimen!
-            h.store.edit("Update specimen hue") { d ->
-                d.copy(
-                    slides = listOf(
-                        d.slides[0].copy(
-                            nodes = listOf(
-                                d.slides[0].nodes[0].copy(
-                                    specimen = SpecimenPayload(
-                                        ref = "stateful.box",
-                                        params = mapOf("hue" to JsonPrimitive(1.0)),
+            h.onUiThread {
+                h.store.edit("Update specimen hue") { d ->
+                    d.copy(
+                        slides = listOf(
+                            d.slides[0].copy(
+                                nodes = listOf(
+                                    d.slides[0].nodes[0].copy(
+                                        specimen = SpecimenPayload(
+                                            ref = "stateful.box",
+                                            params = mapOf("hue" to JsonPrimitive(1.0)),
+                                        ),
                                     ),
                                 ),
                             ),
                         ),
-                    ),
-                )
+                    )
+                }
             }
             h.settle(3)
             assertSame(sbInitial, h.storyboard, "Property edit must NOT rebuild Storyboard")
@@ -700,12 +706,14 @@ class DocumentMotionAndWarpTest {
             assertEquals(1, mountCount.get(), "Theme switch must NOT remount specimen")
 
             // Structural edit (add beat to slide): MUST rebuild Storyboard!
-            h.store.edit("Add beat") { d ->
-                d.copy(
-                    slides = listOf(
-                        d.slides[0].copy(beats = listOf(BeatSpec(), BeatSpec())),
-                    ),
-                )
+            h.onUiThread {
+                h.store.edit("Add beat") { d ->
+                    d.copy(
+                        slides = listOf(
+                            d.slides[0].copy(beats = listOf(BeatSpec(), BeatSpec())),
+                        ),
+                    )
+                }
             }
             h.settle(3)
             assertNotSame(sbInitial, h.storyboard, "Beat count change MUST rebuild Storyboard")
@@ -799,11 +807,13 @@ class DocumentMotionAndWarpTest {
             assertEquals(Storyboard.Index(0, 1), h.animatic.currentIndex, "Cold seek onto beat 1 must NEVER trigger auto-advance")
 
             // 6. Mid-flight reversal back onto beat 1 (beat 1 -> Forward toward beat 2 -> Backward back to beat 1) must NOT auto-advance!
-            val revStart = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
-            var ticks = 0
-            while (!revStart.isCompleted && ticks++ < 40) {
-                h.renderStep(10_000_000L)
-                if (!h.animatic.scrubSettling && h.animatic.activeFraction >= 0.4f) break
+            h.onUiThread {
+                val revStart = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
+                var ticks = 0
+                while (!revStart.isCompleted && ticks++ < 40) {
+                    h.renderStep(10_000_000L)
+                    if (!h.animatic.scrubSettling && h.animatic.activeFraction >= 0.4f) break
+                }
             }
             h.advanceToRest(AdvanceDirection.Backward, stepMs = 10L)
             h.settle(12, stepNanos = 15_000_000L)

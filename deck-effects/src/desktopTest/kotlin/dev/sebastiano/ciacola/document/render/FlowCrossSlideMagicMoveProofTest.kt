@@ -40,6 +40,7 @@ import dev.sebastiano.ciacola.document.ContainerPayload
 import dev.sebastiano.ciacola.document.CrossSlideGeometry
 import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.core.fonts.DeckFontDeclaration
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.Fill
 import dev.sebastiano.ciacola.document.FrameSpec
@@ -297,9 +298,11 @@ class FlowCrossSlideMagicMoveProofTest {
         matchedOverlayIds: List<String>,
         scenarioLabel: String,
     ) {
-        fun overlayNodesCount(id: String) = h.scene.semanticsOwners
-            .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
-            .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+        fun overlayNodesCount(id: String) = h.onUiThread {
+            h.scene.semanticsOwners
+                .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
+                .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+        }
 
         fun diffSummary(a: RenderedFrame, b: RenderedFrame): String {
             var minX = Int.MAX_VALUE; var maxX = Int.MIN_VALUE; var minY = Int.MAX_VALUE; var maxY = Int.MIN_VALUE
@@ -637,6 +640,13 @@ class FlowCrossSlideMagicMoveProofTest {
         val doc = DeckDocument(
             id = "s3-reflow-text",
             stage = compactStage(820, 380),
+            fonts = listOf(
+                DeckFontDeclaration(
+                    family = "Inter",
+                    src = "Inter-Regular.ttf",
+                    weight = 400,
+                ),
+            ),
             slides = listOf(
                 SlideSpec(
                     id = "sA",
@@ -655,6 +665,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         weight = 1.0,
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Flow layout Magic Move morphs wrapped words cleanly"),
+                                            font = "Inter",
                                             size = 20.0,
                                             color = "#F8FAFC",
                                             surface = SurfaceSpec(
@@ -684,6 +695,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         frame = FrameSpec(w = 320.0),
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Right Aligned"),
+                                            font = "Inter",
                                             size = 22.0,
                                             color = "#38BDF8",
                                             align = "end",
@@ -708,6 +720,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         id = "reflow-title",
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Flow layout Magic Move morphs wrapped words cleanly"),
+                                            font = "Inter",
                                             size = 26.0,
                                             color = "#F8FAFC",
                                             surface = SurfaceSpec(
@@ -731,6 +744,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         frame = FrameSpec(w = 340.0),
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Center Aligned"),
+                                            font = "Inter",
                                             size = 22.0,
                                             color = "#38BDF8",
                                             align = "center",
@@ -777,9 +791,11 @@ class FlowCrossSlideMagicMoveProofTest {
             ) {
                 val frame = h.seekSegment(crossIdx, fraction, rebuildScene = true)
                 for (id in listOf("reflow-title", "aligned-text")) {
-                    val count = h.scene.semanticsOwners
-                        .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
-                        .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+                    val count = h.onUiThread {
+                        h.scene.semanticsOwners
+                            .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
+                            .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+                    }
                     assertEquals(1, count, "Scenario 3 $label must mount doc-overlay-node-$id")
                 }
                 val exMinX = restInk.minX - 2
@@ -1614,11 +1630,13 @@ class FlowCrossSlideMagicMoveProofTest {
                 },
             ),
         ).use { h ->
-            fun nodesWithTag(tag: String) = h.scene.semanticsOwners
-                .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
-                .filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            fun nodesWithTag(tag: String) = h.onUiThread {
+                h.scene.semanticsOwners
+                    .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
+                    .filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            }
 
-            assertFalse(h.scene.hasInvalidations(), "Rest frame must have zero pending invalidations")
+            assertFalse(h.onUiThread { h.scene.hasInvalidations() }, "Rest frame must have zero pending invalidations")
             assertEquals(1, nodesWithTag("doc-node-card-1").size)
             assertEquals(0, nodesWithTag("doc-ghost-node-card-1").size)
             assertTrue("card-1" in registry.nodes)
@@ -1626,7 +1644,7 @@ class FlowCrossSlideMagicMoveProofTest {
             // Seek to Cross(A, B) at p=0.5
             val crossIdx = h.crossFromStateIndex(0)
             val midFrame = h.seekSegment(crossIdx, 0.5f, rebuildScene = true)
-            assertFalse(h.scene.hasInvalidations(), "Cross(A,B) mid-flight frame must have zero infinite invalidations")
+            assertFalse(h.onUiThread { h.scene.hasInvalidations() }, "Cross(A,B) mid-flight frame must have zero infinite invalidations")
 
             // Ghosts exist ONLY under doc-ghost-node-* / doc-ghost-warp-* with cleared text semantics
             assertEquals(0, nodesWithTag("doc-node-card-1").size)
@@ -1914,7 +1932,7 @@ class FlowCrossSlideMagicMoveProofTest {
 
             // 2. Halfway through move window (t=200ms of 300ms => frac=200/300): both at exact 50% X in lockstep!
             val midMove = h.seekSegment(crossIdx, 200f / 300f, rebuildScene = true)
-            assertFalse(h.scene.hasInvalidations(), "Plain Cross(A,B) mid-flight frame must have zero infinite invalidations")
+            assertFalse(h.onUiThread { h.scene.hasInvalidations() }, "Plain Cross(A,B) mid-flight frame must have zero infinite invalidations")
             val cardMid = measureColorCentroid(midMove, 0xEF, 0x44, 0x44)
             val shapeMid = measureColorCentroid(midMove, 0x14, 0xB8, 0xA6)
             val cardProg = (cardMid.x - cardA.x) / (cardB.x - cardA.x)

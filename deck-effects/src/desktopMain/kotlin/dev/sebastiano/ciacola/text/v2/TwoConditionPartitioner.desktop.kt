@@ -120,6 +120,7 @@ data class AdmittedPartition(
     val refusalReason: String? = null,
     val effectiveFeatureConfig: EffectiveFontFeatureConfig = EffectiveFontFeatureConfig.ShaperDefaults,
     val condition1ParagraphRefusalReason: String? = null,
+    val round0Diagnostic: String? = null,
 )
 
 /**
@@ -257,6 +258,7 @@ internal object TwoConditionPartitioner {
 
         var lastDelta = 0
         var lastOuterRing = false
+        var round0Diag: String? = null
 
         for (round in 0..MAX_CONDITION2_COARSENING_ROUNDS) {
             val currentGran = computeCandidateGranularity(candidates)
@@ -287,6 +289,9 @@ internal object TwoConditionPartitioner {
                     c1Refusal = c1Refusal,
                 )
             var comparison = compareBitmaps(wholePixels, piecesPixels, bmpW, bmpH, pad)
+            val preOverrideDelta = comparison.maxChannelDelta
+            val preOverrideDiffCount = comparison.diffPoints.size
+            var resolvedOverrideCount = 0
             if (!comparison.outerRingInkDetected && comparison.maxChannelDelta > CONDITION2_CHANNEL_TOLERANCE) {
                 val resolved = PieceInkBounds.resolveSubpixelBinEdgeOverrides(
                     normPieces = normPieces,
@@ -301,6 +306,7 @@ internal object TwoConditionPartitioner {
                     layoutDirection = layoutDirection,
                 )
                 if (resolved != null) {
+                    resolvedOverrideCount = resolved.count { !it.isNaN() }
                     originXOverrides = resolved
                     normPieces = normPieces.mapIndexed { idx, p ->
                         val ov = resolved[idx]
@@ -316,6 +322,34 @@ internal object TwoConditionPartitioner {
                         )
                     comparison = compareBitmaps(wholePixels, retryPixels, bmpW, bmpH, pad)
                 }
+            }
+            if (round == 0 && (comparison.outerRingInkDetected || comparison.maxChannelDelta > CONDITION2_CHANNEL_TOLERANCE)) {
+                val hitPieces = LinkedHashSet<Int>()
+                for ((dx, dy) in comparison.diffPoints) {
+                    for (i in normPieces.indices) {
+                        val b = normPieces[i].boundingBox
+                        if (dx >= b.left - 4f && dx <= b.right + 4f && dy >= b.top - 4f && dy <= b.bottom + 4f) {
+                            hitPieces += i
+                        }
+                    }
+                }
+                val sampleIdx = hitPieces.firstOrNull()
+                val sampleDesc = if (sampleIdx != null) {
+                    val sp = normPieces[sampleIdx]
+                    var maxDrift = 0f
+                    var firstWLeft = 0f
+                    for (ci in sp.start until sp.end) {
+                        val wb = normWholeLayout.getBoundingBox(ci)
+                        val pb = sp.layout.getBoundingBox(ci - sp.start)
+                        if (ci == sp.start) firstWLeft = wb.left
+                        val d = abs(wb.left - (sp.originX + pb.left))
+                        if (d > maxDrift) maxDrift = d
+                    }
+                    "p$sampleIdx(l=${sp.line},wLeft=$firstWLeft,ox=${sp.originX},oy=${sp.originY},maxDrift=$maxDrift)"
+                } else {
+                    "none"
+                }
+                round0Diag = "preDelta=$preOverrideDelta,postDelta=${comparison.maxChannelDelta},prePts=$preOverrideDiffCount,postPts=${comparison.diffPoints.size},resolved=$resolvedOverrideCount,hits=${hitPieces.size},sample=$sampleDesc"
             }
             lastDelta = comparison.maxChannelDelta
             lastOuterRing = comparison.outerRingInkDetected
@@ -348,6 +382,7 @@ internal object TwoConditionPartitioner {
                     outerRingInkDetected = false,
                     effectiveFeatureConfig = effectiveConfig,
                     condition1ParagraphRefusalReason = c1Refusal,
+                    round0Diagnostic = round0Diag,
                 )
             }
 

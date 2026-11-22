@@ -375,14 +375,17 @@ class DocumentCrossSlideAndTransitionsTest {
         )
         assertEquals(0, SegmentPlanner.planTransition(noneDoc, "sA", "sB").segmentMs)
         DocumentStageHarness(noneDoc).use { h ->
-            val job = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
-            var sawNonZeroDuration = false
-            var steps = 0
-            while (!job.isCompleted && steps++ < 400) {
-                h.renderStep(10_000_000L)
-                if (!h.animatic.scrubSettling && h.animatic.currentIndex != h.animatic.targetIndex) {
-                    if (h.animatic.effectiveDurationNanos() > 0L) sawNonZeroDuration = true
+            val sawNonZeroDuration = h.onUiThread {
+                val job = h.scope.launch { h.animatic.advance(AdvanceDirection.Forward) }
+                var nonZero = false
+                var steps = 0
+                while (!job.isCompleted && steps++ < 400) {
+                    h.renderStep(10_000_000L)
+                    if (!h.animatic.scrubSettling && h.animatic.currentIndex != h.animatic.targetIndex) {
+                        if (h.animatic.effectiveDurationNanos() > 0L) nonZero = true
+                    }
                 }
+                nonZero
             }
             assertTrue(!sawNonZeroDuration, "TransitionType.None must have 0-ms cut")
             assertColorNear(h.renderCurrent().pixelColor(100, 60), 0, 0, 255, label = "none cut landed on B")

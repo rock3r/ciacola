@@ -450,7 +450,9 @@ class MagicTextV2EffectsAndRenderingTest {
                 movePlan.groups.size,
                 "Fixture 1 must have 300 admitted moving word groups " +
                     "(fromPieces=${movePlan.fromPartition.pieces.size}, fromRounds=${movePlan.fromPartition.coarseningRounds}, " +
-                    "toPieces=${movePlan.toPartition.pieces.size}, toRounds=${movePlan.toPartition.coarseningRounds})",
+                    "fromDiag=${movePlan.fromPartition.round0Diagnostic}, " +
+                    "toPieces=${movePlan.toPartition.pieces.size}, toRounds=${movePlan.toPartition.coarseningRounds}, " +
+                    "toDiag=${movePlan.toPartition.round0Diagnostic})",
             )
             assertTrue(
                 movePlan.groups.all { it.kind == DrawableGroupKind.Move && !it.styleChanged },

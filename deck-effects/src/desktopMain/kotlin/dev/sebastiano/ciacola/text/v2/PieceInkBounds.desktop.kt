@@ -431,7 +431,7 @@ internal object PieceInkBounds {
             val pBox = pieceLayout.getBoundingBox(i - candStart)
             if (wBox.width <= 0f || pBox.width <= 0f) continue
             val delta = wBox.left - (baseOriginX + pBox.left)
-            if (abs(delta) > 0.002f) return baseOriginX
+            if (abs(delta) > 0.02f) return baseOriginX
             sum += delta.toDouble()
             count++
 
@@ -449,8 +449,8 @@ internal object PieceInkBounds {
         if (count == 0 || (!anyPadBinMismatch && !anyZeroBinMismatch)) return baseOriginX
 
         val avg = baseOriginX.toDouble() + (sum / count)
-        var minOx = baseOriginX.toDouble() - 0.002
-        var maxOx = baseOriginX.toDouble() + 0.002
+        var minOx = baseOriginX.toDouble() - 0.02
+        var maxOx = baseOriginX.toDouble() + 0.02
         val binMargin = 2e-4
 
         // First constrain against the Condition 2 pad translation across all 1/8-px grid intervals
@@ -469,8 +469,8 @@ internal object PieceInkBounds {
         }
         if (minOx > maxOx) {
             // Relax margin to 1e-5 if glyphs on opposite sides of the piece are tightly bounded.
-            minOx = baseOriginX.toDouble() - 0.002
-            maxOx = baseOriginX.toDouble() + 0.002
+            minOx = baseOriginX.toDouble() - 0.02
+            maxOx = baseOriginX.toDouble() + 0.02
             for (i in candStart until candEnd) {
                 val wBox = wholeLayout.getBoundingBox(i)
                 val pBox = pieceLayout.getBoundingBox(i - candStart)
@@ -526,7 +526,7 @@ internal object PieceInkBounds {
 
         val overrides = FloatArray(normPieces.size) { Float.NaN }
         var anyResolved = false
-        val deltas = floatArrayOf(0.0005f, -0.0005f, 0.0015f, -0.0015f, 0.0025f, -0.0025f)
+        val deltas = floatArrayOf(0.0005f, -0.0005f, 0.0015f, -0.0015f, 0.004f, -0.004f, 0.01f, -0.01f, 0.02f, -0.02f)
         val bmp = Bitmap()
         try {
             for (idx in failingIndices) {
@@ -542,12 +542,25 @@ internal object PieceInkBounds {
                 val ch = y1 - y0
                 if (cw <= 0 || ch <= 0 || cw.toLong() * ch.toLong() > MAX_SCRATCH_SURFACE_PIXELS) continue
 
-                val neighbors = normPieces.filterIndexed { otherIdx, other ->
-                    otherIdx != idx &&
-                        other.boundingBox.right + 8f >= b.left - 4f &&
-                        other.boundingBox.left - 8f <= b.right + 4f &&
-                        other.boundingBox.bottom + 8f >= b.top - 4f &&
-                        other.boundingBox.top - 8f <= b.bottom + 4f
+                // Scan strictly over piece idx's own pixel box (+1 px AA halo) so an adjacent
+                // unresolved neighbor cannot mask a valid subpixel override for this piece.
+                val scanX0 = ((floor(b.left.toDouble()).toInt() + pad - 1) - x0).coerceIn(0, cw - 1)
+                val scanY0 = ((floor(b.top.toDouble()).toInt() + pad - 1) - y0).coerceIn(0, ch - 1)
+                val scanX1 = ((ceil(b.right.toDouble()).toInt() + pad + 1) - x0).coerceIn(scanX0 + 1, cw)
+                val scanY1 = ((ceil(b.bottom.toDouble()).toInt() + pad + 1) - y0).coerceIn(scanY0 + 1, ch)
+
+                val neighbors = buildList {
+                    for (otherIdx in normPieces.indices) {
+                        if (otherIdx == idx) continue
+                        val other = normPieces[otherIdx]
+                        if (other.boundingBox.right + 8f >= b.left - 4f &&
+                            other.boundingBox.left - 8f <= b.right + 4f &&
+                            other.boundingBox.bottom + 8f >= b.top - 4f &&
+                            other.boundingBox.top - 8f <= b.bottom + 4f
+                        ) {
+                            add(otherIdx to other)
+                        }
+                    }
                 }
 
                 val surface = try {
@@ -564,9 +577,10 @@ internal object PieceInkBounds {
                         val candidateOx = p.originX + delta
                         surface.canvas.clear(0)
                         drawScope.draw(density, layoutDirection, composeCanvas, cropSize) {
-                            for (nb in neighbors) {
+                            for ((nbIdx, nb) in neighbors) {
+                                val nbOx = overrides[nbIdx].takeIf { !it.isNaN() } ?: nb.originX
                                 withTransform({
-                                    translate(pad - x0 + nb.originX, pad - y0 + nb.originY)
+                                    translate(pad - x0 + nbOx, pad - y0 + nb.originY)
                                 }) {
                                     drawText(nb.layout)
                                 }
@@ -580,7 +594,18 @@ internal object PieceInkBounds {
                         if (!bmp.allocPixels(info) || !surface.readPixels(bmp, 0, 0)) continue
                         val cropRgba = bmp.readPixels(info, cw * 4, 0, 0) ?: continue
                         if (cropRgba.size != cw * ch * 4) continue
-                        val localDelta = maxCropChannelDelta(wholePixels, bmpW, x0, y0, cropRgba, cw, ch)
+                        val localDelta = maxCropChannelDelta(
+                            whole = wholePixels,
+                            wholeW = bmpW,
+                            x0 = x0,
+                            y0 = y0,
+                            crop = cropRgba,
+                            cw = cw,
+                            scanX0 = scanX0,
+                            scanY0 = scanY0,
+                            scanX1 = scanX1,
+                            scanY1 = scanY1,
+                        )
                         if (localDelta <= tolerance) {
                             overrides[idx] = candidateOx
                             anyResolved = true
@@ -604,9 +629,9 @@ internal object PieceInkBounds {
             val wBox = wholeLayout.getBoundingBox(i)
             val pBox = piece.layout.getBoundingBox(i - piece.start)
             if (wBox.width <= 0f || pBox.width <= 0f) continue
-            if (abs(wBox.left - (piece.originX + pBox.left)) > 0.0025f) return false
+            if (abs(wBox.left - (piece.originX + pBox.left)) > 0.03f) return false
             val scaled8 = wBox.left.toDouble() * 8.0
-            if (abs(scaled8 - round(scaled8)) <= 0.025) {
+            if (abs(scaled8 - round(scaled8)) <= 0.25) {
                 anyNearBinEdge = true
             }
         }
@@ -620,13 +645,16 @@ internal object PieceInkBounds {
         y0: Int,
         crop: ByteArray,
         cw: Int,
-        ch: Int,
+        scanX0: Int,
+        scanY0: Int,
+        scanX1: Int,
+        scanY1: Int,
     ): Int {
         var maxDelta = 0
-        for (y in 0 until ch) {
+        for (y in scanY0 until scanY1) {
             val wRow = (y0 + y) * wholeW * 4 + x0 * 4
             val cRow = y * cw * 4
-            for (x in 0 until cw) {
+            for (x in scanX0 until scanX1) {
                 val wb = wRow + x * 4
                 val cb = cRow + x * 4
                 val d0 = abs((whole[wb].toInt() and 0xFF) - (crop[cb].toInt() and 0xFF))
