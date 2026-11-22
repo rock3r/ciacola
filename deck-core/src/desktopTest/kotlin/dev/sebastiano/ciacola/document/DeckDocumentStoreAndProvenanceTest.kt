@@ -960,4 +960,140 @@ class DeckDocumentStoreAndProvenanceTest {
         assertEquals(300, planAnon.tracks.first { it.nodeId == "b" }.startMs, "B must follow the 300ms anonymous Enter, not a#last")
         assertTrue(DeckDocumentCodec.validate(afterAnon).none { it.code.startsWith("AFTER_") })
     }
+
+    @Test
+    fun deleteBeatPinsNodeOnlyDependenciesToPreventCyclesAndPreserveOrder() {
+        fun makeCrossOrderDoc(
+            targetBeat: Int,
+            deletedBeat: Int,
+            aFirstId: String?,
+            bFirstId: String?,
+            extraExistingIdOnA: String? = null,
+            nestedInStack: Boolean = false,
+        ): DeckDocument {
+            val aBuilds = buildList {
+                add(Build.Enter(id = aFirstId, beat = targetBeat, effect = "fade", durationMs = 200))
+                add(Build.Emphasis(id = "second", beat = deletedBeat, effect = "pulse", after = "b", durationMs = 150))
+                if (extraExistingIdOnA != null) {
+                    add(Build.Emphasis(id = extraExistingIdOnA, beat = deletedBeat + 1, effect = "pulse", durationMs = 100))
+                }
+            }
+            val bBuilds = listOf(
+                Build.Enter(id = bFirstId, beat = targetBeat, effect = "fade", after = "a", durationMs = 150),
+                Build.Emphasis(id = "second", beat = deletedBeat, effect = "pulse", durationMs = 250),
+            )
+            val nodeA = NodeSpec(
+                id = "a",
+                frame = FrameSpec(x = 100.0, y = 100.0, w = 200.0, h = 80.0),
+                text = TextPayload(RichTextValue.Plain("A")),
+                builds = aBuilds,
+            )
+            val nodeB = NodeSpec(
+                id = "b",
+                frame = FrameSpec(x = 400.0, y = 100.0, w = 200.0, h = 80.0),
+                text = TextPayload(RichTextValue.Plain("B")),
+                builds = bBuilds,
+            )
+            val nodeC = NodeSpec(
+                id = "c",
+                frame = FrameSpec(x = 700.0, y = 100.0, w = 200.0, h = 80.0),
+                text = TextPayload(RichTextValue.Plain("C")),
+                builds = listOf(Build.Enter(id = null, beat = targetBeat, effect = "fade", durationMs = 100)),
+            )
+            val nodeD = NodeSpec(
+                id = "d",
+                frame = FrameSpec(x = 1000.0, y = 100.0, w = 200.0, h = 80.0),
+                text = TextPayload(RichTextValue.Plain("D")),
+                builds = listOf(Build.Enter(id = null, beat = targetBeat, effect = "fade", after = "c", durationMs = 100)),
+            )
+            val rootNodes = if (nestedInStack) {
+                listOf(
+                    NodeSpec(
+                        id = "group",
+                        frame = FrameSpec(x = 0.0, y = 0.0, w = 1200.0, h = 300.0),
+                        stack = ContainerPayload(children = listOf(nodeA, nodeB)),
+                    ),
+                    nodeC,
+                    nodeD,
+                )
+            } else {
+                listOf(nodeA, nodeB, nodeC, nodeD)
+            }
+            val beatCount = maxOf(deletedBeat + 1, if (extraExistingIdOnA != null) deletedBeat + 2 else 0)
+            return DeckDocument(
+                format = 1,
+                id = "delete-beat-pin-after",
+                title = "Delete Beat Pin After",
+                defaultTheme = "dark",
+                themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+                slides = listOf(
+                    SlideSpec(id = "s0", beats = listOf(BeatSpec())),
+                    SlideSpec(
+                        id = "s1",
+                        beats = List(beatCount) { BeatSpec() },
+                        nodes = rootNodes,
+                    ),
+                ),
+            )
+        }
+
+        // 1. Named builds merging beat 1 into beat 0: B#first(after="a") must pin to a#first so no cycle forms.
+        val mergedBeat0 = DeckStructureEdits.deleteBeat(
+            makeCrossOrderDoc(targetBeat = 0, deletedBeat = 1, aFirstId = "first", bFirstId = "first"),
+            slideId = "s1",
+            beatIndex = 1,
+        )
+        val mergedBeat0Issues = DeckDocumentCodec.validate(mergedBeat0)
+        assertTrue(mergedBeat0Issues.none { it.code.startsWith("AFTER_") }, "Unexpected after issues: $mergedBeat0Issues")
+        val mergedB0 = mergedBeat0.slides[1].nodes.first { it.id == "b" }
+        assertEquals("a#first", mergedB0.builds.first().after)
+        val mergedD0 = mergedBeat0.slides[1].nodes.first { it.id == "d" }
+        assertEquals("c", mergedD0.builds.single().after, "Unmerged target node 'c' should remain node-only")
+        val plan0 = SegmentPlanner.planSegment(mergedBeat0, "s1", beat = 0)
+        assertEquals(200, plan0.tracks.first { it.nodeId == "b" && it.buildId == "first" }.startMs)
+
+        // 2. Named builds merging beat 2 into beat 1: full execution order A#first -> B#first -> B#second -> A#second.
+        val mergedBeat1 = DeckStructureEdits.deleteBeat(
+            makeCrossOrderDoc(targetBeat = 1, deletedBeat = 2, aFirstId = "first", bFirstId = "first"),
+            slideId = "s1",
+            beatIndex = 2,
+        )
+        val mergedBeat1Issues = DeckDocumentCodec.validate(mergedBeat1)
+        assertTrue(mergedBeat1Issues.none { it.code.startsWith("AFTER_") }, "Unexpected after issues: $mergedBeat1Issues")
+        val plan1 = SegmentPlanner.planSegment(mergedBeat1, "s1", beat = 1)
+        assertEquals(0, plan1.tracks.first { it.nodeId == "a" && it.buildId == "first" }.startMs)
+        assertEquals(200, plan1.tracks.first { it.nodeId == "b" && it.buildId == "first" }.startMs)
+        assertEquals(350, plan1.tracks.first { it.nodeId == "b" && it.buildId == "second" }.startMs)
+        assertEquals(600, plan1.tracks.first { it.nodeId == "a" && it.buildId == "second" }.startMs)
+
+        // 3. Anonymous builds inside a nested stack with an existing 'b1' id on another beat:
+        // assigns non-colliding synthetic id ('b2'), pins B's target-beat after, and preserves acyclic timing.
+        val mergedAnonNested = DeckStructureEdits.deleteBeat(
+            makeCrossOrderDoc(
+                targetBeat = 1,
+                deletedBeat = 2,
+                aFirstId = null,
+                bFirstId = null,
+                extraExistingIdOnA = "b1",
+                nestedInStack = true,
+            ),
+            slideId = "s1",
+            beatIndex = 2,
+        )
+        val nestedIssues = DeckDocumentCodec.validate(mergedAnonNested)
+        assertTrue(
+            nestedIssues.none { it.code.startsWith("AFTER_") || it.code == "DUPLICATE_BUILD_ID" },
+            "Unexpected validation issues: $nestedIssues",
+        )
+        val groupChildren = mergedAnonNested.slides[1].nodes.first { it.id == "group" }.children
+        val nestedA = groupChildren.first { it.id == "a" }
+        val nestedB = groupChildren.first { it.id == "b" }
+        assertEquals("b2", nestedA.builds.first().id)
+        assertEquals("a#b2", nestedB.builds.first().after)
+        val planNested = SegmentPlanner.planSegment(mergedAnonNested, "s1", beat = 1)
+        assertEquals(0, planNested.tracks.first { it.nodeId == "a" && it.buildId == "b2" }.startMs)
+        assertEquals(200, planNested.tracks.first { it.nodeId == "b" && it.buildIndex == 0 }.startMs)
+        assertEquals(350, planNested.tracks.first { it.nodeId == "b" && it.buildId == "second" }.startMs)
+        assertEquals(600, planNested.tracks.first { it.nodeId == "a" && it.buildId == "second" }.startMs)
+    }
 }

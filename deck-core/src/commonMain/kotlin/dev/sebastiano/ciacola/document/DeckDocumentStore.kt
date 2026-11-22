@@ -601,7 +601,12 @@ object DeckStructureEdits {
                 set(beatIndex - 1, prevBeat.copy(notes = mergedNotes))
                 removeAt(beatIndex)
             }
-            val newNodes = slide.nodes.map { shiftNodeBeatsOnDelete(it, beatIndex) }
+            val pinning = computeBeatMergePinning(
+                nodes = slide.nodes,
+                targetBeat = beatIndex - 1,
+                deletedBeat = beatIndex,
+            )
+            val newNodes = slide.nodes.map { shiftNodeBeatsOnDelete(it, beatIndex, pinning) }
             slide.copy(beats = newBeats, nodes = newNodes)
         }
 
@@ -864,15 +869,87 @@ object DeckStructureEdits {
         return updated.withChildren(updated.children.map { shiftNodeBeatsOnInsert(it, atBeat) })
     }
 
-    private fun shiftNodeBeatsOnDelete(node: NodeSpec, deletedBeat: Int): NodeSpec {
-        val targetBeat = deletedBeat - 1
-        // Builds already on targetBeat stay first, then builds moved from deletedBeat keep their order.
-        val alreadyOnTarget = node.builds.filter { it.beat == targetBeat }
-        val movedFromDeleted = node.builds.filter { it.beat == deletedBeat }.map { it.withBeat(targetBeat) }
-        val othersBefore = node.builds.filter { it.beat < targetBeat }
-        val othersAfter = node.builds.filter { it.beat > deletedBeat }.map { it.withBeat(it.beat - 1) }
+    private data class BeatMergePinning(
+        val syntheticBuildIds: Map<Pair<String, Int>, String>,
+        val rewrittenTargetAfters: Map<Pair<String, Int>, String>,
+    )
 
-        val mergedBuilds = buildList(node.builds.size) {
+    private fun computeBeatMergePinning(
+        nodes: List<NodeSpec>,
+        targetBeat: Int,
+        deletedBeat: Int,
+    ): BeatMergePinning {
+        val nodesById = LinkedHashMap<String, NodeSpec>()
+        fun collect(list: List<NodeSpec>) {
+            for (n in list) {
+                nodesById[n.id] = n
+                collect(n.children)
+            }
+        }
+        collect(nodes)
+
+        val syntheticBuildIds = HashMap<Pair<String, Int>, String>()
+        val usedIdsByNode = HashMap<String, MutableSet<String>>()
+        val rewrittenTargetAfters = HashMap<Pair<String, Int>, String>()
+
+        for (node in nodesById.values) {
+            for ((bIdx, build) in node.builds.withIndex()) {
+                if (build.beat != targetBeat) continue
+                val afterRaw = build.after ?: continue
+                if ('#' in afterRaw) continue
+
+                val targetNode = nodesById[afterRaw] ?: continue
+                if (targetNode.builds.none { it.beat == deletedBeat }) continue
+
+                val targetBuildIdx = if (targetBeat == 0 && build is Build.Enter) {
+                    targetNode.builds.indexOfLast { it.beat == targetBeat && it is Build.Enter }
+                        .takeIf { it >= 0 }
+                        ?: targetNode.builds.indexOfLast { it.beat == targetBeat }
+                } else {
+                    targetNode.builds.indexOfLast { it.beat == targetBeat }
+                }
+                if (targetBuildIdx < 0) continue
+
+                val targetBuild = targetNode.builds[targetBuildIdx]
+                val targetKey = targetNode.id to targetBuildIdx
+                val pinnedId = targetBuild.id
+                    ?: syntheticBuildIds[targetKey]
+                    ?: run {
+                        val used = usedIdsByNode.getOrPut(targetNode.id) {
+                            targetNode.builds.mapNotNullTo(HashSet()) { it.id }
+                        }
+                        generateSequence(1) { it + 1 }
+                            .map { "b$it" }
+                            .first { used.add(it) }
+                            .also { syntheticBuildIds[targetKey] = it }
+                    }
+                rewrittenTargetAfters[node.id to bIdx] = "${targetNode.id}#$pinnedId"
+            }
+        }
+
+        return BeatMergePinning(
+            syntheticBuildIds = syntheticBuildIds,
+            rewrittenTargetAfters = rewrittenTargetAfters,
+        )
+    }
+
+    private fun shiftNodeBeatsOnDelete(
+        node: NodeSpec,
+        deletedBeat: Int,
+        pinning: BeatMergePinning,
+    ): NodeSpec {
+        val targetBeat = deletedBeat - 1
+        val preparedBuilds = node.builds.mapIndexed { idx, b ->
+            val withPinnedId = pinning.syntheticBuildIds[node.id to idx]?.let { b.withId(it) } ?: b
+            pinning.rewrittenTargetAfters[node.id to idx]?.let { withPinnedId.withAfter(it) } ?: withPinnedId
+        }
+        // Builds already on targetBeat stay first, then builds moved from deletedBeat keep their order.
+        val alreadyOnTarget = preparedBuilds.filter { it.beat == targetBeat }
+        val movedFromDeleted = preparedBuilds.filter { it.beat == deletedBeat }.map { it.withBeat(targetBeat) }
+        val othersBefore = preparedBuilds.filter { it.beat < targetBeat }
+        val othersAfter = preparedBuilds.filter { it.beat > deletedBeat }.map { it.withBeat(it.beat - 1) }
+
+        val mergedBuilds = buildList(preparedBuilds.size) {
             addAll(othersBefore)
             addAll(alreadyOnTarget)
             addAll(movedFromDeleted)
@@ -890,7 +967,7 @@ object DeckStructureEdits {
             )
         }
         val updated = node.copy(builds = mergedBuilds, specimen = shiftedSpecimen)
-        return updated.withChildren(updated.children.map { shiftNodeBeatsOnDelete(it, deletedBeat) })
+        return updated.withChildren(updated.children.map { shiftNodeBeatsOnDelete(it, deletedBeat, pinning) })
     }
 
     private fun updateSlide(
