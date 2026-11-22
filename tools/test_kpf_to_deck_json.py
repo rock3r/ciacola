@@ -7,9 +7,11 @@ import json
 import math
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
+from unittest.mock import patch
 
 TOOLS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOLS_DIR.parent
@@ -18,6 +20,7 @@ DECKS_DIR = REPO_ROOT / "deck" / "src" / "desktopMain" / "resources" / "decks"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+import kpf_to_deck_json  # noqa: E402
 from kpf_converter.canonical import (  # noqa: E402
     VALID_EFFECTS,
     VALID_TRANSITIONS,
@@ -1123,6 +1126,178 @@ class VisualFixesConverterUnitTest(unittest.TestCase):
         self.assertEqual(sh_s14_p1["frame"], {"x": 225, "y": 459, "w": 902.45, "h": 159.12})
         sh_s28_p1 = next(n for n in sh_slides["s28"]["nodes"] if n["id"] == "path-1")
         self.assertEqual(sh_s28_p1["frame"], {"x": 303, "y": 308, "w": 1310.46, "h": 462})
+
+
+class RunSingleAtomicOutputTests(unittest.TestCase):
+    def _seed_existing_outputs(self, root: Path) -> Tuple[Path, Path]:
+        out_json = root / "sample.deck.json"
+        assets_dir = root / "sample.assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        out_json.write_text('{"sentinel": true}\n', encoding="utf-8")
+        (assets_dir / "keep.png").write_bytes(b"existing-png-bytes")
+        return out_json, assets_dir
+
+    def test_missing_and_malformed_kpf_preserve_existing_json_and_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_json, assets_dir = self._seed_existing_outputs(root)
+
+            with self.assertRaises(FileNotFoundError):
+                kpf_to_deck_json.run_single(
+                    kpf_dir=root / "does-not-exist",
+                    deck_id="sample",
+                    title="Sample",
+                    talk_id="generic",
+                    out_json=out_json,
+                    assets_dir=assets_dir,
+                )
+
+            self.assertEqual(out_json.read_text(encoding="utf-8"), '{"sentinel": true}\n')
+            self.assertEqual((assets_dir / "keep.png").read_bytes(), b"existing-png-bytes")
+
+            bad_kpf = root / "bad-kpf"
+            bad_kpf.mkdir()
+            (bad_kpf / "header.json").write_text("{not valid json", encoding="utf-8")
+
+            with self.assertRaises(json.JSONDecodeError):
+                kpf_to_deck_json.run_single(
+                    kpf_dir=bad_kpf,
+                    deck_id="sample",
+                    title="Sample",
+                    talk_id="generic",
+                    out_json=out_json,
+                    assets_dir=assets_dir,
+                )
+
+            self.assertEqual(out_json.read_text(encoding="utf-8"), '{"sentinel": true}\n')
+            self.assertEqual((assets_dir / "keep.png").read_bytes(), b"existing-png-bytes")
+
+    def test_validation_failure_preserves_existing_json_and_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_json, assets_dir = self._seed_existing_outputs(root)
+            invalid_doc = _minimal_valid_doc()
+            invalid_doc["slides"][0]["nodes"].append({
+                "id": "missing-img",
+                "frame": {"x": 0, "y": 0, "w": 100, "h": 100},
+                "image": {"src": "missing.png", "fit": "contain"},
+            })
+
+            with patch.object(kpf_to_deck_json, "convert_kpf_to_deck_doc", return_value=invalid_doc):
+                ok, _ = kpf_to_deck_json.run_single(
+                    kpf_dir=root / "unused",
+                    deck_id="sample",
+                    title="Sample",
+                    talk_id="generic",
+                    out_json=out_json,
+                    assets_dir=assets_dir,
+                )
+
+            self.assertFalse(ok)
+            self.assertEqual(out_json.read_text(encoding="utf-8"), '{"sentinel": true}\n')
+            self.assertEqual((assets_dir / "keep.png").read_bytes(), b"existing-png-bytes")
+
+    def test_successful_conversion_replaces_outputs_and_prunes_stale_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_json, assets_dir = self._seed_existing_outputs(root)
+            valid_doc = _minimal_valid_doc()
+            valid_doc["slides"][0]["nodes"].append({
+                "id": "hero-img",
+                "frame": {"x": 0, "y": 0, "w": 100, "h": 100},
+                "image": {"src": "fresh.png", "fit": "contain"},
+            })
+
+            def fake_convert(**kwargs: Any) -> Dict[str, Any]:
+                staged_dir: Path = kwargs["assets_out_dir"]
+                staged_dir.mkdir(parents=True, exist_ok=True)
+                (staged_dir / "fresh.png").write_bytes(b"fresh-png")
+                (staged_dir / "orphan.png").write_bytes(b"orphan-png")
+                return valid_doc
+
+            with patch.object(kpf_to_deck_json, "convert_kpf_to_deck_doc", side_effect=fake_convert):
+                ok, _ = kpf_to_deck_json.run_single(
+                    kpf_dir=root / "unused",
+                    deck_id="sample",
+                    title="Sample",
+                    talk_id="generic",
+                    out_json=out_json,
+                    assets_dir=assets_dir,
+                )
+
+            self.assertTrue(ok)
+            self.assertEqual(out_json.read_text(encoding="utf-8"), canonical_dumps(valid_doc))
+            self.assertEqual(sorted(p.name for p in assets_dir.iterdir()), ["fresh.png"])
+            self.assertEqual((assets_dir / "fresh.png").read_bytes(), b"fresh-png")
+            # No leftover temp files or staging dirs next to targets
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["sample.assets", "sample.deck.json"])
+
+            # Converting to a deck with zero image assets cleans up stale assets_dir
+            no_img_doc = _minimal_valid_doc()
+            with patch.object(kpf_to_deck_json, "convert_kpf_to_deck_doc", return_value=no_img_doc):
+                ok_empty, _ = kpf_to_deck_json.run_single(
+                    kpf_dir=root / "unused",
+                    deck_id="sample",
+                    title="Sample",
+                    talk_id="generic",
+                    out_json=out_json,
+                    assets_dir=assets_dir,
+                )
+
+            self.assertTrue(ok_empty)
+            self.assertFalse(assets_dir.exists())
+            self.assertEqual(out_json.read_text(encoding="utf-8"), canonical_dumps(no_img_doc))
+
+    def test_commit_failure_rolls_back_replaced_assets_and_cleans_temp_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_json, assets_dir = self._seed_existing_outputs(root)
+            valid_doc = _minimal_valid_doc()
+            valid_doc["slides"][0]["nodes"].append({
+                "id": "hero-img",
+                "frame": {"x": 0, "y": 0, "w": 100, "h": 100},
+                "image": {"src": "fresh.png", "fit": "contain"},
+            })
+
+            def fake_convert(**kwargs: Any) -> Dict[str, Any]:
+                staged_dir: Path = kwargs["assets_out_dir"]
+                staged_dir.mkdir(parents=True, exist_ok=True)
+                (staged_dir / "fresh.png").write_bytes(b"fresh-png")
+                return valid_doc
+
+            with (
+                patch.object(kpf_to_deck_json, "convert_kpf_to_deck_doc", side_effect=fake_convert),
+                patch.object(kpf_to_deck_json.os, "replace", side_effect=OSError("simulated replace failure")),
+                self.assertRaises(OSError),
+            ):
+                kpf_to_deck_json.run_single(
+                    kpf_dir=root / "unused",
+                    deck_id="sample",
+                    title="Sample",
+                    talk_id="generic",
+                    out_json=out_json,
+                    assets_dir=assets_dir,
+                )
+
+            self.assertEqual(out_json.read_text(encoding="utf-8"), '{"sentinel": true}\n')
+            self.assertEqual(sorted(p.name for p in assets_dir.iterdir()), ["keep.png"])
+            self.assertEqual((assets_dir / "keep.png").read_bytes(), b"existing-png-bytes")
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["sample.assets", "sample.deck.json"])
+
+    def test_validate_only_fails_when_referenced_assets_dir_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = _minimal_valid_doc()
+            doc["slides"][0]["nodes"].append({
+                "id": "hero-img",
+                "frame": {"x": 0, "y": 0, "w": 100, "h": 100},
+                "image": {"src": "missing.png", "fit": "contain"},
+            })
+            deck_path = root / "orphan.deck.json"
+            deck_path.write_text(canonical_dumps(doc), encoding="utf-8")
+
+            rc = kpf_to_deck_json.main(["--validate-only", str(deck_path)])
+            self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

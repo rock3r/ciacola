@@ -14,7 +14,9 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -110,6 +112,91 @@ def _collect_referenced_images(doc: Dict[str, Any]) -> set[str]:
     return refs
 
 
+def _commit_outputs(
+    out_json: Path,
+    serialized: str,
+    staged_assets: Path,
+    assets_dir: Path,
+) -> None:
+    """Install validated JSON and assets into their target paths, restoring on failure."""
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    target_assets_dir = assets_dir if assets_dir.name else assets_dir.resolve()
+    has_staged_assets = staged_assets.is_dir() and any(staged_assets.iterdir())
+    had_existing_assets = target_assets_dir.exists() or target_assets_dir.is_symlink()
+
+    tmp_json_path: Optional[Path] = None
+    new_assets_container: Optional[Path] = None
+    new_assets_path: Optional[Path] = None
+    backup_container: Optional[Path] = None
+    backup_assets_path: Optional[Path] = None
+    installed_new_assets = False
+
+    try:
+        json_mode = (
+            stat.S_IMODE(out_json.stat().st_mode)
+            if out_json.exists() and not out_json.is_symlink()
+            else 0o644
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=out_json.parent,
+            prefix=f".{out_json.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_f:
+            tmp_f.write(serialized)
+            tmp_json_path = Path(tmp_f.name)
+        os.chmod(tmp_json_path, json_mode)
+
+        if has_staged_assets:
+            target_assets_dir.parent.mkdir(parents=True, exist_ok=True)
+            new_assets_container = Path(
+                tempfile.mkdtemp(prefix=f".{target_assets_dir.name}.new.", dir=target_assets_dir.parent)
+            )
+            new_assets_path = new_assets_container / target_assets_dir.name
+            shutil.copytree(staged_assets, new_assets_path)
+            if target_assets_dir.is_dir() and not target_assets_dir.is_symlink():
+                os.chmod(new_assets_path, stat.S_IMODE(target_assets_dir.stat().st_mode))
+
+        if had_existing_assets:
+            backup_container = Path(
+                tempfile.mkdtemp(prefix=f".{target_assets_dir.name}.bak.", dir=target_assets_dir.parent)
+            )
+            backup_assets_path = backup_container / target_assets_dir.name
+            target_assets_dir.rename(backup_assets_path)
+
+        if new_assets_path is not None:
+            new_assets_path.rename(target_assets_dir)
+            new_assets_path = None
+            installed_new_assets = True
+
+        os.replace(tmp_json_path, out_json)
+        tmp_json_path = None
+    except BaseException:
+        if installed_new_assets and (target_assets_dir.exists() or target_assets_dir.is_symlink()):
+            if target_assets_dir.is_dir() and not target_assets_dir.is_symlink():
+                shutil.rmtree(target_assets_dir, ignore_errors=True)
+            else:
+                target_assets_dir.unlink(missing_ok=True)
+        if backup_assets_path is not None and (backup_assets_path.exists() or backup_assets_path.is_symlink()):
+            if not (target_assets_dir.exists() or target_assets_dir.is_symlink()):
+                backup_assets_path.rename(target_assets_dir)
+        if tmp_json_path is not None:
+            tmp_json_path.unlink(missing_ok=True)
+        if new_assets_container is not None and new_assets_container.exists():
+            shutil.rmtree(new_assets_container, ignore_errors=True)
+        if backup_container is not None and backup_container.exists():
+            shutil.rmtree(backup_container, ignore_errors=True)
+        raise
+    else:
+        if new_assets_container is not None and new_assets_container.exists():
+            shutil.rmtree(new_assets_container, ignore_errors=True)
+        if backup_container is not None and backup_container.exists():
+            shutil.rmtree(backup_container, ignore_errors=True)
+
+
 def run_single(
     kpf_dir: Path,
     deck_id: str,
@@ -122,60 +209,73 @@ def run_single(
     notes_json: Optional[Path] = None,
     clean_assets: bool = True,
 ) -> Tuple[bool, Dict[str, int]]:
-    if clean_assets and assets_dir.exists():
-        shutil.rmtree(assets_dir)
-
     notes_map: Optional[Dict[int, str]] = None
     if notes_json and notes_json.exists():
         raw_notes = json.loads(notes_json.read_text(encoding="utf-8"))
         notes_map = {int(k): str(v) for k, v in raw_notes.items()}
 
-    doc = convert_kpf_to_deck_doc(
-        kpf_assets_dir=kpf_dir,
-        deck_id=deck_id,
-        title=title,
-        talk_id=talk_id,
-        assets_out_dir=assets_dir,
-        key_path=key_path,
-        extra_svg_dir=extra_svg_dir,
-        notes_by_slide=notes_map,
-    )
+    with tempfile.TemporaryDirectory(prefix="ciacola-kpf-") as tmp_root:
+        staged_assets = Path(tmp_root) / "assets"
+        if not clean_assets and assets_dir.is_dir():
+            shutil.copytree(assets_dir, staged_assets)
 
-    # Prune any unreferenced asset files just in case
-    if assets_dir.exists():
-        used_imgs = _collect_referenced_images(doc)
-        for fp in list(assets_dir.iterdir()):
-            if fp.is_file() and fp.name not in used_imgs:
-                fp.unlink()
+        doc = convert_kpf_to_deck_doc(
+            kpf_assets_dir=kpf_dir,
+            deck_id=deck_id,
+            title=title,
+            talk_id=talk_id,
+            assets_out_dir=staged_assets,
+            key_path=key_path,
+            extra_svg_dir=extra_svg_dir,
+            notes_by_slide=notes_map,
+        )
 
-    serialized = canonical_dumps(doc)
-    out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_json.write_text(serialized, encoding="utf-8", newline="\n")
+        # Prune any unreferenced asset files just in case
+        if staged_assets.exists():
+            used_imgs = _collect_referenced_images(doc)
+            for fp in list(staged_assets.iterdir()):
+                if fp.is_file() and fp.name not in used_imgs:
+                    fp.unlink()
 
-    # Verify strict canonical round-trip byte-identity
-    reparsed = json.loads(serialized)
-    reserialized = canonical_dumps(reparsed)
-    if reserialized != serialized:
-        print(f"ERROR [{deck_id}]: canonical JSON round-trip mismatch!", file=sys.stderr)
-        return (False, summarize_deck(doc))
+        serialized = canonical_dumps(doc)
 
-    errors, warnings = validate_deck_document(reparsed, assets_dir=assets_dir if assets_dir.exists() else None)
-    stats = summarize_deck(reparsed)
-    asset_files = sorted(p.name for p in assets_dir.iterdir() if p.is_file()) if assets_dir.exists() else []
-    print(
-        f"[{deck_id}] slides={stats['slides']} beats={stats['beats']} nodes={stats['nodes']} "
-        f"builds={stats['builds']} specimens={stats['specimens']} images={stats['images']} "
-        f"mm={stats['magicMoveTransitions']} assets={len(asset_files)} "
-        f"errors={len(errors)} warnings={len(warnings)}"
-    )
-    for w in warnings[:20]:
-        print(f"  WARN: {w}")
-    for e in errors[:30]:
-        print(f"  ERR:  {e}", file=sys.stderr)
-    if len(errors) > 30:
-        print(f"  ... ({len(errors) - 30} more errors)", file=sys.stderr)
+        # Verify strict canonical round-trip byte-identity before touching target outputs
+        reparsed = json.loads(serialized)
+        reserialized = canonical_dumps(reparsed)
+        if reserialized != serialized:
+            print(f"ERROR [{deck_id}]: canonical JSON round-trip mismatch!", file=sys.stderr)
+            return (False, summarize_deck(doc))
 
-    return (len(errors) == 0, stats)
+        errors, warnings = validate_deck_document(reparsed, assets_dir=staged_assets)
+        stats = summarize_deck(reparsed)
+        asset_files = (
+            sorted(p.name for p in staged_assets.iterdir() if p.is_file())
+            if staged_assets.exists()
+            else []
+        )
+        print(
+            f"[{deck_id}] slides={stats['slides']} beats={stats['beats']} nodes={stats['nodes']} "
+            f"builds={stats['builds']} specimens={stats['specimens']} images={stats['images']} "
+            f"mm={stats['magicMoveTransitions']} assets={len(asset_files)} "
+            f"errors={len(errors)} warnings={len(warnings)}"
+        )
+        for w in warnings[:20]:
+            print(f"  WARN: {w}")
+        for e in errors[:30]:
+            print(f"  ERR:  {e}", file=sys.stderr)
+        if len(errors) > 30:
+            print(f"  ... ({len(errors) - 30} more errors)", file=sys.stderr)
+
+        if errors:
+            return (False, stats)
+
+        _commit_outputs(
+            out_json=out_json,
+            serialized=serialized,
+            staged_assets=staged_assets,
+            assets_dir=assets_dir,
+        )
+        return (True, stats)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -208,7 +308,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         stem = args.validate_only.name.removesuffix(".deck.json")
         assets_dir = args.validate_only.parent / f"{stem}.assets"
-        errors, warnings = validate_deck_document(doc, assets_dir=assets_dir if assets_dir.exists() else None)
+        errors, warnings = validate_deck_document(doc, assets_dir=assets_dir)
         stats = summarize_deck(doc)
         print(
             f"[validate:{doc.get('id')}] slides={stats['slides']} beats={stats['beats']} "
