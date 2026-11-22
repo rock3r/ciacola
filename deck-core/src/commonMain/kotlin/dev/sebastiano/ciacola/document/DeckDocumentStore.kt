@@ -810,8 +810,10 @@ object DeckStructureEdits {
     }
 
     /**
-     * Applies a whole-text replacement (no edit range) to a text node at [beat] and remaps its
-     * `stagger.manual` entries using [FragmentProvenance.remapForWholeReplacement].
+     * Applies a whole-text replacement (no edit range) to a text node at [beat] (or across every
+     * beat when [allBeats] is `true`, preserving base `RichTextValue.Runs` styling and stripping
+     * per-beat `text.value` overrides) and remaps all affected `stagger.manual` entries against
+     * each build's actual before/after text via [FragmentProvenance.remapForWholeReplacement].
      */
     fun applyWholeTextReplacement(
         document: DeckDocument,
@@ -819,6 +821,7 @@ object DeckStructureEdits {
         nodeId: String,
         beat: Int,
         newText: String,
+        allBeats: Boolean = false,
     ): Pair<DeckDocument, List<ManualDelayRemapNotice>> {
         val notices = mutableListOf<ManualDelayRemapNotice>()
         val updated = updateSlide(document, slideId) { slide ->
@@ -827,7 +830,7 @@ object DeckStructureEdits {
                 nodes = slide.nodes.map { root ->
                     rewriteNodeTree(root) { node ->
                         if (node.id != nodeId || node.text == null) return@rewriteNodeTree node
-                        val resolvedBefore = JsonMergePatch.resolveNodeAtBeat(node, beat)
+                        val resolvedBefore = if (allBeats) node else JsonMergePatch.resolveNodeAtBeat(node, beat)
                         val currentValue = resolvedBefore.text?.value ?: return@rewriteNodeTree node
                         val oldText = currentValue.plainText
                         val newValue = RichTextValueEdits.replaceWholeText(currentValue, newText)
@@ -835,11 +838,15 @@ object DeckStructureEdits {
                             listOf("text", "value"),
                             RichTextValueEdits.encodeJson(newValue),
                         )
-                        val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
+                        val textPatched = if (allBeats) {
+                            JsonMergePatch.applyToAllBeats(node, patch, anchorBeats)
+                        } else {
+                            JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
+                        }
                         FragmentProvenance.remapTextNodeManualDelays(
                             nodeBefore = node,
                             nodeAfter = textPatched,
-                            editedBeat = beat,
+                            editedBeat = if (allBeats) 0 else beat,
                             oldText = oldText,
                             newText = newText,
                             remap = { manual, by, isExit ->

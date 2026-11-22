@@ -1219,6 +1219,108 @@ class InspectorEdgeCasesTest {
         assertNull(JsonMergePatch.resolveNodeAtBeat(nResetWhole, 1).frame?.h, "Whole-frame reset must keep h null when only nudging position")
     }
 
+    @Test
+    fun allBuildsTextReplacementRemapsEnterExitEmphasisAndInheritedMorphDelaysWithNotices() {
+        val textNode = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "hero-text",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 100.0, w = 400.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("alpha shared"),
+                morph = dev.sebastiano.ciacola.document.TextMorphSpec(
+                    by = dev.sebastiano.ciacola.document.MorphBy.Word,
+                    stagger = dev.sebastiano.ciacola.document.Stagger(
+                        manual = mapOf("beta#0" to 90, "-alpha#0" to 40),
+                    ),
+                ),
+            ),
+            builds = listOf(
+                Build.Enter(
+                    beat = 0,
+                    effect = "fade",
+                    by = dev.sebastiano.ciacola.document.DeliveryBy.Word,
+                    stagger = dev.sebastiano.ciacola.document.Stagger(
+                        manual = mapOf("alpha#0" to 50, "shared#0" to 150),
+                    ),
+                ),
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject {
+                        put("text", buildJsonObject { put("value", "beta shared") })
+                    },
+                ),
+                Build.Enter(
+                    beat = 1,
+                    effect = "fade",
+                    by = dev.sebastiano.ciacola.document.DeliveryBy.Word,
+                    stagger = dev.sebastiano.ciacola.document.Stagger(
+                        manual = mapOf("beta#0" to 120, "shared#0" to 200),
+                    ),
+                ),
+                Build.Emphasis(
+                    beat = 1,
+                    effect = "pulse",
+                    by = dev.sebastiano.ciacola.document.DeliveryBy.Word,
+                    stagger = dev.sebastiano.ciacola.document.Stagger(
+                        manual = mapOf("beta#0" to 80),
+                    ),
+                ),
+                Build.Exit(
+                    beat = 2,
+                    effect = "fade",
+                    by = dev.sebastiano.ciacola.document.DeliveryBy.Word,
+                    stagger = dev.sebastiano.ciacola.document.Stagger(
+                        manual = mapOf("beta#0" to 60, "shared#0" to 110),
+                    ),
+                ),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "all-builds-text-remap",
+            title = "All Builds Text Remap",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                    ),
+                    nodes = listOf(textNode),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 1)
+        c.selectNode("hero-text")
+        c.editAllBuilds = true
+
+        assertTrue(c.applyWholeTextReplacement("gamma shared"))
+
+        val updated = findNode(store, "hero-text")
+        assertEquals("gamma shared", updated.text?.value?.plainText)
+        assertEquals("gamma shared", JsonMergePatch.resolveNodeAtBeat(updated, 1).text?.value?.plainText)
+
+        val enter0 = updated.builds.filterIsInstance<Build.Enter>().single { it.beat == 0 }
+        val enter1 = updated.builds.filterIsInstance<Build.Enter>().single { it.beat == 1 }
+        val emphasis1 = updated.builds.filterIsInstance<Build.Emphasis>().single { it.beat == 1 }
+        val exit2 = updated.builds.filterIsInstance<Build.Exit>().single { it.beat == 2 }
+
+        assertEquals(mapOf("shared#0" to 150), enter0.stagger?.manual)
+        assertEquals(mapOf("shared#0" to 200), enter1.stagger?.manual)
+        assertTrue(emphasis1.stagger?.manual.orEmpty().isEmpty())
+        assertEquals(mapOf("shared#0" to 110), exit2.stagger?.manual)
+        assertTrue(updated.text?.morph?.stagger?.manual.orEmpty().isEmpty())
+
+        val noticedAddrs = c.remapNotices.map { it.oldAddress }
+        assertTrue("alpha#0" in noticedAddrs, "Expected notice for removed beat-0 alpha#0: $noticedAddrs")
+        assertEquals(4, noticedAddrs.count { it == "beta#0" }, "Expected notices for Enter, Emphasis, Exit, and text.morph beta#0: $noticedAddrs")
+        assertTrue("-alpha#0" in noticedAddrs, "Expected notice for removed inherited morph exit -alpha#0: $noticedAddrs")
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,

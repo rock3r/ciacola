@@ -479,6 +479,23 @@ object FragmentProvenance {
             }
         }
 
+        // Also inspect pruned Build.Change entries that inherited `node.text.morph` so stale
+        // inherited target/exit delays are still remapped when the change build disappears.
+        val matchedOldIndices = oldIndexForNewBuild.filterNotNullTo(HashSet())
+        for ((oldIdx, oldBuild) in nodeBefore.builds.withIndex()) {
+            if (oldIdx in matchedOldIndices || oldBuild !is Build.Change || oldBuild.morph != null) continue
+            val beforeSrc = textBeforeBuild(nodeBefore, oldIdx)
+            val afterSrc = textAtBeat(nodeAfter, (oldBuild.beat - 1).coerceAtLeast(0))
+            val beforeDst = textAfterBuild(nodeBefore, oldIdx)
+            val afterDst = textAtBeat(nodeAfter, oldBuild.beat)
+            if (beforeDst != afterDst && inheritedMorphTargetChange == null) {
+                inheritedMorphTargetChange = beforeDst to afterDst
+            }
+            if (beforeSrc != afterSrc && inheritedMorphExitChange == null) {
+                inheritedMorphExitChange = beforeSrc to afterSrc
+            }
+        }
+
         val updatedText = nodeAfter.text?.let { tp ->
             val morph = tp.morph
             val stagger = morph?.stagger
@@ -525,14 +542,25 @@ object FragmentProvenance {
         val result = ArrayList<Int?>(nodeAfter.builds.size)
         var oldCursor = 0
         for (afterBuild in nodeAfter.builds) {
-            if (afterBuild !is Build.Change || afterBuild.beat != 0) {
+            if (afterBuild !is Build.Change) {
                 while (oldCursor < nodeBefore.builds.size && nodeBefore.builds[oldCursor] != afterBuild) {
                     oldCursor++
                 }
             } else {
                 while (oldCursor < nodeBefore.builds.size) {
                     val cand = nodeBefore.builds[oldCursor]
-                    if (cand is Build.Change && cand.beat == 0 && cand.id == afterBuild.id && cand.path == afterBuild.path && cand.morph == afterBuild.morph) {
+                    if (
+                        cand is Build.Change &&
+                        cand.beat == afterBuild.beat &&
+                        cand.id == afterBuild.id &&
+                        cand.path == afterBuild.path &&
+                        cand.morph == afterBuild.morph &&
+                        cand.after == afterBuild.after &&
+                        cand.delayMs == afterBuild.delayMs &&
+                        cand.durationMs == afterBuild.durationMs &&
+                        cand.curve == afterBuild.curve &&
+                        afterBuild.set.keys.all { it in cand.set }
+                    ) {
                         break
                     }
                     oldCursor++

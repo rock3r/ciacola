@@ -631,19 +631,23 @@ class DocumentElementInspectorController(
         val ok = store.edit("Edit text") { doc ->
             val (updated, notices) = edit(doc, slideId, id, beat)
             if (allBuilds) {
-                // The text produced on this build becomes the text of EVERY build. Re-run it as a
-                // Base replacement so manual fragment delays on base + every build are remapped
-                // through `FragmentProvenance` against the Base text (not just this build's text).
+                // Apply the resulting text across every beat first, then remap every build's
+                // manual fragment delays once against each build's actual before/after text.
                 val finalText = resolvedNodeText(updated, slideId, id, beat)
                 if (finalText == null) {
                     capturedNotices = notices
                     updated
                 } else {
-                    val (rebased, baseNotices) = DeckStructureEdits.applyWholeTextReplacement(doc, slideId, id, 0, finalText)
-                    capturedNotices = baseNotices
-                    val baseValue = doc.slides.firstOrNull { it.id == slideId }
-                        ?.let { DocumentThemeResolver.findNode(it.nodes, id) }?.text?.value
-                    withTextOnAllBuilds(rebased, slideId, id, finalText, styleSource = baseValue)
+                    val (allUpdated, allNotices) = DeckStructureEdits.applyWholeTextReplacement(
+                        document = doc,
+                        slideId = slideId,
+                        nodeId = id,
+                        beat = 0,
+                        newText = finalText,
+                        allBeats = true,
+                    )
+                    capturedNotices = allNotices
+                    allUpdated
                 }
             } else {
                 capturedNotices = notices
