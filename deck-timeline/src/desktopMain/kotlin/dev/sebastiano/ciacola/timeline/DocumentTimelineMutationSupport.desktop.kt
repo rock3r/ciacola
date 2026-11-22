@@ -6,8 +6,10 @@ import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckThemeSpec
+import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.Phases
+import dev.sebastiano.ciacola.document.PieceSchedule
 import dev.sebastiano.ciacola.document.Slot
 import dev.sebastiano.ciacola.document.SlotPhase
 import dev.sebastiano.ciacola.document.SpecimenTrackOverride
@@ -17,9 +19,9 @@ import dev.sebastiano.ciacola.document.TextMorphSpec
 import dev.sebastiano.ciacola.document.Timing
 import dev.sebastiano.ciacola.document.TrackKind
 import dev.sebastiano.ciacola.document.TransitionSpec
+import dev.sebastiano.ciacola.document.TransitionType
 import dev.sebastiano.ciacola.document.warpSchedule
 import kotlin.math.abs
-import dev.sebastiano.ciacola.document.TransitionType
 
 internal const val SEGMENT_PLANNER_DEFAULT_DURATION_MS: Int = 500
 internal const val AUTO_CURRENT_SLIDE_TRACK_THRESHOLD: Int = 80
@@ -520,15 +522,33 @@ internal object DocumentTimelineMutationSupport {
     }
 
     /**
+     * Mutation plan for resizing a text-morph timeline bar to a requested total span.
+     * - [fallbackDurationMs]: updated `build.durationMs` (slide build) or
+     *   `transition.phases.move.durationMs` (cross-slide transition) when inherited phases control the span.
+     * - [morphPhaseDurations]: explicit per-phase durations to persist on the morph's `phases` when
+     *   explicit phase durations control or bound the span.
+     */
+    data class TextMorphResizePlan(
+        val fallbackDurationMs: Int? = null,
+        val morphPhaseDurations: Map<SlotPhase, Int> = emptyMap(),
+    )
+
+    private data class MorphPhaseSpan(
+        val phase: SlotPhase,
+        val maxStartMs: Int,
+        val maxEndMs: Int,
+        val isSpring: Boolean,
+        val inheritsFallback: Boolean,
+    )
+
+    /**
      * Converts a requested total displayed track span [requestedSpanMs] into the per-fragment
-     * or token `build.durationMs` to persist on [ref]:
+     * or token `build.durationMs` to persist on a non-morph [ref]:
      * - Code warp: inverts [warpSchedule]'s `totalSpanMs`.
      * - Staggered delivery (`by != Whole`): subtracts the max fragment start offset.
-     * - Text morph: subtracts the max start offset of slots inheriting `build.durationMs`.
      * - Whole build: returns [requestedSpanMs] unchanged.
      */
     fun buildDurationForTotalSpan(
-        doc: DeckDocument,
         snapshot: DocumentTimelineSnapshot,
         ref: DocumentTimelineTrackRef.SlideBuildTrack,
         requestedSpanMs: Int,
@@ -544,57 +564,269 @@ internal object DocumentTimelineMutationSupport {
         }
         val pieces = planned.pieces ?: return clamped
         if (pieces.slots.isEmpty()) return clamped
-
-        if (!ref.isTextMorph) {
-            val maxSlotStart = pieces.slots.maxOf { it.startMs }
-            return (clamped - maxSlotStart).coerceAtLeast(0)
-        }
-
-        val slide = doc.slides.firstOrNull { it.id == ref.slideId }
-        val node = findNodeOnSlide(doc, ref.slideId, ref.nodeId)
-        val build = node?.builds?.getOrNull(ref.buildIndex) as? Build.Change
-        val effectivePhases = build?.morph?.phases ?: node?.text?.morph?.phases ?: slide?.beats?.getOrNull(ref.beatIndex)?.phases
-        val inheritedSlots = pieces.slots.filter { phaseExplicitDuration(effectivePhases, it.phase) == null }
-        val maxSlotStart = (inheritedSlots.ifEmpty { pieces.slots }).maxOf { it.startMs }
+        val maxSlotStart = pieces.slots.maxOf { it.startMs }
         return (clamped - maxSlotStart).coerceAtLeast(0)
     }
 
     /**
-     * Converts a requested total displayed track span [requestedSpanMs] into the transition phase
-     * duration for [ref], subtracting staggered morph slot offsets when [ref] is a text morph.
+     * Plans the duration mutation(s) for resizing a slide text-morph build [ref] to [requestedSpanMs].
+     * Returns `null` when no editable morph phase can achieve or move toward [requestedSpanMs]
+     * (e.g., all present phases are spring-driven or already pinned at an irreducible floor).
      */
-    fun transitionPhaseDurationForTotalSpan(
+    fun planSlideTextMorphResize(
+        doc: DeckDocument,
+        themeName: String?,
+        snapshot: DocumentTimelineSnapshot,
+        ref: DocumentTimelineTrackRef.SlideBuildTrack,
+        requestedSpanMs: Int,
+    ): TextMorphResizePlan? {
+        val clamped = requestedSpanMs.coerceAtLeast(0)
+        val beatPlan = snapshot.slideBeatPlans[ref.slideId]?.getOrNull(ref.beatIndex)
+        val planned = beatPlan?.tracks?.firstOrNull {
+            it.nodeId == ref.nodeId && it.buildIndex == ref.buildIndex
+        } ?: ref.trackPlan
+        val pieces = planned.pieces ?: return TextMorphResizePlan(fallbackDurationMs = clamped)
+
+        val slide = doc.slides.firstOrNull { it.id == ref.slideId }
+        val node = findNodeOnSlide(doc, ref.slideId, ref.nodeId)
+        val build = node?.builds?.getOrNull(ref.buildIndex) as? Build.Change
+        val beatPhases = slide?.beats?.getOrNull(ref.beatIndex)?.phases
+        val resolvedMorph = if (node != null && build != null) {
+            val beforeNode = JsonMergePatch.resolveNodeBeforeBuild(node, ref.buildIndex)
+            val afterNode = JsonMergePatch.resolveNodeAfterBuild(node, ref.buildIndex)
+            build.morph ?: afterNode.text?.morph ?: beforeNode.text?.morph
+        } else {
+            null
+        }
+        val effectivePhases = resolvedMorph?.phases ?: beatPhases
+        val themeMotion = resolveActiveTheme(doc, themeName)?.motion
+        val fallbackCurve = build?.curve
+            ?: beatPhases?.move?.curve
+            ?: themeMotion?.curve
+            ?: Curve.EaseInOut
+
+        return planTextMorphResize(
+            pieces = pieces,
+            currentSpanMs = planned.durationMs,
+            requestedSpanMs = clamped,
+            effectivePhases = effectivePhases,
+            fallbackCurve = fallbackCurve,
+            inheritsFallback = { phase ->
+                fallbackCurve !is Curve.Spring && phaseTiming(effectivePhases, phase)?.durationMs == null
+            },
+            preferPerNodeMorphPhasesWhenClamping = false,
+        )
+    }
+
+    /**
+     * Plans the duration mutation(s) for resizing a cross-slide text-morph transition track [ref]
+     * to [requestedSpanMs]. Returns `null` when no editable morph phase can move toward [requestedSpanMs].
+     */
+    fun planTransitionTextMorphResize(
         doc: DeckDocument,
         themeName: String?,
         snapshot: DocumentTimelineSnapshot,
         ref: DocumentTimelineTrackRef.TransitionTrackBar,
         requestedSpanMs: Int,
-    ): Int {
+    ): TextMorphResizePlan? {
         val clamped = requestedSpanMs.coerceAtLeast(0)
-        if (!ref.isTextMorph) return clamped
         val trPlan = snapshot.transitionPlans[ref.fromSlideId to ref.toSlideId]
         val planned = trPlan?.tracks?.firstOrNull {
             it.nodeId == ref.nodeId && it.kind == ref.trackPlan.kind
         } ?: ref.trackPlan
-        val pieces = planned.pieces ?: return clamped
-        if (pieces.slots.isEmpty()) return clamped
+        val pieces = planned.pieces ?: return TextMorphResizePlan(fallbackDurationMs = clamped)
 
         val tr = effectiveTransitionSpec(doc, themeName, ref.fromSlideId)
-        val toNode = findNodeOnSlide(doc, ref.toSlideId, ref.nodeId)
+        val fromSlide = doc.slides.firstOrNull { it.id == ref.fromSlideId }
+        val fromLastBeat = (fromSlide?.beats?.lastIndex ?: 0).coerceAtLeast(0)
         val fromNode = findNodeOnSlide(doc, ref.fromSlideId, ref.nodeId)
-        val morphPhases = (tr.text[ref.nodeId] ?: toNode?.text?.morph ?: fromNode?.text?.morph)?.phases
-        val effectivePhases = morphPhases ?: tr.phases
-        val inheritedSlots = pieces.slots.filter {
-            it.phase == SlotPhase.Move || phaseExplicitDuration(effectivePhases, it.phase) == null
-        }
-        val maxSlotStart = (inheritedSlots.ifEmpty { pieces.slots }).maxOf { it.startMs }
-        return (clamped - maxSlotStart).coerceAtLeast(0)
+            ?.let { JsonMergePatch.resolveNodeAtBeat(it, fromLastBeat) }
+        val toNode = findNodeOnSlide(doc, ref.toSlideId, ref.nodeId)
+        val resolvedMorph = tr.text[ref.nodeId] ?: toNode?.text?.morph ?: fromNode?.text?.morph
+        val relativeParentPhases = relativeTransitionParentPhases(tr.phases)
+        val effectivePhases = resolvedMorph?.phases ?: relativeParentPhases
+        val themeMotion = resolveActiveTheme(doc, themeName)?.motion
+        val defaultCurve = tr.curve ?: themeMotion?.curve ?: Curve.EaseInOut
+        val moveCurve = tr.phases?.move?.curve ?: defaultCurve
+
+        return planTextMorphResize(
+            pieces = pieces,
+            currentSpanMs = planned.durationMs,
+            requestedSpanMs = clamped,
+            effectivePhases = effectivePhases,
+            fallbackCurve = moveCurve,
+            inheritsFallback = { phase ->
+                moveCurve !is Curve.Spring && (
+                    (resolvedMorph?.phases == null && phase == SlotPhase.Move) ||
+                        phaseTiming(effectivePhases, phase)?.durationMs == null
+                    )
+            },
+            preferPerNodeMorphPhasesWhenClamping = true,
+        )
     }
 
-    private fun phaseExplicitDuration(phases: Phases?, phase: SlotPhase): Int? = when (phase) {
-        SlotPhase.Exit -> phases?.exit?.durationMs
-        SlotPhase.Move -> phases?.move?.durationMs
-        SlotPhase.Enter -> phases?.enter?.durationMs
+    /** Applies a [TextMorphResizePlan] to a slide build's timing and/or `build.morph.phases`. */
+    fun applySlideTextMorphResizeDoc(
+        doc: DeckDocument,
+        ref: DocumentTimelineTrackRef.SlideBuildTrack,
+        plan: TextMorphResizePlan,
+    ): DeckDocument {
+        val beatPhases = doc.slides.firstOrNull { it.id == ref.slideId }?.beats?.getOrNull(ref.beatIndex)?.phases
+        return updateNodeOnSlide(doc, ref.slideId, ref.nodeId) { node ->
+            val build = node.builds.getOrNull(ref.buildIndex) as? Build.Change ?: return@updateNodeOnSlide node
+            val beforeNode = JsonMergePatch.resolveNodeBeforeBuild(node, ref.buildIndex)
+            val afterNode = JsonMergePatch.resolveNodeAfterBuild(node, ref.buildIndex)
+            val baseMorph = build.morph ?: afterNode.text?.morph ?: beforeNode.text?.morph ?: TextMorphSpec()
+            val nextPhases = applyMorphPhaseDurations(
+                basePhases = baseMorph.phases ?: beatPhases,
+                phaseDurations = plan.morphPhaseDurations,
+            )
+            val updatedBuilds = node.builds.toMutableList()
+            updatedBuilds[ref.buildIndex] = build.copy(
+                durationMs = plan.fallbackDurationMs ?: build.durationMs,
+                morph = baseMorph.copy(phases = nextPhases),
+            )
+            node.copy(builds = updatedBuilds)
+        }
+    }
+
+    /** Applies a per-node [TextMorphResizePlan] to `slide.transition.text[nodeId].phases`. */
+    fun applyTransitionTextMorphResizeDoc(
+        doc: DeckDocument,
+        themeName: String?,
+        ref: DocumentTimelineTrackRef.TransitionTrackBar,
+        plan: TextMorphResizePlan,
+    ): DeckDocument {
+        val fromSlide = doc.slides.firstOrNull { it.id == ref.fromSlideId }
+        val fromLastBeat = (fromSlide?.beats?.lastIndex ?: 0).coerceAtLeast(0)
+        val fromNode = findNodeOnSlide(doc, ref.fromSlideId, ref.nodeId)
+            ?.let { JsonMergePatch.resolveNodeAtBeat(it, fromLastBeat) }
+        val toNode = findNodeOnSlide(doc, ref.toSlideId, ref.nodeId)
+        return updateSlideTransition(doc, themeName, ref.fromSlideId) { tr ->
+            val baseMorph = tr.text[ref.nodeId] ?: toNode?.text?.morph ?: fromNode?.text?.morph ?: TextMorphSpec()
+            val nextPhases = applyMorphPhaseDurations(
+                basePhases = baseMorph.phases ?: relativeTransitionParentPhases(tr.phases),
+                phaseDurations = plan.morphPhaseDurations,
+            )
+            val nextMap = LinkedHashMap(tr.text)
+            nextMap[ref.nodeId] = baseMorph.copy(phases = nextPhases)
+            tr.copy(text = nextMap)
+        }
+    }
+
+    private fun planTextMorphResize(
+        pieces: PieceSchedule,
+        currentSpanMs: Int,
+        requestedSpanMs: Int,
+        effectivePhases: Phases?,
+        fallbackCurve: Curve,
+        inheritsFallback: (SlotPhase) -> Boolean,
+        preferPerNodeMorphPhasesWhenClamping: Boolean,
+    ): TextMorphResizePlan? {
+        if (pieces.slots.isEmpty()) return TextMorphResizePlan(fallbackDurationMs = requestedSpanMs.coerceAtLeast(0))
+        val clamped = requestedSpanMs.coerceAtLeast(0)
+        val presentPhases = SlotPhase.entries.mapNotNull { phase ->
+            val phaseSlots = pieces.slots.filter { it.phase == phase }
+            if (phaseSlots.isEmpty()) return@mapNotNull null
+            val pt = phaseTiming(effectivePhases, phase)
+            val phaseCurve = pt?.curve ?: fallbackCurve
+            val isSpring = phaseCurve is Curve.Spring
+            MorphPhaseSpan(
+                phase = phase,
+                maxStartMs = phaseSlots.maxOf { it.startMs },
+                maxEndMs = phaseSlots.maxOf { it.endMs },
+                isSpring = isSpring,
+                inheritsFallback = !isSpring && inheritsFallback(phase),
+            )
+        }
+        val editable = presentPhases.filter { !it.isSpring }
+        if (editable.isEmpty()) return null
+
+        val springFloorMs = presentPhases.filter { it.isSpring }.maxOfOrNull { it.maxEndMs } ?: 0
+        val minSpanFloorMs = maxOf(springFloorMs, pieces.slots.maxOf { it.startMs })
+        val targetSpanMs = maxOf(clamped, minSpanFloorMs)
+
+        if (targetSpanMs == currentSpanMs) {
+            return if (clamped == currentSpanMs) TextMorphResizePlan() else null
+        }
+
+        val inherited = editable.filter { it.inheritsFallback }
+        val explicitEditable = editable.filter { !it.inheritsFallback }
+
+        if (inherited.isNotEmpty() && explicitEditable.none { it.maxEndMs > targetSpanMs }) {
+            val maxInheritedStart = inherited.maxOf { it.maxStartMs }
+            if (targetSpanMs > currentSpanMs || inherited.any { it.maxEndMs > targetSpanMs }) {
+                return TextMorphResizePlan(
+                    fallbackDurationMs = (targetSpanMs - maxInheritedStart).coerceAtLeast(0),
+                )
+            }
+            return null
+        }
+
+        if (targetSpanMs < currentSpanMs) {
+            if (inherited.isNotEmpty() && !preferPerNodeMorphPhasesWhenClamping) {
+                val explicitOverrides = explicitEditable
+                    .filter { it.maxEndMs > targetSpanMs }
+                    .associate { it.phase to (targetSpanMs - it.maxStartMs).coerceAtLeast(0) }
+                val fallbackDur = if (inherited.any { it.maxEndMs > targetSpanMs }) {
+                    (targetSpanMs - inherited.maxOf { it.maxStartMs }).coerceAtLeast(0)
+                } else {
+                    null
+                }
+                if (fallbackDur == null && explicitOverrides.isEmpty()) return null
+                return TextMorphResizePlan(
+                    fallbackDurationMs = fallbackDur,
+                    morphPhaseDurations = explicitOverrides,
+                )
+            }
+            val overrides = editable
+                .filter { it.maxEndMs > targetSpanMs }
+                .associate { it.phase to (targetSpanMs - it.maxStartMs).coerceAtLeast(0) }
+            if (overrides.isEmpty()) return null
+            return TextMorphResizePlan(morphPhaseDurations = overrides)
+        }
+
+        val maxEditableEnd = editable.maxOf { it.maxEndMs }
+        val controlling = editable.filter { it.maxEndMs == maxEditableEnd }
+        return TextMorphResizePlan(
+            morphPhaseDurations = controlling.associate { it.phase to (targetSpanMs - it.maxStartMs).coerceAtLeast(0) },
+        )
+    }
+
+    private fun applyMorphPhaseDurations(
+        basePhases: Phases?,
+        phaseDurations: Map<SlotPhase, Int>,
+    ): Phases {
+        var acc = basePhases ?: Phases()
+        for ((phase, durationMs) in phaseDurations) {
+            acc = updatePhases(
+                phases = acc,
+                phase = phase,
+                delayMs = null,
+                durationMs = durationMs,
+                curve = null,
+            )
+        }
+        return acc
+    }
+
+    private fun relativeTransitionParentPhases(phases: Phases?): Phases? = phases?.let { p ->
+        val mDelay = p.move?.delayMs ?: 0
+        if (mDelay == 0) {
+            p
+        } else {
+            p.copy(
+                exit = p.exit?.let { it.copy(delayMs = ((it.delayMs ?: 0) - mDelay).coerceAtLeast(0)) },
+                move = p.move?.copy(delayMs = 0),
+                enter = p.enter?.let { it.copy(delayMs = ((it.delayMs ?: 0) - mDelay).coerceAtLeast(0)) },
+            )
+        }
+    }
+
+    private fun phaseTiming(phases: Phases?, phase: SlotPhase): Timing? = when (phase) {
+        SlotPhase.Exit -> phases?.exit
+        SlotPhase.Move -> phases?.move
+        SlotPhase.Enter -> phases?.enter
     }
 
     private fun invertWarpSpanToTokenDurationMs(targetSpanMs: Int): Int {

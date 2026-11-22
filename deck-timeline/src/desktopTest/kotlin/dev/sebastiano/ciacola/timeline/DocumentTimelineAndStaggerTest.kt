@@ -662,6 +662,163 @@ class DocumentTimelineAndStaggerTest {
         )
     }
 
+    @Test
+    fun resizingTextMorphWithExplicitPhaseDurationsUpdatesControllingPhases() {
+        // 1. Slide build with explicit durations on all morph phases (exit=500, move=500, enter=500).
+        val explicitPhasesDoc = DeckDocument(
+            id = "explicit-morph-phases",
+            title = "Explicit Morph Phases",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "explicit-morph",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 600.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("Old shared text")),
+                            builds = listOf(
+                                Build.Change(
+                                    id = "morph",
+                                    beat = 1,
+                                    set = buildJsonObject {
+                                        put("text", buildJsonObject { put("value", "New shared copy") })
+                                    },
+                                    morph = TextMorphSpec(
+                                        by = MorphBy.Word,
+                                        phases = Phases(
+                                            exit = Timing(durationMs = 500),
+                                            move = Timing(durationMs = 500),
+                                            enter = Timing(durationMs = 500),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "spring-morph",
+                            frame = FrameSpec(x = 100.0, y = 220.0, w = 600.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("Before")),
+                            builds = listOf(
+                                Build.Change(
+                                    id = "spring",
+                                    beat = 1,
+                                    set = buildJsonObject {
+                                        put("text", buildJsonObject { put("value", "After") })
+                                    },
+                                    morph = TextMorphSpec(
+                                        by = MorphBy.Word,
+                                        phases = Phases(
+                                            exit = Timing(durationMs = 400, curve = Curve.Spring(0.8, 300.0)),
+                                            move = Timing(durationMs = 400, curve = Curve.Spring(0.8, 300.0)),
+                                            enter = Timing(durationMs = 400, curve = Curve.Spring(0.8, 300.0)),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    transition = TransitionSpec(
+                        type = TransitionType.MagicMove,
+                        phases = Phases(move = Timing(durationMs = 450)),
+                        text = mapOf(
+                            "explicit-morph" to TextMorphSpec(
+                                by = MorphBy.Word,
+                                phases = Phases(
+                                    exit = Timing(durationMs = 500),
+                                    move = Timing(durationMs = 500),
+                                    enter = Timing(durationMs = 500),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                SlideSpec(
+                    id = "s2",
+                    beats = listOf(BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "explicit-morph",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 600.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("Final shared line")),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(explicitPhasesDoc, initialLoad = dev.sebastiano.ciacola.document.DeckLoadState.Loaded)
+        val controller = DocumentTimelineController(store = store)
+
+        fun slideMorphRef(nodeId: String) = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.nodeId == nodeId && it.beatIndex == 1 }
+
+        // Extending from 500ms to 800ms updates controlling explicit phases to 800ms (not unused build.durationMs).
+        assertEquals(500, slideMorphRef("explicit-morph").trackPlan.durationMs)
+        assertTrue(controller.resizeTrackBarDuration(slideMorphRef("explicit-morph"), 800, useActiveGesture = false))
+        val extendedBuild = store.document.slides[0].nodes.first { it.id == "explicit-morph" }.builds.single() as Build.Change
+        assertNull(extendedBuild.durationMs, "Unused build.durationMs fallback should remain untouched")
+        assertEquals(800, extendedBuild.morph?.phases?.exit?.durationMs)
+        assertEquals(800, extendedBuild.morph?.phases?.move?.durationMs)
+        assertEquals(800, extendedBuild.morph?.phases?.enter?.durationMs)
+        assertEquals(800, slideMorphRef("explicit-morph").trackPlan.durationMs)
+
+        // Shrinking from 800ms to 300ms shrinks all exceeding phases cleanly.
+        assertTrue(controller.resizeTrackBarDuration(slideMorphRef("explicit-morph"), 300, useActiveGesture = false))
+        assertEquals(300, slideMorphRef("explicit-morph").trackPlan.durationMs)
+
+        // All-spring morph cannot be resized by durationMs and leaves the document untouched.
+        val beforeSpring = store.document
+        assertFalse(controller.resizeTrackBarDuration(slideMorphRef("spring-morph"), 1200, useActiveGesture = false))
+        assertEquals(beforeSpring, store.document)
+
+        // Cross-slide transition text morph with explicit transition.text phases updates those phases directly.
+        fun trMorphRef() = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.TransitionTrackBar>()
+            .single { it.fromSlideId == "s1" && it.nodeId == "explicit-morph" && it.isTextMorph }
+
+        assertEquals(500, trMorphRef().trackPlan.durationMs)
+        assertTrue(controller.resizeTrackBarDuration(trMorphRef(), 800, useActiveGesture = false))
+        assertEquals(450, store.document.slides[0].transition?.phases?.move?.durationMs, "Shared transition move duration stays unchanged")
+        assertEquals(800, trMorphRef().trackPlan.durationMs)
+        assertTrue(controller.resizeTrackBarDuration(trMorphRef(), 300, useActiveGesture = false))
+        assertEquals(300, trMorphRef().trackPlan.durationMs)
+
+        // 2. Beat-inherited & transition-inherited explicit phases (sampleDeck):
+        // Resizing headline materializes per-morph phases without mutating shared beat/transition phases.
+        val (sampleStore, sampleController) = createController()
+        val initialBeatPhases = sampleStore.document.slides[0].beats[1].phases
+        val initialTransitionPhases = sampleStore.document.slides[0].transition?.phases
+        fun sampleHeadlineBuild() = sampleController.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.slideId == "s1" && it.nodeId == "headline" && it.isTextMorph }
+
+        assertTrue(sampleController.resizeTrackBarDuration(sampleHeadlineBuild(), 800, useActiveGesture = false))
+        assertEquals(800, sampleHeadlineBuild().trackPlan.durationMs)
+        assertEquals(initialBeatPhases, sampleStore.document.slides[0].beats[1].phases, "Shared beat.phases must stay untouched")
+
+        assertTrue(sampleController.resizeTrackBarDuration(sampleHeadlineBuild(), 420, useActiveGesture = false))
+        assertEquals(420, sampleHeadlineBuild().trackPlan.durationMs)
+        val shrunkBuild = sampleStore.document.slides[0].nodes.first { it.id == "headline" }.builds.single() as Build.Change
+        assertEquals(200, shrunkBuild.morph?.phases?.exit?.durationMs, "Non-exceeding exit phase stays intact")
+
+        // Shrinking headline's cross-slide morph below enter phase's 520ms end materializes per-node transition.text phases.
+        fun sampleHeadlineTr() = sampleController.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.TransitionTrackBar>()
+            .single { it.fromSlideId == "s1" && it.nodeId == "headline" && it.isTextMorph }
+
+        assertEquals(520, sampleHeadlineTr().trackPlan.durationMs)
+        assertTrue(sampleController.resizeTrackBarDuration(sampleHeadlineTr(), 400, useActiveGesture = false))
+        assertEquals(400, sampleHeadlineTr().trackPlan.durationMs)
+        assertEquals(
+            initialTransitionPhases,
+            sampleStore.document.slides[0].transition?.phases,
+            "Shared transition.phases must stay untouched when shrinking a text morph past explicit enter phase",
+        )
+    }
+
     private fun collectAllSemanticTexts(root: SemanticsNode): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {

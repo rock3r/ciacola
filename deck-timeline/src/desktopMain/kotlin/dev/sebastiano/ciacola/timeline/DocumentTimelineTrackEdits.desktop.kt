@@ -82,19 +82,44 @@ internal object DocumentTimelineTrackEdits {
         val doc = c.store.document
         return when (ref) {
             is DocumentTimelineTrackRef.SlideBuildTrack -> {
-                val buildDurationMs = DocumentTimelineMutationSupport.buildDurationForTotalSpan(
-                    doc = doc,
-                    snapshot = c.snapshot,
-                    ref = ref,
-                    requestedSpanMs = clamped,
-                )
-                c.updateBuildTiming(
-                    slideId = ref.slideId,
-                    nodeId = ref.nodeId,
-                    buildIndex = ref.buildIndex,
-                    durationMs = buildDurationMs,
-                    useActiveGesture = useActiveGesture,
-                )
+                if (ref.isTextMorph) {
+                    val plan = DocumentTimelineMutationSupport.planSlideTextMorphResize(
+                        doc = doc,
+                        themeName = c.activeThemeName,
+                        snapshot = c.snapshot,
+                        ref = ref,
+                        requestedSpanMs = clamped,
+                    ) ?: return false
+                    when {
+                        plan.morphPhaseDurations.isNotEmpty() -> c.applyDocumentMutation(
+                            label = "Resize text morph duration",
+                            useActiveGesture = useActiveGesture,
+                        ) { d ->
+                            DocumentTimelineMutationSupport.applySlideTextMorphResizeDoc(d, ref, plan)
+                        }
+                        plan.fallbackDurationMs != null -> c.updateBuildTiming(
+                            slideId = ref.slideId,
+                            nodeId = ref.nodeId,
+                            buildIndex = ref.buildIndex,
+                            durationMs = plan.fallbackDurationMs,
+                            useActiveGesture = useActiveGesture,
+                        )
+                        else -> true
+                    }
+                } else {
+                    val buildDurationMs = DocumentTimelineMutationSupport.buildDurationForTotalSpan(
+                        snapshot = c.snapshot,
+                        ref = ref,
+                        requestedSpanMs = clamped,
+                    )
+                    c.updateBuildTiming(
+                        slideId = ref.slideId,
+                        nodeId = ref.nodeId,
+                        buildIndex = ref.buildIndex,
+                        durationMs = buildDurationMs,
+                        useActiveGesture = useActiveGesture,
+                    )
+                }
             }
             is DocumentTimelineTrackRef.SpecimenTrackBar -> c.updateSpecimenTrack(
                 slideId = ref.slideId,
@@ -105,18 +130,34 @@ internal object DocumentTimelineTrackEdits {
             )
             is DocumentTimelineTrackRef.TransitionTrackBar -> {
                 val phase = DocumentTimelineMutationSupport.phaseForTransitionKind(ref.trackPlan.kind)
-                if (phase != null) {
-                    val phaseDurationMs = DocumentTimelineMutationSupport.transitionPhaseDurationForTotalSpan(
+                if (phase != null && ref.isTextMorph) {
+                    val plan = DocumentTimelineMutationSupport.planTransitionTextMorphResize(
                         doc = doc,
                         themeName = c.activeThemeName,
                         snapshot = c.snapshot,
                         ref = ref,
                         requestedSpanMs = clamped,
-                    )
+                    ) ?: return false
+                    when {
+                        plan.morphPhaseDurations.isNotEmpty() -> c.applyDocumentMutation(
+                            label = "Resize transition text morph duration",
+                            useActiveGesture = useActiveGesture,
+                        ) { d ->
+                            DocumentTimelineMutationSupport.applyTransitionTextMorphResizeDoc(d, c.activeThemeName, ref, plan)
+                        }
+                        plan.fallbackDurationMs != null -> c.updateTransitionPhaseTiming(
+                            fromSlideId = ref.fromSlideId,
+                            phase = phase,
+                            durationMs = plan.fallbackDurationMs,
+                            useActiveGesture = useActiveGesture,
+                        )
+                        else -> true
+                    }
+                } else if (phase != null) {
                     c.updateTransitionPhaseTiming(
                         fromSlideId = ref.fromSlideId,
                         phase = phase,
-                        durationMs = phaseDurationMs,
+                        durationMs = clamped,
                         useActiveGesture = useActiveGesture,
                     )
                 } else {
