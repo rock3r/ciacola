@@ -56,19 +56,95 @@ internal object DocumentElementArrangeOps {
         }
     }
 
-    fun nodeStageBounds(controller: DocumentElementInspectorController, nodeId: String): Rect? {
+    private fun findAncestorChain(nodes: List<NodeSpec>, targetId: String): List<NodeSpec>? {
+        for (node in nodes) {
+            if (node.id == targetId) return listOf(node)
+            val childChain = findAncestorChain(node.children, targetId)
+            if (childChain != null) return listOf(node) + childChain
+        }
+        return null
+    }
+
+    private fun containerContentInset(node: NodeSpec): Pair<Double, Double> {
+        val (containerPad, surfacePad) = when {
+            node.stack != null -> node.stack!!.padding to node.stack!!.surface?.padding
+            node.row != null -> node.row!!.padding to node.row!!.surface?.padding
+            node.column != null -> node.column!!.padding to node.column!!.surface?.padding
+            else -> null to null
+        }
+        val padLeft = (containerPad?.left ?: 0.0) + (surfacePad?.left ?: 0.0)
+        val padTop = (containerPad?.top ?: 0.0) + (surfacePad?.top ?: 0.0)
+        return padLeft to padTop
+    }
+
+    /** Stage-coordinate top-left of the direct parent's content box (`Offset.Zero` for top-level nodes). */
+    private fun parentContentStageOrigin(
+        controller: DocumentElementInspectorController,
+        chain: List<NodeSpec>,
+    ): Offset {
+        if (chain.size <= 1) return Offset.Zero
+        var ox = 0.0
+        var oy = 0.0
+        for (idx in 0 until chain.lastIndex) {
+            val anc = JsonMergePatch.resolveNodeAtBeat(chain[idx], controller.activeBeat)
+            val inspectedAnc = controller.stageBoundsProvider?.invoke(anc.id)
+            if (inspectedAnc != null) {
+                ox = inspectedAnc.left.toDouble()
+                oy = inspectedAnc.top.toDouble()
+            } else {
+                ox += anc.frame?.x ?: 0.0
+                oy += anc.frame?.y ?: 0.0
+            }
+            val (padLeft, padTop) = containerContentInset(anc)
+            ox += padLeft
+            oy += padTop
+        }
+        return Offset(ox.toFloat(), oy.toFloat())
+    }
+
+    private data class ResolvedArrangeNode(
+        val resolvedFrame: FrameSpec?,
+        val stageBounds: Rect,
+        val parentOrigin: Offset,
+    ) {
+        val localLeft: Double get() = resolvedFrame?.x ?: (stageBounds.left.toDouble() - parentOrigin.x)
+        val localTop: Double get() = resolvedFrame?.y ?: (stageBounds.top.toDouble() - parentOrigin.y)
+        val localBounds: Rect
+            get() = Rect(
+                localLeft.toFloat(),
+                localTop.toFloat(),
+                (localLeft + stageBounds.width).toFloat(),
+                (localTop + stageBounds.height).toFloat(),
+            )
+        val isImplicitlyAligned: Boolean get() = resolvedFrame?.x == null && resolvedFrame?.y == null
+    }
+
+    private fun resolveArrangeNode(
+        controller: DocumentElementInspectorController,
+        nodeId: String,
+    ): ResolvedArrangeNode? {
         val slide = controller.activeSlide() ?: return null
-        val base = DocumentThemeResolver.findNode(slide.nodes, nodeId) ?: return null
-        val frame = JsonMergePatch.resolveNodeAtBeat(base, controller.activeBeat).frame
+        val chain = findAncestorChain(slide.nodes, nodeId) ?: return null
+        val frame = JsonMergePatch.resolveNodeAtBeat(chain.last(), controller.activeBeat).frame
         val inspected = controller.stageBoundsProvider?.invoke(nodeId)
         val hasExplicitFrame = frame != null && (frame.x != null || frame.y != null || frame.w != null || frame.h != null)
         if (!hasExplicitFrame && inspected == null) return null
-        val x = frame?.x ?: inspected?.left?.toDouble() ?: 0.0
-        val y = frame?.y ?: inspected?.top?.toDouble() ?: 0.0
+        val parentOrigin = parentContentStageOrigin(controller, chain)
+        val frameX = frame?.x
+        val frameY = frame?.y
+        val stageX = if (frameX != null) parentOrigin.x + frameX else inspected?.left?.toDouble() ?: parentOrigin.x.toDouble()
+        val stageY = if (frameY != null) parentOrigin.y + frameY else inspected?.top?.toDouble() ?: parentOrigin.y.toDouble()
         val w = frame?.w ?: inspected?.width?.toDouble() ?: DEFAULT_W
         val h = frame?.h ?: inspected?.height?.toDouble() ?: DEFAULT_H
-        return Rect(x.toFloat(), y.toFloat(), (x + w).toFloat(), (y + h).toFloat())
+        return ResolvedArrangeNode(
+            resolvedFrame = frame,
+            stageBounds = Rect(stageX.toFloat(), stageY.toFloat(), (stageX + w).toFloat(), (stageY + h).toFloat()),
+            parentOrigin = parentOrigin,
+        )
     }
+
+    fun nodeStageBounds(controller: DocumentElementInspectorController, nodeId: String): Rect? =
+        resolveArrangeNode(controller, nodeId)?.stageBounds
 
     /** Moves each node by its delta, snapping `frame.x` / `frame.y` to half units, in ONE undo step. */
     fun moveNodesBy(
@@ -79,36 +155,43 @@ internal object DocumentElementArrangeOps {
         if (controller.store.isReadOnly) return false
         val slideId = controller.activeSlide()?.id ?: return false
         if (controller.editAllBuilds && controller.activeBeat > 0) {
-            val activeDeltas = LinkedHashMap<String, Pair<Offset, Rect>>()
+            val activeDeltas = LinkedHashMap<String, Pair<Offset, ResolvedArrangeNode>>()
             for ((id, delta) in deltas) {
                 if (!moved(delta.x) && !moved(delta.y)) continue
-                val bounds = nodeStageBounds(controller, id) ?: continue
-                activeDeltas[id] = delta to bounds
+                val resolved = resolveArrangeNode(controller, id) ?: continue
+                activeDeltas[id] = delta to resolved
             }
             if (activeDeltas.isEmpty()) return false
             return controller.applyMutation(label, useActiveGesture = false) { doc ->
                 activeDeltas.entries.fold(doc) { acc, (id, pair) ->
-                    val (delta, bounds) = pair
+                    val (delta, resolved) = pair
                     DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { node ->
-                        offsetFrameAcrossAllBuilds(node, FrameDelta(dx = delta.x.toDouble(), dy = delta.y.toDouble()), bounds)
+                        offsetFrameAcrossAllBuilds(
+                            node = node,
+                            delta = FrameDelta(dx = delta.x.toDouble(), dy = delta.y.toDouble()),
+                            fallbackBounds = resolved.localBounds,
+                        )
                     }
                 }
             }
         }
         val patches = LinkedHashMap<String, JsonObject>()
         for ((id, delta) in deltas) {
-            // Only the axis that actually moved is written, so a horizontal nudge never pins (or
-            // re-snaps an off-grid) `y` into a build's change patch, and vice versa.
             val moveX = moved(delta.x)
             val moveY = moved(delta.y)
             if (!moveX && !moveY) continue
-            val bounds = nodeStageBounds(controller, id) ?: continue
+            val resolved = resolveArrangeNode(controller, id) ?: continue
+            // When an alignment-positioned node has neither frame.x nor frame.y, setting one axis
+            // disables alignment on BOTH axes in DocumentStackChildrenLayout, so preserve the
+            // orthogonal local coordinate as well on this first explicit positioning.
+            val writeX = moveX || resolved.isImplicitlyAligned
+            val writeY = moveY || resolved.isImplicitlyAligned
             patches[id] = buildJsonObject {
                 put(
                     "frame",
                     buildJsonObject {
-                        if (moveX) put("x", snapHalfUnit(bounds.left.toDouble() + delta.x))
-                        if (moveY) put("y", snapHalfUnit(bounds.top.toDouble() + delta.y))
+                        if (writeX) put("x", snapHalfUnit(resolved.localLeft + delta.x))
+                        if (writeY) put("y", snapHalfUnit(resolved.localTop + delta.y))
                     },
                 )
             }
@@ -126,18 +209,22 @@ internal object DocumentElementArrangeOps {
      * Width / height stay at least 1 stage unit; everything snaps to half units.
      */
     fun offsetFrameAcrossAllBuilds(node: NodeSpec, delta: FrameDelta, fallbackBounds: Rect): NodeSpec {
+        fun overrides(key: String) = node.builds.any { b -> b is Build.Change && (b.set["frame"] as? JsonObject)?.containsKey(key) == true }
+        val implicitlyAlignedBase = node.frame?.x == null && node.frame?.y == null && !overrides("x") && !overrides("y")
+        val movingPos = moved(delta.dx) || moved(delta.dy)
         val keys = listOf(
             Triple("x", delta.dx, fallbackBounds.left.toDouble()),
             Triple("y", delta.dy, fallbackBounds.top.toDouble()),
             Triple("w", delta.dw, fallbackBounds.width.toDouble()),
             Triple("h", delta.dh, fallbackBounds.height.toDouble()),
-        ).filter { moved(it.second) }
+        ).filter { (key, d, _) ->
+            moved(d) || (implicitlyAlignedBase && movingPos && (key == "x" || key == "y"))
+        }
         if (keys.isEmpty()) return node
         fun adjust(key: String, value: Double, d: Double): Double {
             val next = snapHalfUnit(value + d)
             return if (key == "w" || key == "h") next.coerceAtLeast(1.0) else next
         }
-        fun overrides(key: String) = node.builds.any { b -> b is Build.Change && (b.set["frame"] as? JsonObject)?.containsKey(key) == true }
         var frame = node.frame ?: FrameSpec()
         for ((key, d, fallback) in keys) {
             val base = when (key) { "x" -> frame.x; "y" -> frame.y; "w" -> frame.w; else -> frame.h }
@@ -156,10 +243,10 @@ internal object DocumentElementArrangeOps {
         val nextFrame = if (frame == (node.frame ?: FrameSpec())) node.frame else frame
         val nextBuilds = node.builds.map { build ->
             val frameObj = (build as? Build.Change)?.set?.get("frame") as? JsonObject ?: return@map build
-            if (keys.none { (key, _, _) -> (frameObj[key] as? JsonPrimitive)?.doubleOrNull != null }) return@map build
+            if (keys.none { (key, d, _) -> moved(d) && (frameObj[key] as? JsonPrimitive)?.doubleOrNull != null }) return@map build
             val newFrameObj = buildJsonObject {
                 for ((k, v) in frameObj) {
-                    val d = keys.firstOrNull { it.first == k }?.second
+                    val d = keys.firstOrNull { it.first == k && moved(it.second) }?.second
                     val old = (v as? JsonPrimitive)?.doubleOrNull
                     if (d != null && old != null) put(k, adjust(k, old, d)) else put(k, v)
                 }
@@ -231,30 +318,36 @@ internal object DocumentElementArrangeOps {
         val frames = groupResizeFrames(startUnion, nextUnion, startRects)
         if (frames.isEmpty()) return false
         val label = "Resize ${frames.size} elements"
+        val slide = controller.activeSlide() ?: return false
+        val parentOrigins = frames.keys.associateWith { id ->
+            findAncestorChain(slide.nodes, id)?.let { parentContentStageOrigin(controller, it) } ?: Offset.Zero
+        }
         if (controller.editAllBuilds && controller.activeBeat > 0) {
             // Relative change across base + every build (like `moveNodesBy`), never stamping this
             // build's absolute frame onto Beat 0. The transaction re-applies it to its start snapshot.
-            val slideId = controller.activeSlide()?.id ?: return false
             return controller.applyMutation(label, useActiveGesture = true) { doc ->
                 frames.entries.fold(doc) { acc, (id, f) ->
                     val start = startRects[id] ?: return@fold acc
+                    val parentOrigin = parentOrigins[id] ?: Offset.Zero
+                    val startLocal = start.translate(-parentOrigin.x, -parentOrigin.y)
                     val delta = FrameDelta(
                         dx = (f.x ?: 0.0) - start.left,
                         dy = (f.y ?: 0.0) - start.top,
                         dw = (f.w ?: 0.0) - start.width,
                         dh = (f.h ?: 0.0) - start.height,
                     )
-                    DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { offsetFrameAcrossAllBuilds(it, delta, start) }
+                    DocumentThemeResolver.updateNodeInSlide(acc, slide.id, id) { offsetFrameAcrossAllBuilds(it, delta, startLocal) }
                 }
             }
         }
-        val patches = frames.mapValues { (_, f) ->
+        val patches = frames.mapValues { (id, f) ->
+            val parentOrigin = parentOrigins[id] ?: Offset.Zero
             buildJsonObject {
                 put(
                     "frame",
                     buildJsonObject {
-                        put("x", f.x ?: 0.0)
-                        put("y", f.y ?: 0.0)
+                        put("x", snapHalfUnit((f.x ?: 0.0) - parentOrigin.x))
+                        put("y", snapHalfUnit((f.y ?: 0.0) - parentOrigin.y))
                         put("w", f.w ?: DEFAULT_W)
                         put("h", f.h ?: DEFAULT_H)
                     },

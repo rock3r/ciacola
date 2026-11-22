@@ -285,4 +285,119 @@ class InspectorEdgeCasesTest {
         c.selectLocation("s1", 0) // `late` is absent on Base.
         assertFalse(c.handleKeyEvent(keyDown(Key.DirectionRight)), "Arrows must fall through to slide navigation")
     }
+
+    @Test
+    fun firstNudgeOnImplicitlyAlignedChildPreservesOrthogonalCoordinateInParentLocalSpace() {
+        val alignedChild = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "centered-child",
+            align = "center",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Centered"),
+            ),
+        )
+        val parent = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-stack",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 200.0, w = 600.0, h = 400.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(alignedChild)),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "aligned-nudge",
+            title = "Aligned Nudge",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec(), dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(parent),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        // Parent sits at stage (100, 200); centered child sits at local (200, 160) -> stage (300, 360).
+        c.stageBoundsProvider = { id ->
+            when (id) {
+                "parent-stack" -> Rect(100f, 200f, 700f, 600f)
+                "centered-child" -> Rect(300f, 360f, 500f, 440f)
+                else -> null
+            }
+        }
+        c.selectLocation("s1", 0)
+        c.selectNode("centered-child")
+
+        assertTrue(c.nudgeSelectedNodes(10.0, 0.0))
+        val updated = dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
+            store.document.slides.first().nodes,
+            "centered-child",
+        )!!
+        assertEquals(210.0, updated.frame?.x, "Horizontal nudge must move parent-local x from 200 to 210")
+        assertEquals(160.0, updated.frame?.y, "First nudge on aligned child must preserve parent-local y (160), not jump to 0")
+    }
+
+    @Test
+    fun alignAndDistributeCompareNestedChildrenInStageCoordinatesAndWriteParentLocalPatches() {
+        val child1 = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "child-1",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 10.0, y = 20.0, w = 100.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("One"),
+            ),
+        )
+        val child2 = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "child-2",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 10.0, y = 20.0, w = 100.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Two"),
+            ),
+        )
+        val parent1 = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-1",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 50.0, w = 300.0, h = 200.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(child1)),
+        )
+        val parent2 = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-2",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 200.0, y = 300.0, w = 300.0, h = 200.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(child2)),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "nested-align",
+            title = "Nested Align",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(parent1, parent2),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 0)
+        c.selectNodes(setOf("child-1", "child-2"), primaryId = "child-1")
+
+        // Stage positions: child-1 is at x = 110, child-2 is at x = 210 (100 units apart despite equal local x = 10).
+        assertEquals(110f, DocumentElementArrangeOps.nodeStageBounds(c, "child-1")?.left)
+        assertEquals(210f, DocumentElementArrangeOps.nodeStageBounds(c, "child-2")?.left)
+
+        // Left-align brings child-2 to stage x = 110 -> parent-local x = -90 inside parent-2 (at x = 200).
+        assertTrue(c.alignSelectedNodes(NodeAlignment.Left))
+        val after1 = dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
+            store.document.slides.first().nodes,
+            "child-1",
+        )!!
+        val after2 = dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
+            store.document.slides.first().nodes,
+            "child-2",
+        )!!
+        assertEquals(10.0, after1.frame?.x, "Leftmost child-1 stays at local x = 10 (stage x = 110)")
+        assertEquals(-90.0, after2.frame?.x, "child-2 must shift by -100 to local x = -90 (stage x = 110)")
+        assertEquals(110f, DocumentElementArrangeOps.nodeStageBounds(c, "child-2")?.left)
+    }
 }
