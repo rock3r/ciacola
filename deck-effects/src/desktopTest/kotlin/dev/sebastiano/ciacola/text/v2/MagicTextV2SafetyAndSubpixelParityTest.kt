@@ -162,24 +162,38 @@ class MagicTextV2SafetyAndSubpixelParityTest {
         val w = 1160
         val h = 900
         val wrapPad = 24f
-        val metalCtx = MetalOffscreenContext()
-        val surface = Surface.makeRenderTarget(
-            context = metalCtx.directContext,
-            budgeted = false,
-            imageInfo = ImageInfo.makeN32Premul(w, h),
-        ) ?: error("Failed to create Metal render target")
+        val isMacOs = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
+        val metalCtx = if (isMacOs) {
+            MetalOffscreenContext()
+        } else {
+            try {
+                MetalOffscreenContext()
+            } catch (_: Throwable) {
+                null
+            }
+        }
+        val surface = if (metalCtx != null) {
+            Surface.makeRenderTarget(
+                context = metalCtx.directContext,
+                budgeted = false,
+                imageInfo = ImageInfo.makeN32Premul(w, h),
+            ) ?: error("Failed to create Metal render target")
+        } else {
+            Surface.makeRasterN32Premul(w, h)
+        }
+        val backendLabel = if (metalCtx != null) "Metal GPU" else "CPU Raster"
         val bmp = Bitmap()
         val info = ImageInfo(w, h, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
         bmp.allocPixels(info)
 
-        fun renderMetal(drawBlock: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit): ByteArray {
+        fun renderSurface(drawBlock: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit): ByteArray {
             val drawScope = CanvasDrawScope()
             surface.canvas.clear(0)
             drawScope.draw(density, LayoutDirection.Ltr, surface.canvas.asComposeCanvas(), androidx.compose.ui.geometry.Size(w.toFloat(), h.toFloat())) {
                 drawContext.transform.translate(wrapPad, wrapPad)
                 drawBlock()
             }
-            metalCtx.directContext.flushAndSubmit(surface, syncCpu = true)
+            metalCtx?.directContext?.flushAndSubmit(surface, syncCpu = true)
             assertTrue(surface.readPixels(bmp, 0, 0))
             return assertNotNull(bmp.readPixels(info, w * 4, 0, 0))
         }
@@ -187,8 +201,8 @@ class MagicTextV2SafetyAndSubpixelParityTest {
         try {
             val fromWL = plan.fromPartition.wholeLayout
             val toWL = plan.toPartition.wholeLayout
-            val restSmall = renderMetal { drawText(fromWL) }
-            val morphStart = renderMetal { drawMorphFrame(plan, morph.copy(elapsedMs = 0f), config) }
+            val restSmall = renderSurface { drawText(fromWL) }
+            val morphStart = renderSurface { drawMorphFrame(plan, morph.copy(elapsedMs = 0f), config) }
 
             for (line in 0 until fromWL.lineCount) {
                 val yTop = (wrapPad + fromWL.getLineTop(line)).toInt().coerceAtLeast(0)
@@ -199,13 +213,13 @@ class MagicTextV2SafetyAndSubpixelParityTest {
                     max(abs(restEdges.left - startEdges.left), abs(restEdges.right - startEdges.right)),
                     max(abs(restEdges.top - startEdges.top), abs(restEdges.bottom - startEdges.bottom)),
                 )
-                assertTrue(err <= 0.5, "Metal GPU wrapped line $line direct handover exceeded 0.5 px: $err")
+                assertTrue(err <= 0.5, "$backendLabel wrapped line $line direct handover exceeded 0.5 px: $err")
             }
 
             val lineSamples = Array(fromWL.lineCount) { ArrayList<MagicTextV2TestSupport.SubpixelInkEdges>(60) }
             for (k in 0 until 60) {
                 val p = k / 59f
-                val rgba = renderMetal { drawMorphFrame(plan, morph.copy(elapsedMs = p * 800f), config) }
+                val rgba = renderSurface { drawMorphFrame(plan, morph.copy(elapsedMs = p * 800f), config) }
                 for (line in 0 until fromWL.lineCount) {
                     val interpTop = fromWL.getLineTop(line) + (toWL.getLineTop(line) - fromWL.getLineTop(line)) * p
                     val interpBot = fromWL.getLineBottom(line) + (toWL.getLineBottom(line) - fromWL.getLineBottom(line)) * p
@@ -230,14 +244,14 @@ class MagicTextV2SafetyAndSubpixelParityTest {
                     )
                     assertTrue(
                         dev <= 0.5,
-                        "Metal GPU wrapped line $line sample $k trajectory dev exceeded 0.5 px: $dev (cur=$cur first=$first last=$last)",
+                        "$backendLabel wrapped line $line sample $k trajectory dev exceeded 0.5 px: $dev (cur=$cur first=$first last=$last)",
                     )
                 }
             }
         } finally {
             bmp.close()
             surface.close()
-            metalCtx.close()
+            metalCtx?.close()
         }
     }
 }

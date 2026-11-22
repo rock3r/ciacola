@@ -445,7 +445,13 @@ class MagicTextV2EffectsAndRenderingTest {
                 movePlan.wholeParagraphCrossFade,
                 "Fixture 1 (300-move) must admit cleanly without falling back (from=${movePlan.fromPartition.refusalReason}, to=${movePlan.toPartition.refusalReason})",
             )
-            assertEquals(300, movePlan.groups.size, "Fixture 1 must have 300 admitted moving word groups")
+            assertEquals(
+                300,
+                movePlan.groups.size,
+                "Fixture 1 must have 300 admitted moving word groups " +
+                    "(fromPieces=${movePlan.fromPartition.pieces.size}, fromRounds=${movePlan.fromPartition.coarseningRounds}, " +
+                    "toPieces=${movePlan.toPartition.pieces.size}, toRounds=${movePlan.toPartition.coarseningRounds})",
+            )
             assertTrue(
                 movePlan.groups.all { it.kind == DrawableGroupKind.Move && !it.styleChanged },
                 "Fixture 1 must be 100% layer-free Move groups",
