@@ -437,12 +437,12 @@ internal object PieceInkBounds {
 
             val wPosPad = padF + wBox.left
             val pPosPad = (padF + baseOriginX) + pBox.left
-            if (floor(wPosPad.toDouble() * 4.0 + 0.5) != floor(pPosPad.toDouble() * 4.0 + 0.5)) {
+            if (floor(wPosPad.toDouble() * 8.0) != floor(pPosPad.toDouble() * 8.0)) {
                 anyPadBinMismatch = true
             }
             val wPosZero = wBox.left
             val pPosZero = baseOriginX + pBox.left
-            if (floor(wPosZero.toDouble() * 4.0 + 0.5) != floor(pPosZero.toDouble() * 4.0 + 0.5)) {
+            if (floor(wPosZero.toDouble() * 8.0) != floor(pPosZero.toDouble() * 8.0)) {
                 anyZeroBinMismatch = true
             }
         }
@@ -453,15 +453,16 @@ internal object PieceInkBounds {
         var maxOx = baseOriginX.toDouble() + 0.002
         val binMargin = 2e-4
 
-        // First constrain against the Condition 2 pad translation (float32-accurate).
+        // First constrain against the Condition 2 pad translation across all 1/8-px grid intervals
+        // (covers floor k, 1-bin k+0.5, 2-bin k/2+0.25, and 4-bin k/4+0.125 boundaries).
         for (i in candStart until candEnd) {
             val wBox = wholeLayout.getBoundingBox(i)
             val pBox = pieceLayout.getBoundingBox(i - candStart)
             if (wBox.width <= 0f || pBox.width <= 0f) continue
             val wPos = (padF + wBox.left).toDouble()
-            val wBin = floor(wPos * 4.0 + 0.5)
-            val binLo = (wBin - 0.5) / 4.0
-            val binHi = (wBin + 0.5) / 4.0
+            val wBin8 = floor(wPos * 8.0)
+            val binLo = wBin8 / 8.0
+            val binHi = (wBin8 + 1.0) / 8.0
             val shift = padF.toDouble() + pBox.left.toDouble()
             minOx = max(minOx, (binLo + binMargin) - shift)
             maxOx = min(maxOx, (binHi - binMargin) - shift)
@@ -475,9 +476,9 @@ internal object PieceInkBounds {
                 val pBox = pieceLayout.getBoundingBox(i - candStart)
                 if (wBox.width <= 0f || pBox.width <= 0f) continue
                 val wPos = (padF + wBox.left).toDouble()
-                val wBin = floor(wPos * 4.0 + 0.5)
-                val binLo = (wBin - 0.5) / 4.0
-                val binHi = (wBin + 0.5) / 4.0
+                val wBin8 = floor(wPos * 8.0)
+                val binLo = wBin8 / 8.0
+                val binHi = (wBin8 + 1.0) / 8.0
                 val shift = padF.toDouble() + pBox.left.toDouble()
                 minOx = max(minOx, (binLo + 1e-5) - shift)
                 maxOx = min(maxOx, (binHi - 1e-5) - shift)
@@ -521,11 +522,11 @@ internal object PieceInkBounds {
                 }
             }
         }
-        if (failingIndices.isEmpty() || failingIndices.size > 32) return null
+        if (failingIndices.isEmpty() || failingIndices.size > 64) return null
 
         val overrides = FloatArray(normPieces.size) { Float.NaN }
         var anyResolved = false
-        val deltas = floatArrayOf(0.0005f, -0.0005f, 0.0015f, -0.0015f)
+        val deltas = floatArrayOf(0.0005f, -0.0005f, 0.0015f, -0.0015f, 0.0025f, -0.0025f)
         val bmp = Bitmap()
         try {
             for (idx in failingIndices) {
@@ -604,8 +605,8 @@ internal object PieceInkBounds {
             val pBox = piece.layout.getBoundingBox(i - piece.start)
             if (wBox.width <= 0f || pBox.width <= 0f) continue
             if (abs(wBox.left - (piece.originX + pBox.left)) > 0.0025f) return false
-            val scaled = wBox.left.toDouble() * 4.0 + 0.5
-            if (abs(scaled - round(scaled)) <= 0.012) {
+            val scaled8 = wBox.left.toDouble() * 8.0
+            if (abs(scaled8 - round(scaled8)) <= 0.025) {
                 anyNearBinEdge = true
             }
         }

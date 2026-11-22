@@ -8,8 +8,10 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.platform.FontLoadResult
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
@@ -252,6 +254,30 @@ class MagicTextV2SafetyAndSubpixelParityTest {
             bmp.close()
             surface.close()
             metalCtx?.close()
+        }
+    }
+
+    @Test
+    fun skiaTypefaceCacheResolvesDefaultAndGenericFamiliesViaComposeFontFamilyResolver() {
+        val density = Density(1f)
+        val measurer = MagicTextV2TestSupport.createMeasurer(density)
+        for (family in listOf(FontFamily.Default, FontFamily.SansSerif, FontFamily.Monospace)) {
+            val layout = measurer.measure(
+                text = AnnotatedString("Handover"),
+                style = TextStyle(fontFamily = family, fontSize = 20.sp),
+            )
+            val composeResolver = layout.layoutInput.fontFamilyResolver
+            val expected = (composeResolver.resolve(family, FontWeight.Normal, FontStyle.Normal).value as? FontLoadResult)?.typeface
+            val actual = SkiaTypefaceCache.resolve(
+                fontFamily = family,
+                weight = FontWeight.Normal,
+                style = FontStyle.Normal,
+                fontResolver = null,
+                fontFamilyResolver = composeResolver,
+            )
+            assertNotNull(expected, "Compose FontFamily.Resolver must resolve $family")
+            assertNotNull(actual, "SkiaTypefaceCache must resolve $family")
+            assertEquals(expected.familyName, actual.familyName, "SkiaTypefaceCache must match SkParagraph typeface for $family")
         }
     }
 }

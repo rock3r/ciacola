@@ -633,6 +633,7 @@ internal object TwoConditionPartitioner {
                 weight = dom.fontWeight,
                 style = dom.fontStyle,
                 fontResolver = fontResolver,
+                fontFamilyResolver = wholeLayout.layoutInput.fontFamilyResolver,
             )
             val paintedBaselineY = if (typeface != null) {
                 wholeLinePaintedBaselinePx(

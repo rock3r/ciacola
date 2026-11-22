@@ -436,6 +436,7 @@ internal object JointGroupingPlanner {
             weight = fromPiece.dominantFontWeight,
             style = fromPiece.dominantFontStyle,
             fontResolver = fontResolver,
+            fontFamilyResolver = fromLargeLayout.layoutInput.fontFamilyResolver,
         )
         val fromLargeBaseline = if (fromTypeface != null) {
             truePaintedBaselinePx(fromTypeface, largePx)
@@ -548,6 +549,7 @@ internal object JointGroupingPlanner {
             weight = toPiece.dominantFontWeight,
             style = toPiece.dominantFontStyle,
             fontResolver = fontResolver,
+            fontFamilyResolver = toLargeLayout.layoutInput.fontFamilyResolver,
         )
         val toLargeBaseline = if (toTypeface != null) {
             truePaintedBaselinePx(toTypeface, largePx)

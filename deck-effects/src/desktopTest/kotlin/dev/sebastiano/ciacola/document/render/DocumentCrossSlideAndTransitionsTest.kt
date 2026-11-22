@@ -768,7 +768,7 @@ class DocumentCrossSlideAndTransitionsTest {
 
         val travellerPair = matchResult.pairs.first { it.nodeId == "traveller" }
 
-        DocumentStageHarness(doc).use { h ->
+        val warmMidFrame = DocumentStageHarness(doc).use { h ->
             val crossIdx = h.crossFromStateIndex(0)
 
             // Resting Slide A & Slide B frames
@@ -871,12 +871,14 @@ class DocumentCrossSlideAndTransitionsTest {
                 )
             }
 
-            // Fresh RenderSession cold seek to p = 0.5 equals warm play pixel-for-pixel!
-            DocumentStageHarness(doc).use { fresh ->
-                val freshCross = fresh.crossFromStateIndex(0)
-                val freshMid = fresh.seekSegment(freshCross, 0.5f, rebuildScene = true)
-                assertFramesEqual(fwdFrames.getValue(0.5f), freshMid, "fresh RenderSession cold seek != warm play")
-            }
+            fwdFrames.getValue(0.5f)
+        }
+
+        // Fresh RenderSession cold seek to p = 0.5 equals warm play pixel-for-pixel!
+        DocumentStageHarness(doc).use { fresh ->
+            val freshCross = fresh.crossFromStateIndex(0)
+            val freshMid = fresh.seekSegment(freshCross, 0.5f, rebuildScene = true)
+            assertFramesEqual(warmMidFrame, freshMid, "fresh RenderSession cold seek != warm play")
         }
     }
 

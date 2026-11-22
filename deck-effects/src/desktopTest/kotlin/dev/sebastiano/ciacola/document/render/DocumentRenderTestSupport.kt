@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
@@ -497,6 +498,10 @@ internal class DocumentStageHarness(
     }
 
     override fun close() {
+        Snapshot.sendApplyNotifications()
+        if (scene.hasInvalidations()) {
+            scene.render(clockNanos).close()
+        }
         scene.close()
     }
 }

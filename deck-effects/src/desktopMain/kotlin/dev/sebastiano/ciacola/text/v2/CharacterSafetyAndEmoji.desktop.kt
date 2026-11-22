@@ -10,6 +10,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontListFontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.platform.FontLoadResult
 import androidx.compose.ui.text.platform.LoadedFont
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Density
@@ -141,6 +142,7 @@ internal object SkiaTypefaceCache {
         weight: FontWeight,
         style: FontStyle,
         fontResolver: DeckFontResolver?,
+        fontFamilyResolver: FontFamily.Resolver? = null,
     ): SkiaTypeface? {
         if (fontResolver != null && fontFamily != null) {
             val resolvedFamily = fontResolver.findResolvedFamily(fontFamily)
@@ -177,6 +179,16 @@ internal object SkiaTypefaceCache {
                     CachedTypeface(resolved)
                 }
             }.typeface
+        }
+        if (fontFamilyResolver != null) {
+            val resolved = runCatching {
+                fontFamilyResolver.resolve(
+                    fontFamily = fontFamily,
+                    fontWeight = weight,
+                    fontStyle = style,
+                ).value
+            }.getOrNull()
+            (resolved as? FontLoadResult)?.typeface?.let { return it }
         }
         val isBold = weight.weight >= 600
         val isItalic = style == FontStyle.Italic
@@ -279,7 +291,13 @@ internal object VectorGlyphOutlineBuilder {
                 val family = merged.fontFamily ?: baseStyle.fontFamily
                 val weight = merged.fontWeight ?: baseStyle.fontWeight ?: FontWeight.Normal
                 val fontStyle = merged.fontStyle ?: baseStyle.fontStyle ?: FontStyle.Normal
-                val typeface = SkiaTypefaceCache.resolve(family, weight, fontStyle, fontResolver) ?: return null
+                val typeface = SkiaTypefaceCache.resolve(
+                    fontFamily = family,
+                    weight = weight,
+                    style = fontStyle,
+                    fontResolver = fontResolver,
+                    fontFamilyResolver = largeLayout.layoutInput.fontFamilyResolver,
+                ) ?: return null
                 val sliceFontSizePx = if (!merged.fontSize.isUnspecified) {
                     merged.fontSize.value * pxPerSp
                 } else {

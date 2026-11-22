@@ -37,7 +37,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Check project
-        run: ./gradlew check compileKotlinWasmJs --continue -x wasmJsBrowserTest
+        run: ./gradlew check compileKotlinWasmJs --no-parallel --continue -x wasmJsBrowserTest
 
       - uses: mikepenz/action-junit-report@v6
         if: success() || failure()
