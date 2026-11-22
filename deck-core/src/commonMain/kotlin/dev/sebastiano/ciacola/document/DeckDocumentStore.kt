@@ -368,9 +368,8 @@ class DeckDocumentStore(
     }
 
     /**
-     * Applies an external clean file update as a new history entry labelled `"External change"`
-     * while preserving undo history. Any open gesture transaction is invalidated first so a
-     * stale `cancel()` can never overwrite the taken document.
+     * Applies an external file update as a new history entry while preserving undo history.
+     * Any open gesture transaction is invalidated first so a stale `cancel()` cannot revert it.
      */
     fun applyExternalChange(
         newDocument: DeckDocument,
@@ -381,26 +380,79 @@ class DeckDocumentStore(
         val resolvedIssues = issues ?: validateDocument(newDocument)
         mutateState {
             invalidateActiveTransactionLocked()
-            if (committedDocumentState != newDocument) {
-                pushCapped(undoStack, HistoryEntry(label, committedDocumentState))
-                redoStack.clear()
-                committedDocumentState = newDocument
-                lintIssues = resolvedIssues
-                lastRejectedEditErrors = emptyList()
-                revision++
-                committedPair = committedDocumentState to revision
-            } else {
-                lintIssues = resolvedIssues
+            commitExternalDocumentLocked(newDocument, label, markAsSaved, resolvedIssues)
+        }
+    }
+
+    /**
+     * Atomically checks under [stateLock] that the store is clean (`!isDirty && !hasOpenTransaction`)
+     * before applying an external file change. Returns the previous committed document on reload, or
+     * `null` (preserving the live document/transaction and surfacing [conflictOnDirty]) if an edit
+     * or gesture transaction intervened.
+     */
+    fun applyExternalChangeIfClean(
+        newDocument: DeckDocument,
+        conflictOnDirty: ConflictInfo,
+        label: String = "External change",
+        issues: List<DocumentIssue>? = null,
+    ): DeckDocument? {
+        val resolvedIssues = issues ?: validateDocument(newDocument)
+        return mutateState {
+            if (sync is SyncState.Conflict) return@mutateState null
+            if (revision > savedRevision || activeTransaction != null) {
+                if (sync !is SyncState.ReadOnly) sync = SyncState.Conflict(conflictOnDirty)
+                return@mutateState null
             }
-            if (markAsSaved) {
-                savedRevision = revision
-                if (sync !is SyncState.ReadOnly) {
-                    sync = SyncState.Saved
-                }
-            } else {
-                updateDirtySyncAfterCommit()
+            val previousDoc = committedDocumentState
+            commitExternalDocumentLocked(newDocument, label, markAsSaved = true, resolvedIssues)
+            previousDoc
+        }
+    }
+
+    private fun commitExternalDocumentLocked(
+        newDocument: DeckDocument,
+        label: String,
+        markAsSaved: Boolean,
+        resolvedIssues: List<DocumentIssue>,
+    ) {
+        if (committedDocumentState != newDocument) {
+            pushCapped(undoStack, HistoryEntry(label, committedDocumentState))
+            redoStack.clear()
+            committedDocumentState = newDocument
+            lastRejectedEditErrors = emptyList()
+            revision++
+            committedPair = committedDocumentState to revision
+        }
+        lintIssues = resolvedIssues
+        if (markAsSaved) {
+            savedRevision = revision
+            if (sync !is SyncState.ReadOnly) sync = SyncState.Saved
+        } else {
+            updateDirtySyncAfterCommit()
+        }
+        refreshHistoryFlags()
+    }
+
+    /**
+     * Atomically updates [sync] to `Dirty` or `Saved` under [stateLock] based on current revision
+     * and open-transaction state, optionally clearing error or conflict states.
+     */
+    fun reconcileSyncState(
+        clearWriteFailed: Boolean = false,
+        clearExternalInvalid: Boolean = false,
+        clearConflict: Boolean = false,
+    ) {
+        mutateState {
+            val canUpdate = when (sync) {
+                is SyncState.Saved, is SyncState.Dirty -> true
+                is SyncState.WriteFailed -> clearWriteFailed
+                is SyncState.ExternalInvalid -> clearExternalInvalid
+                is SyncState.Conflict -> clearConflict
+                is SyncState.ReadOnly -> false
             }
-            refreshHistoryFlags()
+            if (canUpdate) {
+                sync = if (revision > savedRevision || activeTransaction != null) SyncState.Dirty else SyncState.Saved
+            }
         }
     }
 

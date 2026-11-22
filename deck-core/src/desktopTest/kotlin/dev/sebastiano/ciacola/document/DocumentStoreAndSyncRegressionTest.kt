@@ -696,4 +696,82 @@ class DocumentStoreAndSyncRegressionTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun externalReloadAtomicallyConflictsWhenEditOrTransactionIntervenes(): Unit = runBlocking {
+        val dir = Files.createTempDirectory("external-reload-race-guard")
+        try {
+            // 1. Intervening committed edit right before external apply must NOT be overwritten; surfaces Unwritten conflict.
+            val target1 = dir.resolve("deck1.deck.json")
+            Files.writeString(target1, CanonicalJson.print(makeDoc("V1-base")))
+            val store1 = DeckDocumentStore()
+            var injectedEdit = false
+            val sync1 = DeckFileSync(
+                targetFile = target1,
+                recoveryRootDir = dir.resolve("rec1"),
+                store = store1,
+                stepHook = { step ->
+                    if (step == SyncStep.PollBeforeApplyExternal && !injectedEdit) {
+                        injectedEdit = true
+                        assertTrue(store1.edit("Intervening edit") { makeDoc("V2-local-edit") })
+                    }
+                },
+            )
+            try {
+                assertEquals(DeckLoadState.Loaded, sync1.open())
+                writeCanonicalAtomic(target1, makeDoc("V2-external"))
+                sync1.pollExternalChangesNow()
+
+                assertEquals("V2-local-edit", store1.document.title, "Intervening local edit must survive")
+                assertTrue(store1.isDirty)
+                val conflict1 = assertIs<SyncState.Conflict>(store1.sync)
+                assertEquals(ConflictKind.Unwritten, conflict1.info.kind)
+                assertEquals(
+                    DeckFileSync.sha256Hex(Files.readAllBytes(target1)),
+                    conflict1.info.observedTheirsHash,
+                )
+            } finally {
+                sync1.close()
+            }
+
+            // 2. Intervening active gesture transaction right before external apply must stay active and intact.
+            val target2 = dir.resolve("deck2.deck.json")
+            Files.writeString(target2, CanonicalJson.print(makeDoc("V1-base")))
+            val store2 = DeckDocumentStore()
+            var openedTx: EditTransaction? = null
+            val sync2 = DeckFileSync(
+                targetFile = target2,
+                recoveryRootDir = dir.resolve("rec2"),
+                store = store2,
+                stepHook = { step ->
+                    if (step == SyncStep.PollBeforeApplyExternal && openedTx == null) {
+                        val tx = assertNotNull(store2.begin("Live drag"))
+                        tx.update { makeDoc("V2-dragging-preview") }
+                        openedTx = tx
+                    }
+                },
+            )
+            try {
+                assertEquals(DeckLoadState.Loaded, sync2.open())
+                writeCanonicalAtomic(target2, makeDoc("V2-external"))
+                sync2.pollExternalChangesNow()
+
+                val tx = assertNotNull(openedTx)
+                assertTrue(tx.isActive, "In-progress gesture transaction must NOT be cancelled by external poll")
+                assertTrue(store2.hasOpenTransaction)
+                assertEquals("V2-dragging-preview", store2.document.title)
+                val conflict2 = assertIs<SyncState.Conflict>(store2.sync)
+                assertEquals(ConflictKind.Unwritten, conflict2.info.kind)
+
+                // Committing the gesture afterwards preserves the user's edit while keeping the conflict banner active.
+                assertTrue(tx.commit())
+                assertEquals("V2-dragging-preview", store2.document.title)
+                assertIs<SyncState.Conflict>(store2.sync)
+            } finally {
+                sync2.close()
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

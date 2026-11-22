@@ -294,10 +294,10 @@ class DeckFileSync(
             if (!recoverCatchingIo(targetHash, "Failed to recover unresolved transaction", isOnOpen = false)) {
                 return@withLock store.sync
             }
-            if (store.sync is SyncState.WriteFailed && !Files.exists(journalFile)) {
-                store.setSyncState(if (store.isDirty || store.hasOpenTransaction) SyncState.Dirty else SyncState.Saved)
-            } else if (store.sync == SyncState.Saved && (store.isDirty || store.hasOpenTransaction)) {
-                store.setSyncState(SyncState.Dirty)
+            if (!Files.exists(journalFile)) {
+                store.reconcileSyncState(clearWriteFailed = true)
+            } else {
+                store.reconcileSyncState()
             }
             store.sync
         }
@@ -346,7 +346,7 @@ class DeckFileSync(
                     if (!theirsName.isNullOrBlank() && resolvedConflictNames.add(theirsName)) {
                         SyncFilesHelper.persistDismissedSet(resolvedConflictsFile, syncDir, resolvedConflictNames, fileOps)
                     }
-                    store.setSyncState(if (store.isDirty) SyncState.Dirty else SyncState.Saved)
+                    store.reconcileSyncState(clearConflict = true)
                 }
             }
             store.sync
@@ -887,22 +887,22 @@ class DeckFileSync(
         if (isOnOpen) {
             diskHash = targetHash
             recordStatSnapshot()
-            if (store.sync is SyncState.WriteFailed) {
-                store.setSyncState(if (store.isDirty || store.hasOpenTransaction) SyncState.Dirty else SyncState.Saved)
-            }
+            store.reconcileSyncState(clearWriteFailed = true)
         } else {
             val targetMatchesRecoveredNew = recoveredMeta != null && targetHash == recoveredMeta.newHash
             if (targetMatchesRecoveredNew) {
                 diskHash = targetHash
                 recordStatSnapshot()
-                if (store.sync is SyncState.WriteFailed) {
-                    store.setSyncState(if (store.isDirty || store.hasOpenTransaction) SyncState.Dirty else SyncState.Saved)
-                }
+                store.reconcileSyncState(clearWriteFailed = true)
             } else {
                 // In-session recovery MUST NOT adopt an unseen external target as diskHash or
                 // mark a stale in-memory document as Saved without reloading targetFile.
                 if (targetHash != diskHash && store.sync !is SyncState.Conflict) {
-                    if (store.isDirty || store.hasOpenTransaction) {
+                    val bytes = runCatching { Files.readAllBytes(targetFile) }.getOrNull()
+                    if (bytes != null) {
+                        applyDecodedExternalTargetLocked(bytes, SyncFilesHelper.sha256Hex(bytes))
+                        recordStatSnapshot()
+                    } else if (store.isDirty || store.hasOpenTransaction) {
                         store.setSyncState(
                             SyncState.Conflict(
                                 ConflictInfo(
@@ -914,15 +914,9 @@ class DeckFileSync(
                                 ),
                             ),
                         )
-                    } else {
-                        val bytes = runCatching { Files.readAllBytes(targetFile) }.getOrNull()
-                        if (bytes != null) {
-                            applyDecodedExternalTargetLocked(bytes, SyncFilesHelper.sha256Hex(bytes))
-                            recordStatSnapshot()
-                        }
                     }
-                } else if (store.sync is SyncState.WriteFailed) {
-                    store.setSyncState(if (store.isDirty || store.hasOpenTransaction) SyncState.Dirty else SyncState.Saved)
+                } else {
+                    store.reconcileSyncState(clearWriteFailed = true)
                 }
             }
         }
@@ -1033,33 +1027,25 @@ class DeckFileSync(
 
             is DeckDecodeResult.Success -> {
                 if (currentHash == diskHash) {
-                    if (store.sync is SyncState.ExternalInvalid || store.sync is SyncState.WriteFailed) {
-                        store.setSyncState(if (store.isDirty || store.hasOpenTransaction) SyncState.Dirty else SyncState.Saved)
-                    }
+                    store.reconcileSyncState(clearWriteFailed = true, clearExternalInvalid = true)
                     return
                 }
-                if (!store.isDirty && !store.hasOpenTransaction) {
-                    val previousDoc = store.committedSnapshot().first
-                    store.applyExternalChange(
-                        newDocument = decoded.document,
-                        label = "External change",
-                        markAsSaved = true,
-                        issues = decoded.lintIssues,
-                    )
+                stepHook(SyncStep.PollBeforeApplyExternal)
+                val previousDoc = store.applyExternalChangeIfClean(
+                    newDocument = decoded.document,
+                    conflictOnDirty = ConflictInfo(
+                        kind = ConflictKind.Unwritten,
+                        targetPath = targetFile.toString(),
+                        theirsPath = targetFile.toString(),
+                        theirsHash = currentHash,
+                        reason = "Deck file changed externally while Studio has unsaved edits.",
+                    ),
+                    label = "External change",
+                    issues = decoded.lintIssues,
+                )
+                if (previousDoc != null) {
                     externalEditLintWarnings = FragmentProvenance.lintExternalDocumentEdit(previousDoc, decoded.document)
                     diskHash = currentHash
-                } else if (store.sync !is SyncState.ReadOnly) {
-                    store.setSyncState(
-                        SyncState.Conflict(
-                            ConflictInfo(
-                                kind = ConflictKind.Unwritten,
-                                targetPath = targetFile.toString(),
-                                theirsPath = targetFile.toString(),
-                                theirsHash = currentHash,
-                                reason = "Deck file changed externally while Studio has unsaved edits.",
-                            ),
-                        ),
-                    )
                 }
             }
         }

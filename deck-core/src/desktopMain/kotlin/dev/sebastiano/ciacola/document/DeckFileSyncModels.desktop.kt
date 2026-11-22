@@ -52,6 +52,7 @@ enum class SyncStep {
     SweepBeforeHash,
     SweepAfterHashBeforeDelete,
     SweepAfterDeleteEntryBeforeMeta,
+    PollBeforeApplyExternal,
 }
 
 /** Quarantine entry classification matching the sync quarantine filename suffixes. */
