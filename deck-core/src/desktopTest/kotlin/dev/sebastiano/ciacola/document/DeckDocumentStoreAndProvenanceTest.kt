@@ -1096,4 +1096,136 @@ class DeckDocumentStoreAndProvenanceTest {
         assertEquals(350, planNested.tracks.first { it.nodeId == "b" && it.buildId == "second" }.startMs)
         assertEquals(600, planNested.tracks.first { it.nodeId == "a" && it.buildId == "second" }.startMs)
     }
+
+    @Test
+    fun editingTextRemapsCrossSlideTransitionFragmentDelaysForIncomingAndOutgoingSides() {
+        val doc = DeckDocument(
+            format = 1,
+            id = "cross-slide-remap",
+            title = "Cross-Slide Remap",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s0",
+                    beats = listOf(BeatSpec()),
+                    transition = TransitionSpec(
+                        type = TransitionType.MagicMove,
+                        durationMs = 500,
+                        text = mapOf(
+                            "headline" to TextMorphSpec(
+                                by = MorphBy.Word,
+                                stagger = Stagger(
+                                    manual = mapOf(
+                                        "alpha#1" to 140,
+                                        "-old#0" to 80,
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "headline",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 600.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("old tail")),
+                        ),
+                    ),
+                ),
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "headline",
+                            frame = FrameSpec(x = 100.0, y = 200.0, w = 600.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("alpha alpha")),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        // 1. Incoming range edit on s1 beat 0: inserting "alpha " at offset 0 shifts alpha#1 -> alpha#2
+        //    while leaving outgoing -old#0 untouched.
+        val (afterIncomingRange, inNotices) = DeckStructureEdits.applyTextRangeEdit(
+            document = doc,
+            slideId = "s1",
+            nodeId = "headline",
+            beat = 0,
+            edit = TextRangeEdit(start = 0, removedLength = 0, insertedText = "alpha "),
+        )
+        assertTrue(inNotices.isEmpty(), "Exact range shift should emit no removal notices: $inNotices")
+        assertEquals(
+            mapOf("alpha#2" to 140, "-old#0" to 80),
+            afterIncomingRange.slides[0].transition?.text?.get("headline")?.stagger?.manual,
+        )
+        val planAfterIncoming = SegmentPlanner.planTransition(afterIncomingRange, "s0", "s1")
+        val morphTrack = planAfterIncoming.tracks.single { it.nodeId == "headline" }
+        assertEquals(140, morphTrack.pieces?.slot("alpha#2")?.startMs)
+
+        // 2. Outgoing range edit on s0 last beat: inserting "old " at offset 0 shifts -old#0 -> -old#1
+        //    while leaving incoming alpha#2 untouched.
+        val (afterOutgoingRange, outNotices) = DeckStructureEdits.applyTextRangeEdit(
+            document = afterIncomingRange,
+            slideId = "s0",
+            nodeId = "headline",
+            beat = 0,
+            edit = TextRangeEdit(start = 0, removedLength = 0, insertedText = "old "),
+        )
+        assertTrue(outNotices.isEmpty(), "Exact outgoing range shift should emit no notices: $outNotices")
+        assertEquals(
+            mapOf("alpha#2" to 140, "-old#1" to 80),
+            afterOutgoingRange.slides[0].transition?.text?.get("headline")?.stagger?.manual,
+        )
+
+        // 3. Editing s1 beat 1 (not beat 0) does NOT affect the incoming s0->s1 transition.
+        val (afterBeat1Edit, beat1Notices) = DeckStructureEdits.applyWholeTextReplacement(
+            document = afterOutgoingRange,
+            slideId = "s1",
+            nodeId = "headline",
+            beat = 1,
+            newText = "unrelated beat1",
+        )
+        assertTrue(beat1Notices.isEmpty())
+        assertEquals(
+            mapOf("alpha#2" to 140, "-old#1" to 80),
+            afterBeat1Edit.slides[0].transition?.text?.get("headline")?.stagger?.manual,
+        )
+
+        // 4. Whole-text replacement on s1 (allBeats = true) removes stale alpha#2 with a notice while keeping -old#1.
+        val (afterWholeReplace, replaceNotices) = DeckStructureEdits.applyWholeTextReplacement(
+            document = afterBeat1Edit,
+            slideId = "s1",
+            nodeId = "headline",
+            beat = 0,
+            newText = "gamma",
+            allBeats = true,
+        )
+        assertEquals(
+            mapOf("-old#1" to 80),
+            afterWholeReplace.slides[0].transition?.text?.get("headline")?.stagger?.manual,
+        )
+        assertTrue(replaceNotices.any { it.oldAddress == "alpha#2" }, "Expected notice for removed alpha#2: $replaceNotices")
+
+        // 5. External-edit lint also flags stale cross-slide transition delays when text is edited externally.
+        val externallyEdited = afterOutgoingRange.copy(
+            slides = afterOutgoingRange.slides.map { s ->
+                if (s.id != "s1") {
+                    s
+                } else {
+                    s.copy(
+                        nodes = s.nodes.map { n ->
+                            if (n.id == "headline") n.copy(text = n.text!!.copy(value = RichTextValue.Plain("gamma"))) else n
+                        },
+                    )
+                }
+            },
+        )
+        val extIssues = FragmentProvenance.lintExternalDocumentEdit(afterOutgoingRange, externallyEdited)
+        assertTrue(
+            extIssues.any { it.address == "s0/transition/text/headline" },
+            "Expected external-edit lint warning on s0/transition/text/headline: $extIssues",
+        )
+    }
 }

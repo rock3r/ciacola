@@ -822,7 +822,7 @@ object DeckStructureEdits {
 
     /**
      * Applies an inline range edit to a text node at [beat] and remaps its `stagger.manual`
-     * entries using [FragmentProvenance.remapForRangeEdit].
+     * entries (including cross-slide `transition.text`) using [FragmentProvenance.remapForRangeEdit].
      */
     fun applyTextRangeEdit(
         document: DeckDocument,
@@ -830,47 +830,17 @@ object DeckStructureEdits {
         nodeId: String,
         beat: Int,
         edit: TextRangeEdit,
-    ): Pair<DeckDocument, List<ManualDelayRemapNotice>> {
-        val notices = mutableListOf<ManualDelayRemapNotice>()
-        val updated = updateSlide(document, slideId) { slide ->
-            val anchorBeats = JsonMergePatch.referencedNodeAnchorBeats(slide, nodeId)
-            slide.copy(
-                nodes = slide.nodes.map { root ->
-                    rewriteNodeTree(root) { node ->
-                        if (node.id != nodeId || node.text == null) return@rewriteNodeTree node
-                        val resolvedBefore = JsonMergePatch.resolveNodeAtBeat(node, beat)
-                        val currentValue = resolvedBefore.text?.value ?: return@rewriteNodeTree node
-                        val oldText = currentValue.plainText
-                        val newValue = RichTextValueEdits.applyRangeEdit(currentValue, edit)
-                        val newText = newValue.plainText
-                        val patch = JsonMergePatch.nestedPatch(
-                            listOf("text", "value"),
-                            RichTextValueEdits.encodeJson(newValue),
-                        )
-                        val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
-                        FragmentProvenance.remapTextNodeManualDelays(
-                            nodeBefore = node,
-                            nodeAfter = textPatched,
-                            editedBeat = beat,
-                            oldText = oldText,
-                            newText = newText,
-                            remap = { manual, by, isExit ->
-                                FragmentProvenance.remapForRangeEdit(oldText, edit, manual, by, isExit)
-                            },
-                            noticesOut = notices,
-                        )
-                    }
-                },
-            )
-        }
-        return updated to notices
-    }
+    ): Pair<DeckDocument, List<ManualDelayRemapNotice>> = applyTextNodeMutation(
+        document, slideId, nodeId, beat, allBeats = false,
+        transformValue = { RichTextValueEdits.applyRangeEdit(it, edit) },
+        remap = { oldText, _, manual, by, isExit -> FragmentProvenance.remapForRangeEdit(oldText, edit, manual, by, isExit) },
+    )
 
     /**
      * Applies a whole-text replacement (no edit range) to a text node at [beat] (or across every
      * beat when [allBeats] is `true`, preserving base `RichTextValue.Runs` styling and stripping
-     * per-beat `text.value` overrides) and remaps all affected `stagger.manual` entries against
-     * each build's actual before/after text via [FragmentProvenance.remapForWholeReplacement].
+     * per-beat `text.value` overrides) and remaps all affected `stagger.manual` entries (including
+     * cross-slide `transition.text`) via [FragmentProvenance.remapForWholeReplacement].
      */
     fun applyWholeTextReplacement(
         document: DeckDocument,
@@ -879,8 +849,26 @@ object DeckStructureEdits {
         beat: Int,
         newText: String,
         allBeats: Boolean = false,
+    ): Pair<DeckDocument, List<ManualDelayRemapNotice>> = applyTextNodeMutation(
+        document, slideId, nodeId, beat, allBeats = allBeats,
+        transformValue = { RichTextValueEdits.replaceWholeText(it, newText) },
+        remap = { oldText, targetText, manual, by, isExit ->
+            FragmentProvenance.remapForWholeReplacement(oldText, targetText, manual, by, isExit)
+        },
+    )
+
+    private fun applyTextNodeMutation(
+        document: DeckDocument,
+        slideId: String,
+        nodeId: String,
+        beat: Int,
+        allBeats: Boolean,
+        transformValue: (RichTextValue) -> RichTextValue,
+        remap: (oldText: String, newText: String, manual: Map<String, Int>, by: MorphBy, isExit: Boolean) -> ManualDelayRemapResult,
     ): Pair<DeckDocument, List<ManualDelayRemapNotice>> {
         val notices = mutableListOf<ManualDelayRemapNotice>()
+        var editedOldText: String? = null
+        var editedNewText: String? = null
         val updated = updateSlide(document, slideId) { slide ->
             val anchorBeats = JsonMergePatch.referencedNodeAnchorBeats(slide, nodeId)
             slide.copy(
@@ -890,11 +878,11 @@ object DeckStructureEdits {
                         val resolvedBefore = if (allBeats) node else JsonMergePatch.resolveNodeAtBeat(node, beat)
                         val currentValue = resolvedBefore.text?.value ?: return@rewriteNodeTree node
                         val oldText = currentValue.plainText
-                        val newValue = RichTextValueEdits.replaceWholeText(currentValue, newText)
-                        val patch = JsonMergePatch.nestedPatch(
-                            listOf("text", "value"),
-                            RichTextValueEdits.encodeJson(newValue),
-                        )
+                        val newValue = transformValue(currentValue)
+                        val newText = newValue.plainText
+                        editedOldText = oldText
+                        editedNewText = newText
+                        val patch = JsonMergePatch.nestedPatch(listOf("text", "value"), RichTextValueEdits.encodeJson(newValue))
                         val textPatched = if (allBeats) {
                             JsonMergePatch.applyToAllBeats(node, patch, anchorBeats)
                         } else {
@@ -906,16 +894,30 @@ object DeckStructureEdits {
                             editedBeat = if (allBeats) 0 else beat,
                             oldText = oldText,
                             newText = newText,
-                            remap = { manual, by, isExit ->
-                                FragmentProvenance.remapForWholeReplacement(oldText, newText, manual, by, isExit)
-                            },
+                            remap = { manual, by, isExit -> remap(oldText, newText, manual, by, isExit) },
                             noticesOut = notices,
                         )
                     }
                 },
             )
         }
-        return updated to notices
+        val old = editedOldText
+        val next = editedNewText
+        val finalDoc = if (old != null && next != null) {
+            FragmentProvenance.remapCrossSlideTransitionManualDelays(
+                documentBefore = document,
+                documentAfter = updated,
+                slideId = slideId,
+                nodeId = nodeId,
+                oldText = old,
+                newText = next,
+                remap = { manual, by, isExit -> remap(old, next, manual, by, isExit) },
+                noticesOut = notices,
+            )
+        } else {
+            updated
+        }
+        return finalDoc to notices
     }
 
     private fun shiftNodeBeatsOnInsert(node: NodeSpec, atBeat: Int): NodeSpec {

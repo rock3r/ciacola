@@ -299,6 +299,42 @@ object FragmentProvenance {
                 }
             }
         }
+
+        // Also lint cross-slide transition.text[nodeId].stagger.manual across active slide pairs.
+        val activeNewSlides = newDocument.slides.filter { !it.skipped }
+        for (i in 0 until activeNewSlides.lastIndex) {
+            val newFrom = activeNewSlides[i]
+            val newTo = activeNewSlides[i + 1]
+            val transText = newFrom.transition?.text.orEmpty()
+            if (transText.isEmpty()) continue
+            val oldFrom = oldSlides[newFrom.id]
+            val oldTo = oldSlides[newTo.id]
+            val oldFromNodes = oldFrom?.let { collectNodesById(it.nodes) }.orEmpty()
+            val newFromNodes = collectNodesById(newFrom.nodes)
+            val oldToNodes = oldTo?.let { collectNodesById(it.nodes) }.orEmpty()
+            val newToNodes = collectNodesById(newTo.nodes)
+            val oldFromLastBeat = oldFrom?.beats?.lastIndex?.coerceAtLeast(0) ?: 0
+            val newFromLastBeat = newFrom.beats.lastIndex.coerceAtLeast(0)
+            for ((nodeId, morph) in transText) {
+                val manual = morph.stagger?.manual.orEmpty()
+                if (manual.isEmpty()) continue
+                val addr = "${newFrom.id}/transition/text/$nodeId"
+                val oldFromNode = oldFromNodes[nodeId]
+                val newFromNode = newFromNodes[nodeId]
+                if (oldFromNode?.kind == NodeKind.Text && newFromNode?.kind == NodeKind.Text) {
+                    val oldSrc = JsonMergePatch.resolveNodeAtBeat(oldFromNode, oldFromLastBeat).text?.value?.plainText.orEmpty()
+                    val newSrc = JsonMergePatch.resolveNodeAtBeat(newFromNode, newFromLastBeat).text?.value?.plainText.orEmpty()
+                    issues += lintExternalEdit(oldSrc, newSrc, manual, morph.by, addr, editingExitSource = true)
+                }
+                val oldToNode = oldToNodes[nodeId]
+                val newToNode = newToNodes[nodeId]
+                if (oldToNode?.kind == NodeKind.Text && newToNode?.kind == NodeKind.Text) {
+                    val oldDst = JsonMergePatch.resolveNodeAtBeat(oldToNode, 0).text?.value?.plainText.orEmpty()
+                    val newDst = JsonMergePatch.resolveNodeAtBeat(newToNode, 0).text?.value?.plainText.orEmpty()
+                    issues += lintExternalEdit(oldDst, newDst, manual, morph.by, addr, editingExitSource = false)
+                }
+            }
+        }
         return issues
     }
 
@@ -518,6 +554,180 @@ object FragmentProvenance {
         }
 
         return nodeAfter.copy(text = updatedText, builds = updatedBuilds)
+    }
+
+    /**
+     * Remaps cross-slide `transition.text[nodeId].stagger.manual` (and inherited cross-slide
+     * `text.morph` delays when no transition override is present) whenever editing [nodeId] on
+     * [slideId] changes the slide's outgoing last-beat text or incoming beat-0 text.
+     */
+    internal fun remapCrossSlideTransitionManualDelays(
+        documentBefore: DeckDocument,
+        documentAfter: DeckDocument,
+        slideId: String,
+        nodeId: String,
+        oldText: String,
+        newText: String,
+        remap: (manual: Map<String, Int>, by: MorphBy, isExit: Boolean) -> ManualDelayRemapResult,
+        noticesOut: MutableList<ManualDelayRemapNotice>,
+    ): DeckDocument {
+        val slideIdx = documentAfter.slides.indexOfFirst { it.id == slideId }
+        if (slideIdx < 0) return documentAfter
+        val slideBefore = documentBefore.slides.firstOrNull { it.id == slideId } ?: return documentAfter
+        val slideAfter = documentAfter.slides[slideIdx]
+        val nodeBefore = collectNodesById(slideBefore.nodes)[nodeId] ?: return documentAfter
+        val nodeAfter = collectNodesById(slideAfter.nodes)[nodeId] ?: return documentAfter
+        if (nodeBefore.kind != NodeKind.Text || nodeAfter.kind != NodeKind.Text) return documentAfter
+
+        fun remapManual(
+            manual: Map<String, Int>,
+            by: MorphBy,
+            before: String,
+            after: String,
+            isExit: Boolean,
+        ): Map<String, Int> {
+            if (manual.isEmpty() || before == after) return manual
+            val res = if (before == oldText && after == newText) {
+                remap(manual, by, isExit)
+            } else {
+                remapForWholeReplacement(before, after, manual, by, isExit)
+            }
+            noticesOut += res.notices
+            return res.updatedManual
+        }
+
+        fun updateTransitionMorph(
+            slide: SlideSpec,
+            before: String,
+            after: String,
+            isExit: Boolean,
+        ): SlideSpec {
+            val tr = slide.transition ?: return slide
+            val morph = tr.text[nodeId] ?: return slide
+            val stagger = morph.stagger ?: return slide
+            val updatedManual = remapManual(stagger.manual, morph.by, before, after, isExit)
+            if (updatedManual == stagger.manual) return slide
+            val updatedTextMap = LinkedHashMap(tr.text).apply {
+                put(nodeId, morph.copy(stagger = stagger.copy(manual = updatedManual)))
+            }
+            return slide.copy(transition = tr.copy(text = updatedTextMap))
+        }
+
+        fun updateNodeInheritedMorph(
+            slide: SlideSpec,
+            targetNodeId: String,
+            before: String,
+            after: String,
+            isExit: Boolean,
+            onlyWhenNoChangeBuilds: Boolean = false,
+        ): SlideSpec {
+            fun rewrite(nodes: List<NodeSpec>): List<NodeSpec> = nodes.map { n ->
+                val updatedNode = if (n.id == targetNodeId && n.text != null && (!onlyWhenNoChangeBuilds || n.builds.none { it is Build.Change })) {
+                    val morph = n.text.morph
+                    val stagger = morph?.stagger
+                    if (morph != null && stagger != null && stagger.manual.isNotEmpty()) {
+                        val updatedManual = remapManual(stagger.manual, morph.by, before, after, isExit)
+                        if (updatedManual == stagger.manual) {
+                            n
+                        } else {
+                            n.copy(text = n.text.copy(morph = morph.copy(stagger = stagger.copy(manual = updatedManual))))
+                        }
+                    } else {
+                        n
+                    }
+                } else {
+                    n
+                }
+                when {
+                    updatedNode.stack != null -> updatedNode.copy(stack = updatedNode.stack.copy(children = rewrite(updatedNode.children)))
+                    updatedNode.row != null -> updatedNode.copy(row = updatedNode.row.copy(children = rewrite(updatedNode.children)))
+                    updatedNode.column != null -> updatedNode.copy(column = updatedNode.column.copy(children = rewrite(updatedNode.children)))
+                    updatedNode.loupe != null -> updatedNode.copy(loupe = updatedNode.loupe.copy(children = rewrite(updatedNode.children)))
+                    else -> updatedNode
+                }
+            }
+            return slide.copy(nodes = rewrite(slide.nodes))
+        }
+
+        val updatedSlides = documentAfter.slides.toMutableList()
+        var changed = false
+
+        // 1. Outgoing transition from `slideId` (uses `slideId`'s last beat as exit source).
+        val lastBeatBefore = slideBefore.beats.lastIndex.coerceAtLeast(0)
+        val lastBeatAfter = slideAfter.beats.lastIndex.coerceAtLeast(0)
+        val beforeFromText = JsonMergePatch.resolveNodeAtBeat(nodeBefore, lastBeatBefore).text?.value?.plainText.orEmpty()
+        val afterFromText = JsonMergePatch.resolveNodeAtBeat(nodeAfter, lastBeatAfter).text?.value?.plainText.orEmpty()
+        if (beforeFromText != afterFromText) {
+            val remappedOut = updateTransitionMorph(updatedSlides[slideIdx], beforeFromText, afterFromText, isExit = true)
+            if (remappedOut !== updatedSlides[slideIdx]) {
+                updatedSlides[slideIdx] = remappedOut
+                changed = true
+            } else if (!slideAfter.skipped && slideAfter.transition?.text?.containsKey(nodeId) != true) {
+                val nextIdx = ((slideIdx + 1) until updatedSlides.size).firstOrNull { !updatedSlides[it].skipped }
+                if (nextIdx != null) {
+                    val nextNode = collectNodesById(updatedSlides[nextIdx].nodes)[nodeId]
+                    if (nextNode?.kind == NodeKind.Text) {
+                        if (nextNode.text?.morph != null) {
+                            val remappedNext = updateNodeInheritedMorph(
+                                slide = updatedSlides[nextIdx],
+                                targetNodeId = nodeId,
+                                before = beforeFromText,
+                                after = afterFromText,
+                                isExit = true,
+                            )
+                            if (remappedNext !== updatedSlides[nextIdx]) {
+                                updatedSlides[nextIdx] = remappedNext
+                                changed = true
+                            }
+                        } else {
+                            val remappedSelf = updateNodeInheritedMorph(
+                                slide = updatedSlides[slideIdx],
+                                targetNodeId = nodeId,
+                                before = beforeFromText,
+                                after = afterFromText,
+                                isExit = true,
+                                onlyWhenNoChangeBuilds = true,
+                            )
+                            if (remappedSelf !== updatedSlides[slideIdx]) {
+                                updatedSlides[slideIdx] = remappedSelf
+                                changed = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Incoming transition into `slideId` from nearest preceding active slide (uses `slideId` beat 0 as target).
+        if (!slideAfter.skipped) {
+            val prevIdx = (slideIdx - 1 downTo 0).firstOrNull { !updatedSlides[it].skipped }
+            if (prevIdx != null) {
+                val beforeToText = JsonMergePatch.resolveNodeAtBeat(nodeBefore, 0).text?.value?.plainText.orEmpty()
+                val afterToText = JsonMergePatch.resolveNodeAtBeat(nodeAfter, 0).text?.value?.plainText.orEmpty()
+                if (beforeToText != afterToText) {
+                    val remappedPrev = updateTransitionMorph(updatedSlides[prevIdx], beforeToText, afterToText, isExit = false)
+                    if (remappedPrev !== updatedSlides[prevIdx]) {
+                        updatedSlides[prevIdx] = remappedPrev
+                        changed = true
+                    } else if (updatedSlides[prevIdx].transition?.text?.containsKey(nodeId) != true && nodeAfter.text?.morph == null) {
+                        val remappedPrevNode = updateNodeInheritedMorph(
+                            slide = updatedSlides[prevIdx],
+                            targetNodeId = nodeId,
+                            before = beforeToText,
+                            after = afterToText,
+                            isExit = false,
+                            onlyWhenNoChangeBuilds = true,
+                        )
+                        if (remappedPrevNode !== updatedSlides[prevIdx]) {
+                            updatedSlides[prevIdx] = remappedPrevNode
+                            changed = true
+                        }
+                    }
+                }
+            }
+        }
+
+        return if (changed) documentAfter.copy(slides = updatedSlides) else documentAfter
     }
 
     private fun mapOldBuildIndices(
