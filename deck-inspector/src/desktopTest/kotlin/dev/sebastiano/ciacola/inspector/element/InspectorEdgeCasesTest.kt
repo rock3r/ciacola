@@ -599,6 +599,184 @@ class InspectorEdgeCasesTest {
         assertEquals(40.0, frame["y"]!!.jsonPrimitive.content.toDouble())
     }
 
+    @Test
+    fun selectedParentAndChildMoveOnceAcrossNudgeDragAlignAndAllBuilds() {
+        val child = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "child",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 10.0, y = 20.0, w = 80.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Child"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject { put("frame", buildJsonObject { put("x", 40.0) }) },
+                ),
+            ),
+        )
+        val parent = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 200.0, w = 300.0, h = 200.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(child)),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject { put("frame", buildJsonObject { put("x", 300.0) }) },
+                ),
+            ),
+        )
+        val anchor = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "anchor",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 50.0, y = 200.0, w = 40.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Anchor"),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "ancestor-descendant-move",
+            title = "Ancestor Descendant Move",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec(), dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(anchor, parent),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 0)
+        c.selectNodes(setOf("parent", "child"), primaryId = "parent")
+
+        // Nudge +10 at beat 0: parent moves 100 -> 110, child stays at local 10 (stage 120, not 130).
+        assertTrue(c.nudgeSelectedNodes(10.0, 0.0))
+        assertEquals(110.0, findNode(store, "parent").frame?.x)
+        assertEquals(10.0, findNode(store, "child").frame?.x)
+        assertEquals(120f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+
+        // Multi-drag by (+15, -5): parent moves to (125, 195), child keeps local (10, 20) -> stage (135, 215).
+        c.beginMultiDrag("parent")
+        assertTrue(c.commitMultiDrag(15.0, -5.0))
+        assertEquals(125.0, findNode(store, "parent").frame?.x)
+        assertEquals(195.0, findNode(store, "parent").frame?.y)
+        assertEquals(10.0, findNode(store, "child").frame?.x)
+        assertEquals(20.0, findNode(store, "child").frame?.y)
+        assertEquals(135f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+        assertEquals(215f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.top)
+
+        // All builds nudge at beat 1 by +20: parent shifts on beat 0 & beat 1; child local stays untouched on both.
+        c.selectLocation("s1", 1)
+        c.editAllBuilds = true
+        assertTrue(c.nudgeSelectedNodes(20.0, 0.0))
+        val parentAfterAll = findNode(store, "parent")
+        val childAfterAll = findNode(store, "child")
+        assertEquals(145.0, parentAfterAll.frame?.x, "Beat 0 parent shifts +20")
+        assertEquals(320.0, JsonMergePatch.resolveNodeAtBeat(parentAfterAll, 1).frame?.x, "Beat 1 parent shifts +20")
+        assertEquals(10.0, childAfterAll.frame?.x, "Beat 0 child local x must not shift twice")
+        assertEquals(40.0, JsonMergePatch.resolveNodeAtBeat(childAfterAll, 1).frame?.x, "Beat 1 child local x must not shift twice")
+
+        // Align Left with anchor at x = 50 on beat 0: parent moves to 50 and child moves to local 0 (stage 50).
+        c.editAllBuilds = false
+        c.selectLocation("s1", 0)
+        c.selectNodes(setOf("anchor", "parent", "child"), primaryId = "anchor")
+        assertTrue(c.alignSelectedNodes(NodeAlignment.Left))
+        assertEquals(50.0, findNode(store, "parent").frame?.x)
+        assertEquals(0.0, findNode(store, "child").frame?.x, "Child aligns to stage 50 via local 0 inside parent at 50")
+        assertEquals(50f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+    }
+
+    @Test
+    fun selectedParentAndChildInspectorFieldsAndGroupResizeCompensateForAncestorShift() {
+        val child = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "child",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 10.0, y = 20.0, w = 50.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Child"),
+            ),
+        )
+        val parent = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 200.0, w = 200.0, h = 100.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(child)),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "ancestor-descendant-inspector-resize",
+            title = "Ancestor Descendant Inspector And Resize",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec(), dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(parent),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 0)
+        c.selectNodes(setOf("parent", "child"), primaryId = "parent")
+
+        // Step X by +10: parent moves 100 -> 110, child keeps local 10 (stage 120, not 130).
+        val xEditor = GridPropertyEditor(c, LayoutXProperty, c.editTargets())
+        xEditor.step(10.0)
+        xEditor.targets = c.editTargets()
+        assertEquals(110.0, findNode(store, "parent").frame?.x)
+        assertEquals(10.0, findNode(store, "child").frame?.x)
+        assertEquals(120f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+
+        // Scrub X by +15: parent moves 110 -> 125, child keeps local 10 (stage 135).
+        xEditor.scrubStart()
+        xEditor.scrub(5.0)
+        xEditor.scrub(15.0)
+        xEditor.scrubEnd()
+        xEditor.targets = c.editTargets()
+        assertEquals(125.0, findNode(store, "parent").frame?.x)
+        assertEquals(10.0, findNode(store, "child").frame?.x)
+        assertEquals(135f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+
+        // Commit absolute stage X = 150: parent moves to 150, child moves to local 0 (stage 150, not 200).
+        xEditor.commit(150.0)
+        assertEquals(150.0, findNode(store, "parent").frame?.x)
+        assertEquals(0.0, findNode(store, "child").frame?.x)
+        assertEquals(150f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+
+        // Reset to known positions and test multi-selection union resize with parent + child selected.
+        store.undo() // back to parent 125, child local 10 (stage 135)
+        val startRects = mapOf(
+            "parent" to Rect(125f, 200f, 325f, 300f),
+            "child" to Rect(135f, 220f, 185f, 260f),
+        )
+        val startUnion = Rect(125f, 200f, 325f, 300f)
+        // Double size and move union top-left by (+50, +50) -> parent becomes (175, 250, 400, 200),
+        // child becomes stage (175 + 20 = 195, 250 + 40 = 290, 100, 80) -> local (20, 40).
+        val nextUnion = Rect(175f, 250f, 575f, 450f)
+        assertTrue(c.beginGroupResizeGesture(2))
+        assertTrue(c.updateGroupResizeGesture(startUnion, nextUnion, startRects))
+        c.commitGesture()
+        assertEquals(175.0, findNode(store, "parent").frame?.x)
+        assertEquals(250.0, findNode(store, "parent").frame?.y)
+        assertEquals(20.0, findNode(store, "child").frame?.x, "Child local x reflects post-resize parent origin")
+        assertEquals(40.0, findNode(store, "child").frame?.y, "Child local y reflects post-resize parent origin")
+        assertEquals(195f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.left)
+        assertEquals(290f, DocumentElementArrangeOps.nodeStageBounds(c, "child")?.top)
+
+        // Undo and verify the exact same union resize in All builds mode on beat 1.
+        store.undo()
+        c.selectLocation("s1", 1)
+        c.editAllBuilds = true
+        assertTrue(c.beginGroupResizeGesture(2))
+        assertTrue(c.updateGroupResizeGesture(startUnion, nextUnion, startRects))
+        c.commitGesture()
+        assertEquals(175.0, findNode(store, "parent").frame?.x)
+        assertEquals(20.0, findNode(store, "child").frame?.x, "All-builds group resize must not double-shift child")
+        assertEquals(40.0, findNode(store, "child").frame?.y)
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,

@@ -82,6 +82,8 @@ internal class GridProperty(
     val write: (Double) -> JsonObject,
     /** Per-target patch (preserving each node's other values); falls back to [write] when `null`. */
     val writeFor: ((DocumentElementInspectorController, Double, EditTarget) -> JsonObject)? = null,
+    /** Whole-selection patch builder when targets can share ancestor/descendant coordinate frames. */
+    val writeBatch: ((DocumentElementInspectorController, Map<String, Double>) -> Map<String, JsonObject>)? = null,
 )
 
 internal fun GridProperty.patchFor(
@@ -102,6 +104,7 @@ internal val LayoutXProperty = GridProperty(
     read = { c, t -> bounds(c, t)?.left?.toDouble() },
     write = { framePatch("x", it) },
     writeFor = { c, v, t -> DocumentElementArrangeOps.stagePositionPatch(c, t.id, stageX = v) },
+    writeBatch = { c, values -> DocumentElementArrangeOps.stagePositionPatches(c, stageXById = values) },
 )
 internal val LayoutYProperty = GridProperty(
     label = "Y", tag = "ciacola-doc-frame-y", undoLabel = "Edit Y", keyPath = listOf("frame", "y"), resetAtBase = false,
@@ -109,6 +112,7 @@ internal val LayoutYProperty = GridProperty(
     read = { c, t -> bounds(c, t)?.top?.toDouble() },
     write = { framePatch("y", it) },
     writeFor = { c, v, t -> DocumentElementArrangeOps.stagePositionPatch(c, t.id, stageY = v) },
+    writeBatch = { c, values -> DocumentElementArrangeOps.stagePositionPatches(c, stageYById = values) },
 )
 internal val LayoutWProperty = GridProperty(
     label = "W", tag = "ciacola-doc-frame-w", undoLabel = "Edit width", keyPath = listOf("frame", "w"), resetAtBase = false,
@@ -149,13 +153,18 @@ internal class GridPropertyEditor(
 
     private fun target(id: String): EditTarget? = targets.firstOrNull { it.id == id }
 
+    private fun patchesFor(desired: Map<String, Double>): Map<String, JsonObject> {
+        property.writeBatch?.let { return it(controller, desired) }
+        return desired.mapNotNull { (id, v) -> target(id)?.let { id to property.patchFor(controller, v, it) } }.toMap()
+    }
+
     private fun patchesFrom(values: Map<String, Double>, delta: Double): Map<String, JsonObject> =
-        values.mapNotNull { (id, v) -> target(id)?.let { id to property.patchFor(controller, v + delta, it) } }.toMap()
+        patchesFor(values.mapValues { (_, v) -> v + delta })
 
     fun commit(value: Double) {
         controller.applyPatchesToNodes(
             property.undoLabel,
-            targets.associate { it.id to property.patchFor(controller, value, it) },
+            patchesFor(targets.associate { it.id to value }),
         )
     }
 

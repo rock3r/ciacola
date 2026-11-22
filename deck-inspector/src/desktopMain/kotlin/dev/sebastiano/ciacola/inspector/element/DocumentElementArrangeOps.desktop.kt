@@ -111,19 +111,48 @@ internal object DocumentElementArrangeOps {
         var oy = 0.0
         for (idx in 0 until chain.lastIndex) {
             val anc = JsonMergePatch.resolveNodeAtBeat(chain[idx], beat)
+            val ancX = anc.frame?.x
+            val ancY = anc.frame?.y
             val inspectedAnc = stageBoundsProvider?.invoke(anc.id)
-            if (inspectedAnc != null) {
-                ox = inspectedAnc.left.toDouble()
-                oy = inspectedAnc.top.toDouble()
-            } else {
-                ox += anc.frame?.x ?: 0.0
-                oy += anc.frame?.y ?: 0.0
-            }
+            ox = if (ancX != null) ox + ancX else inspectedAnc?.left?.toDouble() ?: ox
+            oy = if (ancY != null) oy + ancY else inspectedAnc?.top?.toDouble() ?: oy
             val (padLeft, padTop) = containerContentInset(anc)
             ox += padLeft
             oy += padTop
         }
         return Offset(ox.toFloat(), oy.toFloat())
+    }
+
+    /** Filters out nodes that already have an ancestor in [ids] so parent transforms are not applied twice. */
+    fun topMostIds(slide: SlideSpec?, ids: Set<String>): Set<String> {
+        if (slide == null || ids.size <= 1) return ids
+        return ids.filterTo(LinkedHashSet()) { id ->
+            val chain = findAncestorChain(slide.nodes, id) ?: return@filterTo true
+            (0 until chain.lastIndex).none { chain[it].id in ids }
+        }
+    }
+
+    /** Whether [nodeId] or any of its ancestors on [slide] is in [ids]. */
+    fun hasSelfOrAncestorIn(slide: SlideSpec?, nodeId: String, ids: Set<String>): Boolean {
+        if (nodeId in ids) return true
+        if (slide == null || ids.isEmpty()) return false
+        val chain = findAncestorChain(slide.nodes, nodeId) ?: return false
+        return (0 until chain.lastIndex).any { chain[it].id in ids }
+    }
+
+    /** Stage-space shift contributed by the nearest ancestor of [chain] present in [stageShifts]. */
+    private fun nearestAncestorShift(chain: List<NodeSpec>, stageShifts: Map<String, Offset>): Offset {
+        for (idx in chain.lastIndex - 1 downTo 0) {
+            stageShifts[chain[idx].id]?.let { return it }
+        }
+        return Offset.Zero
+    }
+
+    private fun nearestAncestorAxisShift(chain: List<NodeSpec>, shifts: Map<String, Double>): Double {
+        for (idx in chain.lastIndex - 1 downTo 0) {
+            shifts[chain[idx].id]?.let { return it }
+        }
+        return 0.0
     }
 
     private data class ResolvedArrangeNode(
@@ -185,47 +214,132 @@ internal object DocumentElementArrangeOps {
         nodeId: String,
         stageX: Double? = null,
         stageY: Double? = null,
-    ): JsonObject {
-        val baseDocument = controller.activeGestureStartDocument() ?: controller.store.document
-        val resolved = resolveArrangeNode(controller, nodeId, document = baseDocument)
-        val parentOrigin = resolved?.parentOrigin ?: parentContentStageOrigin(controller, nodeId, document = baseDocument)
-        val preserveOtherAxis = resolved != null && resolved.isImplicitlyAligned
-        val localX = stageX?.let { it - parentOrigin.x } ?: if (preserveOtherAxis && stageY != null) resolved.localLeft else null
-        val localY = stageY?.let { it - parentOrigin.y } ?: if (preserveOtherAxis && stageX != null) resolved.localTop else null
-        return buildJsonObject {
-            put(
-                "frame",
-                buildJsonObject {
-                    localX?.let { put("x", snapHalfUnit(it)) }
-                    localY?.let { put("y", snapHalfUnit(it)) }
-                },
-            )
-        }
+    ): JsonObject = stagePositionPatches(
+        controller = controller,
+        stageXById = stageX?.let { mapOf(nodeId to it) }.orEmpty(),
+        stageYById = stageY?.let { mapOf(nodeId to it) }.orEmpty(),
+    )[nodeId] ?: buildJsonObject {
+        put(
+            "frame",
+            buildJsonObject {
+                stageX?.let { put("x", snapHalfUnit(it)) }
+                stageY?.let { put("y", snapHalfUnit(it)) }
+            },
+        )
     }
 
-    /** Moves each node by its delta, snapping `frame.x` / `frame.y` to half units, in ONE undo step. */
+    /**
+     * Converts a batch of stage-coordinate [stageXById] / [stageYById] targets into parent-local
+     * `frame` patches, subtracting the translation of any selected ancestor so descendants are
+     * never moved twice when both a container and its children are selected.
+     */
+    fun stagePositionPatches(
+        controller: DocumentElementInspectorController,
+        stageXById: Map<String, Double> = emptyMap(),
+        stageYById: Map<String, Double> = emptyMap(),
+    ): Map<String, JsonObject> {
+        val ids = LinkedHashSet<String>().apply {
+            addAll(stageXById.keys)
+            addAll(stageYById.keys)
+        }
+        if (ids.isEmpty()) return emptyMap()
+        val baseDocument = controller.activeGestureStartDocument() ?: controller.store.document
+        val slide = controller.slideIn(baseDocument) ?: return emptyMap()
+
+        val chains = ids.associateWith { findAncestorChain(slide.nodes, it) }
+        val resolvedById = ids.associateWith { resolveArrangeNode(controller, it, document = baseDocument) }
+        val orderedIds = ids.sortedBy { chains[it]?.size ?: 0 }
+
+        val stageShiftX = HashMap<String, Double>()
+        val stageShiftY = HashMap<String, Double>()
+        val patches = LinkedHashMap<String, JsonObject>()
+
+        for (id in orderedIds) {
+            val chain = chains[id]
+            val resolved = resolvedById[id]
+            val preParentOrigin = resolved?.parentOrigin ?: chain?.let {
+                parentContentStageOrigin(it, controller.activeBeat, controller.stageBoundsProvider)
+            } ?: Offset.Zero
+            val ancestorShiftX = chain?.let { nearestAncestorAxisShift(it, stageShiftX) } ?: 0.0
+            val ancestorShiftY = chain?.let { nearestAncestorAxisShift(it, stageShiftY) } ?: 0.0
+            val postParentX = preParentOrigin.x + ancestorShiftX
+            val postParentY = preParentOrigin.y + ancestorShiftY
+
+            val stageX = stageXById[id]
+            val stageY = stageYById[id]
+            if (resolved != null) {
+                stageX?.let { stageShiftX[id] = it - resolved.stageBounds.left.toDouble() }
+                stageY?.let { stageShiftY[id] = it - resolved.stageBounds.top.toDouble() }
+            }
+
+            val newLocalX = stageX?.let { it - postParentX }
+            val newLocalY = stageY?.let { it - postParentY }
+            val parentShifted = moved(ancestorShiftX) || moved(ancestorShiftY)
+            if (parentShifted && resolved != null) {
+                val xUnchanged = newLocalX == null || !moved(newLocalX - resolved.localLeft)
+                val yUnchanged = newLocalY == null || !moved(newLocalY - resolved.localTop)
+                if (xUnchanged && yUnchanged) continue
+            }
+
+            val preserveOtherAxis = resolved != null && resolved.isImplicitlyAligned
+            val finalLocalX = newLocalX ?: if (preserveOtherAxis && stageY != null) resolved.localLeft else null
+            val finalLocalY = newLocalY ?: if (preserveOtherAxis && stageX != null) resolved.localTop else null
+            patches[id] = buildJsonObject {
+                put(
+                    "frame",
+                    buildJsonObject {
+                        finalLocalX?.let { put("x", snapHalfUnit(it)) }
+                        finalLocalY?.let { put("y", snapHalfUnit(it)) }
+                    },
+                )
+            }
+        }
+        return patches
+    }
+
+    /** Moves each node by its stage delta (compensating for selected moving ancestors) in ONE undo step. */
     fun moveNodesBy(
         controller: DocumentElementInspectorController,
         deltas: Map<String, Offset>,
         label: String,
     ): Boolean {
         if (controller.store.isReadOnly) return false
-        val slideId = controller.activeSlide()?.id ?: return false
-        if (controller.editAllBuilds && controller.activeBeat > 0) {
-            val activeDeltas = LinkedHashMap<String, Pair<Offset, ResolvedArrangeNode>>()
-            for ((id, delta) in deltas) {
-                if (!moved(delta.x) && !moved(delta.y)) continue
-                val resolved = resolveArrangeNode(controller, id) ?: continue
-                activeDeltas[id] = delta to resolved
+        val slide = controller.activeSlide() ?: return false
+        val slideId = slide.id
+        data class MoveCandidate(
+            val id: String,
+            val stageDelta: Offset,
+            val chain: List<NodeSpec>,
+            val resolved: ResolvedArrangeNode,
+        )
+        val candidates = deltas.entries.mapNotNull { (id, delta) ->
+            val chain = findAncestorChain(slide.nodes, id) ?: return@mapNotNull null
+            val resolved = resolveArrangeNode(controller, id) ?: return@mapNotNull null
+            MoveCandidate(id, delta, chain, resolved)
+        }.sortedBy { it.chain.size }
+
+        // Subtract the nearest selected ancestor's stage movement so descendants inside a moving
+        // container are not shifted twice.
+        val effectiveStageShifts = HashMap<String, Offset>()
+        val localMoves = LinkedHashMap<String, Pair<Offset, ResolvedArrangeNode>>()
+        for (c in candidates) {
+            val ancestorShift = nearestAncestorShift(c.chain, effectiveStageShifts)
+            val localDelta = Offset(c.stageDelta.x - ancestorShift.x, c.stageDelta.y - ancestorShift.y)
+            effectiveStageShifts[c.id] = c.stageDelta
+            if (moved(localDelta.x) || moved(localDelta.y)) {
+                localMoves[c.id] = localDelta to c.resolved
             }
-            if (activeDeltas.isEmpty()) return false
+        }
+        if (localMoves.isEmpty()) return false
+
+        if (controller.editAllBuilds && controller.activeBeat > 0) {
             return controller.applyMutation(label, useActiveGesture = false) { doc ->
-                activeDeltas.entries.fold(doc) { acc, (id, pair) ->
-                    val (delta, resolved) = pair
+                localMoves.entries.fold(doc) { acc, (id, pair) ->
+                    val (localDelta, resolved) = pair
                     DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { node ->
                         offsetFrameAcrossAllBuilds(
                             node = node,
-                            delta = FrameDelta(dx = delta.x.toDouble(), dy = delta.y.toDouble()),
+                            delta = FrameDelta(dx = localDelta.x.toDouble(), dy = localDelta.y.toDouble()),
                             fallbackBounds = resolved.localBounds,
                         )
                     }
@@ -233,11 +347,10 @@ internal object DocumentElementArrangeOps {
             }
         }
         val patches = LinkedHashMap<String, JsonObject>()
-        for ((id, delta) in deltas) {
-            val moveX = moved(delta.x)
-            val moveY = moved(delta.y)
-            if (!moveX && !moveY) continue
-            val resolved = resolveArrangeNode(controller, id) ?: continue
+        for ((id, pair) in localMoves) {
+            val (localDelta, resolved) = pair
+            val moveX = moved(localDelta.x)
+            val moveY = moved(localDelta.y)
             // When an alignment-positioned node has neither frame.x nor frame.y, setting one axis
             // disables alignment on BOTH axes in DocumentStackChildrenLayout, so preserve the
             // orthogonal local coordinate as well on this first explicit positioning.
@@ -247,8 +360,8 @@ internal object DocumentElementArrangeOps {
                 put(
                     "frame",
                     buildJsonObject {
-                        if (writeX) put("x", snapHalfUnit(resolved.localLeft + delta.x))
-                        if (writeY) put("y", snapHalfUnit(resolved.localTop + delta.y))
+                        if (writeX) put("x", snapHalfUnit(resolved.localLeft + localDelta.x))
+                        if (writeY) put("y", snapHalfUnit(resolved.localTop + localDelta.y))
                     },
                 )
             }
@@ -375,9 +488,18 @@ internal object DocumentElementArrangeOps {
         val frames = groupResizeFrames(startUnion, nextUnion, startRects)
         if (frames.isEmpty()) return false
         val label = "Resize ${frames.size} elements"
-        val slide = controller.activeSlide() ?: return false
-        val parentOrigins = frames.keys.associateWith { id ->
-            parentContentStageOrigin(slide, controller.activeBeat, id, controller.stageBoundsProvider)
+        val baseDocument = controller.activeGestureStartDocument() ?: controller.store.document
+        val slide = controller.slideIn(baseDocument) ?: return false
+        val chains = frames.keys.associateWith { findAncestorChain(slide.nodes, it) }
+        val preParentOrigins = frames.keys.associateWith { id ->
+            chains[id]?.let { parentContentStageOrigin(it, controller.activeBeat, controller.stageBoundsProvider) } ?: Offset.Zero
+        }
+        val stageShifts = frames.mapNotNull { (id, f) ->
+            val start = startRects[id] ?: return@mapNotNull null
+            id to Offset(((f.x ?: start.left.toDouble()) - start.left).toFloat(), ((f.y ?: start.top.toDouble()) - start.top).toFloat())
+        }.toMap()
+        val ancestorShifts = frames.keys.associateWith { id ->
+            chains[id]?.let { nearestAncestorShift(it, stageShifts) } ?: Offset.Zero
         }
         if (controller.editAllBuilds && controller.activeBeat > 0) {
             // Relative change across base + every build (like `moveNodesBy`), never stamping this
@@ -385,11 +507,12 @@ internal object DocumentElementArrangeOps {
             return controller.applyMutation(label, useActiveGesture = true) { doc ->
                 frames.entries.fold(doc) { acc, (id, f) ->
                     val start = startRects[id] ?: return@fold acc
-                    val parentOrigin = parentOrigins[id] ?: Offset.Zero
-                    val startLocal = start.translate(-parentOrigin.x, -parentOrigin.y)
+                    val preParentOrigin = preParentOrigins[id] ?: Offset.Zero
+                    val ancShift = ancestorShifts[id] ?: Offset.Zero
+                    val startLocal = start.translate(-preParentOrigin.x, -preParentOrigin.y)
                     val delta = FrameDelta(
-                        dx = (f.x ?: 0.0) - start.left,
-                        dy = (f.y ?: 0.0) - start.top,
+                        dx = (f.x ?: 0.0) - start.left - ancShift.x,
+                        dy = (f.y ?: 0.0) - start.top - ancShift.y,
                         dw = (f.w ?: 0.0) - start.width,
                         dh = (f.h ?: 0.0) - start.height,
                     )
@@ -398,13 +521,16 @@ internal object DocumentElementArrangeOps {
             }
         }
         val patches = frames.mapValues { (id, f) ->
-            val parentOrigin = parentOrigins[id] ?: Offset.Zero
+            val preParentOrigin = preParentOrigins[id] ?: Offset.Zero
+            val ancShift = ancestorShifts[id] ?: Offset.Zero
+            val postParentX = preParentOrigin.x + ancShift.x
+            val postParentY = preParentOrigin.y + ancShift.y
             buildJsonObject {
                 put(
                     "frame",
                     buildJsonObject {
-                        put("x", snapHalfUnit((f.x ?: 0.0) - parentOrigin.x))
-                        put("y", snapHalfUnit((f.y ?: 0.0) - parentOrigin.y))
+                        put("x", snapHalfUnit((f.x ?: 0.0) - postParentX))
+                        put("y", snapHalfUnit((f.y ?: 0.0) - postParentY))
                         put("w", f.w ?: DEFAULT_W)
                         put("h", f.h ?: DEFAULT_H)
                     },

@@ -139,13 +139,14 @@ fun DocumentStageDirectEditOverlay(
     val movingIds = controller.dragPreviewNodeIds
     val activeDragDx = controller.dragPreviewDeltaX
     val activeDragDy = controller.dragPreviewDeltaY
-    LaunchedEffect(stageDragPreview, movingIds, activeDragDx, activeDragDy, safeScale) {
+    LaunchedEffect(stageDragPreview, slide, movingIds, activeDragDx, activeDragDy, safeScale) {
         if (stageDragPreview != null) {
             stageDragPreview.clear()
             // Stage-unit deltas → overlay pixels: the same `safeScale` the selection chrome uses,
             // so the dragged node and its outline/handles never detach when `stageScale != 1`.
+            // Only translate top-most moving nodes so descendants inside a moving container are not shifted twice.
             val offset = stageDragPreviewOffset(activeDragDx, activeDragDy, safeScale, density.density)
-            for (id in movingIds) stageDragPreview.set(id, offset)
+            for (id in DocumentElementArrangeOps.topMostIds(slide, movingIds)) stageDragPreview.set(id, offset)
         }
     }
 
@@ -498,6 +499,7 @@ private fun StageSelectionChrome(
     val dx = controller.dragPreviewDeltaX.toFloat()
     val dy = controller.dragPreviewDeltaY.toFloat()
 
+    val slide = controller.activeSlide()
     val displayRects = LinkedHashMap<String, Rect>()
     for (node in resolvedNodes) {
         var r = nodeRect(node) ?: continue
@@ -508,7 +510,7 @@ private fun StageSelectionChrome(
                 r = Rect(x, y, x + (f.w ?: r.width.toDouble()).toFloat(), y + (f.h ?: r.height.toDouble()).toFloat())
             }
         }
-        if (node.id in movingIds) r = r.translate(dx, dy)
+        if (DocumentElementArrangeOps.hasSelfOrAncestorIn(slide, node.id, movingIds)) r = r.translate(dx, dy)
         displayRects[node.id] = r
     }
 
