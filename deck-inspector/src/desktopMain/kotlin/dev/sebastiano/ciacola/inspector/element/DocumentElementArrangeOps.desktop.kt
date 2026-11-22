@@ -23,6 +23,7 @@ import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import dev.sebastiano.ciacola.inspector.document.snapHalfUnit
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -410,17 +411,27 @@ internal object DocumentElementArrangeOps {
         fallbackBounds: Rect,
         activeBeat: Int = 0,
     ): NodeSpec {
-        fun hasBeat0NumericOverride(key: String) = node.builds.any { b ->
-            b is Build.Change && b.beat == 0 && ((b.set["frame"] as? JsonObject)?.get(key) as? JsonPrimitive)?.doubleOrNull != null
+        fun frameSetsKey(set: JsonObject, key: String): Boolean {
+            val rawFrame = set["frame"] ?: return false
+            return rawFrame is JsonNull || (rawFrame as? JsonObject)?.containsKey(key) == true
+        }
+        fun hasBeat0Override(key: String) = node.builds.any { b ->
+            b is Build.Change && b.beat == 0 && frameSetsKey(b.set, key)
         }
         fun overriddenAtOrBeforeActiveBeat(key: String) = node.builds.any { b ->
-            b is Build.Change && b.beat <= activeBeat && (b.set["frame"] as? JsonObject)?.containsKey(key) == true
+            b is Build.Change && b.beat <= activeBeat && frameSetsKey(b.set, key)
         }
         val implicitlyAlignedBase = node.frame?.x == null &&
             node.frame?.y == null &&
-            !hasBeat0NumericOverride("x") &&
-            !hasBeat0NumericOverride("y")
+            !hasBeat0Override("x") &&
+            !hasBeat0Override("y")
         val movingPos = moved(delta.dx) || moved(delta.dy)
+        val deltaByKey = mapOf(
+            "x" to delta.dx,
+            "y" to delta.dy,
+            "w" to delta.dw,
+            "h" to delta.dh,
+        )
         val keys = listOf(
             Triple("x", delta.dx, fallbackBounds.left.toDouble()),
             Triple("y", delta.dy, fallbackBounds.top.toDouble()),
@@ -434,12 +445,18 @@ internal object DocumentElementArrangeOps {
             val next = snapHalfUnit(value + d)
             return if (key == "w" || key == "h") next.coerceAtLeast(1.0) else next
         }
+        fun effectiveResetValue(key: String, beat: Int): Double = when (key) {
+            "x" -> if (beat == activeBeat) fallbackBounds.left.toDouble() else 0.0
+            "y" -> if (beat == activeBeat) fallbackBounds.top.toDouble() else 0.0
+            "w" -> fallbackBounds.width.toDouble().takeIf { it > 0.0 } ?: DEFAULT_W
+            else -> fallbackBounds.height.toDouble().takeIf { it > 0.0 } ?: DEFAULT_H
+        }
         var frame = node.frame ?: FrameSpec()
         for ((key, d, fallback) in keys) {
             val base = when (key) { "x" -> frame.x; "y" -> frame.y; "w" -> frame.w; else -> frame.h }
             val next = when {
                 base != null -> adjust(key, base, d)
-                hasBeat0NumericOverride(key) -> null
+                hasBeat0Override(key) -> null
                 !overriddenAtOrBeforeActiveBeat(key) -> adjust(key, fallback, d)
                 key == "x" || key == "y" -> adjust(key, 0.0, d)
                 else -> null
@@ -452,17 +469,53 @@ internal object DocumentElementArrangeOps {
             }
         }
         val nextFrame = if (frame == (node.frame ?: FrameSpec())) node.frame else frame
-        val nextBuilds = node.builds.map { build ->
-            val frameObj = (build as? Build.Change)?.set?.get("frame") as? JsonObject ?: return@map build
-            if (keys.none { (key, d, _) -> moved(d) && (frameObj[key] as? JsonPrimitive)?.doubleOrNull != null }) return@map build
+        val nextBuilds = node.builds.mapIndexed { buildIdx, build ->
+            val change = build as? Build.Change ?: return@mapIndexed build
+            val rawFrame = change.set["frame"] ?: return@mapIndexed build
+            val frameObj: JsonObject = when (rawFrame) {
+                is JsonObject -> rawFrame
+                is JsonNull -> buildJsonObject {
+                    put("x", JsonNull)
+                    put("y", JsonNull)
+                    put("w", JsonNull)
+                    put("h", JsonNull)
+                }
+                else -> return@mapIndexed build
+            }
+            val resolvedAfter = JsonMergePatch.resolveNodeAfterBuild(node, buildIdx).frame
+            val implicitlyAlignedAfterBuild = resolvedAfter?.x == null && resolvedAfter?.y == null
+            val resetsPositionAxis = frameObj["x"] is JsonNull || frameObj["y"] is JsonNull
+            val pinBothAxes = movingPos && implicitlyAlignedAfterBuild && resetsPositionAxis
+            val touchesAnyKey = deltaByKey.any { (key, d) ->
+                val activeMove = moved(d) || (pinBothAxes && (key == "x" || key == "y"))
+                if (!activeMove) return@any false
+                val v = frameObj[key]
+                (v as? JsonPrimitive)?.doubleOrNull != null || v is JsonNull || (pinBothAxes && (key == "x" || key == "y"))
+            }
+            if (!touchesAnyKey) return@mapIndexed build
+
             val newFrameObj = buildJsonObject {
+                val writtenKeys = HashSet<String>()
                 for ((k, v) in frameObj) {
-                    val d = keys.firstOrNull { it.first == k && moved(it.second) }?.second
-                    val old = (v as? JsonPrimitive)?.doubleOrNull
-                    if (d != null && old != null) put(k, adjust(k, old, d)) else put(k, v)
+                    val d = deltaByKey[k]
+                    val shouldTranslate = d != null && (moved(d) || (pinBothAxes && (k == "x" || k == "y")))
+                    val numeric = (v as? JsonPrimitive)?.doubleOrNull
+                    when {
+                        shouldTranslate && numeric != null -> put(k, adjust(k, numeric, d))
+                        shouldTranslate && v is JsonNull -> put(k, adjust(k, effectiveResetValue(k, change.beat), d))
+                        else -> put(k, v)
+                    }
+                    writtenKeys += k
+                }
+                if (pinBothAxes) {
+                    for (axis in listOf("x", "y")) {
+                        if (axis !in writtenKeys) {
+                            put(axis, adjust(axis, effectiveResetValue(axis, change.beat), deltaByKey.getValue(axis)))
+                        }
+                    }
                 }
             }
-            build.copy(set = buildJsonObject { for ((k, v) in build.set) put(k, if (k == "frame") newFrameObj else v) })
+            change.copy(set = buildJsonObject { for ((k, v) in change.set) put(k, if (k == "frame") newFrameObj else v) })
         }
         return node.copy(frame = nextFrame, builds = nextBuilds)
     }

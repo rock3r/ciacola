@@ -1118,6 +1118,107 @@ class InspectorEdgeCasesTest {
         assertEquals(500, pulseTrack.startMs, "Pulse must remain sequenced after the 200ms + 300ms beat-1 changes")
     }
 
+    @Test
+    fun allBuildsMoveTranslatesNullResetFrameCoordinatesAndWholeFrameResets() {
+        val resetSingleAxis = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "reset-x",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 0.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Reset X"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject {
+                        put("frame", buildJsonObject { put("x", kotlinx.serialization.json.JsonNull) })
+                    },
+                ),
+            ),
+        )
+        val resetBothAligned = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "reset-aligned",
+            align = "center",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 50.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Reset Aligned"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject {
+                        put(
+                            "frame",
+                            buildJsonObject {
+                                put("x", kotlinx.serialization.json.JsonNull)
+                                put("y", kotlinx.serialization.json.JsonNull)
+                            },
+                        )
+                    },
+                ),
+            ),
+        )
+        val resetWholeFrame = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "reset-whole",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 50.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Reset Whole"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject { put("frame", kotlinx.serialization.json.JsonNull) },
+                ),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "all-builds-reset-translate",
+            title = "All Builds Reset Translate",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec(), dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(resetSingleAxis, resetBothAligned, resetWholeFrame),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.stageBoundsProvider = { id ->
+            when (id) {
+                "reset-x" -> Rect(0f, 0f, 200f, 80f)
+                "reset-aligned" -> Rect(860f, 500f, 1060f, 580f)
+                "reset-whole" -> Rect(0f, 0f, 200f, 80f)
+                else -> null
+            }
+        }
+        c.selectLocation("s1", 1)
+        c.editAllBuilds = true
+        c.selectNodes(setOf("reset-x", "reset-aligned", "reset-whole"), primaryId = "reset-x")
+
+        assertTrue(DocumentElementArrangeOps.nudgeSelected(c, dx = 10.0, dy = 0.0))
+
+        val nResetX = findNode(store, "reset-x")
+        assertEquals(110.0, JsonMergePatch.resolveNodeAtBeat(nResetX, 0).frame?.x)
+        assertEquals(10.0, JsonMergePatch.resolveNodeAtBeat(nResetX, 1).frame?.x, "Beat-1 null x override must move from 0 to 10")
+        assertEquals(0.0, JsonMergePatch.resolveNodeAtBeat(nResetX, 1).frame?.y)
+
+        val nResetAligned = findNode(store, "reset-aligned")
+        assertEquals(110.0, JsonMergePatch.resolveNodeAtBeat(nResetAligned, 0).frame?.x)
+        assertEquals(50.0, JsonMergePatch.resolveNodeAtBeat(nResetAligned, 0).frame?.y)
+        assertEquals(870.0, JsonMergePatch.resolveNodeAtBeat(nResetAligned, 1).frame?.x, "Aligned beat-1 null x must translate from measured 860 to 870")
+        assertEquals(500.0, JsonMergePatch.resolveNodeAtBeat(nResetAligned, 1).frame?.y, "Aligned beat-1 null y must stay pinned at measured 500")
+
+        val nResetWhole = findNode(store, "reset-whole")
+        assertEquals(110.0, JsonMergePatch.resolveNodeAtBeat(nResetWhole, 0).frame?.x)
+        assertEquals(10.0, JsonMergePatch.resolveNodeAtBeat(nResetWhole, 1).frame?.x)
+        assertEquals(0.0, JsonMergePatch.resolveNodeAtBeat(nResetWhole, 1).frame?.y)
+        assertNull(JsonMergePatch.resolveNodeAtBeat(nResetWhole, 1).frame?.w, "Whole-frame reset must keep w null when only nudging position")
+        assertNull(JsonMergePatch.resolveNodeAtBeat(nResetWhole, 1).frame?.h, "Whole-frame reset must keep h null when only nudging position")
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,
