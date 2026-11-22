@@ -9,12 +9,6 @@ junit-jupiter = "5.11.4"
 kotlin = "2.4.10"
 ktor = "3.5.2"
 collection = "1.6.0"
-# TextMate parsing dependencies for JVM
-# # Eclipse T4ME + Transitive dependencies
-t4me = "0.18.1-SNAPSHOT"
-jdt-annotations = "2.4.100"
-joni = "2.2.7"
-jcodings = "1.0.64"
 annotations = "26.1.0"
 filekit = "0.15.0"
 
@@ -52,9 +46,3 @@ ktor-client-engine-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref
 ktor-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version = "3.0.8" }
 androidx-collection = { module = "androidx.collection:collection", version.ref = "collection" }
-# TextMate parsing dependencies for JVM
-# # Eclipse T4ME + Transitive dependencies
-eclipse-t4me-core = { module = "org.eclipse:org.eclipse.tm4e.core", version.ref = "t4me" }
-eclipse-jdt-annotations = { module = "org.eclipse.jdt:org.eclipse.jdt.annotation", version.ref = "jdt-annotations" }
-jruby-joni = { module = "org.jruby.joni:joni", version.ref = "joni" }
-jruby-jcodings = { module = "org.jruby.jcodings:jcodings", version.ref = "jcodings" }

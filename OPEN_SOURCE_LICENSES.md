@@ -3,7 +3,7 @@
 Ciacola is distributed under the [Apache License, Version 2.0](LICENSE.txt).
 See [NOTICE](NOTICE) for project and upstream Storyboard attribution notices.
 
-This document lists the third-party open-source libraries, TextMate grammars, build plugins, and
+This document lists the third-party open-source libraries, build plugins, and
 bundled fonts used in this repository, followed by the full verbatim text of each applicable
 license.
 
@@ -27,7 +27,6 @@ license.
 | **Kotlinx Collections Immutable** | `org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.2` | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/Kotlin/kotlinx.collections.immutable> |
 | **Kotlinx Serialization** | `org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0`, `org.jetbrains.kotlin.plugin.serialization:2.4.10` | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/Kotlin/kotlinx.serialization> |
 | **Kotlinx Coroutines** | `org.jetbrains.kotlinx:kotlinx-coroutines-*` (transitive via Compose, Storyboard, Ktor) | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/Kotlin/kotlinx.coroutines> |
-| **Kotlinx Browser** | `org.jetbrains.kotlinx:kotlinx-browser:0.5.0` (`:storyboard-warp` WasmJs) | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/Kotlin/kotlinx-browser> |
 | **Compose Multiplatform** | `org.jetbrains.compose` (`1.13.0-beta02`), `org.jetbrains.compose.material:material-icons-core:1.7.3` | JetBrains s.r.o. and The Android Open Source Project | Apache-2.0 | <https://github.com/JetBrains/compose-multiplatform> |
 | **Compose Hot Reload** | `org.jetbrains.compose.hot-reload:hot-reload-runtime-api:1.2.0` | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/JetBrains/compose-hot-reload> |
 | **Skiko & Skia** | `org.jetbrains.skiko:*` (bundled with Compose Desktop) | JetBrains s.r.o. (Skiko); Google Inc. and contributors (Skia) | Apache-2.0 (Skiko); BSD-3-Clause (Skia) | <https://github.com/JetBrains/skiko>, <https://skia.org/> |
@@ -37,27 +36,9 @@ license.
 | **AndroidX Collection** | `androidx.collection:collection:1.6.0` | The Android Open Source Project | Apache-2.0 | <https://developer.android.com/jetpack/androidx/releases/collection> |
 | **Apache PDFBox** | `org.apache.pdfbox:pdfbox:3.0.8` (`:storyboard-easel`) | Copyright 2002-2026 The Apache Software Foundation | Apache-2.0 | <https://pdfbox.apache.org/> |
 | **FileKit** | `io.github.vinceglb:filekit-core:0.15.0`, `io.github.vinceglb:filekit-dialogs-compose:0.15.0` (`:storyboard-easel`) | Copyright Vinceglb and FileKit contributors | MIT | <https://github.com/vinceglb/FileKit> |
-| **ANTLR Kotlin** | `com.strumenta:antlr-kotlin-runtime:1.0.13`, `com.strumenta.antlr-kotlin:1.0.13` (`:storyboard-text`) | Strumenta and ANTLR 4 contributors | Apache-2.0 & BSD-3-Clause | <https://github.com/Strumenta/antlr-kotlin> |
-| **Eclipse TM4E** | `org.eclipse:org.eclipse.tm4e.core:0.18.1-SNAPSHOT` (`:storyboard-warp`) | Copyright Eclipse Foundation and TM4E contributors | EPL-2.0 | <https://github.com/eclipse-tm4e/tm4e> |
-| **Eclipse JDT Annotations** | `org.eclipse.jdt:org.eclipse.jdt.annotation:2.4.100` (`:storyboard-warp`) | Copyright Eclipse Foundation and JDT contributors | EPL-2.0 | <https://github.com/eclipse-jdt/eclipse.jdt.core> |
-| **JRuby Joni** | `org.jruby.joni:joni:2.2.7` (`:storyboard-warp`) | Copyright JRuby contributors | MIT | <https://github.com/jruby/joni> |
-| **JRuby JCodings** | `org.jruby.jcodings:jcodings:1.0.64` (`:storyboard-warp`) | Copyright JRuby contributors | MIT | <https://github.com/jruby/jcodings> |
-| **Shiki** | `shiki` (`^4.3.1`, npm, `:storyboard-warp` WasmJs) | Copyright (c) 2021 Pine Wu; Copyright (c) 2023 Anthony Fu | MIT | <https://github.com/shikijs/shiki> |
+| **ANTLR Kotlin** | `com.strumenta:antlr-kotlin-runtime:1.0.13`, `com.strumenta.antlr-kotlin:1.0.13` (`:storyboard-text`, `:storyboard-warp`) | Strumenta and ANTLR 4 contributors | Apache-2.0 & BSD-3-Clause | <https://github.com/Strumenta/antlr-kotlin> |
 | **Ktor Client** | `io.ktor:ktor-client-{core,content-negotiation,js,okhttp}:3.5.2`, `io.ktor:ktor-serialization-kotlinx-json:3.5.2` (`:examples:interactive`) | JetBrains s.r.o. and Ktor contributors | Apache-2.0 | <https://github.com/ktorio/ktor> |
 | **OkHttp** | `com.squareup.okhttp3:okhttp` (via `ktor-client-okhttp`, `:examples:interactive`) | Square, Inc. | Apache-2.0 | <https://square.github.io/okhttp/> |
-
-### Bundled TextMate Grammars (`:storyboard-warp`)
-
-The following TextMate syntax grammar files are included in `storyboard-warp/src/jvmMain/resources/`
-(and mirrored for WasmJs in `storyboard-warp/src/wasmJsMain/kotlin/dev/bnorm/storyboard/LanguageRegistry.kt`),
-sourced via [shikijs/textmate-grammars-themes](https://github.com/shikijs/textmate-grammars-themes)
-(`Copyright (c) 2021 Pine Wu`, `Copyright (c) 2023 Anthony Fu`, MIT):
-
-| File | Original Upstream | Copyright | License |
-|---|---|---|---|
-| `kotlin.tmLanguage.json` | <https://github.com/fwcd/vscode-kotlin> | Copyright (c) 2016 George Fraser; Copyright (c) 2018 fwcd | MIT |
-| `json.tmLanguage.json` | <https://github.com/microsoft/vscode-JSON.tmLanguage> (via `microsoft/vscode`) | Copyright (c) 2015 - present Microsoft Corporation | MIT |
-| `xml.tmLanguage.json` | <https://github.com/atom/language-xml> (via `microsoft/vscode`) | Copyright (c) 2015 - present Microsoft Corporation; Copyright (c) 2014 GitHub Inc. | MIT |
 
 ### Testing & Build Tooling
 

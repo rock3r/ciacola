@@ -67,7 +67,7 @@ private val CODE_MULTI_CHAR_OPERATORS = arrayOf(
 )
 
 /**
- * Splits coarse TextMate/Shiki spans (such as `"(s"`, `"(s)"`, `"  s"`, or `"(s, alpha "`) into
+ * Splits multi-token spans (such as `"(s"`, `"(s)"`, `"  s"`, or `"(s, alpha "`) into
  * atomic lexical code tokens while preserving each slice's exact syntax highlight scope and line
  * offsets, so delimiters like `'('` and `')'` and identifiers like `'s'` match individually across
  * single-line <-> multi-line code reflows.
