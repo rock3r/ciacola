@@ -119,13 +119,19 @@ class DocumentElementInspectorController(
         private set
 
     private var activeTx: EditTransaction? = null
+    private var gestureStartDocument: DeckDocument? = null
 
     val hasActiveTransaction: Boolean
         get() = activeTx?.isActive == true || store.hasOpenTransaction
 
-    fun activeSlide(): SlideSpec? =
-        store.document.slides.firstOrNull { it.id == activeSlideId }
-            ?: store.document.slides.firstOrNull { !it.skipped }
+    internal fun activeGestureStartDocument(): DeckDocument? =
+        gestureStartDocument?.takeIf { activeTx?.isActive == true }
+
+    internal fun slideIn(document: DeckDocument): SlideSpec? =
+        document.slides.firstOrNull { it.id == activeSlideId }
+            ?: document.slides.firstOrNull { !it.skipped }
+
+    fun activeSlide(): SlideSpec? = slideIn(store.document)
 
     fun activeSlideNodes(): List<NodeSpec> =
         activeSlide()?.let { DocumentThemeResolver.flattenNodes(it.nodes) }.orEmpty()
@@ -231,20 +237,26 @@ class DocumentElementInspectorController(
     fun beginGesture(label: String): Boolean {
         if (activeTx?.isActive == true) return true
         onBeforeBeginGesture?.invoke()
+        val startDoc = store.document
         val tx = store.begin(label) ?: return false
         activeTx = tx
+        gestureStartDocument = startDoc
         return true
     }
 
     fun commitGesture() {
         val tx = activeTx ?: return
         activeTx = null
+        gestureStartDocument = null
         tx.commit()
     }
 
     fun cancelGesture(): Boolean {
         resizePreviewNodeId = null
         resizePreviewFrame = null
+        resizeStartFrame = null
+        resizeParentOrigin = Offset.Zero
+        gestureStartDocument = null
         val tx = activeTx
         if (tx != null && tx.isActive) {
             activeTx = null
@@ -774,8 +786,11 @@ class DocumentElementInspectorController(
     /** Stage-unit bounds of [nodeId] at the active beat (explicit frame, falling back to the live layout). */
     fun nodeStageBounds(nodeId: String): Rect? = DocumentElementArrangeOps.nodeStageBounds(this, nodeId)
 
-    /** Frame at the start of the active single-node resize (deltas for `All builds` mode). */
+    /** Frame at the start of the active single-node resize (stage coordinates). */
     private var resizeStartFrame: FrameSpec? = null
+
+    /** Direct parent content-box stage origin for the node being resized (`Offset.Zero` for top-level nodes). */
+    private var resizeParentOrigin: Offset = Offset.Zero
 
     /** Begins an interactive 8-handle resize transaction (`store.begin`/`update`/`commit`, 1 undo step). */
     fun beginResizeGesture(nodeId: String, initialFrame: FrameSpec): Boolean {
@@ -785,6 +800,7 @@ class DocumentElementInspectorController(
         resizePreviewNodeId = nodeId
         resizePreviewFrame = initialFrame
         resizeStartFrame = initialFrame
+        resizeParentOrigin = DocumentElementArrangeOps.parentContentStageOrigin(this, nodeId)
         return true
     }
 
@@ -799,6 +815,7 @@ class DocumentElementInspectorController(
         resizePreviewNodeId = nodeId
         resizePreviewFrame = snapped
         val start = resizeStartFrame
+        val parentOrigin = resizeParentOrigin
         val slideId = activeSlide()?.id
         if (editAllBuilds && activeBeat > 0 && start != null && slideId != null) {
             // Relative change on base + every build (like moves and union resizes), never stamping
@@ -813,16 +830,23 @@ class DocumentElementInspectorController(
                 dw = (snapped.w ?: sw) - sw,
                 dh = (snapped.h ?: sh) - sh,
             )
-            val startRect = Rect(sx.toFloat(), sy.toFloat(), (sx + sw).toFloat(), (sy + sh).toFloat())
+            val localSx = sx - parentOrigin.x
+            val localSy = sy - parentOrigin.y
+            val startLocalRect = Rect(
+                localSx.toFloat(),
+                localSy.toFloat(),
+                (localSx + sw).toFloat(),
+                (localSy + sh).toFloat(),
+            )
             return applyMutation("Resize ${displayNameOf(nodeId)}", useActiveGesture = true) { doc ->
                 DocumentThemeResolver.updateNodeInSlide(doc, slideId, nodeId) {
-                    DocumentElementArrangeOps.offsetFrameAcrossAllBuilds(it, delta, startRect)
+                    DocumentElementArrangeOps.offsetFrameAcrossAllBuilds(it, delta, startLocalRect)
                 }
             }
         }
         return setFrame(
-            x = snapped.x,
-            y = snapped.y,
+            x = snapped.x?.let { it - parentOrigin.x },
+            y = snapped.y?.let { it - parentOrigin.y },
             w = snapped.w,
             h = snapped.h,
             useActiveGesture = true,
@@ -834,6 +858,7 @@ class DocumentElementInspectorController(
         resizePreviewNodeId = null
         resizePreviewFrame = null
         resizeStartFrame = null
+        resizeParentOrigin = Offset.Zero
         commitGesture()
     }
 
@@ -841,6 +866,7 @@ class DocumentElementInspectorController(
         resizePreviewNodeId = null
         resizePreviewFrame = null
         resizeStartFrame = null
+        resizeParentOrigin = Offset.Zero
         cancelGesture()
     }
 

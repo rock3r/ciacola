@@ -81,11 +81,14 @@ internal class GridProperty(
     val read: (DocumentElementInspectorController, EditTarget) -> Double?,
     val write: (Double) -> JsonObject,
     /** Per-target patch (preserving each node's other values); falls back to [write] when `null`. */
-    val writeFor: ((Double, EditTarget) -> JsonObject)? = null,
+    val writeFor: ((DocumentElementInspectorController, Double, EditTarget) -> JsonObject)? = null,
 )
 
-internal fun GridProperty.patchFor(value: Double, target: EditTarget): JsonObject =
-    writeFor?.invoke(value, target) ?: write(value)
+internal fun GridProperty.patchFor(
+    controller: DocumentElementInspectorController,
+    value: Double,
+    target: EditTarget,
+): JsonObject = writeFor?.invoke(controller, value, target) ?: write(value)
 
 private fun framePatch(key: String, value: Double, minimum: Double? = null): JsonObject = buildJsonObject {
     put("frame", buildJsonObject { put(key, snapHalfUnit(minimum?.let { value.coerceAtLeast(it) } ?: value)) })
@@ -96,12 +99,16 @@ private fun bounds(c: DocumentElementInspectorController, t: EditTarget) = c.nod
 internal val LayoutXProperty = GridProperty(
     label = "X", tag = "ciacola-doc-frame-x", undoLabel = "Edit X", keyPath = listOf("frame", "x"), resetAtBase = false,
     tooltip = "Horizontal position (stage units). Drag to scrub: Shift ×10, Alt ×0.1",
-    read = { c, t -> bounds(c, t)?.left?.toDouble() }, write = { framePatch("x", it) },
+    read = { c, t -> bounds(c, t)?.left?.toDouble() },
+    write = { framePatch("x", it) },
+    writeFor = { c, v, t -> DocumentElementArrangeOps.stagePositionPatch(c, t.id, stageX = v) },
 )
 internal val LayoutYProperty = GridProperty(
     label = "Y", tag = "ciacola-doc-frame-y", undoLabel = "Edit Y", keyPath = listOf("frame", "y"), resetAtBase = false,
     tooltip = "Vertical position (stage units). Drag to scrub: Shift ×10, Alt ×0.1",
-    read = { c, t -> bounds(c, t)?.top?.toDouble() }, write = { framePatch("y", it) },
+    read = { c, t -> bounds(c, t)?.top?.toDouble() },
+    write = { framePatch("y", it) },
+    writeFor = { c, v, t -> DocumentElementArrangeOps.stagePositionPatch(c, t.id, stageY = v) },
 )
 internal val LayoutWProperty = GridProperty(
     label = "W", tag = "ciacola-doc-frame-w", undoLabel = "Edit width", keyPath = listOf("frame", "w"), resetAtBase = false,
@@ -143,10 +150,13 @@ internal class GridPropertyEditor(
     private fun target(id: String): EditTarget? = targets.firstOrNull { it.id == id }
 
     private fun patchesFrom(values: Map<String, Double>, delta: Double): Map<String, JsonObject> =
-        values.mapNotNull { (id, v) -> target(id)?.let { id to property.patchFor(v + delta, it) } }.toMap()
+        values.mapNotNull { (id, v) -> target(id)?.let { id to property.patchFor(controller, v + delta, it) } }.toMap()
 
     fun commit(value: Double) {
-        controller.applyPatchesToNodes(property.undoLabel, targets.associate { it.id to property.patchFor(value, it) })
+        controller.applyPatchesToNodes(
+            property.undoLabel,
+            targets.associate { it.id to property.patchFor(controller, value, it) },
+        )
     }
 
     fun step(delta: Double) {
@@ -377,7 +387,7 @@ private fun nonUniformScaleProperty(isX: Boolean) = GridProperty(
     read = { _, t -> (t.resolved.scale ?: ScaleValue.Identity).let { if (isX) it.scaleX else it.scaleY } * 100.0 },
     write = { v -> buildJsonObject { put("scale", (v / 100.0).coerceIn(0.05, 10.0)) } },
     // Editing SX keeps each node's own SY (and vice versa).
-    writeFor = { v, t -> nonUniformScalePatch(isX, v, t) },
+    writeFor = { _, v, t -> nonUniformScalePatch(isX, v, t) },
 )
 
 /** SX/SY edit for one node: the edited axis takes [percent], the other keeps the node's own value. */

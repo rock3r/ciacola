@@ -7,6 +7,7 @@ import dev.sebastiano.ciacola.document.NodeKind
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import dev.sebastiano.ciacola.inspector.document.snapHalfUnit
+import dev.sebastiano.ciacola.inspector.element.DocumentElementArrangeOps
 import dev.sebastiano.ciacola.inspector.element.InspectorDisplayNames
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -146,14 +147,28 @@ internal fun lintFixPatch(issue: DocumentLintIssue, document: DeckDocument): Jso
             val f = node.frame ?: return null
             val w = f.w ?: issue.stageBounds.width.toDouble()
             val h = f.h ?: issue.stageBounds.height.toDouble()
-            val x = f.x ?: issue.stageBounds.left.toDouble()
-            val y = f.y ?: issue.stageBounds.top.toDouble()
+            val parentOrigin = DocumentElementArrangeOps.parentContentStageOrigin(slide, issue.beatIndex, nodeId)
+            val hasMeasuredStageBounds = issue.stageBounds.width > 0f || issue.stageBounds.height > 0f
+            val stageX = when {
+                hasMeasuredStageBounds -> issue.stageBounds.left.toDouble()
+                f.x != null -> parentOrigin.x + f.x!!
+                else -> issue.stageBounds.left.toDouble()
+            }
+            val stageY = when {
+                hasMeasuredStageBounds -> issue.stageBounds.top.toDouble()
+                f.y != null -> parentOrigin.y + f.y!!
+                else -> issue.stageBounds.top.toDouble()
+            }
             val maxX = (document.stage.width - margin - w).coerceAtLeast(margin)
             val maxY = (document.stage.height - margin - h).coerceAtLeast(margin)
+            val targetStageX = stageX.coerceIn(margin, maxX)
+            val targetStageY = stageY.coerceIn(margin, maxY)
+            val localX = (f.x ?: (stageX - parentOrigin.x)) + (targetStageX - stageX)
+            val localY = (f.y ?: (stageY - parentOrigin.y)) + (targetStageY - stageY)
             buildJsonObject {
                 put("frame", buildJsonObject {
-                    put("x", snapHalfUnit(x.coerceIn(margin, maxX)))
-                    put("y", snapHalfUnit(y.coerceIn(margin, maxY)))
+                    put("x", snapHalfUnit(localX))
+                    put("y", snapHalfUnit(localY))
                 })
             }
         }

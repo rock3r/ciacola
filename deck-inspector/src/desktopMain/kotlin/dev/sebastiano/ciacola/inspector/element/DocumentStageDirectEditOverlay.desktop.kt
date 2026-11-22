@@ -150,15 +150,14 @@ fun DocumentStageDirectEditOverlay(
     }
 
     fun nodeStageRect(n: NodeSpec, scale: Float = latestSafeScale): Rect? {
-        val inspected = inspectionRegistry?.nodes?.get(n.id)?.stageBounds
-        val f = n.frame
-        val hasExplicitFrame = f != null && (f.x != null || f.y != null || f.w != null || f.h != null)
-        if (!hasExplicitFrame && inspected == null) return null
-        val bx = (f?.x ?: inspected?.left?.toDouble() ?: 0.0).toFloat()
-        val by = (f?.y ?: inspected?.top?.toDouble() ?: 0.0).toFloat()
-        val bw = (f?.w ?: inspected?.width?.toDouble() ?: 240.0).toFloat().coerceAtLeast(16f / scale)
-        val bh = (f?.h ?: inspected?.height?.toDouble() ?: 64.0).toFloat().coerceAtLeast(16f / scale)
-        return Rect(bx, by, bx + bw, by + bh)
+        val bounds = DocumentElementArrangeOps.nodeStageBounds(
+            controller = controller,
+            nodeId = n.id,
+            stageBoundsProvider = { id -> inspectionRegistry?.nodes?.get(id)?.stageBounds },
+        ) ?: return null
+        val bw = bounds.width.coerceAtLeast(16f / scale)
+        val bh = bounds.height.coerceAtLeast(16f / scale)
+        return Rect(bounds.left, bounds.top, bounds.left + bw, bounds.top + bh)
     }
 
     fun buildSnapSnapshots(nodes: List<NodeSpec>): List<StageNodeSnapshot> {

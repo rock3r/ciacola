@@ -17,6 +17,8 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 @OptIn(InternalComposeUiApi::class)
@@ -400,4 +402,206 @@ class InspectorEdgeCasesTest {
         assertEquals(-90.0, after2.frame?.x, "child-2 must shift by -100 to local x = -90 (stage x = 110)")
         assertEquals(110f, DocumentElementArrangeOps.nodeStageBounds(c, "child-2")?.left)
     }
+
+    @Test
+    fun inspectorPositionFieldsConvertStageCoordinatesBackToParentLocal() {
+        val child = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "nested-child",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 10.0, y = 20.0, w = 100.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Nested"),
+            ),
+        )
+        val alignedChild = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "aligned-child",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(w = 120.0, h = 40.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Aligned"),
+            ),
+        )
+        val parent = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-stack",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 200.0, w = 500.0, h = 300.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(
+                padding = dev.sebastiano.ciacola.document.PaddingSpec(left = 12.0, top = 8.0, right = 12.0, bottom = 8.0),
+                children = listOf(child, alignedChild),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "inspector-nested-xy",
+            title = "Inspector Nested XY",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(parent),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        // Parent origin is (100, 200) + padding (12, 8) = (112, 208).
+        // alignedChild sits at local (88, 92) -> stage (200, 300).
+        c.stageBoundsProvider = { id ->
+            when (id) {
+                "parent-stack" -> Rect(100f, 200f, 600f, 500f)
+                "aligned-child" -> Rect(200f, 300f, 320f, 340f)
+                else -> null
+            }
+        }
+        c.selectLocation("s1", 0)
+        c.selectNode("nested-child")
+
+        val xEditor = GridPropertyEditor(c, LayoutXProperty, c.editTargets())
+        val yEditor = GridPropertyEditor(c, LayoutYProperty, c.editTargets())
+        // Displayed stage coordinates include parent origin + padding: X = 112 + 10 = 122, Y = 208 + 20 = 228.
+        assertEquals(122.0, xEditor.sharedValue())
+        assertEquals(228.0, yEditor.sharedValue())
+
+        // Step by +1 moves stage X from 122 to 123 (parent-local 10 -> 11), never 123 local.
+        xEditor.step(1.0)
+        xEditor.targets = c.editTargets()
+        assertEquals(11.0, findNode(store, "nested-child").frame?.x)
+        assertEquals(123.0, xEditor.sharedValue())
+
+        // Commit absolute stage Y = 258 writes parent-local 50 (258 - 208).
+        yEditor.commit(258.0)
+        yEditor.targets = c.editTargets()
+        assertEquals(50.0, findNode(store, "nested-child").frame?.y)
+        assertEquals(258.0, yEditor.sharedValue())
+
+        // Scrub X by +15 moves stage X from 123 to 138 (parent-local 26) in one undo step.
+        xEditor.scrubStart()
+        xEditor.scrub(5.0)
+        xEditor.scrub(15.0)
+        xEditor.scrubEnd()
+        assertEquals(26.0, findNode(store, "nested-child").frame?.x)
+        assertEquals(138f, DocumentElementArrangeOps.nodeStageBounds(c, "nested-child")?.left)
+
+        // Scrubbing X on an implicitly aligned nested child preserves local Y across every scrub update.
+        c.selectNode("aligned-child")
+        val alignedX = GridPropertyEditor(c, LayoutXProperty, c.editTargets())
+        assertEquals(200.0, alignedX.sharedValue())
+        alignedX.scrubStart()
+        alignedX.scrub(5.0)
+        alignedX.targets = c.editTargets()
+        alignedX.scrub(15.0)
+        alignedX.scrubEnd()
+        val updatedAligned = findNode(store, "aligned-child")
+        assertEquals(103.0, updatedAligned.frame?.x, "local X moves from 88 to 103 (stage 215)")
+        assertEquals(92.0, updatedAligned.frame?.y, "local Y stays pinned at 92 across multi-step scrub")
+    }
+
+    @Test
+    fun singleNodeResizeGestureConvertsStageCoordinatesToParentLocal() {
+        val child = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "nested-card",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 20.0, y = 30.0, w = 100.0, h = 60.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Card"),
+            ),
+        )
+        val parent = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-stack",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 200.0, w = 500.0, h = 300.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(child)),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "nested-resize",
+            title = "Nested Resize",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(parent),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 0)
+        c.selectNode("nested-card")
+
+        // Stage handle starts at (120, 230, 100, 60) and drags NW by (-10, -15) -> stage (110, 215, 110, 75).
+        assertTrue(
+            c.beginResizeGesture(
+                "nested-card",
+                dev.sebastiano.ciacola.document.FrameSpec(x = 120.0, y = 230.0, w = 100.0, h = 60.0),
+            ),
+        )
+        assertTrue(
+            c.updateResizeGesture(
+                "nested-card",
+                dev.sebastiano.ciacola.document.FrameSpec(x = 110.0, y = 215.0, w = 110.0, h = 75.0),
+            ),
+        )
+        assertEquals(110.0, c.resizePreviewFrame?.x, "Live preview stays in stage coordinates")
+        c.commitResizeGesture()
+
+        val updated = findNode(store, "nested-card").frame!!
+        assertEquals(10.0, updated.x, "Parent-local x is stage 110 - parent 100 = 10")
+        assertEquals(15.0, updated.y, "Parent-local y is stage 215 - parent 200 = 15")
+        assertEquals(110.0, updated.w)
+        assertEquals(75.0, updated.h)
+    }
+
+    @Test
+    fun lintOutOfBoundsFixConvertsClampedStagePositionToParentLocal() {
+        val child = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "oob-child",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 220.0, y = 40.0, w = 200.0, h = 60.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Overflow"),
+            ),
+        )
+        val parent = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-stack",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 1600.0, y = 100.0, w = 300.0, h = 200.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(child)),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "nested-lint-fix",
+            title = "Nested Lint Fix",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(parent),
+                ),
+            ),
+        )
+        val issue = dev.sebastiano.ciacola.inspector.lint.DocumentLintIssue(
+            id = "oob-1",
+            code = "STAGE_OUT_OF_BOUNDS",
+            severity = dev.sebastiano.ciacola.inspector.lint.LintSeverity.Error,
+            source = dev.sebastiano.ciacola.inspector.lint.DocumentLintSource.Layout,
+            slideIndex = 0,
+            slideId = "s1",
+            beatIndex = 0,
+            nodeId = "oob-child",
+            title = "Out of bounds",
+            detail = "Extends past right edge",
+            stageBounds = Rect(1820f, 140f, 2020f, 200f),
+        )
+        val patch = dev.sebastiano.ciacola.inspector.lint.lintFixPatch(issue, doc)!!
+        val frame = patch["frame"]!!.jsonObject
+        // Stage left clamps from 1820 to 1720 (1920 - 200), so local x shifts by -100 from 220 to 120.
+        assertEquals(120.0, frame["x"]!!.jsonPrimitive.content.toDouble())
+        assertEquals(40.0, frame["y"]!!.jsonPrimitive.content.toDouble())
+    }
+
+    private fun findNode(store: DeckDocumentStore, id: String) =
+        dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
+            store.document.slides.first().nodes,
+            id,
+        )!!
 }

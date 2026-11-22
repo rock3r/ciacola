@@ -13,10 +13,12 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.FrameSpec
 import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.ParamSpec
+import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import dev.sebastiano.ciacola.inspector.document.snapHalfUnit
 import kotlin.math.abs
@@ -78,16 +80,38 @@ internal object DocumentElementArrangeOps {
     }
 
     /** Stage-coordinate top-left of the direct parent's content box (`Offset.Zero` for top-level nodes). */
-    private fun parentContentStageOrigin(
+    fun parentContentStageOrigin(
+        slide: SlideSpec,
+        beat: Int,
+        nodeId: String,
+        stageBoundsProvider: ((String) -> Rect?)? = null,
+    ): Offset {
+        val chain = findAncestorChain(slide.nodes, nodeId) ?: return Offset.Zero
+        return parentContentStageOrigin(chain, beat, stageBoundsProvider)
+    }
+
+    /** Stage-coordinate top-left of [nodeId]'s direct parent content box (`Offset.Zero` for top-level nodes). */
+    fun parentContentStageOrigin(
         controller: DocumentElementInspectorController,
+        nodeId: String,
+        document: DeckDocument = controller.store.document,
+        stageBoundsProvider: ((String) -> Rect?)? = controller.stageBoundsProvider,
+    ): Offset {
+        val slide = controller.slideIn(document) ?: return Offset.Zero
+        return parentContentStageOrigin(slide, controller.activeBeat, nodeId, stageBoundsProvider)
+    }
+
+    private fun parentContentStageOrigin(
         chain: List<NodeSpec>,
+        beat: Int,
+        stageBoundsProvider: ((String) -> Rect?)?,
     ): Offset {
         if (chain.size <= 1) return Offset.Zero
         var ox = 0.0
         var oy = 0.0
         for (idx in 0 until chain.lastIndex) {
-            val anc = JsonMergePatch.resolveNodeAtBeat(chain[idx], controller.activeBeat)
-            val inspectedAnc = controller.stageBoundsProvider?.invoke(anc.id)
+            val anc = JsonMergePatch.resolveNodeAtBeat(chain[idx], beat)
+            val inspectedAnc = stageBoundsProvider?.invoke(anc.id)
             if (inspectedAnc != null) {
                 ox = inspectedAnc.left.toDouble()
                 oy = inspectedAnc.top.toDouble()
@@ -122,14 +146,16 @@ internal object DocumentElementArrangeOps {
     private fun resolveArrangeNode(
         controller: DocumentElementInspectorController,
         nodeId: String,
+        document: DeckDocument = controller.store.document,
+        stageBoundsProvider: ((String) -> Rect?)? = controller.stageBoundsProvider,
     ): ResolvedArrangeNode? {
-        val slide = controller.activeSlide() ?: return null
+        val slide = controller.slideIn(document) ?: return null
         val chain = findAncestorChain(slide.nodes, nodeId) ?: return null
         val frame = JsonMergePatch.resolveNodeAtBeat(chain.last(), controller.activeBeat).frame
-        val inspected = controller.stageBoundsProvider?.invoke(nodeId)
+        val inspected = stageBoundsProvider?.invoke(nodeId)
         val hasExplicitFrame = frame != null && (frame.x != null || frame.y != null || frame.w != null || frame.h != null)
         if (!hasExplicitFrame && inspected == null) return null
-        val parentOrigin = parentContentStageOrigin(controller, chain)
+        val parentOrigin = parentContentStageOrigin(chain, controller.activeBeat, stageBoundsProvider)
         val frameX = frame?.x
         val frameY = frame?.y
         val stageX = if (frameX != null) parentOrigin.x + frameX else inspected?.left?.toDouble() ?: parentOrigin.x.toDouble()
@@ -143,8 +169,39 @@ internal object DocumentElementArrangeOps {
         )
     }
 
-    fun nodeStageBounds(controller: DocumentElementInspectorController, nodeId: String): Rect? =
-        resolveArrangeNode(controller, nodeId)?.stageBounds
+    fun nodeStageBounds(
+        controller: DocumentElementInspectorController,
+        nodeId: String,
+        stageBoundsProvider: ((String) -> Rect?)? = controller.stageBoundsProvider,
+    ): Rect? = resolveArrangeNode(controller, nodeId, stageBoundsProvider = stageBoundsProvider)?.stageBounds
+
+    /**
+     * Converts stage-coordinate [stageX] / [stageY] edits into a parent-local `frame` merge patch
+     * for [nodeId]. When an alignment-positioned node has neither `frame.x` nor `frame.y`, also
+     * pins the untouched local axis so it does not collapse to `0` on its first explicit coordinate.
+     */
+    fun stagePositionPatch(
+        controller: DocumentElementInspectorController,
+        nodeId: String,
+        stageX: Double? = null,
+        stageY: Double? = null,
+    ): JsonObject {
+        val baseDocument = controller.activeGestureStartDocument() ?: controller.store.document
+        val resolved = resolveArrangeNode(controller, nodeId, document = baseDocument)
+        val parentOrigin = resolved?.parentOrigin ?: parentContentStageOrigin(controller, nodeId, document = baseDocument)
+        val preserveOtherAxis = resolved != null && resolved.isImplicitlyAligned
+        val localX = stageX?.let { it - parentOrigin.x } ?: if (preserveOtherAxis && stageY != null) resolved.localLeft else null
+        val localY = stageY?.let { it - parentOrigin.y } ?: if (preserveOtherAxis && stageX != null) resolved.localTop else null
+        return buildJsonObject {
+            put(
+                "frame",
+                buildJsonObject {
+                    localX?.let { put("x", snapHalfUnit(it)) }
+                    localY?.let { put("y", snapHalfUnit(it)) }
+                },
+            )
+        }
+    }
 
     /** Moves each node by its delta, snapping `frame.x` / `frame.y` to half units, in ONE undo step. */
     fun moveNodesBy(
@@ -320,7 +377,7 @@ internal object DocumentElementArrangeOps {
         val label = "Resize ${frames.size} elements"
         val slide = controller.activeSlide() ?: return false
         val parentOrigins = frames.keys.associateWith { id ->
-            findAncestorChain(slide.nodes, id)?.let { parentContentStageOrigin(controller, it) } ?: Offset.Zero
+            parentContentStageOrigin(slide, controller.activeBeat, id, controller.stageBoundsProvider)
         }
         if (controller.editAllBuilds && controller.activeBeat > 0) {
             // Relative change across base + every build (like `moveNodesBy`), never stamping this
