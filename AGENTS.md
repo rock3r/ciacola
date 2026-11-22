@@ -61,13 +61,36 @@ and exercise forward and backward navigation. `:deck:run` auto-provisions JetBra
 Before every push, the relevant checks must pass and `git diff --check` must be clean. After a
 rebase, verify that the key changes survived before pushing.
 
+### Pull request delivery
+
+After completing and verifying a batch of work on a non-main branch (unless the user asks to hold
+off):
+
+1. Confirm local verification passes, `git diff --check` is clean, and code, comments, commits, and
+   PR descriptions contain only public-safe technical content (no internal tool names, model names,
+   or development-process references).
+2. Push the branch and open a pull request against `main` (pass `-R rock3r/ciacola` to `gh` when
+   multiple remotes are configured).
+3. Monitor the PR using the local `babysit-pr` skill (`.agents/skills/babysit-pr/SKILL.md`):
+   address branch-related CI failures and actionable review findings in batched pushes, reply to
+   and resolve addressed bot threads, and never push or merge while automated review is running.
+4. Once `babysit-pr` reports `stop_ready_to_merge` (CI green, automated review clean, zero
+   unresolved blocking review threads, and `MERGEABLE`), squash-merge the PR with `--delete-branch`
+   and perform post-merge cleanup (switch to `main`, pull `--ff-only`, and remove the merged local
+   branch and worktree if present).
+5. If `babysit-pr` stops on any non-ready condition (`stop_non_retryable_failure`,
+   `stop_exhausted_retries`, `diagnose_hung_check`, `stop_session_timeout`, or ambiguous/blocking
+   human feedback), stop and report to the user before merging or overriding checks.
+
 ## Actions requiring explicit user approval
 
 Do not perform these without clear instruction in the current task:
 
-- opening, merging, or closing a pull request;
-- pushing a branch;
-- destructive Git history changes or deleting branches; or
+- pushing directly to `main`;
+- closing a pull request without merging, or merging a pull request before `babysit-pr` reaches
+  `stop_ready_to_merge` (for example, when CI is red or blocking review feedback remains open);
+- destructive Git history changes (force-pushing shared branches or rewriting `main`) or deleting
+  unmerged or unrelated branches; or
 - committing unrelated changes outside the task's scope.
 
 ## Working style
