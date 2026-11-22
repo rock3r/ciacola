@@ -1082,4 +1082,101 @@ class CanonicalJsonAndValidationTest {
         assertEquals("SCHEMA_DECODE_ERROR", typeFail.errors.single().code)
         assertEquals("s0/n0/opacity", typeFail.errors.single().address)
     }
+
+    @Test
+    fun nestedAllBuildsAndSameBeatEditsPreserveSiblingNullResets() {
+        val baseNode = NodeSpec(
+            id = "box",
+            frame = FrameSpec(x = 100.0, y = 50.0, w = 200.0, h = 80.0),
+            text = TextPayload(
+                value = RichTextValue.Plain("Hello"),
+                surface = SurfaceSpec(
+                    fill = Fill.Solid("#111111"),
+                    cornerRadius = 8.0,
+                    padding = PaddingSpec(left = 12.0, top = 8.0),
+                ),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject {
+                        put("frame", JsonNull)
+                        put("text", buildJsonObject { put("surface", JsonNull) })
+                    },
+                ),
+            ),
+        )
+
+        // 1. All-builds edit of frame.w only: beat 0 gets w=300; beat 1 gets w=300 while keeping x/y/h reset to null.
+        val allWidth = JsonMergePatch.applyToAllBeats(
+            node = baseNode,
+            patch = JsonMergePatch.nestedPatch(listOf("frame", "w"), JsonPrimitive(300.0)),
+        )
+        assertEquals(FrameSpec(x = 100.0, y = 50.0, w = 300.0, h = 80.0), JsonMergePatch.resolveNodeAtBeat(allWidth, 0).frame)
+        assertEquals(FrameSpec(x = null, y = null, w = 300.0, h = null), JsonMergePatch.resolveNodeAtBeat(allWidth, 1).frame)
+
+        // 2. All-builds edit of nested text.surface.cornerRadius: beat 1 keeps fill and padding reset to null.
+        val allRadius = JsonMergePatch.applyToAllBeats(
+            node = baseNode,
+            patch = JsonMergePatch.nestedPatch(listOf("text", "surface", "cornerRadius"), JsonPrimitive(16.0)),
+        )
+        val beat1Surface = JsonMergePatch.resolveNodeAtBeat(allRadius, 1).text?.surface
+        assertEquals(16.0, beat1Surface?.cornerRadius)
+        assertNull(beat1Surface?.fill, "Untouched sibling fill must remain reset on beat 1")
+        assertNull(beat1Surface?.padding, "Untouched sibling padding must remain reset on beat 1")
+
+        // 3. Same-beat edit of frame.w onto existing `"frame": null`: beat 1 keeps x/y/h reset instead of resurrecting base.
+        val beat1Width = JsonMergePatch.applyEditAtBeat(
+            node = baseNode,
+            beat = 1,
+            patch = JsonMergePatch.nestedPatch(listOf("frame", "w"), JsonPrimitive(320.0)),
+        )
+        assertEquals(FrameSpec(x = 100.0, y = 50.0, w = 200.0, h = 80.0), JsonMergePatch.resolveNodeAtBeat(beat1Width, 0).frame)
+        assertEquals(FrameSpec(x = null, y = null, w = 320.0, h = null), JsonMergePatch.resolveNodeAtBeat(beat1Width, 1).frame)
+
+        // 4. All-builds nested null reset (`frame.w = null`) keeps existing `"frame": null` whole-object reset intact.
+        val allResetW = JsonMergePatch.applyToAllBeats(
+            node = baseNode,
+            patch = JsonMergePatch.nestedPatch(listOf("frame", "w"), JsonNull),
+        )
+        assertEquals(FrameSpec(x = 100.0, y = 50.0, w = null, h = 80.0), JsonMergePatch.resolveNodeAtBeat(allResetW, 0).frame)
+        assertNull(JsonMergePatch.resolveNodeAtBeat(allResetW, 1).frame)
+
+        // 5. Earlier beat adds frame.h before a beat-2 whole-frame reset; all-builds frame.w preserves reset of h too.
+        val multiBeat = NodeSpec(
+            id = "multi",
+            frame = FrameSpec(x = 100.0, y = 50.0),
+            text = TextPayload(value = RichTextValue.Plain("Multi")),
+            builds = listOf(
+                Build.Change(beat = 1, set = JsonMergePatch.nestedPatch(listOf("frame", "h"), JsonPrimitive(80.0))),
+                Build.Change(beat = 2, set = buildJsonObject { put("frame", JsonNull) }),
+            ),
+        )
+        val multiAllW = JsonMergePatch.applyToAllBeats(
+            node = multiBeat,
+            patch = JsonMergePatch.nestedPatch(listOf("frame", "w"), JsonPrimitive(300.0)),
+        )
+        assertEquals(FrameSpec(x = 100.0, y = 50.0, w = 300.0, h = 80.0), JsonMergePatch.resolveNodeAtBeat(multiAllW, 1).frame)
+        assertEquals(FrameSpec(x = null, y = null, w = 300.0, h = null), JsonMergePatch.resolveNodeAtBeat(multiAllW, 2).frame)
+
+        // 6. Required-field nested object (`StrokeSpec.color` required): partial all-builds stroke.width edit
+        // keeps beat-1 `"stroke": null` instead of producing an undecodable partial StrokeSpec.
+        val shapeWithStrokeReset = NodeSpec(
+            id = "rect",
+            frame = FrameSpec(x = 0.0, y = 0.0, w = 100.0, h = 100.0),
+            shape = ShapePayload(
+                geometry = ShapeGeometry.Rect,
+                stroke = StrokeSpec(color = "#FFFFFF", width = 2.0),
+            ),
+            builds = listOf(
+                Build.Change(beat = 1, set = JsonMergePatch.nestedPatch(listOf("shape", "stroke"), JsonNull)),
+            ),
+        )
+        val allStrokeWidth = JsonMergePatch.applyToAllBeats(
+            node = shapeWithStrokeReset,
+            patch = JsonMergePatch.nestedPatch(listOf("shape", "stroke", "width"), JsonPrimitive(4.0)),
+        )
+        assertEquals(4.0, JsonMergePatch.resolveNodeAtBeat(allStrokeWidth, 0).shape?.stroke?.width)
+        assertNull(JsonMergePatch.resolveNodeAtBeat(allStrokeWidth, 1).shape?.stroke)
+    }
 }

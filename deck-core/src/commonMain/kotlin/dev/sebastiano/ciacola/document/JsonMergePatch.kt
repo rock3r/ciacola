@@ -155,15 +155,60 @@ object JsonMergePatch {
      * [JsonNull] entries (since `null` inside `set` is the stored removal marker, distinct from
      * an absent key).
      */
-    fun composeSetPatch(existingSet: JsonObject, deltaPatch: JsonObject): JsonObject {
+    fun composeSetPatch(
+        existingSet: JsonObject,
+        deltaPatch: JsonObject,
+        priorState: JsonObject? = null,
+    ): JsonObject = composeSetPatchRecursive(
+        existingSet = existingSet,
+        deltaPatch = deltaPatch,
+        priorState = priorState,
+        rootPriorState = null,
+        path = emptyList(),
+    )
+
+    private fun composeSetPatchRecursive(
+        existingSet: JsonObject,
+        deltaPatch: JsonObject,
+        priorState: JsonObject?,
+        rootPriorState: JsonObject?,
+        path: List<String>,
+    ): JsonObject {
         val result = LinkedHashMap<String, JsonElement>(existingSet.size + deltaPatch.size)
         result.putAll(existingSet)
         for ((key, value) in deltaPatch) {
             val prev = result[key]
-            result[key] = if (prev is JsonObject && value is JsonObject) {
-                composeSetPatch(prev, value)
-            } else {
-                value
+            val childPath = path + key
+            result[key] = when {
+                prev is JsonObject && value is JsonObject -> composeSetPatchRecursive(
+                    existingSet = prev,
+                    deltaPatch = value,
+                    priorState = priorState?.get(key) as? JsonObject,
+                    rootPriorState = rootPriorState,
+                    path = childPath,
+                )
+                prev is JsonNull && value is JsonObject -> {
+                    if (!hasNonNullLeaf(value)) {
+                        JsonNull
+                    } else {
+                        val priorObj = priorState?.get(key) as? JsonObject
+                        if (priorObj != null) {
+                            val expanded = composeSetPatchRecursive(
+                                existingSet = expandNullResetExcluding(priorObj, value),
+                                deltaPatch = value,
+                                priorState = priorObj,
+                                rootPriorState = null,
+                                path = childPath,
+                            )
+                            val valid = rootPriorState == null ||
+                                canDecodeNodeJson(apply(rootPriorState, nestedPatch(childPath, expanded)).jsonObject)
+                            if (valid) expanded else value
+                        } else {
+                            value
+                        }
+                    }
+                }
+                else -> value
             }
         }
         return JsonObject(result)
@@ -171,18 +216,60 @@ object JsonMergePatch {
 
     /**
      * Removes every leaf key present in [keysToStrip] from [setPatch], pruning any nested objects
-     * that become empty as a result.
+     * that become empty as a result. When [setPatch] holds a whole-object [JsonNull] reset and
+     * [keysToStrip] only updates nested subkeys, expands the reset against [priorState] so
+     * untouched sibling keys stay reset instead of re-inheriting ancestor values.
      */
-    fun stripKeysFromSet(setPatch: JsonObject, keysToStrip: JsonObject): JsonObject {
+    fun stripKeysFromSet(
+        setPatch: JsonObject,
+        keysToStrip: JsonObject,
+        priorState: JsonObject? = null,
+    ): JsonObject = stripKeysFromSetRecursive(
+        setPatch = setPatch,
+        keysToStrip = keysToStrip,
+        priorState = priorState,
+        rootPriorState = null,
+        path = emptyList(),
+    )
+
+    private fun stripKeysFromSetRecursive(
+        setPatch: JsonObject,
+        keysToStrip: JsonObject,
+        priorState: JsonObject?,
+        rootPriorState: JsonObject?,
+        path: List<String>,
+    ): JsonObject {
         val result = LinkedHashMap<String, JsonElement>(setPatch.size)
         for ((key, existingValue) in setPatch) {
             val stripValue = keysToStrip[key]
+            val childPath = path + key
             when {
                 stripValue == null -> result[key] = existingValue
                 stripValue is JsonObject && existingValue is JsonObject -> {
-                    val pruned = stripKeysFromSet(existingValue, stripValue)
+                    val pruned = stripKeysFromSetRecursive(
+                        setPatch = existingValue,
+                        keysToStrip = stripValue,
+                        priorState = priorState?.get(key) as? JsonObject,
+                        rootPriorState = rootPriorState,
+                        path = childPath,
+                    )
                     if (pruned.isNotEmpty()) {
                         result[key] = pruned
+                    }
+                }
+                stripValue is JsonObject && existingValue is JsonNull -> {
+                    if (!hasNonNullLeaf(stripValue)) {
+                        result[key] = JsonNull
+                    } else {
+                        val priorObj = priorState?.get(key) as? JsonObject
+                        if (priorObj != null) {
+                            val expanded = expandNullResetExcluding(priorObj, stripValue)
+                            if (expanded.isNotEmpty()) {
+                                val valid = rootPriorState == null ||
+                                    canDecodeNodeJson(apply(rootPriorState, nestedPatch(childPath, expanded)).jsonObject)
+                                result[key] = if (valid) expanded else JsonNull
+                            }
+                        }
                     }
                 }
                 else -> Unit // Leaf overridden across all beats -> drop from this beat's set.
@@ -190,6 +277,33 @@ object JsonMergePatch {
         }
         return JsonObject(result)
     }
+
+    private fun hasNonNullLeaf(obj: JsonObject): Boolean = obj.values.any { v ->
+        when (v) {
+            is JsonNull -> false
+            is JsonObject -> hasNonNullLeaf(v)
+            else -> true
+        }
+    }
+
+    private fun expandNullResetExcluding(priorObj: JsonObject, excluded: JsonObject): JsonObject {
+        val out = LinkedHashMap<String, JsonElement>()
+        for ((k, priorVal) in priorObj) {
+            val exVal = excluded[k]
+            when {
+                exVal == null || exVal is JsonNull -> out[k] = JsonNull
+                exVal is JsonObject && priorVal is JsonObject -> {
+                    val nested = expandNullResetExcluding(priorVal, exVal)
+                    if (nested.isNotEmpty()) out[k] = nested
+                }
+                else -> Unit // Concrete leaf in excluded inherits from ancestor instead of resetting.
+            }
+        }
+        return JsonObject(out)
+    }
+
+    private fun canDecodeNodeJson(json: JsonObject): Boolean =
+        runCatching { strictJson.decodeFromJsonElement(NodeSpec.serializer(), json) }.isSuccess
 
     /**
      * Resolves all top-level (and nested container) nodes of [slide] at [beat], memoized in a
@@ -382,20 +496,50 @@ object JsonMergePatch {
         build.beat in preservedAnchorBeats ||
         (build.beat > 0 && hasParticipatingSameBeatSuccessor)
 
+    private fun computeNodeJsonBeforeBuild(node: NodeSpec, buildIndex: Int): JsonObject {
+        val targetBuild = node.builds[buildIndex]
+        var current = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
+        for ((idx, b) in chronologicalChangeBuilds(node.builds)) {
+            if (b.beat < targetBuild.beat || (b.beat == targetBuild.beat && idx < buildIndex)) {
+                current = apply(current, b.set).jsonObject
+            }
+        }
+        return current
+    }
+
     private fun stripAndPruneChangeBuilds(
         builds: List<Build>,
         patch: JsonObject,
         onlyBeat: Int?,
         preservedAnchorBeats: Set<Int>,
+        mergedBaseJson: JsonObject,
     ): List<Build> {
+        val strippedSets = arrayOfNulls<JsonObject>(builds.size)
+        var runningState = mergedBaseJson
+        for ((idx, build) in chronologicalChangeBuilds(builds)) {
+            if (onlyBeat != null && build.beat != onlyBeat) {
+                runningState = apply(runningState, build.set).jsonObject
+            } else {
+                val stripped = stripKeysFromSetRecursive(
+                    setPatch = build.set,
+                    keysToStrip = patch,
+                    priorState = runningState,
+                    rootPriorState = runningState,
+                    path = emptyList(),
+                )
+                strippedSets[idx] = stripped
+                runningState = apply(runningState, stripped).jsonObject
+            }
+        }
+
         val keptReversed = ArrayList<Build>(builds.size)
         val beatsWithSurvivingSuccessor = HashSet<Int>()
         for (i in builds.lastIndex downTo 0) {
             val build = builds[i]
-            val candidate: Build? = if (build !is Build.Change || (onlyBeat != null && build.beat != onlyBeat)) {
+            val stripped = strippedSets[i]
+            val candidate: Build? = if (build !is Build.Change || stripped == null) {
                 build
             } else {
-                val stripped = stripKeysFromSet(build.set, patch)
                 val keep = stripped.isNotEmpty() || shouldKeepEmptyChangeBuild(
                     build = build,
                     preservedAnchorBeats = preservedAnchorBeats,
@@ -440,6 +584,7 @@ object JsonMergePatch {
                 patch = patch,
                 onlyBeat = 0,
                 preservedAnchorBeats = preservedAnchorBeats,
+                mergedBaseJson = merged,
             )
             return patchedBase.copy(builds = reconciledBuilds)
         }
@@ -447,7 +592,16 @@ object JsonMergePatch {
         val updatedBuilds = node.builds.toMutableList()
         if (lastChangeIdx >= 0) {
             val existing = updatedBuilds[lastChangeIdx] as Build.Change
-            updatedBuilds[lastChangeIdx] = existing.copy(set = composeSetPatch(existing.set, patch))
+            val priorJson = computeNodeJsonBeforeBuild(node, lastChangeIdx)
+            updatedBuilds[lastChangeIdx] = existing.copy(
+                set = composeSetPatchRecursive(
+                    existingSet = existing.set,
+                    deltaPatch = patch,
+                    priorState = priorJson,
+                    rootPriorState = priorJson,
+                    path = emptyList(),
+                ),
+            )
         } else {
             val newChange = Build.Change(beat = beat, set = patch)
             val insertIdx = updatedBuilds.indexOfFirst { it is Build.Change && it.beat > beat }
@@ -480,6 +634,7 @@ object JsonMergePatch {
             patch = patch,
             onlyBeat = null,
             preservedAnchorBeats = preservedAnchorBeats,
+            mergedBaseJson = mergedBase,
         )
         return patchedBase.copy(builds = cleanedBuilds)
     }
