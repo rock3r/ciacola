@@ -10,6 +10,8 @@ import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.SceneMode
+import dev.bnorm.storyboard.easel.export.BeatExportSpan
+import dev.bnorm.storyboard.easel.export.ExportStatus
 import dev.bnorm.storyboard.easel.export.StoryboardVideoExporter
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.DeckCatalog
@@ -63,6 +65,22 @@ import org.jetbrains.skia.ImageInfo
 object DeckAgentCli {
 
     private val Mp4ExtensionRegex = Regex("""(?i)\.mp4$""")
+
+    internal val defaultVideoExporterFactory: (
+        fps: Int,
+        holdDurationForState: (Storyboard.Index) -> Duration,
+        outputSize: IntSize,
+        onBeatSpan: (BeatExportSpan) -> Unit,
+    ) -> StoryboardVideoExporter = { fps, holdDurationForState, outputSize, onBeatSpan ->
+        StoryboardVideoExporter(
+            fps = fps,
+            holdDurationForState = holdDurationForState,
+            outputSize = outputSize,
+            onBeatSpan = onBeatSpan,
+        )
+    }
+
+    internal var videoExporterFactory = defaultVideoExporterFactory
 
     private val prettyJson = Json {
         prettyPrint = true
@@ -853,11 +871,11 @@ object DeckAgentCli {
 
         val recordedSpans = ArrayList<ExportedBeatSpan>(storyboard.indices.size)
         val startNanos = System.nanoTime()
-        val exporter = StoryboardVideoExporter(
-            fps = options.fps,
-            holdDurationForState = { idx -> exportHoldDuration(prepared.document, idx) },
-            outputSize = options.size,
-            onBeatSpan = { span ->
+        val exporter = videoExporterFactory(
+            options.fps,
+            { idx -> exportHoldDuration(prepared.document, idx) },
+            options.size,
+            { span ->
                 val slideInfo = prepared.slides.getOrNull(span.index.sceneIndex)
                 val slideId = slideInfo?.slide?.id ?: "s${span.index.sceneIndex + 1}"
                 val origNum = slideInfo?.originalSlideNumber1Based ?: (span.index.sceneIndex + 1)
@@ -879,6 +897,23 @@ object DeckAgentCli {
         )
         runBlocking {
             exporter.exportAsMp4(storyboard, mp4Path)
+        }
+        when (val status = exporter.status) {
+            is ExportStatus.Failed -> {
+                System.err.println("Error: Video export failed: ${status.message}")
+                return 1
+            }
+
+            is ExportStatus.Exporting -> {
+                System.err.println("Error: Video export did not complete cleanly: ${status.message}")
+                return 1
+            }
+
+            null -> Unit
+        }
+        if (!Files.isRegularFile(mp4Path)) {
+            System.err.println("Error: Video export produced no output file at $mp4Path")
+            return 1
         }
         writeExportSpansTsvInternal(spansTsvPath, recordedSpans)
 

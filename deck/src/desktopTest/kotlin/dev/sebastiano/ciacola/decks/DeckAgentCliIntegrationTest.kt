@@ -1,5 +1,7 @@
 package dev.sebastiano.ciacola.decks
 
+import dev.bnorm.storyboard.easel.export.StoryboardVideoExporter
+import dev.bnorm.storyboard.easel.export.VideoFrameSink
 import dev.sebastiano.ciacola.document.BeatSpec
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckThemeSpec
@@ -12,6 +14,7 @@ import dev.sebastiano.ciacola.document.TextPayload
 import dev.sebastiano.ciacola.document.TransitionSpec
 import dev.sebastiano.ciacola.document.TransitionType
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.PrintStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -484,6 +487,87 @@ class DeckAgentCliIntegrationTest {
             assertTrue(videoMp4.endsWith(java.nio.file.Path.of("build/ciacola-video/evil/evil.mp4")), "Got $videoMp4")
             assertTrue(videoSpans.endsWith(java.nio.file.Path.of("build/ciacola-video/evil/evil.spans.tsv")), "Got $videoSpans")
         } finally {
+            tmpDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `cli export-video returns nonzero and skips spans file when exporter fails`() {
+        val tmpDir = Files.createTempDirectory("ciacola-cli-export-fail-")
+        val prevFactory = DeckAgentCli.videoExporterFactory
+        try {
+            // 1. Missing ffmpeg -> ExportStatus.Failed before writing any MP4 or spans file.
+            DeckAgentCli.videoExporterFactory = { fps, hold, size, onBeatSpan ->
+                StoryboardVideoExporter(
+                    fps = fps,
+                    ffmpegChecker = { false },
+                    holdDurationForState = hold,
+                    outputSize = size,
+                    onBeatSpan = onBeatSpan,
+                )
+            }
+            val missingFfmpegMp4 = tmpDir.resolve("missing/out.mp4")
+            val missingFfmpegSpans = tmpDir.resolve("missing/out.spans.tsv")
+            val (missingExit, missingOutAndErr) = captureStdout {
+                captureStderr {
+                    DeckAgentCli.runCli(
+                        arrayOf(
+                            "--export-video",
+                            "--deck=foundation",
+                            "--slides=1",
+                            "--fps=10",
+                            "--size=320x180",
+                            "--out=${missingFfmpegMp4.toAbsolutePath()}",
+                        ),
+                    )
+                }.also { (_, err) ->
+                    assertTrue(err.contains("Video export failed"), "Expected failure message on stderr, got: $err")
+                }.first
+            }
+            assertEquals(1, missingExit)
+            assertFalse(missingOutAndErr.contains("Exported "), "Must not print success summary on failure:\n$missingOutAndErr")
+            assertFalse(Files.exists(missingFfmpegMp4), "Must not create MP4 when ffmpeg is unavailable")
+            assertFalse(Files.exists(missingFfmpegSpans), "Must not create spans.tsv when export fails")
+
+            // 2. Encoder sink I/O failure mid-export -> ExportStatus.Failed, nonzero exit, no spans file.
+            DeckAgentCli.videoExporterFactory = { fps, hold, size, onBeatSpan ->
+                StoryboardVideoExporter(
+                    fps = fps,
+                    ffmpegChecker = { true },
+                    sinkFactory = { _, _, _, _ ->
+                        object : VideoFrameSink {
+                            override suspend fun writeFrame(rgbaBytes: ByteArray) {
+                                throw IOException("simulated encoder failure")
+                            }
+
+                            override suspend fun finish() = Unit
+                            override fun abort() = Unit
+                        }
+                    },
+                    holdDurationForState = hold,
+                    outputSize = size,
+                    onBeatSpan = onBeatSpan,
+                )
+            }
+            val sinkFailMp4 = tmpDir.resolve("sink-fail/out.mp4")
+            val sinkFailSpans = tmpDir.resolve("sink-fail/out.spans.tsv")
+            val (sinkExit, sinkErr) = captureStderr {
+                DeckAgentCli.runCli(
+                    arrayOf(
+                        "--export-video",
+                        "--deck=foundation",
+                        "--slides=1",
+                        "--fps=10",
+                        "--size=320x180",
+                        "--out=${sinkFailMp4.toAbsolutePath()}",
+                    ),
+                )
+            }
+            assertEquals(1, sinkExit)
+            assertTrue(sinkErr.contains("simulated encoder failure"), "Expected encoder error on stderr, got: $sinkErr")
+            assertFalse(Files.exists(sinkFailSpans), "Must not write spans.tsv after mid-export failure")
+        } finally {
+            DeckAgentCli.videoExporterFactory = prevFactory
             tmpDir.toFile().deleteRecursively()
         }
     }
