@@ -301,8 +301,9 @@ private fun emitXmlGap(code: String, start: Int, end: Int, out: MutableList<Synt
             out += SyntaxToken(SyntaxTokenKind.Whitespace, wsStart, i)
         } else if (ch == '<' && i + 1 < end && code[i + 1] == '!') {
             val dtdStart = i
-            val closeIdx = code.indexOf('>', i + 2)
-            i = if (closeIdx in (i + 2) until end) closeIdx + 1 else end
+            var j = i + 2
+            while (j < end && code[j] != '>') j++
+            i = if (j < end) j + 1 else end
             out += SyntaxToken(SyntaxTokenKind.Keyword, dtdStart, i)
         } else {
             val badStart = i
@@ -415,7 +416,8 @@ private fun emitKotlinRawToken(
         KotlinTokens.THIS_AT,
         KotlinTokens.SUPER_AT,
         -> {
-            val atPos = code.indexOf('@', start).takeIf { it in start until end } ?: end
+            var atPos = start
+            while (atPos < end && code[atPos] != '@') atPos++
             if (atPos > start) {
                 out += RawKotlinToken(type, start, atPos, SyntaxTokenKind.Keyword, isHidden = false)
             }
@@ -512,7 +514,7 @@ private fun findAtPositionInBothWs(code: String, start: Int, end: Int): Int {
             i++
         }
     }
-    return code.indexOf('@', start).coerceIn(start, end - 1)
+    return end - 1
 }
 
 private fun classifyKotlinRawTokens(code: String, raw: List<RawKotlinToken>) {

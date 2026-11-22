@@ -71,8 +71,9 @@ private fun parseWithSyntaxLexer(
         var pos = span.startIndex
         val end = span.endIndex
         while (pos < end) {
-            val nlIdx = normalized.indexOf('\n', pos).takeIf { it in pos until end } ?: -1
-            val segEnd = if (nlIdx >= 0) nlIdx else end
+            var segEnd = pos
+            while (segEnd < end && normalized[segEnd] != '\n') segEnd++
+            val hitNewline = segEnd < end
             if (segEnd > pos) {
                 out += Token(
                     content = normalized.substring(pos, segEnd),
@@ -86,14 +87,14 @@ private fun parseWithSyntaxLexer(
                 )
                 lineHasToken = true
             }
-            if (nlIdx >= 0) {
+            if (hitNewline) {
                 if (!lineHasToken) {
                     emitBlankLinePlaceholder()
                 }
                 lineNumber++
-                lineStartOffset = nlIdx + 1
+                lineStartOffset = segEnd + 1
                 lineHasToken = false
-                pos = nlIdx + 1
+                pos = segEnd + 1
             } else {
                 pos = end
             }

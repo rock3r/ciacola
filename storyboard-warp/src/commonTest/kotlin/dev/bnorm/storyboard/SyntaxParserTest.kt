@@ -211,6 +211,12 @@ class SyntaxParserTest {
         val invalid = """{"ok": undefined}"""
         val invalidTokens = assertLosslessAndWellFormed(invalid, Json)
         assertTrue(invalidTokens.any { it.content == "undefined" && it.scope.contains("invalid") })
+
+        // Large single-line minified JSON stays linear (bounded newline scanning per span).
+        val largeSingleLine = "[" + (1..20_000).joinToString(",") + "]"
+        val largeTokens = assertLosslessAndWellFormed(largeSingleLine, Json)
+        assertEquals(Number, largeTokens.first { it.content == "1" }.color())
+        assertEquals(Number, largeTokens.last { it.content == "20000" }.color())
     }
 
     @Test
