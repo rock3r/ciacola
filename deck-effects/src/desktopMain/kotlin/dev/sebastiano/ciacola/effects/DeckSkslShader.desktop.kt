@@ -36,8 +36,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
-import dev.sebastiano.ciacola.inspector.LocalActiveBeatIndex
-import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageParentElementId
@@ -45,7 +43,6 @@ import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
 import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
 import dev.sebastiano.ciacola.inspector.StageElementMetadata
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
-import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
 import java.util.Collections
 import org.jetbrains.skia.RuntimeEffect
 import org.jetbrains.skia.RuntimeShaderBuilder
@@ -180,20 +177,15 @@ actual fun DeckSkslShader(
     overlay: @Composable BoxScope.() -> Unit,
     uniforms: @Composable DeckShaderUniformScope.() -> Unit,
 ) {
-    val overrides = LocalElementOverrides.current
-    val patch = overrides.patchFor(id)
     val dragPreview = LocalStageDragPreview.current
     val parentElementId = LocalStageParentElementId.current
     val registry = LocalStageInspectionRegistry.current
     val anchorRegistry = LocalStageAnchorRegistry.current
-    val sceneCtx = LocalActiveSceneTimeline.current
-    val beatIndex = LocalActiveBeatIndex.current
     val overviewOpen = LocalOverviewOpen.current
     val rootHolder = LocalStageRootCoordinates.current
     val effectiveBg = effectiveBackgroundColor()
 
-    val uniformScope = remember(id) { DeckShaderUniformScope(id, overrides) }
-    uniformScope.overrides = overrides
+    val uniformScope = remember(id) { DeckShaderUniformScope(id) }
     uniformScope.uniforms()
     val snapshotUniforms = LinkedHashMap(uniformScope.boundValues)
     val shaderUniformSpecs = uniformScope.declaredSpecs
@@ -264,8 +256,8 @@ actual fun DeckSkslShader(
                 elementId = id,
                 kind = "Shader",
                 label = label,
-                sceneIndex = sceneCtx?.sceneIndex ?: 0,
-                beatIndex = beatIndex,
+                sceneIndex = 0,
+                beatIndex = 0,
                 stageBounds = stageBounds,
                 effectiveBackground = effectiveBg,
                 isEditable = true,
@@ -290,8 +282,8 @@ actual fun DeckSkslShader(
     val offsetModifier = Modifier.offset {
         val drag = dragPreview?.offsetFor(id) ?: DpOffset.Zero
         IntOffset(
-            x = ((patch?.offsetXDp ?: 0f).dp + drag.x).roundToPx(),
-            y = ((patch?.offsetYDp ?: 0f).dp + drag.y).roundToPx(),
+            x = drag.x.roundToPx(),
+            y = drag.y.roundToPx(),
         )
     }
 

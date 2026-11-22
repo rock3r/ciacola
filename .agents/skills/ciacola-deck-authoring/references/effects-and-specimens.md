@@ -1,0 +1,29 @@
+# Quick Cheat Sheet: Effects, Curves, Layouts & Specimens
+
+## Standard Build Effects (`BuildEffectRegistry.Standard`)
+
+- **Simple entrances/exits**: `appear` (0ms), `dissolve` (500ms), `fadeMove` (600ms, `direction`, `args.distance`), `moveIn` (650ms, `direction`, `args.bounce`), `pop` (450ms), `zoom` (500ms, `args.fromScale`, `args.toScale`, `args.scaleDelay`), `wipe` (600ms, `direction`), `iris` (600ms, `direction`: `in`|`out`), `blur` (500ms, `args.radius`), `fromDarkness` (700ms).
+- **Text typing**: `keyboard` (on `text` nodes, `by`: `character`, `args.charsPerSec`, `args.caret`, `args.seed`).
+- **Vector path draw**: `lineDraw` (on `shape`/`connector`, `direction`: `startToEnd`|`endToStart`|`fromCenter`|`clockwise`|`counterClockwise`).
+- **Content shimmer/sparkle**: `trace`, `sparkle`, `shimmer`.
+- **Emphasis**: `jiggle` (`kind: "emphasis"`, `args.amplitude`, `args.cycles`).
+
+## Standard Curves
+
+- Presets: `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, `"fastOutSlowIn"`, `"keynote.magicMove"`, `"keynote.pop"`, `"keynote.moveIn"`, `"keynote.fadeMovePos"`, `"keynote.fadeMoveAlpha"`
+- Custom cubic bezier: `{ "bezier": [0.2, 0.0, 0.0, 1.0] }`
+- Spring physics: `{ "spring": { "damping": 0.72, "stiffness": 380.0 } }`
+
+## Cross-Slide Magic Move Tips
+
+- Keep matching `node.id` values across consecutive slides (`s01` -> `s02`) when `s01.transition.type == "magicMove"`.
+- For smooth cross-slide text morphs on a shared text node ID, attach `"morph": { "by": "word" }` on `text` or `transition.text["<nodeId>"]`.
+
+## Registered Specimen Refs (`AllDocumentDecks.allSpecimens`)
+
+- **Foundation**: `foundation.ambientMesh` (6000ms), `foundation.dottedLeaderRow`
+- **Shaders**: `shaders.trippyKaleidoscope` (12000ms), `shaders.journeyDunes` (14000ms), `shaders.hazeScrollHeader` (8000ms), `shaders.liquidGlassLens` (8000ms), `shaders.raindropsWindow` (10000ms), `shaders.colorEvolution`, `shaders.liveUvStatic`, `shaders.liveUvAnimated` (6283ms), `shaders.sdfGoalCircle`, `shaders.sdfRawDistance`, `shaders.sdfStepCircle`, `shaders.sdfCsgSubtract`, `shaders.sdfCsgUnionSubtract`, `shaders.plaidHyperspaceStarfield` (16000ms)
+- **Jewel**: `jewel.taskBasedProfilers`, `jewel.addDeviceDialog` (12000ms), `jewel.geminiAuthCard` (4000ms), `jewel.geminiPromptInput` (12000ms), `jewel.geminiStreamingChat` (10000ms), `jewel.geminiChatComposer` (8000ms), `jewel.referencesBouncyExpand` (3500ms), `jewel.geminiToolWindowFull` (6000ms), `jewel.confettiPartyPopper` (1400ms), `jewel.markdownStandaloneSample` (14000ms), `jewel.swingComposeInterop`, `jewel.microinteractionScrollFab` (8500ms), `jewel.microinteractionEnabledButton` (2400ms), `jewel.adaptiveDemoWizard` (5400ms), `jewel.adaptiveWireframePanes` (6400ms), `jewel.m3ExpressiveShowcase` (9400ms), `jewel.springTokenTree`, `jewel.geminiLoadingChoreography` (2400ms), `jewel.referencesBouncySpringV2` (2200ms), `jewel.cohesionIdeShowcase`
+- **Markdown**: `njpt.jewelMarkdownSplitDemo` (14000ms), `njpt.geminiDarkMarkdownChat` (12000ms)
+
+> Note: When using an animated specimen with a loop period, declare `"<ref>/time": <periodMs>` in root `loopPeriodsMs`.

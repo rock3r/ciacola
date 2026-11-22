@@ -3,151 +3,105 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.v2.ScrollbarAdapter
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isAltPressed as isKeyAltPressed
-import androidx.compose.ui.input.key.isCtrlPressed as isKeyCtrlPressed
-import androidx.compose.ui.input.key.isMetaPressed as isKeyMetaPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import dev.bnorm.storyboard.Storyboard
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.util.Locale
 import kotlin.math.exp
 import kotlin.math.ln
-import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
-import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.Divider
-import org.jetbrains.jewel.ui.component.HorizontalScrollbar
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
-import org.jetbrains.jewel.ui.component.OutlinedButton
-import org.jetbrains.jewel.ui.component.SegmentedControl
-import org.jetbrains.jewel.ui.component.SegmentedControlButtonData
+import org.jetbrains.jewel.ui.component.PopupMenu
 import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.TextField
 import org.jetbrains.jewel.ui.component.Tooltip
-import org.jetbrains.jewel.ui.component.VerticalScrollbar
-import org.jetbrains.jewel.ui.component.styling.SegmentedControlButtonMetrics
-import org.jetbrains.jewel.ui.component.styling.SegmentedControlButtonStyle
 import org.jetbrains.jewel.ui.icon.IconKey
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
-import org.jetbrains.jewel.ui.theme.colorPalette
-import org.jetbrains.jewel.ui.theme.segmentedControlButtonStyle
-import org.jetbrains.jewel.ui.typography
 
-internal val SLIDE_RIBBON_HEIGHT = 26.dp
-internal val TIME_RULER_HEIGHT = 26.dp
-internal val HEADER_TOTAL_HEIGHT = 52.dp
-internal val TRACK_ROW_HEIGHT = 28.dp
+/** Formats [timeMs] as `mm:ss.SSS` for the transport bar timecode display. */
+fun formatTransportTimecode(timeMs: Int): String {
+    val safeMs = timeMs.coerceAtLeast(0)
+    val mins = safeMs / 60_000
+    val secs = (safeMs % 60_000) / 1_000
+    val ms = safeMs % 1_000
+    return String.format(Locale.US, "%02d:%02d.%03d", mins, secs, ms)
+}
+
+/** How the zoom controls render at the current transport bar width. */
+enum class TransportZoomMode { Slider, Buttons, Menu }
+
+/** Responsive layout decision for the transport bar (pure, so it is unit-testable). */
+data class TransportBarLayout(
+    val zoomMode: TransportZoomMode,
+    val inlineFilterField: Boolean,
+    /** Legacy flag kept for callers; the deck toolbar now needs [TRANSPORT_DECK_TOOLBAR_MIN_WIDTH]. */
+    val showLeadingToolbar: Boolean,
+    val compactTimecode: Boolean,
+    /** Below ~440dp the `Slide | All` toggle folds into the zoom menu. */
+    val scopeInMenu: Boolean = false,
+)
+
+internal val TRANSPORT_SLIDER_MIN_WIDTH: Dp = 760.dp
+internal val TRANSPORT_BUTTONS_MIN_WIDTH: Dp = 540.dp
+internal val TRANSPORT_FILTER_FIELD_MIN_WIDTH: Dp = 880.dp
+internal val TRANSPORT_SCOPE_MIN_WIDTH: Dp = 440.dp
+internal val TRANSPORT_DECK_TOOLBAR_MIN_WIDTH: Dp = 1_100.dp
+internal val TRANSPORT_DECK_TOOLBAR_BUDGET: Dp = 220.dp
 
 /**
- * Formats the transport timecode & `S_:B_` location badge from the playhead's active [StateTimeSpan]
- * so mid-segment playback/scrubbing shows `S1:B1 → B2` or `S1:B2 → S2:B1` instead of jumping
- * prematurely to `animatic.targetIndex`.
+ * Three fixed priority groups: (1) transport + timecode + expand chevron never hide; (2) scope and
+ * zoom collapse `slider → − + Fit → Zoom ▾`; (3) the filter field collapses to a search icon.
  */
-fun formatTimelineLocationBadge(
-    snapshot: DeckTimelineSnapshot,
-    timeMs: Int,
-    activeSubLoopId: String?,
-    fallbackIndex: Storyboard.Index,
-    sceneBeatsCountProvider: (sceneIndex: Int) -> Int,
-): String {
-    val safeMs = timeMs.coerceAtLeast(0)
-    val seconds = safeMs / 1000
-    val millis = safeMs % 1000
-    val formattedTime = String.format(Locale.US, "%02d.%03ds", seconds, millis)
-    if (activeSubLoopId != null) {
-        return "$formattedTime · Loop"
-    }
-    val spans = snapshot.stateSpans
-    if (spans.isEmpty()) {
-        val beats = sceneBeatsCountProvider(fallbackIndex.sceneIndex).coerceAtLeast(1)
-        return "$formattedTime · S${fallbackIndex.sceneIndex + 1}:B${fallbackIndex.frameIndex + 1}/$beats"
-    }
-    val clampedMs = safeMs.coerceIn(0, snapshot.totalDurationMs.coerceAtLeast(1))
-    val span = spans.firstOrNull { s ->
-        (s.durationMs > 0 || s == spans.last()) &&
-            (clampedMs < s.startMs + s.durationMs || s == spans.last())
-    } ?: spans.last()
-
-    val beatCount = sceneBeatsCountProvider(span.sceneIndex).coerceAtLeast(1)
-    val locationPart = when {
-        span.isHold -> "S${span.sceneIndex + 1}:B${span.frameIndex + 1}/$beatCount"
-        span.isBoundary && span.frameIndex < 0 -> {
-            val fromScene = (span.sceneIndex - 1).coerceAtLeast(0)
-            val fromBeat = sceneBeatsCountProvider(fromScene).coerceAtLeast(1)
-            "S${fromScene + 1}:B$fromBeat → S${span.sceneIndex + 1}:B1"
-        }
-        span.isBoundary || span.frameIndex + 1 >= beatCount -> {
-            val toScene = (span.sceneIndex + 1).coerceAtMost((snapshot.slides.size - 1).coerceAtLeast(span.sceneIndex))
-            if (toScene != span.sceneIndex) {
-                "S${span.sceneIndex + 1}:B$beatCount → S${toScene + 1}:B1"
-            } else {
-                "S${span.sceneIndex + 1}:B${span.frameIndex + 1}/$beatCount"
-            }
-        }
-        else -> "S${span.sceneIndex + 1}:B${span.frameIndex + 1} → B${span.frameIndex + 2}"
-    }
-    return "$formattedTime · $locationPart"
-}
+fun transportBarLayoutFor(width: Dp): TransportBarLayout = TransportBarLayout(
+    zoomMode = when {
+        width >= TRANSPORT_SLIDER_MIN_WIDTH -> TransportZoomMode.Slider
+        width >= TRANSPORT_BUTTONS_MIN_WIDTH -> TransportZoomMode.Buttons
+        else -> TransportZoomMode.Menu
+    },
+    inlineFilterField = width >= TRANSPORT_FILTER_FIELD_MIN_WIDTH,
+    showLeadingToolbar = width >= TRANSPORT_FILTER_FIELD_MIN_WIDTH,
+    compactTimecode = width < TRANSPORT_BUTTONS_MIN_WIDTH,
+    scopeInMenu = width < TRANSPORT_SCOPE_MIN_WIDTH,
+)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TransportIconButton(
+private fun DocumentTransportIconButton(
     icon: IconKey,
     contentDescription: String,
     tooltip: String,
@@ -161,7 +115,7 @@ private fun TransportIconButton(
             onClick = onClick,
             enabled = enabled,
             modifier = Modifier
-                .size(24.dp)
+                .size(STUDIO_CONTROL_HEIGHT)
                 .studioActivatableFocus(focusRingColor)
                 .testTag(testTag),
         ) {
@@ -171,653 +125,369 @@ private fun TransportIconButton(
 }
 
 /**
- * Transport bar: beat stepping, playback, timecode, 0-ms event keyframe controls, sub-composition
- * breadcrumb, After Effects style zoom (slider + icon buttons), and Kotlin writeback.
+ * Responsive document-backed Timeline transport bar. Undo/Redo live in the App Bar (opt back in with
+ * [showInlineUndoRedo]); beat insert/delete live on the header band.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TimelineTransportBar(
-    controller: TimelineStudioController,
-    modifier: Modifier = Modifier,
+internal fun DocumentTimelineTransportBar(
+    controller: DocumentTimelineController,
+    docSnapshot: DocumentTimelineSnapshot,
+    canvasWidthPx: Int,
     surface: TimelineSurface = TimelineSurface.Docked,
     leadingToolbarContent: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    headerLeadingContent: (@Composable () -> Unit)? = null,
+    isExpanded: Boolean = true,
+    onToggleExpanded: (() -> Unit)? = null,
+    showInlineUndoRedo: Boolean = false,
 ) {
-    val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
-    val isDark = JewelTheme.isDark
-    val secondaryCaptionColor = studioSecondaryTextColor(isDark)
-    val activeSubLoopId = controller.loopClock.activeSubCompLoopId
-    val nowMs = controller.currentPlayheadTimeMs
-    val idx = controller.animatic.presentedIndex
-    val sceneBeatsCount = controller.animatic.storyboard.scenes.getOrNull(idx.sceneIndex)?.frames?.size ?: 1
-    controller.overridesStore.parameterRevision
-    controller.overridesStore.structuralRevision
-    val overridesData = controller.overridesStore.data()
-    val hasOverrides = overridesData.hasOverrides
-    val viewport = controller.viewport
-    val focusRingColor = rememberAccessibleFocusRingColor()
+    val activeSubLoopId = controller.activeSubCompLoopId
+    val activeSubLoopRef = controller.activeSubCompLoopRef()
+    val nowMs = if (activeSubLoopId != null) {
+        (controller.subCompositionScrubMillis ?: 0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    } else {
+        controller.playheadMs
+    }
+    val fallbackIndex = Storyboard.Index(
+        sceneIndex = controller.currentPresentedSceneIndex,
+        frameIndex = controller.currentPresentedBeatIndex,
+    )
+    val locationBadge = formatTimelineLocationBadge(
+        snapshot = docSnapshot.snapshot,
+        timeMs = nowMs,
+        activeSubLoopId = activeSubLoopId,
+        fallbackIndex = fallbackIndex,
+        sceneBeatsCountProvider = { sIdx -> docSnapshot.snapshot.slides.getOrNull(sIdx)?.beatCount ?: 1 },
+    )
+    val location = locationBadge.substringAfter(" · ", locationBadge)
 
-    Row(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .background(globalColors.panelBackground)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .testTag("ciacola-doc-timeline-toolbar"),
     ) {
+        // Width taken by host-provided leading content (e.g. `Timeline | Issues` tabs) is measured
+        // and subtracted so the priority groups always fit the space that is really left.
+        var leadingWidth by remember { mutableStateOf(0.dp) }
+        val density = LocalDensity.current
+        // The optional deck toolbar only shows when there is generous room, and reserves a fixed
+        // budget, so its own visibility never feeds back into the measurement above.
+        val showDeckToolbar = leadingToolbarContent != null && maxWidth - leadingWidth >= TRANSPORT_DECK_TOOLBAR_MIN_WIDTH
+        val layout = transportBarLayoutFor(maxWidth - leadingWidth - if (showDeckToolbar) TRANSPORT_DECK_TOOLBAR_BUDGET else 0.dp)
+        var searchOpen by remember(surface) { mutableStateOf(false) }
+        val searchActive = layout.inlineFilterField || searchOpen || controller.trackSearchQuery.isNotEmpty()
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(STUDIO_CONTROL_HEIGHT + 8.dp)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (leadingToolbarContent != null) {
+            // ── Priority 1: never hidden ────────────────────────────────────────────────────────
+            val hasHeaderLeading = headerLeadingContent != null
+            LaunchedEffect(hasHeaderLeading) { if (!hasHeaderLeading) leadingWidth = 0.dp }
+            if (headerLeadingContent != null) {
+                Row(
+                    modifier = Modifier
+                        .onSizeChanged { leadingWidth = with(density) { it.width.toDp() } + 4.dp }
+                        .testTag("ciacola-timeline-dock-header-leading"),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    headerLeadingContent()
+                    Divider(Orientation.Vertical, Modifier.height(16.dp).padding(horizontal = 2.dp))
+                }
+            }
+            if (leadingToolbarContent != null && showDeckToolbar) {
                 leadingToolbarContent()
-                Divider(Orientation.Vertical, Modifier.height(18.dp).padding(horizontal = 2.dp))
+                Divider(Orientation.Vertical, Modifier.height(16.dp).padding(horizontal = 2.dp))
             }
-            TransportIconButton(AllIconsKeys.General.ChevronLeft, "Previous beat", "Previous Beat ([)", "ciacola-timeline-prev-beat") {
-                controller.stepBeat(-1)
-            }
-            TransportIconButton(
+            DocumentTransportIconButton(
+                icon = AllIconsKeys.General.ChevronLeft,
+                contentDescription = "Previous beat",
+                tooltip = "Previous beat",
+                testTag = "ciacola-timeline-prev-beat",
+                enabled = activeSubLoopId == null,
+            ) { controller.stepBeat(-1) }
+            DocumentTransportIconButton(
                 icon = if (controller.isPlaying) AllIconsKeys.Actions.Pause else AllIconsKeys.Actions.Execute,
                 contentDescription = if (controller.isPlaying) "Pause" else "Play",
-                tooltip = "Play / Pause (Space)",
+                tooltip = if (controller.isPlaying) "Pause" else "Play",
                 testTag = "ciacola-timeline-play",
-            ) { controller.togglePlayback(scope) }
-            TransportIconButton(AllIconsKeys.General.ChevronRight, "Next beat", "Next Beat (])", "ciacola-timeline-next-beat") {
-                controller.stepBeat(+1)
-            }
+            ) { controller.togglePlayback() }
+            DocumentTransportIconButton(
+                icon = AllIconsKeys.General.ChevronRight,
+                contentDescription = "Next beat",
+                tooltip = "Next beat",
+                testTag = "ciacola-timeline-next-beat",
+                enabled = activeSubLoopId == null,
+            ) { controller.stepBeat(+1) }
 
-            val locationText = formatTimelineLocationBadge(
-                snapshot = controller.snapshot,
-                timeMs = nowMs,
-                activeSubLoopId = activeSubLoopId,
-                fallbackIndex = idx,
-                sceneBeatsCountProvider = { sIdx ->
-                    controller.animatic.storyboard.scenes.getOrNull(sIdx)?.frames?.size
-                        ?: controller.snapshot.slides.getOrNull(sIdx)?.beatCount
-                        ?: 1
-                },
-            )
             Box(
                 modifier = Modifier
-                    .padding(start = 4.dp)
-                    .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                    .height(STUDIO_CONTROL_HEIGHT)
+                    .border(1.dp, globalColors.borders.normal, STUDIO_CONTROL_SHAPE)
+                    .padding(horizontal = 7.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = locationText,
-                    style = JewelTheme.typography.small.copy(fontFamily = FontFamily.Monospace),
+                    text = if (layout.compactTimecode) {
+                        "${formatTransportTimecode(nowMs).drop(1)} · ${location.substringBefore(" →").substringBefore("/")}"
+                    } else {
+                        "${formatTransportTimecode(nowMs)} · $location"
+                    },
+                    style = studioLabelStyle().copy(fontFeatureSettings = "tnum"),
                     color = globalColors.text.normal,
-                    modifier = Modifier.testTag("ciacola-timeline-timecode"),
+                    maxLines = 1,
+                    modifier = Modifier.testTag("ciacola-doc-timeline-playhead-readout"),
                 )
             }
 
-            if (activeSubLoopId == null) {
-                TransportIconButton(AllIconsKeys.General.Add, "Add beat", "Insert event keyframe (+ Beat)", "ciacola-timeline-add-beat") {
-                    controller.insertEventBeatAtPlayhead()
-                }
-                TransportIconButton(
-                    icon = AllIconsKeys.General.Remove,
-                    contentDescription = "Remove beat",
-                    tooltip = "Remove the current event keyframe from this slide",
-                    testTag = "ciacola-timeline-remove-beat",
-                    enabled = sceneBeatsCount > 1,
-                ) { controller.removeEventBeatAtPlayhead() }
+            if (showInlineUndoRedo) {
+                CompactTextButton("Undo", { controller.performUndo() }, "ciacola-doc-timeline-undo", enabled = controller.store.canUndo)
+                CompactTextButton("Redo", { controller.performRedo() }, "ciacola-doc-timeline-redo", enabled = controller.store.canRedo)
             }
-            TransportIconButton(
-                icon = AllIconsKeys.Actions.Undo,
-                contentDescription = "Undo",
-                tooltip = "Undo motion edit (⌘Z)",
-                testTag = "ciacola-timeline-undo",
-                enabled = controller.overridesStore.canUndo,
-            ) { controller.undo() }
-            TransportIconButton(
-                icon = AllIconsKeys.Actions.Redo,
-                contentDescription = "Redo",
-                tooltip = "Redo motion edit (⇧⌘Z)",
-                testTag = "ciacola-timeline-redo",
-                enabled = controller.overridesStore.canRedo,
-            ) { controller.redo() }
-        }
 
-        Row(
-            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
             if (activeSubLoopId != null) {
-                val loopLabel = controller.loopClock.registeredLoops[activeSubLoopId]?.label ?: activeSubLoopId
-                Tooltip(tooltip = { Text("Return to Master Deck timeline (Esc)") }) {
-                    OutlinedButton(
-                        onClick = { controller.exitLoopSubComp() },
-                        modifier = Modifier
-                            .studioActivatableFocus(focusRingColor)
-                            .testTag("ciacola-timeline-exit-subcomp"),
-                    ) {
-                        Text("← Master Deck", style = JewelTheme.typography.small, maxLines = 1)
-                    }
-                }
+                CompactTextButton("← Master", { controller.exitLoopSubComp() }, "ciacola-timeline-exit-subcomp")
                 Text(
-                    text = "▸ Sub-Comp: $loopLabel",
-                    style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
-                    color = globalColors.text.normal,
+                    text = "Loop · ${activeSubLoopRef?.label ?: activeSubLoopId}",
+                    style = studioLabelStyle().copy(fontWeight = FontWeight.SemiBold),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("ciacola-timeline-subcomp-title"),
+                    modifier = Modifier.weight(1f).testTag("ciacola-timeline-subcomp-title"),
+                )
+                ExpandToggle(isExpanded, onToggleExpanded)
+                return@Row
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // ── Priority 3: filter (inline field when wide, search icon otherwise) ──────────────
+            if (searchActive) {
+                TransportSearchField(
+                    controller = controller,
+                    width = if (layout.inlineFilterField) 140.dp else 112.dp,
+                    autoFocus = !layout.inlineFilterField && searchOpen,
+                    onBlurEmpty = { if (!layout.inlineFilterField) searchOpen = false },
                 )
             } else {
-                Text(
-                    text = "Master Deck (${controller.snapshot.slides.size} slides · ${controller.snapshot.tracks.size} tracks)",
-                    style = JewelTheme.typography.small,
-                    color = secondaryCaptionColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("ciacola-timeline-master-summary"),
-                )
+                DocumentTransportIconButton(
+                    icon = AllIconsKeys.Actions.Search,
+                    contentDescription = "Filter tracks",
+                    tooltip = "Filter tracks",
+                    testTag = "ciacola-doc-timeline-search-toggle",
+                ) { searchOpen = true }
             }
-        }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            if (activeSubLoopId == null) {
-                TransportIconButton(AllIconsKeys.General.ZoomOut, "Zoom out", "Zoom Out (-, or Alt+wheel)", "ciacola-timeline-zoom-out") {
-                    viewport.markSurfaceActive(surface)
-                    viewport.zoomBy(0.8f, viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface)), surface)
-                }
-                // Logarithmic zoom slider (After Effects-style), anchored on the playhead.
-                val minZoom = viewport.minZoomDpPerMs(surface).coerceAtMost(MAX_DP_PER_MS)
-                val logMin = ln(minZoom)
-                val logMax = ln(MAX_DP_PER_MS)
-                val sliderValue = if (logMax > logMin) {
-                    ((ln(viewport.dpPerMs) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                var zoomDragging by remember(surface) { mutableStateOf(false) }
-                var zoomHadFocus by remember(surface) { mutableStateOf(false) }
-                var localZoomValue by remember(surface) { mutableFloatStateOf(sliderValue) }
-                LaunchedEffect(sliderValue, zoomDragging) {
-                    if (!zoomDragging) {
-                        localZoomValue = sliderValue
-                    }
-                }
-                Slider(
-                    value = if (zoomDragging) localZoomValue else sliderValue,
-                    onValueChange = { v ->
-                        zoomDragging = true
-                        val clamped = v.coerceIn(0f, 1f)
-                        localZoomValue = clamped
-                        viewport.markSurfaceActive(surface)
-                        val anchor = viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface))
-                        viewport.setZoomDpPerMs(exp(logMin + clamped * (logMax - logMin)), anchor, surface)
-                    },
-                    onValueChangeFinished = {
-                        zoomDragging = false
-                    },
-                    modifier = Modifier
-                        .width(84.dp)
-                        .onFocusChanged { focusState ->
-                            if (focusState.hasFocus) {
-                                zoomHadFocus = true
-                            } else if (zoomHadFocus) {
-                                zoomHadFocus = false
-                                zoomDragging = false
-                            }
-                        }
-                        .testTag("ciacola-timeline-zoom-slider"),
+            // ── Priority 2: scope + zoom ────────────────────────────────────────────────────────
+            val isSlideScope = controller.trackFilterMode == TimelineTrackFilterMode.CurrentSlide
+            if (!layout.scopeInMenu) Row(horizontalArrangement = Arrangement.spacedBy(0.dp), verticalAlignment = Alignment.CenterVertically) {
+                CompactToggleChip(
+                    label = "Slide",
+                    selected = isSlideScope,
+                    onClick = { controller.setTrackFilter(TimelineTrackFilterMode.CurrentSlide) },
+                    tag = "ciacola-timeline-filter-current",
                 )
-                TransportIconButton(AllIconsKeys.General.ZoomIn, "Zoom in", "Zoom In (=, or Alt+wheel)", "ciacola-timeline-zoom-in") {
-                    viewport.markSurfaceActive(surface)
-                    viewport.zoomBy(1.25f, viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, viewport.viewportWidthPx(surface)), surface)
-                }
-                TransportIconButton(AllIconsKeys.General.FitContent, "Zoom to fit", "Zoom to Fit (;)", "ciacola-timeline-zoom-fit") {
-                    viewport.markSurfaceActive(surface)
-                    viewport.toggleFitAndFrames(nowMs.toFloat(), surface)
-                }
+                Spacer(Modifier.width(2.dp))
+                CompactToggleChip(
+                    label = "All",
+                    selected = !isSlideScope,
+                    onClick = { controller.setTrackFilter(TimelineTrackFilterMode.AllSlides) },
+                    tag = "ciacola-timeline-filter-all",
+                )
             }
-            if (controller.bakeStatus != TimelineBakeStatus.Idle) {
-                val palette = JewelTheme.colorPalette
-                val pillColor = when (controller.bakeStatus) {
-                    TimelineBakeStatus.Sending -> palette.blueOrNull(if (isDark) 6 else 5) ?: Color(0xFF4C8BF5)
-                    TimelineBakeStatus.Sent -> palette.greenOrNull(if (isDark) 6 else 5) ?: Color(0xFF4AB57D)
-                    TimelineBakeStatus.Error -> palette.redOrNull(if (isDark) 6 else 5) ?: Color(0xFFE5534B)
-                    TimelineBakeStatus.Idle -> globalColors.borders.normal
-                }
-                val fullMessage = controller.bakeStatusMessage ?: controller.bakeStatus.name
-                Tooltip(tooltip = { Text(fullMessage) }) {
-                    Box(
-                        modifier = Modifier
-                            .widthIn(max = 156.dp)
-                            .background(pillColor.copy(alpha = 0.16f), RoundedCornerShape(4.dp))
-                            .border(1.dp, pillColor.copy(alpha = 0.70f), RoundedCornerShape(4.dp))
-                            .studioActivatableFocus(focusRingColor)
-                            .clickable(enabled = controller.bakeStatus != TimelineBakeStatus.Sending) {
-                                controller.clearBakeStatus()
-                            }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                            .testTag("ciacola-timeline-bake-status")
-                            .semantics {
-                                role = Role.Button
-                                contentDescription = "Bake status: $fullMessage"
-                            },
-                    ) {
-                        Text(
-                            text = fullMessage,
-                            style = JewelTheme.typography.small,
-                            color = globalColors.text.normal,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+            val hideZoomForSearch = searchOpen && !layout.inlineFilterField && layout.zoomMode == TransportZoomMode.Menu
+            if (!hideZoomForSearch) {
+                TransportZoomControls(controller, layout.zoomMode, canvasWidthPx, surface, nowMs, docSnapshot, layout.scopeInMenu)
             }
-            if (hasOverrides || controller.copiedConfirmationVisible) {
-                Tooltip(tooltip = { Text("Copy active overrides as Kotlin modifier/parameter snippets + JSON") }) {
-                    OutlinedButton(
-                        onClick = { controller.copyOverridesAsKotlinSnippet(scope) },
-                        modifier = Modifier
-                            .studioActivatableFocus(focusRingColor)
-                            .testTag("ciacola-timeline-copy-kotlin"),
-                    ) {
-                        Text(
-                            text = if (controller.copiedConfirmationVisible) "Copied!" else "Copy Kotlin",
-                            style = JewelTheme.typography.small,
-                        )
-                    }
-                }
-            }
-            if (hasOverrides) {
-                Tooltip(tooltip = { Text("Discard all live timeline overrides across the deck") }) {
-                    OutlinedButton(
-                        onClick = { controller.resetAllOverrides() },
-                        modifier = Modifier
-                            .studioActivatableFocus(focusRingColor)
-                            .testTag("ciacola-timeline-reset"),
-                    ) {
-                        Text("Reset All", style = JewelTheme.typography.small)
-                    }
-                }
-                if (controller.bakeDispatcher != null) {
-                    Tooltip(tooltip = { Text("Send live overrides to agent to fold into Kotlin source") }) {
-                        DefaultButton(
-                            onClick = { controller.bakeOverridesViaAgent(scope) },
-                            enabled = controller.bakeStatus != TimelineBakeStatus.Sending,
-                            modifier = Modifier
-                                .studioActivatableFocus(focusRingColor)
-                                .testTag("ciacola-timeline-bake"),
-                        ) {
-                            Text("Bake to Kotlin", style = JewelTheme.typography.small)
-                        }
-                    }
-                }
-            }
-            if (controller.dockedInStoryWindow) {
-                TransportIconButton(
-                    icon = AllIconsKeys.General.Close,
-                    contentDescription = "Close Timeline",
-                    tooltip = "Close Timeline (F5)",
-                    testTag = "ciacola-timeline-close",
-                ) {
-                    controller.dockedInStoryWindow = false
-                }
-            }
+            ExpandToggle(isExpanded, onToggleExpanded)
         }
     }
 }
 
-/** Layer headers + multi-track canvas, both scrolling vertically through one shared state. */
+@Composable
+private fun ExpandToggle(isExpanded: Boolean, onToggleExpanded: (() -> Unit)?) {
+    if (onToggleExpanded == null) return
+    DocumentTransportIconButton(
+        icon = if (isExpanded) AllIconsKeys.General.ChevronDown else AllIconsKeys.General.ChevronUp,
+        contentDescription = if (isExpanded) "Collapse timeline" else "Expand timeline",
+        tooltip = if (isExpanded) "Collapse timeline (F5)" else "Expand timeline tracks (F5)",
+        testTag = "ciacola-timeline-expand-toggle",
+        onClick = onToggleExpanded,
+    )
+}
+
+@Composable
+private fun TransportSearchField(
+    controller: DocumentTimelineController,
+    width: Dp,
+    autoFocus: Boolean,
+    onBlurEmpty: () -> Unit,
+) {
+    val searchState = rememberTextFieldState(initialText = controller.trackSearchQuery)
+    val focusRequester = remember { FocusRequester() }
+    var hadFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(searchState.text.toString()) {
+        val next = searchState.text.toString()
+        if (controller.trackSearchQuery != next) controller.trackSearchQuery = next
+    }
+    LaunchedEffect(controller.trackSearchQuery) {
+        if (searchState.text.toString() != controller.trackSearchQuery) {
+            searchState.setTextAndPlaceCursorAtEnd(controller.trackSearchQuery)
+        }
+    }
+    LaunchedEffect(autoFocus) { if (autoFocus) runCatching { focusRequester.requestFocus() } }
+    TextField(
+        state = searchState,
+        placeholder = { Text("Filter tracks", style = studioCaptionStyle(), maxLines = 1) },
+        modifier = Modifier
+            .width(width)
+            .height(STUDIO_CONTROL_HEIGHT)
+            .focusRequester(focusRequester)
+            .onFocusChanged { st ->
+                if (hadFocus && !st.hasFocus && searchState.text.isEmpty()) onBlurEmpty()
+                hadFocus = st.hasFocus
+            }
+            .studioTextInputFocus()
+            .testTag("ciacola-doc-timeline-search"),
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TimelineMultiTrackArea(
-    controller: TimelineStudioController,
-    modifier: Modifier = Modifier,
-    surface: TimelineSurface = TimelineSurface.Docked,
+private fun TransportZoomControls(
+    controller: DocumentTimelineController,
+    mode: TransportZoomMode,
+    canvasWidthPx: Int,
+    surface: TimelineSurface,
+    nowMs: Int,
+    docSnapshot: DocumentTimelineSnapshot,
+    scopeInMenu: Boolean = false,
 ) {
-    val scope = rememberCoroutineScope()
-    val activeSubLoopId = controller.loopClock.activeSubCompLoopId
-    if (activeSubLoopId != null) {
-        LoopSubCompTimelineView(
-            controller = controller,
-            loopId = activeSubLoopId,
-            modifier = modifier,
-        )
-        return
-    }
-
-    val snapshot = controller.snapshot
     val viewport = controller.viewport
-    val globalColors = JewelTheme.globalColors
-    val palette = JewelTheme.colorPalette
-    val isDark = JewelTheme.isDark
-    val secondaryLayerColor = studioSecondaryTextColor(isDark)
-    controller.overridesStore.parameterRevision
-    val overridesData = controller.overridesStore.data()
-    val overrideBadgeColor = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFE0A82E)
-
-    val focusRingColor = rememberAccessibleFocusRingColor()
-    val focusState = LocalStudioA11yFocusState.current
-    val density = LocalDensity.current
-    val rowHeightPx = with(density) { TRACK_ROW_HEIGHT.toPx() }
-    val activeSceneIndex = controller.animatic.presentedIndex.sceneIndex
-    val displayedTracks = remember(snapshot.tracks, controller.trackFilter, activeSceneIndex) {
-        controller.visibleTracks(activeSceneIndex)
+    val isSlideScope = controller.trackFilterMode == TimelineTrackFilterMode.CurrentSlide
+    val isLargeDeck = docSnapshot.snapshot.slides.size > 12
+    val zoomOut = {
+        viewport.markSurfaceActive(surface)
+        viewport.zoomBy(factor = 0.7f, anchorX = canvasWidthPx / 2f, surface = surface)
     }
-    val trackIds = remember(displayedTracks) { displayedTracks.map { it.trackId } }
-    val rowFocusRequesters = remember(trackIds) { List(trackIds.size) { FocusRequester() } }
-    var layerColumnHeightPx by remember { mutableFloatStateOf(0f) }
-    var lastAutoScrolledScene by remember(snapshot) { mutableStateOf(activeSceneIndex) }
-    var lastFilter by remember { mutableStateOf(controller.trackFilter) }
-
-    LaunchedEffect(activeSceneIndex, controller.trackFilter, snapshot, rowHeightPx, layerColumnHeightPx) {
-        val filterChanged = controller.trackFilter != lastFilter
-        lastFilter = controller.trackFilter
-        if (controller.trackFilter == TimelineTrackFilter.CurrentSlide) {
-            viewport.verticalScroll.scrollTo(0)
-            lastAutoScrolledScene = activeSceneIndex
-            return@LaunchedEffect
-        }
-        if ((!filterChanged && activeSceneIndex == lastAutoScrolledScene) || controller.isScrubDragging) {
-            return@LaunchedEffect
-        }
-        lastAutoScrolledScene = activeSceneIndex
-        val firstRowIdx = displayedTracks.indexOfFirst { it.sceneIndex == activeSceneIndex }
-        if (firstRowIdx >= 0) {
-            val rowTop = (firstRowIdx * rowHeightPx).roundToInt()
-            val visH = layerColumnHeightPx.roundToInt().coerceAtLeast(rowHeightPx.roundToInt())
-            val curScroll = viewport.verticalScroll.value
-            if (filterChanged || rowTop < curScroll || rowTop + rowHeightPx > curScroll + visH) {
-                viewport.verticalScroll.animateScrollTo(rowTop.coerceAtLeast(0))
-            }
-        }
+    val zoomIn = {
+        viewport.markSurfaceActive(surface)
+        viewport.zoomBy(factor = 1.4f, anchorX = canvasWidthPx / 2f, surface = surface)
     }
+    val fit = {
+        viewport.markSurfaceActive(surface)
+        controller.fitCurrentScope(surface)
+    }
+    val fitSlide = {
+        viewport.markSurfaceActive(surface)
+        controller.activeSlideTimeRange()?.let { (start, end) -> viewport.zoomToRange(start, end, surface = surface) }
+        Unit
+    }
+    val fitTooltip = if (isSlideScope) "Fit the current slide to the timeline width" else "Fit the whole deck to the timeline width"
 
-    Row(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .width(viewport.layerColumnWidthDp.dp)
-                .fillMaxHeight()
-                .clipToBounds()
-                .background(globalColors.panelBackground),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(HEADER_TOTAL_HEIGHT)
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                verticalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                Text(
-                    text = "SLIDES & OVERLAPS",
-                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
-                    color = secondaryLayerColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = "TRACKS",
-                        style = JewelTheme.typography.small,
-                        color = secondaryLayerColor,
-                        maxLines = 1,
-                    )
-                    val baseBtnStyle = JewelTheme.segmentedControlButtonStyle
-                    val compactBtnStyle = remember(baseBtnStyle) {
-                        SegmentedControlButtonStyle(
-                            colors = baseBtnStyle.colors,
-                            metrics = SegmentedControlButtonMetrics(
-                                cornerSize = baseBtnStyle.metrics.cornerSize,
-                                segmentedButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                minSize = DpSize(24.dp, 20.dp),
-                                borderWidth = baseBtnStyle.metrics.borderWidth,
-                            ),
-                        )
-                    }
-                    SegmentedControl(
-                        buttons = listOf(
-                            SegmentedControlButtonData(
-                                selected = controller.trackFilter == TimelineTrackFilter.All,
-                                onSelect = { controller.trackFilter = TimelineTrackFilter.All },
-                                content = {
-                                    Text(
-                                        text = "All",
-                                        maxLines = 1,
-                                        modifier = Modifier
-                                            .semantics(mergeDescendants = true) {}
-                                            .testTag("ciacola-timeline-filter-all"),
-                                    )
-                                },
-                            ),
-                            SegmentedControlButtonData(
-                                selected = controller.trackFilter == TimelineTrackFilter.CurrentSlide,
-                                onSelect = { controller.trackFilter = TimelineTrackFilter.CurrentSlide },
-                                content = {
-                                    Text(
-                                        text = "Current slide",
-                                        maxLines = 1,
-                                        modifier = Modifier
-                                            .semantics(mergeDescendants = true) {}
-                                            .testTag("ciacola-timeline-filter-current"),
-                                    )
-                                },
-                            ),
-                        ),
-                        buttonStyle = compactBtnStyle,
-                        textStyle = JewelTheme.typography.small,
-                    )
-                }
-            }
-            Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onSizeChanged { layerColumnHeightPx = it.height.toFloat() }
-                    .onFocusChanged { focusState?.layerListHasFocus = it.hasFocus }
-                    .verticalScroll(viewport.verticalScroll)
-                    .testTag("ciacola-timeline-layer-headers"),
-            ) {
-                displayedTracks.forEachIndexed { rowIdx, track ->
-                    val isSelected = controller.isTrackRowSelected(track.trackId)
-                    val loopBlock = track.blocks.firstOrNull { it.loopId != null }
-                    val isRowOverridden = if (loopBlock?.loopId != null) {
-                        loopBlock.loopId in overridesData.loopPeriodsMs
-                    } else {
-                        track.trackId in overridesData.tracks
-                    }
-                    val fullLoopTooltip = if (loopBlock?.loopId != null) {
-                        val livePeriod = overridesData.loopPeriodsMs[loopBlock.loopId] ?: loopBlock.loopPeriodMs ?: 6_000L
-                        val prefix = track.label.substringBeforeLast(" · ")
-                        "$prefix · ${livePeriod}ms"
-                    } else {
-                        track.label
-                    }
-                    val displayRowLabel = if (loopBlock?.loopId != null) {
-                        val livePeriod = overridesData.loopPeriodsMs[loopBlock.loopId] ?: loopBlock.loopPeriodMs ?: 6_000L
-                        val prefix = track.label.substringBeforeLast(" · ")
-                        if (isRowOverridden || viewport.layerColumnWidthDp >= 290f) {
-                            "$prefix · ${livePeriod}ms"
-                        } else {
-                            prefix
-                        }
-                    } else {
-                        track.label
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(TRACK_ROW_HEIGHT)
-                            .background(
-                                when {
-                                    isSelected -> globalColors.outlines.focused.copy(alpha = 0.16f)
-                                    isRowOverridden -> overrideBadgeColor.copy(alpha = 0.08f)
-                                    else -> Color.Transparent
-                                }
-                            )
-                            .focusRequester(rowFocusRequesters[rowIdx])
-                            .studioActivatableFocus(focusRingColor, cornerRadius = 2.dp)
-                            .onKeyEvent { ev ->
-                                if (ev.type == KeyEventType.KeyDown &&
-                                    !ev.isKeyCtrlPressed && !ev.isKeyMetaPressed && !ev.isKeyAltPressed
-                                ) {
-                                    val nextIdx = when (ev.key) {
-                                        Key.DirectionDown -> (rowIdx + 1).coerceAtMost(displayedTracks.lastIndex)
-                                        Key.DirectionUp -> (rowIdx - 1).coerceAtLeast(0)
-                                        else -> return@onKeyEvent false
-                                    }
-                                    if (nextIdx != rowIdx) {
-                                        runCatching { rowFocusRequesters[nextIdx].requestFocus() }
-                                        val nextTop = (nextIdx * rowHeightPx).roundToInt()
-                                        val nextBottom = ((nextIdx + 1) * rowHeightPx).roundToInt()
-                                        val visH = layerColumnHeightPx.roundToInt().coerceAtLeast(rowHeightPx.roundToInt())
-                                        val curScroll = viewport.verticalScroll.value
-                                        val targetScroll = when {
-                                            nextTop < curScroll -> nextTop
-                                            nextBottom > curScroll + visH -> nextBottom - visH
-                                            else -> null
-                                        }
-                                        if (targetScroll != null) {
-                                            scope.launch { viewport.verticalScroll.animateScrollTo(targetScroll.coerceAtLeast(0)) }
-                                        }
-                                    }
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                            .clickable { controller.selectTrack(track.trackId) }
-                            .padding(start = (10 + track.indentLevel * 14).dp, end = 6.dp)
-                            .testTag("ciacola-track-row-${track.trackId}")
-                            .semantics {
-                                contentDescription = "$displayRowLabel, ${track.category.accessibleLabel()}"
-                                stateDescription = buildString {
-                                    append(if (isSelected) "Selected" else "Not selected")
-                                    if (isRowOverridden) append(", Overridden")
-                                }
-                            },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+    when (mode) {
+        TransportZoomMode.Menu -> {
+            var open by remember { mutableStateOf(false) }
+            Box {
+                CompactTextButton("Zoom ▾", { open = !open }, "ciacola-doc-timeline-zoom-menu")
+                if (open) {
+                    PopupMenu(
+                        onDismissRequest = {
+                            open = false
+                            true
+                        },
+                        horizontalAlignment = Alignment.End,
+                        popupProperties = PopupProperties(focusable = true),
+                        modifier = Modifier.testTag("ciacola-doc-timeline-zoom-popup"),
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            if (isRowOverridden) {
-                                Tooltip(tooltip = { Text("Track has live overrides") }) {
-                                    Text(
-                                        text = "●",
-                                        style = JewelTheme.typography.small,
-                                        color = overrideBadgeColor,
-                                        modifier = Modifier
-                                            .testTag("ciacola-override-badge-${track.trackId}")
-                                            .semantics { contentDescription = "Track overridden" },
-                                    )
-                                }
-                            }
-                            var labelOverflows by remember(track.trackId, displayRowLabel) { mutableStateOf(false) }
-                            val showTooltip = labelOverflows || displayRowLabel != fullLoopTooltip
-                            val labelColor = if (isSelected || isRowOverridden) globalColors.text.normal else secondaryLayerColor
-                            if (showTooltip) {
-                                Tooltip(tooltip = { Text(fullLoopTooltip) }) {
-                                    Text(
-                                        text = displayRowLabel,
-                                        style = JewelTheme.typography.small,
-                                        color = labelColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        onTextLayout = { labelOverflows = it.hasVisualOverflow },
-                                    )
-                                }
-                            } else {
-                                Text(
-                                    text = displayRowLabel,
-                                    style = JewelTheme.typography.small,
-                                    color = labelColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    onTextLayout = { labelOverflows = it.hasVisualOverflow },
-                                )
+                        selectableItem(selected = false, onClick = { open = false; zoomIn() }) { Text("Zoom in", style = studioLabelStyle()) }
+                        selectableItem(selected = false, onClick = { open = false; zoomOut() }) { Text("Zoom out", style = studioLabelStyle()) }
+                        selectableItem(selected = false, onClick = { open = false; fit() }) {
+                            Text(if (isSlideScope) "Fit slide" else "Fit deck", style = studioLabelStyle())
+                        }
+                        if (!isSlideScope) {
+                            selectableItem(selected = false, onClick = { open = false; fitSlide() }) {
+                                Text("Zoom to current slide", style = studioLabelStyle())
                             }
                         }
-                        if (loopBlock?.loopId != null) {
-                            Tooltip(tooltip = { Text("Enter Loop Sub-Composition") }) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(start = 4.dp)
-                                        .border(1.dp, globalColors.borders.focused, RoundedCornerShape(4.dp))
-                                        .studioActivatableFocus(focusRingColor)
-                                        .clickable {
-                                            controller.enterLoopSubComp(scope, loopBlock.loopId, loopBlock.sceneIndex)
-                                        }
-                                        .padding(horizontal = 4.dp, vertical = 1.dp)
-                                        .testTag("ciacola-timeline-open-loop")
-                                        .semantics {
-                                            role = Role.Button
-                                            contentDescription = "Enter loop sub-composition for ${track.label}"
-                                        },
-                                ) {
-                                    Text("Sub ▸", style = JewelTheme.typography.small, color = globalColors.text.normal)
-                                }
-                            }
+                        if (scopeInMenu) {
+                            passiveItem { Divider(Orientation.Horizontal, Modifier.fillMaxWidth().padding(vertical = 2.dp)) }
+                            selectableItem(
+                                selected = isSlideScope,
+                                onClick = { open = false; controller.setTrackFilter(TimelineTrackFilterMode.CurrentSlide) },
+                            ) { Text("Show this slide's tracks", style = studioLabelStyle()) }
+                            selectableItem(
+                                selected = !isSlideScope,
+                                onClick = { open = false; controller.setTrackFilter(TimelineTrackFilterMode.AllSlides) },
+                            ) { Text("Show all tracks", style = studioLabelStyle()) }
                         }
                     }
                 }
-                Spacer(Modifier.height(24.dp))
             }
         }
-
-        LayerColumnSplitter(viewport)
-
-        Box(Modifier.weight(1f).fillMaxHeight()) {
-            MasterDeckTimelineCanvas(
-                controller = controller,
-                snapshot = snapshot,
-                surface = surface,
-                displayedTracks = displayedTracks,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP),
-            )
-            VerticalScrollbar(
-                scrollState = viewport.verticalScroll,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .fillMaxHeight()
-                    .padding(top = HEADER_TOTAL_HEIGHT, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP)
-                    .testTag("ciacola-timeline-vscrollbar"),
-            )
-            val horizontalState = rememberScrollableState { delta ->
-                viewport.scrollHorizontallyBy(-delta, surface).let { -it }
+        TransportZoomMode.Buttons, TransportZoomMode.Slider -> {
+            Tooltip(tooltip = { Text("Zoom out") }) { CompactTextButton("−", zoomOut, "ciacola-doc-timeline-zoom-out") }
+            if (mode == TransportZoomMode.Slider) {
+                ZoomSlider(controller, canvasWidthPx, surface, nowMs)
             }
-            val horizontalAdapter = remember(viewport, surface) {
-                TimelineHorizontalScrollbarAdapter(viewport, surface)
+            Tooltip(tooltip = { Text("Zoom in") }) { CompactTextButton("+", zoomIn, "ciacola-doc-timeline-zoom-in") }
+            Tooltip(tooltip = { Text(fitTooltip) }) { CompactTextButton("Fit", fit, "ciacola-doc-timeline-fit-all") }
+            if (mode == TransportZoomMode.Slider && isLargeDeck && !isSlideScope) {
+                Tooltip(tooltip = { Text("Zoom to the current slide's time span") }) {
+                    CompactTextButton("Fit slide", fitSlide, "ciacola-doc-timeline-fit-slide")
+                }
             }
-            HorizontalScrollbar(
-                scrollState = horizontalState,
-                adapter = horizontalAdapter,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP)
-                    .testTag("ciacola-timeline-hscrollbar"),
-            )
         }
     }
 }
 
-private class TimelineHorizontalScrollbarAdapter(
-    private val viewport: TimelineViewportState,
-    private val surface: TimelineSurface,
-) : ScrollbarAdapter {
-    override val scrollOffset: Double get() = viewport.scrollX(surface).toDouble()
-    override val contentSize: Double get() = viewport.contentWidthPx(surface).toDouble()
-    override val viewportSize: Double get() = viewport.viewportWidthPx(surface).toDouble()
-    override suspend fun scrollTo(scrollOffset: Double) {
-        viewport.scrollHorizontallyTo(scrollOffset.toFloat(), surface)
+@Composable
+private fun ZoomSlider(
+    controller: DocumentTimelineController,
+    canvasWidthPx: Int,
+    surface: TimelineSurface,
+    nowMs: Int,
+) {
+    val viewport = controller.viewport
+    val minZoom = viewport.minZoomDpPerMs(surface).coerceAtMost(MAX_DP_PER_MS)
+    val logMin = ln(minZoom.coerceAtLeast(MIN_DP_PER_MS))
+    val logMax = ln(MAX_DP_PER_MS)
+    val sliderValue = if (logMax > logMin) {
+        ((ln(viewport.dpPerMs.coerceAtLeast(MIN_DP_PER_MS)) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
+    } else {
+        0f
     }
+    var zoomDragging by remember(surface) { mutableStateOf(false) }
+    var zoomHadFocus by remember(surface) { mutableStateOf(false) }
+    var localZoomValue by remember(surface) { mutableFloatStateOf(sliderValue) }
+    LaunchedEffect(sliderValue, zoomDragging) { if (!zoomDragging) localZoomValue = sliderValue }
+    Slider(
+        value = if (zoomDragging) localZoomValue else sliderValue,
+        onValueChange = { v ->
+            zoomDragging = true
+            val clamped = v.coerceIn(0f, 1f)
+            localZoomValue = clamped
+            viewport.markSurfaceActive(surface)
+            val anchor = viewport.xForTime(nowMs.toFloat(), surface).coerceIn(0f, canvasWidthPx.toFloat().coerceAtLeast(1f))
+            viewport.setZoomDpPerMs(exp(logMin + clamped * (logMax - logMin)), anchor, surface)
+        },
+        onValueChangeFinished = { zoomDragging = false },
+        modifier = Modifier
+            .width(84.dp)
+            .onFocusChanged { focusState ->
+                if (focusState.hasFocus) {
+                    zoomHadFocus = true
+                } else if (zoomHadFocus) {
+                    zoomHadFocus = false
+                    zoomDragging = false
+                }
+            }
+            .testTag("ciacola-timeline-zoom-slider"),
+    )
 }

@@ -4,7 +4,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
-import dev.sebastiano.ciacola.inspector.ElementPatch
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 import dev.sebastiano.ciacola.theme.contrastRatio
 import dev.sebastiano.ciacola.theme.relativeLuminance
@@ -184,7 +183,7 @@ object DeckLintRules {
                         LintQuickFix(
                             label = "Shrink Font -2sp",
                             tooltip = "Reduce font size to ${shrunkSp.roundToInt()} sp on ${node.label}",
-                            patch = ElementPatch(elementId = node.elementId, fontSizeSp = shrunkSp),
+                            suggestedFontSizeSp = shrunkSp,
                         ),
                     )
                 }
@@ -331,10 +330,7 @@ object DeckLintRules {
                     LintQuickFix(
                         label = "Fix Contrast",
                         tooltip = "Set text color to ${formatHexRgb(compliantColor)} (${formatRatio(contrastRatio(compliantColor, bgOpaque))}:1 on ${formatHexRgb(bgOpaque)})",
-                        patch = ElementPatch(
-                            elementId = node.elementId,
-                            textColorArgb = compliantColor.toArgbLong(),
-                        ),
+                        suggestedTextColorHex = formatHexRgb(compliantColor),
                     ),
                 )
                 add(editElementFix(node.elementId, node.label))
@@ -386,7 +382,7 @@ object DeckLintRules {
                     LintQuickFix(
                         label = "Bump to 16sp",
                         tooltip = "Increase font size from ${formatSp(effectiveFontSizeSp)} sp to 16 sp",
-                        patch = ElementPatch(elementId = node.elementId, fontSizeSp = 16f),
+                        suggestedFontSizeSp = 16f,
                     ),
                 )
                 add(editElementFix(node.elementId, node.label))
@@ -806,7 +802,6 @@ object DeckLintRules {
     private fun editElementFix(elementId: String, label: String): LintQuickFix = LintQuickFix(
         label = "Edit Element…",
         tooltip = "Open Direct Element Editor for $label",
-        patch = null,
         opensElementEditor = true,
     )
 

@@ -43,8 +43,8 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -127,21 +127,13 @@ internal fun PreShowReadinessBanner(
     readiness: ReadinessStatus,
     palette: PresenterStatusPalette,
     onEnterCleanShowMode: () -> Unit,
-    onDismissUnbakedNotice: () -> Unit,
 ) {
     val activeItems = buildList {
         if (readiness.openAuthoringTools.isNotEmpty()) {
             addAll(readiness.openAuthoringTools)
         } else {
-            if (readiness.studioOpen) add("Timeline Studio is open (F5/F6)")
-            if (readiness.inspectOpen) add("Review Inspect mode is active (F3)")
-        }
-        if (readiness.hasUnbakedOverrides) {
-            if (readiness.unbakedDomains.isNotEmpty()) {
-                add("Live session overrides active (${readiness.unbakedDomains.joinToString(", ")})")
-            } else {
-                add("Unbaked timeline overrides are active")
-            }
+            if (readiness.studioOpen) add("Timeline (F5)")
+            if (readiness.inspectOpen) add("Review Inspect (F3)")
         }
     }
     val summary = activeItems.joinToString(" · ")
@@ -166,7 +158,7 @@ internal fun PreShowReadinessBanner(
                 modifier = Modifier.size(15.dp),
             )
             Text(
-                text = "Pre-show check: $summary",
+                text = "Pre-show check — open tools: $summary",
                 style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Medium),
                 color = palette.warningBannerInk,
                 maxLines = 2,
@@ -182,15 +174,6 @@ internal fun PreShowReadinessBanner(
                     textStyle = JewelTheme.typography.small,
                     modifier = Modifier.testTag("ciacola-presenter-clean-show-button"),
                 )
-            }
-        } else {
-            Tooltip(tooltip = { Text("Keep live overrides active and hide this notice") }) {
-                OutlinedButton(
-                    onClick = onDismissUnbakedNotice,
-                    modifier = Modifier.testTag("ciacola-presenter-dismiss-readiness"),
-                ) {
-                    Text("Dismiss", style = JewelTheme.typography.small)
-                }
             }
         }
     }

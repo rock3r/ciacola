@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -17,56 +18,6 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.modifier.modifierLocalOf
 import androidx.compose.ui.modifier.modifierLocalProvider
-import kotlinx.serialization.Serializable
-
-/**
- * Per-element live visual and copy override patch keyed by stable [elementId].
- */
-@Serializable
-data class ElementPatch(
-    val elementId: String,
-    val text: String? = null,
-    val textColorArgb: Long? = null,
-    val fontSizeSp: Float? = null,
-    val fontWeight: Int? = null,
-    val fillColorArgb: Long? = null,
-    val borderColorArgb: Long? = null,
-    val borderWidthDp: Float? = null,
-    val cornerRadiusDp: Float? = null,
-    val paddingDp: Float? = null,
-    val offsetXDp: Float? = null,
-    val offsetYDp: Float? = null,
-    val uniforms: Map<String, Float> = emptyMap(),
-) {
-    val isEmpty: Boolean
-        get() = text == null &&
-            textColorArgb == null &&
-            fontSizeSp == null &&
-            fontWeight == null &&
-            fillColorArgb == null &&
-            borderColorArgb == null &&
-            borderWidthDp == null &&
-            cornerRadiusDp == null &&
-            paddingDp == null &&
-            offsetXDp == null &&
-            offsetYDp == null &&
-            uniforms.isEmpty()
-}
-
-/**
- * Persisted collection of per-element overrides keyed by [ElementPatch.elementId].
- */
-@Serializable
-data class DeckElementOverridesFile(
-    val elements: Map<String, ElementPatch> = emptyMap(),
-) {
-    val hasOverrides: Boolean
-        get() = elements.values.any { !it.isEmpty }
-
-    fun patchFor(elementId: String): ElementPatch? = elements[elementId]
-}
-
-val LocalElementOverrides = staticCompositionLocalOf { DeckElementOverridesFile() }
 
 /**
  * Metadata for an inspector-tunable float shader uniform exposed by a stage shader element.
@@ -143,11 +94,6 @@ data class StageElementMetadata(
 )
 
 /**
- * Returns the beat-scoped override identifier for multi-beat elements such as MagicText.
- */
-fun beatElementId(baseId: String, beatIndex: Int): String = "$baseId:b$beatIndex"
-
-/**
  * Live registry of rendered stage element snapshots for the active composition.
  */
 @Stable
@@ -180,8 +126,10 @@ class StageInspectionRegistry {
         if (stageRootProvider != null) {
             stageRootProviders[snapshot.elementId] = stageRootProvider
         }
-        if (nodes[snapshot.elementId] != snapshot) {
-            nodes[snapshot.elementId] = snapshot
+        Snapshot.withoutReadObservation {
+            if (nodes[snapshot.elementId] != snapshot) {
+                nodes[snapshot.elementId] = snapshot
+            }
         }
     }
 
@@ -201,8 +149,10 @@ class StageInspectionRegistry {
         if (owner != null) {
             metadataOwners[meta.elementId] = owner
         }
-        if (metadata[meta.elementId] != meta) {
-            metadata[meta.elementId] = meta
+        Snapshot.withoutReadObservation {
+            if (metadata[meta.elementId] != meta) {
+                metadata[meta.elementId] = meta
+            }
         }
     }
 
@@ -263,11 +213,6 @@ val LocalStageInspectionRegistry = staticCompositionLocalOf<StageInspectionRegis
  * containers so child text nodes know their true background colour for contrast checks.
  */
 val LocalEffectiveBackgroundColor = compositionLocalOf { Color.Unspecified }
-
-/**
- * Current active beat index within the enclosing choreographed scene.
- */
-val LocalActiveBeatIndex = compositionLocalOf { 0 }
 
 /**
  * Holds the root 1920x1080 stage [LayoutCoordinates] so child elements compute stage-space

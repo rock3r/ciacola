@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -90,11 +91,6 @@ fun PresenterDashboard(
     }
 
     val readiness = controller.readinessStatus()
-    LaunchedEffect(readiness.hasUnbakedOverrides) {
-        if (!readiness.hasUnbakedOverrides) {
-            controller.unbakedNoticeDismissed = false
-        }
-    }
 
     val dashboardFocusRequester = remember { FocusRequester() }
     var dashboardHadFocus by remember { mutableStateOf(false) }
@@ -110,11 +106,13 @@ fun PresenterDashboard(
         controller.canStepForward,
         controller.notesFontSizeSp,
         controller.timer.targetDurationMinutes,
+        controller.isEditingNotes,
     ) {
         if (dashboardHadFocus &&
             !dashboardHasFocus &&
             controller.jumpDialogHost != JumpDialogHost.Presenter &&
-            !displayPopupOpen
+            !displayPopupOpen &&
+            !controller.isEditingNotes
         ) {
             runCatching { dashboardFocusRequester.requestFocus() }
         }
@@ -157,38 +155,48 @@ fun PresenterDashboard(
 
             Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
 
-            val onlyUnbaked = !readiness.hasClosableAuthoringTools && readiness.hasUnbakedOverrides
-            if (readiness.hasAnyHazard && (!onlyUnbaked || !controller.unbakedNoticeDismissed)) {
+            if (readiness.hasAnyHazard) {
                 PreShowReadinessBanner(
                     readiness = readiness,
                     palette = palette,
                     onEnterCleanShowMode = { controller.enterCleanShowMode() },
-                    onDismissUnbakedNotice = { controller.unbakedNoticeDismissed = true },
                 )
                 Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f),
-            ) {
-                PresenterPreviewColumn(
-                    controller = controller,
-                    palette = palette,
-                    modifier = Modifier
-                        .weight(0.46f)
-                        .fillMaxHeight(),
+            val notesFraction = presenterNotesPaneFraction(
+                hasNotes = controller.resolvedCurrentNotes().hasNotes,
+                editing = controller.isEditingNotes,
+            )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize().weight(1f)) {
+                // The preview column hugs its previews (no dead strip); spare width goes to the notes.
+                val previewArea = maxWidth * (1f - notesFraction)
+                val layout = presenterPreviewLayout(
+                    availableWidth = previewArea - PresenterPreviewPadding * 2,
+                    availableHeight = maxHeight - PresenterPreviewPadding * 2,
                 )
+                val previewColumnWidth = min(previewArea, layout.contentWidth + PresenterPreviewPadding * 2)
+                Row(modifier = Modifier.fillMaxSize()) {
+                    PresenterPreviewColumn(
+                        controller = controller,
+                        palette = palette,
+                        layout = layout,
+                        modifier = Modifier
+                            .width(previewColumnWidth)
+                            .fillMaxHeight(),
+                    )
 
-                Divider(Orientation.Vertical, Modifier.fillMaxHeight())
+                    Divider(Orientation.Vertical, Modifier.fillMaxHeight())
 
-                PresenterSpeakerNotesPane(
-                    controller = controller,
-                    modifier = Modifier
-                        .weight(0.54f)
-                        .fillMaxHeight(),
-                )
+                    PresenterSpeakerNotesPane(
+                        controller = controller,
+                        onEditorClosed = { runCatching { dashboardFocusRequester.requestFocus() } },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("ciacola-presenter-notes-pane"),
+                    )
+                }
             }
         }
 
@@ -202,54 +210,118 @@ fun PresenterDashboard(
     }
 }
 
+/** Width share of the speaker notes pane: 40% with notes (or while editing), 28% when empty. */
+fun presenterNotesPaneFraction(hasNotes: Boolean, editing: Boolean): Float =
+    if (hasNotes || editing) NOTES_PANE_FRACTION_WITH_NOTES else NOTES_PANE_FRACTION_EMPTY
+
+const val NOTES_PANE_FRACTION_WITH_NOTES = 0.40f
+const val NOTES_PANE_FRACTION_EMPTY = 0.28f
+
+/** Vertical space reserved per preview block for its header line and spacing. */
+val PresenterPreviewHeaderHeight: Dp = 26.dp
+val PresenterPreviewGap: Dp = 14.dp
+
+/**
+ * Shared width of the `Current` and `Next` previews: the largest 16:9 frame such that both stacked
+ * previews (plus their headers and the gap between them) fit in the column.
+ */
+fun presenterPreviewWidth(
+    availableWidth: Dp,
+    availableHeight: Dp,
+    aspectRatio: Float = 16f / 9f,
+    headerHeight: Dp = PresenterPreviewHeaderHeight,
+    gap: Dp = PresenterPreviewGap,
+): Dp {
+    val heightForFrames = (availableHeight - headerHeight * 2 - gap).coerceAtLeast(0.dp)
+    val widthFromHeight = (heightForFrames / 2) * aspectRatio
+    return min(availableWidth, widthFromHeight).coerceAtLeast(1.dp)
+}
+
+/** Padding around the preview column. */
+val PresenterPreviewPadding: Dp = 16.dp
+
+/** Resolved `Current` / `Next` preview arrangement for the available preview area. */
+data class PresenterPreviewLayout(
+    val sideBySide: Boolean,
+    val currentWidth: Dp,
+    val nextWidth: Dp,
+    val contentWidth: Dp,
+)
+
+/**
+ * Chooses stacked (`Current` above `Next`, one shared width) or side-by-side (`Current` ~60%,
+ * `Next` ~40%) — whichever gives `Current` the larger frame — and reports the content width so the
+ * column can hug its previews instead of leaving a dead strip.
+ */
+fun presenterPreviewLayout(
+    availableWidth: Dp,
+    availableHeight: Dp,
+    aspectRatio: Float = 16f / 9f,
+    headerHeight: Dp = PresenterPreviewHeaderHeight,
+    gap: Dp = PresenterPreviewGap,
+): PresenterPreviewLayout {
+    val stacked = presenterPreviewWidth(availableWidth, availableHeight, aspectRatio, headerHeight, gap)
+    val rowWidth = (availableWidth - gap).coerceAtLeast(0.dp)
+    var sideCurrent = rowWidth * 0.6f
+    val maxByHeight = (availableHeight - headerHeight).coerceAtLeast(0.dp) * aspectRatio
+    if (sideCurrent > maxByHeight) sideCurrent = maxByHeight
+    val sideNext = sideCurrent * (2f / 3f)
+    return if (sideCurrent > stacked + 8.dp) {
+        PresenterPreviewLayout(true, sideCurrent, sideNext, sideCurrent + gap + sideNext)
+    } else {
+        PresenterPreviewLayout(false, stacked, stacked, stacked)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PresenterPreviewColumn(
     controller: PresenterController,
     palette: PresenterStatusPalette,
+    layout: PresenterPreviewLayout,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
 
-    Column(
-        modifier = modifier.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    // Side by side, the pair is vertically centred so a short row never strands the column's lower half.
+    Box(
+        modifier = modifier.padding(PresenterPreviewPadding),
+        contentAlignment = if (layout.sideBySide) Alignment.CenterStart else Alignment.TopStart,
     ) {
-        // Current live slide preview (never SceneMode.Story so it never steals Story clock/capture).
-        Column(
-            modifier = Modifier
-                .weight(1.12f)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        val previewWidth = layout.currentWidth
+        val previewHeight = previewWidth / (16f / 9f)
+        val nextWidth = layout.nextWidth
+        val nextHeight = nextWidth / (16f / 9f)
+        // Stacked: `Current` and `Next` share one left edge and one width so the eye tracks straight
+        // down. Side by side: top-aligned, `Current` larger.
+        PresenterPreviewArrangement(
+            sideBySide = layout.sideBySide,
+            modifier = Modifier.testTag("ciacola-presenter-preview-column"),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = "Current Slide",
-                    style = JewelTheme.typography.h4TextStyle,
-                    color = globalColors.text.normal,
-                )
-                if (controller.curtain != StageCurtain.None) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                PreviewHeader(width = previewWidth) {
                     Text(
-                        text = when (controller.curtain) {
-                            StageCurtain.Blackout -> "Audience sees Blackout"
-                            StageCurtain.Whiteout -> "Audience sees Whiteout"
-                            StageCurtain.None -> ""
-                        },
-                        style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
-                        color = palette.curtainActiveInk,
+                        text = "Current · Slide ${controller.currentSceneIndex + 1}",
+                        style = JewelTheme.typography.h4TextStyle,
+                        color = globalColors.text.normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false).testTag("ciacola-presenter-current-header"),
                     )
+                    if (controller.curtain != StageCurtain.None) {
+                        Text(
+                            text = when (controller.curtain) {
+                                StageCurtain.Blackout -> "Audience sees Blackout"
+                                StageCurtain.Whiteout -> "Audience sees Whiteout"
+                                StageCurtain.None -> ""
+                            },
+                            style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                            color = palette.curtainActiveInk,
+                            maxLines = 1,
+                        )
+                    }
                 }
-            }
-
-            FittedAspectBox(
-                aspectRatio = 16f / 9f,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
                 val frameBorder = if (controller.curtain != StageCurtain.None) {
                     palette.curtainActiveBorder
                 } else {
@@ -257,16 +329,26 @@ private fun PresenterPreviewColumn(
                 }
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .size(previewWidth, previewHeight)
                         .clip(RoundedCornerShape(6.dp))
                         .border(1.dp, frameBorder, RoundedCornerShape(6.dp))
                         .testTag("ciacola-presenter-current-preview"),
                 ) {
-                    Easel(
-                        animatic = controller.animatic,
-                        mode = SceneMode.Preview,
-                        modifier = Modifier.fillMaxSize().padding(bottom = 2.dp),
-                    )
+                    val customCurrentSb = controller.previewStoryboardProvider?.invoke()
+                    if (customCurrentSb != null) {
+                        ScenePreview(
+                            storyboard = customCurrentSb,
+                            index = controller.currentIndex,
+                            sceneMode = SceneMode.Preview,
+                            modifier = Modifier.fillMaxSize().padding(bottom = 2.dp),
+                        )
+                    } else {
+                        Easel(
+                            animatic = controller.animatic,
+                            mode = SceneMode.Preview,
+                            modifier = Modifier.fillMaxSize().padding(bottom = 2.dp),
+                        )
+                    }
                     // Subtle themed transition progress track at the bottom of the preview frame.
                     val progress = controller.transitionProgress
                     val barColor = if (controller.isTransitioning) palette.transitioning else palette.ready
@@ -286,39 +368,31 @@ private fun PresenterPreviewColumn(
                     }
                 }
             }
-        }
 
-        // Next beat / next slide preview (clickable to advance smoothly).
-        Column(
-            modifier = Modifier
-                .weight(0.88f)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = controller.nextStepLabel(),
-                style = JewelTheme.typography.h4TextStyle,
-                color = globalColors.text.info,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            FittedAspectBox(
-                aspectRatio = 16f / 9f,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
-                val nextIdx = controller.nextIndex
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                PreviewHeader(width = nextWidth) {
+                    Text(
+                        text = controller.nextStepLabel(),
+                        style = JewelTheme.typography.h4TextStyle,
+                        color = globalColors.text.info,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("ciacola-presenter-next-header"),
+                    )
+                }
+                val nextIdx = controller.nextPreviewIndex
                 if (nextIdx != null) {
                     Tooltip(tooltip = { Text("Advance to ${controller.nextStepLabel()} (→ / Space)") }) {
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .size(nextWidth, nextHeight)
                                 .clip(RoundedCornerShape(6.dp))
                                 .border(1.dp, globalColors.borders.normal, RoundedCornerShape(6.dp))
                                 .testTag("ciacola-presenter-next-preview"),
                         ) {
                             ScenePreview(
-                                storyboard = controller.animatic.storyboard,
+                                storyboard = controller.nextPreviewStoryboardProvider?.invoke()
+                                    ?: controller.animatic.storyboard,
                                 index = nextIdx,
                                 sceneMode = SceneMode.Preview,
                                 modifier = Modifier.fillMaxSize(),
@@ -334,9 +408,9 @@ private fun PresenterPreviewColumn(
                 } else {
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .size(nextWidth, nextHeight)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(globalColors.toolwindowBackground)
+                            .background(globalColors.panelBackground)
                             .border(1.dp, globalColors.borders.normal, RoundedCornerShape(6.dp))
                             .testTag("ciacola-presenter-end-of-deck"),
                         contentAlignment = Alignment.Center,
@@ -369,188 +443,31 @@ private fun PresenterPreviewColumn(
 }
 
 @Composable
-private fun FittedAspectBox(
-    aspectRatio: Float,
+private fun PresenterPreviewArrangement(
+    sideBySide: Boolean,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        val widthFromHeight = maxHeight * aspectRatio
-        val fittedWidth: Dp = min(maxWidth, widthFromHeight)
-        val fittedHeight: Dp = fittedWidth / aspectRatio
-        Box(
-            modifier = Modifier.size(fittedWidth.coerceAtLeast(1.dp), fittedHeight.coerceAtLeast(1.dp)),
-        ) {
+    if (sideBySide) {
+        Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(PresenterPreviewGap), verticalAlignment = Alignment.Top) {
+            content()
+        }
+    } else {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(PresenterPreviewGap), horizontalAlignment = Alignment.Start) {
             content()
         }
     }
 }
 
 @Composable
-private fun PresenterSpeakerNotesPane(
-    controller: PresenterController,
-    modifier: Modifier = Modifier,
+private fun PreviewHeader(
+    width: Dp,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
 ) {
-    val globalColors = JewelTheme.globalColors
-    val resolved = controller.resolvedCurrentNotes()
-    val scrollState = rememberScrollState()
-
-    LaunchedEffect(resolved.sceneIndex, resolved.beatIndex) {
-        scrollState.scrollTo(0)
-    }
-
-    Column(
-        modifier = modifier.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = "Speaker Notes",
-                    style = JewelTheme.typography.h3TextStyle,
-                    color = globalColors.text.normal,
-                )
-                if (resolved.isVirtualHoldBeat) {
-                    Text(
-                        text = "Hold beat",
-                        style = JewelTheme.typography.small,
-                        color = globalColors.text.info,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 1.dp),
-                    )
-                }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                PresenterIconButton(
-                    icon = AllIconsKeys.General.Remove,
-                    contentDescription = "Decrease speaker notes font size",
-                    tooltip = "Decrease notes font size (⌘-)",
-                    enabled = controller.notesFontSizeSp > PresenterController.MIN_NOTES_FONT_SP,
-                    testTag = "ciacola-presenter-notes-font-dec",
-                    onClick = { controller.decreaseNotesFontSize() },
-                )
-                Text(
-                    text = "${controller.notesFontSizeSp.toInt()} pt",
-                    style = JewelTheme.typography.small.copy(fontFamily = FontFamily.Monospace),
-                    color = globalColors.text.info,
-                    modifier = Modifier.testTag("ciacola-presenter-notes-font-size"),
-                )
-                PresenterIconButton(
-                    icon = AllIconsKeys.General.Add,
-                    contentDescription = "Increase speaker notes font size",
-                    tooltip = "Increase notes font size (⌘=)",
-                    enabled = controller.notesFontSizeSp < PresenterController.MAX_NOTES_FONT_SP,
-                    testTag = "ciacola-presenter-notes-font-inc",
-                    onClick = { controller.increaseNotesFontSize() },
-                )
-            }
-        }
-
-        Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .weight(1f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(globalColors.toolwindowBackground)
-                .border(1.dp, globalColors.borders.normal, RoundedCornerShape(6.dp)),
-        ) {
-            if (!resolved.hasNotes) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp)
-                        .testTag("ciacola-presenter-notes-empty"),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        text = "No speaker notes for this slide",
-                        style = JewelTheme.typography.h4TextStyle,
-                        color = globalColors.text.normal,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    InfoText("Add overview(…) or beat(index, …) notes on this scene to view delivery cues here.")
-                }
-            } else {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
-                            .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 22.dp)
-                            .testTag("ciacola-presenter-notes-content"),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        val noteFontSize = controller.notesFontSizeSp.sp
-                        val noteLineHeight = (controller.notesFontSizeSp * 1.45f).sp
-                        val beatNote = resolved.beatNote
-                        if (!beatNote.isNullOrBlank()) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "BEAT ${resolved.beatIndex + 1} CUE",
-                                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
-                                    color = globalColors.text.info,
-                                )
-                                Text(
-                                    text = beatNote,
-                                    style = JewelTheme.typography.regular.copy(
-                                        fontSize = noteFontSize,
-                                        lineHeight = noteLineHeight,
-                                    ),
-                                    color = globalColors.text.normal,
-                                )
-                            }
-                        }
-
-                        if (resolved.slideNotes.isNotBlank()) {
-                            if (!beatNote.isNullOrBlank()) {
-                                Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-                            }
-                            val contextSize = (controller.notesFontSizeSp * 0.85f).coerceAtLeast(14f)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "SLIDE CONTEXT",
-                                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.Bold),
-                                    color = globalColors.text.info,
-                                )
-                                Text(
-                                    text = resolved.slideNotes,
-                                    style = JewelTheme.typography.regular.copy(
-                                        fontSize = contextSize.sp,
-                                        lineHeight = (contextSize * 1.42f).sp,
-                                    ),
-                                    color = if (beatNote.isNullOrBlank()) globalColors.text.normal else globalColors.text.info,
-                                )
-                            }
-                        }
-                    }
-                    VerticalScrollbar(
-                        scrollState = scrollState,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .fillMaxHeight()
-                            .padding(vertical = 4.dp, horizontal = 2.dp),
-                    )
-                }
-            }
-        }
-    }
+    Row(
+        modifier = Modifier.width(width).height(PresenterPreviewHeaderHeight - 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        content = content,
+    )
 }

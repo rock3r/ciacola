@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -46,8 +46,7 @@ class ReviewUnconfiguredConversationTest {
 
         setContent {
             coordinator = rememberReviewStageCoordinator()
-            val deck = createFoundationDeck(
-                includeKeynoteEffectsLab = true,
+            val deck = buildFoundationTestStoryboard(
                 stageDecorator = coordinator.stageDecorator,
             )
             val animatic = rememberAnimatic(storyboard = { deck })

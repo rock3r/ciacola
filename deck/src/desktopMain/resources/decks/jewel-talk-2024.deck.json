@@ -1,0 +1,6017 @@
+{
+  "format": 1,
+  "id": "jewel-talk-2024",
+  "title": "Project Sparkles: How Compose Is Changing Android Studio",
+  "themes": {
+    "dark": {
+      "preset": "dark",
+      "colors": {
+        "accent": "#EF5350",
+        "canvas": "#29223A",
+        "ink": "#FFFFFF",
+        "muted": "#C6BBD9",
+        "surface": "#372E4D"
+      },
+      "typography": {
+        "body": { "font": "Hanken Grotesk", "size": 36, "weight": 400, "color": "ink" },
+        "code": { "font": "JetBrains Mono", "size": 24, "weight": 400, "color": "ink" },
+        "heading": { "font": "Hanken Grotesk", "size": 56, "weight": 700, "color": "ink" },
+        "title": { "font": "Hanken Grotesk", "size": 96, "weight": 800, "color": "ink" }
+      }
+    },
+    "light": {
+      "preset": "light",
+      "colors": {
+        "accent": "#EF5350",
+        "canvas": "#FAF7F5",
+        "ink": "#29223A",
+        "muted": "#5E5570",
+        "surface": "#FFFFFF"
+      },
+      "typography": {
+        "body": { "font": "Hanken Grotesk", "size": 36, "weight": 400, "color": "ink" },
+        "code": { "font": "JetBrains Mono", "size": 24, "weight": 400, "color": "ink" },
+        "heading": { "font": "Hanken Grotesk", "size": 56, "weight": 700, "color": "ink" },
+        "title": { "font": "Hanken Grotesk", "size": 96, "weight": 800, "color": "ink" }
+      }
+    }
+  },
+  "defaultTheme": "dark",
+  "fonts": [
+    {
+      "family": "Hanken Grotesk",
+      "src": "fonts/HankenGrotesk-VariableFont_wght.ttf",
+      "variable": true
+    },
+    {
+      "family": "Hanken Grotesk",
+      "src": "fonts/HankenGrotesk-Italic-VariableFont_wght.ttf",
+      "italic": true,
+      "variable": true
+    },
+    {
+      "family": "Noto Emoji",
+      "src": "fonts/NotoEmoji-VariableFont_wght.ttf",
+      "variable": true,
+      "role": "emoji"
+    },
+    { "family": "Roboto", "src": "fonts/Roboto-VariableFont_wdth_wght.ttf", "variable": true },
+    { "family": "Inter", "src": "fonts/Inter-Thin.ttf", "weight": 100 },
+    { "family": "Inter", "src": "fonts/Inter-ExtraLight.ttf", "weight": 200 },
+    { "family": "Inter", "src": "fonts/Inter-Light.ttf", "weight": 300 },
+    { "family": "Inter", "src": "fonts/Inter-Regular.ttf", "weight": 400 },
+    { "family": "Inter", "src": "fonts/Inter-Medium.ttf", "weight": 500 },
+    { "family": "Inter", "src": "fonts/Inter-SemiBold.ttf", "weight": 600 },
+    { "family": "Inter", "src": "fonts/Inter-Bold.ttf", "weight": 700 },
+    { "family": "Inter", "src": "fonts/Inter-ExtraBold.ttf", "weight": 800 },
+    { "family": "Inter", "src": "fonts/Inter-Black.ttf", "weight": 900 },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Thin.ttf", "weight": 100 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-ThinItalic.ttf",
+      "weight": 100,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-ExtraLight.ttf", "weight": 200 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-ExtraLightItalic.ttf",
+      "weight": 200,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Light.ttf", "weight": 300 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-LightItalic.ttf",
+      "weight": 300,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Regular.ttf", "weight": 400 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-Italic.ttf",
+      "weight": 400,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Medium.ttf", "weight": 500 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-MediumItalic.ttf",
+      "weight": 500,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-SemiBold.ttf", "weight": 600 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-SemiBoldItalic.ttf",
+      "weight": 600,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Bold.ttf", "weight": 700 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-BoldItalic.ttf",
+      "weight": 700,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-ExtraBold.ttf", "weight": 800 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-ExtraBoldItalic.ttf",
+      "weight": 800,
+      "italic": true
+    }
+  ],
+  "palettes": {
+    "coral": { "canvas": "#EF5350", "ink": "#FFFFFF", "accent": "#FFF176" },
+    "eggplant": { "canvas": "#29223A", "ink": "#FFFFFF", "accent": "#E3F574" },
+    "olive": { "canvas": "#313325", "ink": "#E3F574", "accent": "#EF5350" }
+  },
+  "loopPeriodsMs": {
+    "jewel.adaptiveDemoWizard/time": 5400,
+    "jewel.adaptiveWireframePanes/time": 6400,
+    "jewel.addDeviceDialog/time": 12000,
+    "jewel.confettiPartyPopper/time": 1400,
+    "jewel.geminiAuthCard/time": 4000,
+    "jewel.geminiChatComposer/time": 8000,
+    "jewel.geminiLoadingChoreography/time": 2400,
+    "jewel.geminiPromptInput/time": 12000,
+    "jewel.geminiStreamingChat/time": 10000,
+    "jewel.geminiToolWindowFull/time": 6000,
+    "jewel.m3ExpressiveShowcase/time": 9400,
+    "jewel.markdownStandaloneSample/time": 14000,
+    "jewel.microinteractionEnabledButton/time": 2400,
+    "jewel.microinteractionScrollFab/time": 8500,
+    "jewel.referencesBouncyExpand/time": 3500,
+    "jewel.referencesBouncySpringV2/time": 2200
+  },
+  "slides": [
+    {
+      "id": "s01",
+      "title": "Project Sparkles",
+      "background": "#EF5350",
+      "beats": [
+        {},
+        { "autoAdvanceMs": 100 }
+      ],
+      "nodes": [
+        {
+          "id": "sparkles-icon",
+          "frame": { "x": 177, "y": 299, "w": 174, "h": 178 },
+          "image": { "src": "sparkles.png", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "moveIn",
+              "direction": "right",
+              "durationMs": 700,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "project-sparkles",
+          "frame": { "x": 178, "y": 321.98, "w": 1024.74, "h": 183.63 },
+          "text": {
+            "value": "Project Sparkles",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 384.74, "y": 321.53 }
+              },
+              "durationMs": 700,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s02",
+      "title": "Project Sparkles",
+      "background": "#EF5350",
+      "beats": [
+        { "autoAdvanceMs": 0 },
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "how-compose-is-changing-andr",
+          "frame": { "x": 384, "y": 391.46, "w": 1290.7, "h": 87.06 },
+          "text": {
+            "value": "How Compose is changing Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 55,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 71.66
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 384.19, "y": 481.34 }
+              },
+              "durationMs": 500,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": 351, "y": 262, "w": 1111, "h": 203 },
+          "shape": { "geometry": "rect", "fill": "#EF5350" }
+        },
+        {
+          "id": "sparkles-icon",
+          "frame": { "x": 177, "y": 299, "w": 174, "h": 178 },
+          "image": { "src": "sparkles.png", "fit": "contain" }
+        },
+        {
+          "id": "project-sparkles",
+          "frame": { "x": 385, "y": 321.98, "w": 1023.52, "h": 183.63 },
+          "text": {
+            "value": "Project Sparkles",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 151.15
+          }
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 212, "y": 304, "w": 73, "h": 167 },
+          "shape": {
+            "geometry": { "path": "M 0 163.27 L 67.83 0" },
+            "stroke": { "color": "#EF5350", "width": 2 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "shimmer",
+              "delayMs": 200,
+              "durationMs": 1000,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 400, "curve": "easeInOut" }
+    },
+    {
+      "id": "s03",
+      "title": "Project Sparkles",
+      "background": "#EF5350",
+      "nodes": [
+        {
+          "id": "how-compose-is-changing-andr",
+          "frame": { "x": 384, "y": 441.34, "w": 1290.7, "h": 87.06 },
+          "text": {
+            "value": "How Compose is changing Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 55,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 71.66
+          }
+        },
+        {
+          "id": "sparkles-icon",
+          "frame": { "x": 177, "y": 259, "w": 174, "h": 178 },
+          "image": { "src": "sparkles.png", "fit": "contain" }
+        },
+        {
+          "id": "project-sparkles",
+          "frame": { "x": 385, "y": 281.98, "w": 1023.52, "h": 183.63 },
+          "text": {
+            "value": "Project Sparkles",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 151.15
+          }
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 212, "y": 264, "w": 73, "h": 167 },
+          "shape": {
+            "geometry": { "path": "M 0 163.27 L 67.83 0" },
+            "stroke": { "color": "#EF5350", "width": 2 }
+          }
+        },
+        {
+          "id": "portrait-chris",
+          "frame": { "x": 385, "y": 765, "w": 196, "h": 196 },
+          "stack": {
+            "children": [
+              {
+                "id": "portrait-chris-photo",
+                "frame": { "x": -47.73, "y": 12.73, "w": 255.25, "h": 319.59 },
+                "image": { "src": "chris-portrait.png", "fit": "contain" }
+              }
+            ],
+            "surface": { "fill": "#E3F272", "cornerRadius": 29 },
+            "clip": true
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "up",
+              "args": { "distance": 75.9 },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "portrait-seb",
+          "frame": { "x": 630, "y": 765, "w": 197, "h": 196 },
+          "stack": {
+            "children": [
+              {
+                "id": "portrait-seb-photo",
+                "frame": { "x": -77.1, "y": 6.55, "w": 272.33, "h": 215.82 },
+                "image": { "src": "seb-portrait.png", "fit": "contain" }
+              }
+            ],
+            "surface": { "fill": "#E3F272", "cornerRadius": 29 },
+            "clip": true
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "up",
+              "args": { "distance": 75.9 },
+              "delayMs": 500,
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "chris",
+          "frame": { "x": 200, "y": 844.85, "w": 141.46, "h": 60.15 },
+          "text": {
+            "value": "Chris",
+            "font": "Hanken Grotesk",
+            "size": 38,
+            "weight": 600,
+            "color": "#E3F272",
+            "lineHeight": 49.51
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 44.6 },
+              "delayMs": 100,
+              "durationMs": 300,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "seb",
+          "frame": { "x": 924, "y": 862.58, "w": 108.52, "h": 60.15 },
+          "text": {
+            "value": "Seb",
+            "font": "Hanken Grotesk",
+            "size": 38,
+            "weight": 600,
+            "color": "#E3F272",
+            "lineHeight": 49.51
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 44.6 },
+              "delayMs": 600,
+              "durationMs": 300,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "line-9",
+          "frame": { "x": 832, "y": 845, "w": 87, "h": 49 },
+          "shape": {
+            "geometry": {
+              "path": "M 0 41.66 C 12.11 37.75 23.63 32.22 34.25 25.23 C 43.81 18.94 47.71 7.97 40.59 3.76 C 34.22 0 26.17 6.6 26.81 15.94 C 27.37 24.24 33.6 30.6 40.59 35.25 C 53.42 43.79 68.76 47.74 84.12 46.47"
+            },
+            "stroke": { "color": "#E3F272", "width": 2 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "lineDraw",
+              "direction": "endToStart",
+              "args": { "includeEndpoints": true },
+              "delayMs": 700,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "line-10",
+          "frame": { "x": 829, "y": 844, "w": 91, "h": 51 },
+          "shape": {
+            "geometry": {
+              "path": "M 2.49 43.51 L 18.17 37.45 C 25.42 34.16 32.4 30.3 39.05 25.9 C 48.57 19.59 52.5 8.65 45.38 4.44 C 39.01 0.67 30.97 7.27 31.6 16.61 C 32.17 24.91 38.4 31.28 45.38 35.92 C 58.22 44.46 73.56 48.41 88.92 47.14"
+            },
+            "stroke": { "color": "#E3F272", "width": 4 },
+            "heads": { "start": "filled" }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "lineDraw",
+              "direction": "endToStart",
+              "args": { "includeEndpoints": true },
+              "delayMs": 1100,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "line-11",
+          "frame": { "x": 278, "y": 793, "w": 99, "h": 80 },
+          "shape": {
+            "geometry": {
+              "path": "M 74.49 23.64 C 61.85 25.12 49.08 24.89 36.5 22.95 C 25.2 21.21 17.08 12.87 21.81 6.07 C 26.04 0 36.1 2.66 39.41 11.41 C 42.35 19.19 39.33 27.57 34.92 34.7 C 26.8 47.81 14.5 57.79 0 63.02"
+            },
+            "stroke": { "color": "#E3F272", "width": 2 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "lineDraw",
+              "direction": "endToStart",
+              "args": { "includeEndpoints": true },
+              "delayMs": 100,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "line-12",
+          "frame": { "x": 278, "y": 790, "w": 102, "h": 83 },
+          "shape": {
+            "geometry": {
+              "path": "M 97.43 40.41 L 80.67 41.41 C 72.71 41.44 64.75 40.84 56.87 39.6 C 45.59 37.84 37.46 29.52 42.18 22.73 C 46.4 16.65 56.47 19.3 59.78 28.06 C 62.71 35.84 59.7 44.22 55.29 51.35 C 47.17 64.46 34.87 74.44 20.37 79.68"
+            },
+            "stroke": { "color": "#E3F272", "width": 4 },
+            "heads": { "start": "filled" }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "lineDraw",
+              "direction": "endToStart",
+              "args": { "includeEndpoints": true },
+              "delayMs": 500,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s04",
+      "title": "WHY",
+      "background": "#313325",
+      "nodes": [
+        {
+          "id": "why",
+          "frame": { "x": 782, "y": 409.78, "w": 464.76, "h": 245.37 },
+          "text": {
+            "value": "WHY",
+            "font": "Hanken Grotesk",
+            "size": 155,
+            "weight": 900,
+            "color": "#E3F272",
+            "lineHeight": 201.97
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 1000 }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s05",
+      "title": "➡️",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "node",
+          "frame": { "x": 972, "y": 472.5, "w": 195.14, "h": 168.43 },
+          "text": {
+            "value": "➡️",
+            "font": "Noto Emoji",
+            "size": 116,
+            "color": "#E3F272",
+            "lineHeight": 135.95
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "right",
+              "args": { "distance": 47 },
+              "durationMs": 300,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "better-ux",
+          "frame": { "x": 1171, "y": 464.32, "w": 606.28, "h": 183.63 },
+          "text": {
+            "value": "Better UX",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear", "after": "node", "delayMs": 100 }
+          ]
+        },
+        {
+          "id": "better-dev-ux",
+          "frame": { "x": 203, "y": 464.32, "w": 877.12, "h": 183.63 },
+          "text": {
+            "value": "Better Dev UX",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 600, "curve": "easeInOut" }
+    },
+    {
+      "id": "s06",
+      "title": "⏩️ Velocity to produce and ship",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "velocity-to-produce-and-ship",
+          "frame": { "x": 209, "y": 464.32, "w": 1711, "h": 183.63 },
+          "text": {
+            "value": [
+              { "text": "⏩️", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": " Velocity to produce and ship" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15,
+            "tracking": -0.088
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "node",
+          "frame": { "x": 757, "y": 688.84, "w": 151.22, "h": 123.42 },
+          "opacity": 0.5,
+          "text": {
+            "value": "➡️",
+            "font": "Noto Emoji",
+            "size": 85,
+            "color": "#E3F272",
+            "lineHeight": 99.62
+          }
+        },
+        {
+          "id": "better-ux",
+          "frame": { "x": 897, "y": 682.71, "w": 453.78, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": "Better UX",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        },
+        {
+          "id": "better-dev-ux",
+          "frame": { "x": 200, "y": 682.71, "w": 652.64, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": "Better Dev UX",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s07",
+      "title": "🔨 IDE more usable & crafted",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "ide-more-usable-crafted",
+          "frame": { "x": 207, "y": 464.32, "w": 1713, "h": 183.63 },
+          "text": {
+            "value": [
+              { "text": "🔨", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": " IDE more usable & crafted" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "velocity-to-produce-and-ship",
+          "frame": { "x": 205, "y": 314.71, "w": 1437.1, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": [
+              { "text": "⏩️", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": " Velocity to produce and ship" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75,
+            "tracking": -0.088
+          }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 757, "y": 688.84, "w": 151.22, "h": 123.42 },
+          "opacity": 0.5,
+          "text": {
+            "value": "➡️",
+            "font": "Noto Emoji",
+            "size": 85,
+            "color": "#E3F272",
+            "lineHeight": 99.62
+          }
+        },
+        {
+          "id": "better-ux",
+          "frame": { "x": 897, "y": 682.71, "w": 453.78, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": "Better UX",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        },
+        {
+          "id": "better-dev-ux",
+          "frame": { "x": 200, "y": 682.71, "w": 652.64, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": "Better Dev UX",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s08",
+      "title": "💖 for all developers",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "for-all-developers",
+          "frame": { "x": 204, "y": 464.32, "w": 1290.7, "h": 183.63 },
+          "text": {
+            "value": [
+              { "text": "💖", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": " for all developers" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "velocity-to-produce-and-ship",
+          "frame": { "x": 205, "y": 174.71, "w": 1437.1, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": [
+              { "text": "⏩️", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": " Velocity to produce and ship" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75,
+            "tracking": -0.088
+          }
+        },
+        {
+          "id": "ide-more-usable-crafted",
+          "frame": { "x": 204, "y": 314.71, "w": 1337.06, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": [
+              { "text": "🔨", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": " IDE more usable & crafted" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 757, "y": 688.84, "w": 151.22, "h": 123.42 },
+          "opacity": 0.5,
+          "text": {
+            "value": "➡️",
+            "font": "Noto Emoji",
+            "size": 85,
+            "color": "#E3F272",
+            "lineHeight": 99.62
+          }
+        },
+        {
+          "id": "better-ux",
+          "frame": { "x": 897, "y": 682.71, "w": 453.78, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": "Better UX",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        },
+        {
+          "id": "better-dev-ux",
+          "frame": { "x": 200, "y": 682.71, "w": 652.64, "h": 134.55 },
+          "opacity": 0.5,
+          "text": {
+            "value": "Better Dev UX",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C6B2F0",
+            "lineHeight": 110.75
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s09",
+      "title": "🧐",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "node",
+          "frame": { "x": 1038, "y": 408.4, "w": 317.14, "h": 326.7 },
+          "text": {
+            "value": "🧐",
+            "font": "Noto Emoji",
+            "size": 225,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 263.7
+          }
+        },
+        {
+          "id": "technical-difficulties",
+          "frame": { "x": 586, "y": 443.47, "w": 472.08, "h": 205.44 },
+          "text": {
+            "value": "Technical\nDifficulties",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8,
+            "align": "end"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" },
+            { "kind": "enter", "beat": 2, "effect": "appear", "delayMs": 100 }
+          ]
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1204.3, "y": 374.05, "w": 81.31, "h": 94.98 },
+          "opacity": 0,
+          "text": {
+            "value": "?",
+            "font": "Hanken Grotesk",
+            "size": 60,
+            "weight": 800,
+            "color": "#C7B3F1",
+            "lineHeight": 78.18
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 1204.36, "y": 3.98 },
+                "opacity": 1
+              },
+              "durationMs": 1000
+            }
+          ]
+        },
+        {
+          "id": "node-3",
+          "frame": { "x": 1180.81, "y": 354.36, "w": 80.69, "h": 102.89 },
+          "opacity": 0,
+          "text": {
+            "value": "?",
+            "font": "Hanken Grotesk",
+            "size": 65,
+            "weight": 800,
+            "color": "#C7B3F1",
+            "lineHeight": 84.69
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 1180.72, "y": 58.06 },
+                "opacity": 1
+              },
+              "delayMs": 200,
+              "durationMs": 1000
+            }
+          ]
+        },
+        {
+          "id": "node-4",
+          "frame": { "x": 1226.52, "y": 365.94, "w": 93.25, "h": 110.81 },
+          "opacity": 0,
+          "text": {
+            "value": "?",
+            "font": "Hanken Grotesk",
+            "size": 70,
+            "weight": 800,
+            "color": "#C7B3F1",
+            "lineHeight": 91.21
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 1229.4, "y": 73.53 },
+                "opacity": 1
+              },
+              "delayMs": 500,
+              "durationMs": 1000
+            }
+          ]
+        },
+        {
+          "id": "group-6",
+          "frame": { "x": 1015, "y": -2, "w": 387, "h": 350 },
+          "stack": {
+            "children": [
+              {
+                "id": "shape-6-1",
+                "frame": { "x": 1.16, "y": 1.71, "w": 384.5, "h": 173.57 },
+                "shape": { "geometry": "rect", "fill": "#29223A" }
+              },
+              {
+                "id": "img-technical-difficulties",
+                "frame": { "x": 1.16, "y": 175.23, "w": 385, "h": 174 },
+                "image": { "src": "s09-technical-difficulties.png", "fit": "contain" }
+              }
+            ]
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s10",
+      "title": "Droidcon London 202",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "droidcon-london-202",
+          "frame": { "x": 553, "y": 305.77, "w": 940.56, "h": 123.47 },
+          "text": {
+            "value": "Droidcon London 202",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "4-3",
+          "frame": { "x": 1315.05, "y": 306.01, "w": 114.56, "h": 226 },
+          "text": {
+            "value": "4\n3",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 72.64
+          }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": 1286, "y": 227, "w": 103, "h": 103 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "rect-4",
+          "frame": { "x": 1286, "y": 382, "w": 103, "h": 103 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s11",
+      "title": "Droidcon London 202",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "droidcon-london-202",
+          "frame": { "x": 553, "y": 305.77, "w": 940.56, "h": 123.47 },
+          "text": {
+            "value": "Droidcon London 202",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "4-3",
+          "frame": { "x": 1315.05, "y": 233.01, "w": 114.56, "h": 226 },
+          "text": {
+            "value": "4\n3",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 72.64
+          }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": 1286, "y": 226, "w": 103, "h": 103 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "rect-4",
+          "frame": { "x": 1286, "y": 383, "w": 103, "h": 103 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "img-droidcon-2023-thumb",
+          "frame": { "x": 616, "y": 491, "w": 688, "h": 387 },
+          "image": { "src": "droidcon-2023-thumb-full.png", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 51.8 },
+              "delayMs": 300,
+              "durationMs": 700,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            },
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "fromDarkness",
+              "durationMs": 400,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "img-droidcon-2023-thumb-2",
+          "frame": { "x": 616, "y": 491, "w": 688, "h": 387 },
+          "image": { "src": "droidcon-2023-thumb-crop.png", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "up",
+              "args": { "distance": 96 },
+              "delayMs": 200,
+              "durationMs": 600,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s12",
+      "title": "SYNERGY!",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        { "autoAdvanceMs": 0 }
+      ],
+      "nodes": [
+        {
+          "id": "compose-for-desktop",
+          "frame": { "x": 385, "y": 253.83, "w": 534.3, "h": 205.44 },
+          "text": {
+            "value": "Compose\nfor Desktop",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8
+          }
+        },
+        {
+          "id": "jetbrains",
+          "frame": { "x": 388, "y": 163.66, "w": 434.26, "h": 123.47 },
+          "text": {
+            "value": "JetBrains",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 26.4 },
+              "durationMs": 400,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "jewel",
+          "frame": { "x": 1257, "y": 299.73, "w": 282.98, "h": 123.47 },
+          "text": {
+            "value": "Jewel",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 978, "y": 299, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 41.25 0 C 40.86 0 40.55 0.31 40.55 0.7 L 40.55 40.25 C 40.55 40.42 40.42 40.55 40.25 40.55 L 0.7 40.55 C 0.32 40.55 0 40.86 0 41.25 L 0 58.75 C 0 59.14 0.31 59.45 0.7 59.45 L 40.25 59.45 C 40.42 59.45 40.55 59.58 40.55 59.75 L 40.55 99.3 C 40.55 99.68 40.86 100 41.25 100 L 58.75 100 C 59.14 100 59.45 99.69 59.45 99.3 L 59.45 59.75 C 59.45 59.58 59.58 59.45 59.75 59.45 L 99.3 59.45 C 99.68 59.45 100 59.14 100 58.75 L 100 41.25 C 100 40.86 99.69 40.55 99.3 40.55 L 59.75 40.55 C 59.58 40.55 59.45 40.42 59.45 40.25 L 59.45 0.7 C 59.45 0.32 59.14 0 58.75 0 L 41.25 0 Z M 41.25 0"
+            },
+            "fill": "#E3F272"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "synergy",
+          "frame": { "x": 455, "y": 579.19, "w": 1250.44, "h": 353.01 },
+          "text": {
+            "value": "SYNERGY!",
+            "font": "Hanken Grotesk",
+            "size": 223,
+            "weight": 600,
+            "color": "#E3F272",
+            "lineHeight": 290.57
+          },
+          "builds": [
+            { "kind": "enter", "beat": 4, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "line-6",
+          "frame": { "x": 384, "y": 642, "w": 1152, "h": 164 },
+          "shape": {
+            "geometry": { "path": "M 0 85.35 L 1073.51 0" },
+            "stroke": { "color": "#A74EBF", "width": 70 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 5,
+              "effect": "lineDraw",
+              "direction": "startToEnd",
+              "args": { "includeEndpoints": true },
+              "durationMs": 200,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s13",
+      "title": "Compose for Desktop",
+      "background": "#29223A",
+      "beats": [
+        { "autoAdvanceMs": 0 },
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "compose-for-desktop",
+          "frame": { "x": 385, "y": 253.83, "w": 534.3, "h": 205.44 },
+          "text": {
+            "value": "Compose\nfor Desktop",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8
+          }
+        },
+        {
+          "id": "jetbrains",
+          "frame": { "x": 388, "y": 163.66, "w": 434.26, "h": 123.47 },
+          "text": {
+            "value": "JetBrains",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "jewel",
+          "frame": { "x": 1257, "y": 299.73, "w": 282.98, "h": 123.47 },
+          "text": {
+            "value": "Jewel",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 978, "y": 299, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 41.25 0 C 40.86 0 40.55 0.31 40.55 0.7 L 40.55 40.25 C 40.55 40.42 40.42 40.55 40.25 40.55 L 0.7 40.55 C 0.32 40.55 0 40.86 0 41.25 L 0 58.75 C 0 59.14 0.31 59.45 0.7 59.45 L 40.25 59.45 C 40.42 59.45 40.55 59.58 40.55 59.75 L 40.55 99.3 C 40.55 99.68 40.86 100 41.25 100 L 58.75 100 C 59.14 100 59.45 99.69 59.45 99.3 L 59.45 59.75 C 59.45 59.58 59.58 59.45 59.75 59.45 L 99.3 59.45 C 99.68 59.45 100 59.14 100 58.75 L 100 41.25 C 100 40.86 99.69 40.55 99.3 40.55 L 59.75 40.55 C 59.58 40.55 59.45 40.42 59.45 40.25 L 59.45 0.7 C 59.45 0.32 59.14 0 58.75 0 L 41.25 0 Z M 41.25 0"
+            },
+            "fill": "#E3F272"
+          }
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 456, "y": 642, "w": 999, "h": 128 },
+          "shape": {
+            "geometry": {
+              "path": "M 2.4 124.74 C 1.36 121.64 0.56 118.37 0 114.94 L 25.15 108.74 C 26.03 113.99 27.56 118.56 29.75 122.44 Z M 86.21 117.7 C 86.24 117.2 86.26 116.69 86.26 116.18 C 86.26 111.69 85.01 107.92 82.51 104.86 C 80.01 101.79 76.38 99.03 71.61 96.56 C 66.83 94.09 61.01 91.55 54.14 88.93 C 44.75 85.31 36.77 81.4 30.21 77.2 C 23.66 73.01 18.69 68.07 15.3 62.37 C 11.91 56.68 10.21 49.89 10.21 42.01 C 10.21 33.84 12.22 26.6 16.23 20.29 C 20.25 13.99 25.88 9.03 33.14 5.42 C 40.39 1.81 48.81 0 58.38 0 C 68.61 0 77.68 2.33 85.59 7 C 93.5 11.67 99.84 18.66 104.63 27.97 L 84.12 40.5 C 80.93 34.76 77.11 30.38 72.65 27.36 C 68.19 24.34 63.15 22.84 57.53 22.84 C 53.43 22.84 49.75 23.62 46.49 25.2 C 43.24 26.78 40.67 28.96 38.8 31.76 C 36.93 34.55 35.99 37.79 35.99 41.48 C 35.99 45.34 37.11 48.73 39.34 51.62 C 41.57 54.52 45.03 57.19 49.73 59.63 C 54.43 62.07 60.4 64.66 67.66 67.39 C 77.08 70.93 85.05 74.79 91.56 78.99 C 98.07 83.18 103.08 88.12 106.57 93.82 C 110.06 99.51 111.81 106.44 111.81 114.62 C 111.81 114.93 111.81 115.24 111.8 115.54 Z M 169.79 110.67 L 169.79 98.12 L 115.02 3.21 L 144.46 3.21 L 181.97 72.43 L 220.46 3.21 L 249.72 3.21 L 195.57 98.12 L 195.57 108.5 Z M 267.06 102.49 L 267.06 3.21 L 293.78 3.21 L 350.5 95.48 L 323.87 97.72 L 292.84 46.85 L 292.84 100.33 Z M 362.33 94.49 L 362.33 3.21 L 388.11 3.21 L 388.11 92.32 Z M 419.78 89.66 L 419.78 3.21 L 522.93 3.21 L 522.93 26.27 L 445.55 26.27 L 445.55 67.53 L 517.05 67.53 L 517.05 81.48 Z M 549.16 78.78 L 549.16 3.21 L 598.84 3.21 C 611.21 3.21 621.25 5.02 628.95 8.63 C 636.65 12.24 642.33 17.39 645.99 24.08 C 649.64 30.77 651.47 38.68 651.47 47.81 C 651.47 56.66 649.85 64.26 646.61 70.59 Z M 675.38 68.17 C 676.6 57.16 679.46 47.24 683.96 38.4 C 690.13 26.3 698.74 16.88 709.79 10.12 C 720.83 3.38 733.64 0 748.21 0 C 764.42 0 778.42 4.03 790.22 12.09 C 802.03 20.15 810.52 31.28 815.69 45.49 L 791.52 54.37 C 788.01 44.97 782.55 37.67 775.15 32.45 C 767.75 27.23 758.77 24.62 748.21 24.62 C 738.55 24.62 730.12 26.91 722.92 31.49 C 715.73 36.07 710.19 42.53 706.31 50.87 C 704.19 55.41 702.66 60.44 701.7 65.96 Z M 849.25 53.56 L 820.2 3.21 L 849.63 3.21 L 875.71 51.33 Z M 900.01 49.29 L 925.63 3.21 L 954.89 3.21 L 930.04 46.77 Z M 972.88 43.16 L 971.84 3.21 L 996.5 3.21 L 995.48 41.26 Z M 574.94 70.47 L 596.21 70.47 C 601.8 70.47 606.8 69.8 611.2 68.46 C 615.6 67.12 619.11 64.83 621.75 61.59 C 624.38 58.35 625.69 53.86 625.69 48.13 C 625.69 42.3 624.38 37.81 621.75 34.68 C 619.11 31.54 615.58 29.36 611.13 28.12 C 606.69 26.89 601.71 26.27 596.21 26.27 L 574.94 26.27 Z"
+            },
+            "fill": "#E6F284"
+          },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 269.2 },
+              "delayMs": 200,
+              "durationMs": 600,
+              "curve": {
+                "bezier": [0.7, 0, 0.56, 0.757]
+              }
+            }
+          ]
+        },
+        {
+          "id": "path-6",
+          "frame": { "x": 458, "y": 683, "w": 998, "h": 124 },
+          "shape": {
+            "geometry": {
+              "path": "M 109.4 74.28 C 109.25 82.97 107.03 90.72 102.72 97.53 C 98.26 104.58 92.08 110.12 84.17 114.14 C 76.26 118.17 67.06 120.19 56.56 120.19 C 40.3 120.19 26.98 115.95 16.6 107.48 C 8.76 101.07 3.22 93.07 0 83.48 L 27.35 81.18 C 29.24 84.54 31.63 87.38 34.51 89.7 C 40.71 94.71 48.34 97.22 57.41 97.22 C 62.43 97.22 66.94 96.31 70.92 94.5 C 74.9 92.69 78.06 90.08 80.38 86.67 C 82.43 83.66 83.57 80.25 83.81 76.43 Z M 193.17 67.24 L 193.17 117.38 L 167.39 117.38 L 167.39 69.41 Z M 290.44 59.06 L 290.44 117.38 L 264.66 117.38 L 264.66 61.23 Z M 385.71 51.05 L 385.71 117.38 L 358.64 117.38 L 321.47 56.45 L 348.1 54.22 L 359.93 73.45 L 359.93 53.22 Z M 514.65 40.22 L 514.65 49.32 L 443.15 49.32 L 443.15 94.32 L 520.53 94.32 L 520.53 117.38 L 417.37 117.38 L 417.37 48.39 Z M 644.21 29.33 C 642.39 32.89 640.05 36.05 637.21 38.82 C 632.75 43.15 627.21 46.44 620.59 48.68 L 661.78 117.38 L 632.03 117.38 L 594.29 52.13 C 594.07 52.13 593.85 52.13 593.63 52.13 L 572.54 52.13 L 572.54 117.38 L 546.76 117.38 L 546.76 37.52 Z M 699.29 24.7 C 698.49 29.31 698.09 34.26 698.09 39.55 C 698.09 51.18 700.03 61.2 703.91 69.61 C 707.79 78.03 713.32 84.52 720.52 89.1 C 727.72 93.68 736.15 95.97 745.81 95.97 C 750.8 95.97 755.92 95.27 761.15 93.87 C 766.38 92.48 771.22 90.05 775.65 86.6 C 780.08 83.15 783.65 78.36 786.37 72.22 C 788.27 67.93 789.51 62.84 790.08 56.95 L 751.92 56.95 L 751.92 33.89 L 813.29 33.89 L 813.29 117.38 L 790.54 117.38 L 788.2 99.72 C 785.96 103.19 783.29 106.23 780.19 108.82 C 775.47 112.77 770.03 115.72 763.89 117.67 C 757.75 119.62 751.21 120.59 744.25 120.59 C 730.15 120.59 717.7 117.22 706.89 110.47 C 696.09 103.72 687.62 94.25 681.49 82.08 C 675.37 69.9 672.31 55.73 672.31 39.55 C 672.31 35.19 672.53 30.97 672.98 26.91 Z M 927.64 5.5 L 898.34 56.85 L 898.34 117.38 L 872.56 117.38 L 872.56 56.85 L 846.85 12.29 L 873.3 10.07 L 884.74 31.16 L 897.6 8.03 Z M 993.08 0 L 991.19 70.82 L 972.29 70.82 L 970.48 1.9 Z M 968 117.38 L 995.3 117.38 L 995.3 89.19 L 968 89.19 Z"
+            },
+            "fill": "#E6F284"
+          },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 333.8 },
+              "delayMs": 100,
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.7, 0, 0.56, 0.757]
+              }
+            }
+          ]
+        },
+        {
+          "id": "line-7",
+          "frame": { "x": 384, "y": 642, "w": 1152, "h": 164 },
+          "shape": {
+            "geometry": { "path": "M 0 85.35 L 1073.51 0" },
+            "stroke": { "color": "#A74EBF", "width": 70 }
+          },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "lineDraw",
+              "direction": "startToEnd",
+              "args": { "includeEndpoints": true },
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s14",
+      "title": "Android Studio",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "android-studio",
+          "frame": { "x": 489, "y": 210.95, "w": 373.26, "h": 205.44 },
+          "text": {
+            "value": "Android\nStudio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8,
+            "align": "end"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "right",
+              "args": { "distance": 50.4 },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "intellij-platform",
+          "frame": { "x": 1165, "y": 210.95, "w": 390.34, "h": 205.44 },
+          "text": {
+            "value": "IntelliJ\nPlatform",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 50.4 },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "compose-jetbrains",
+          "frame": { "x": 1156, "y": 661.98, "w": 540.4, "h": 205.44 },
+          "text": {
+            "value": "Compose\n@ JetBrains",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 5,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 50.4 },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "compose-google",
+          "frame": { "x": 428, "y": 661.98, "w": 441.58, "h": 205.44 },
+          "text": {
+            "value": "Compose\n@ Google",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 4,
+              "effect": "fadeMove",
+              "direction": "right",
+              "args": { "distance": 50.4 },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "node",
+          "frame": { "x": 610, "y": 576.31, "w": 92.66, "h": 84.22 },
+          "text": {
+            "value": "🤜",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 610.13, "y": 556.31 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 610.13, "y": 596.31 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 610, "y": 471.31, "w": 92.66, "h": 84.22 },
+          "text": {
+            "value": "🤛",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 610.13, "y": 491.31 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 610.13, "y": 471.31 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-3",
+          "frame": { "x": 1278, "y": 503, "w": 92.66, "h": 84.22 },
+          "text": {
+            "value": "🤛",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 1278.13, "y": 483 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 1278.13, "y": 523 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-4",
+          "frame": { "x": 1278, "y": 398, "w": 92.66, "h": 84.22 },
+          "text": {
+            "value": "🤜",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 1278.13, "y": 418 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 7,
+              "set": {
+                "frame": { "x": 1278.13, "y": 398 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-5",
+          "frame": { "x": 876, "y": 273.51, "w": 110.96, "h": 84.22 },
+          "text": {
+            "value": "🤜",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 3,
+              "set": {
+                "frame": { "x": 894.95, "y": 273.02 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 3,
+              "set": {
+                "frame": { "x": 876.13, "y": 273.02 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-6",
+          "frame": { "x": 977, "y": 273.51, "w": 110.96, "h": 84.22 },
+          "text": {
+            "value": "🤛",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 3,
+              "set": {
+                "frame": { "x": 959.68, "y": 273.02 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 3,
+              "set": {
+                "frame": { "x": 977.13, "y": 273.51 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-7",
+          "frame": { "x": 876, "y": 724.53, "w": 110.96, "h": 84.22 },
+          "text": {
+            "value": "🤜",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 6,
+              "set": {
+                "frame": { "x": 894.95, "y": 725.04 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 6,
+              "set": {
+                "frame": { "x": 876.13, "y": 725.04 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-8",
+          "frame": { "x": 977, "y": 724.53, "w": 110.96, "h": 84.22 },
+          "text": {
+            "value": "🤛",
+            "font": "Noto Emoji",
+            "size": 58,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 67.98
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 6,
+              "set": {
+                "frame": { "x": 959.68, "y": 725.04 }
+              },
+              "durationMs": 400,
+              "curve": "easeIn"
+            },
+            {
+              "kind": "change",
+              "beat": 6,
+              "set": {
+                "frame": { "x": 977.13, "y": 724.53 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-13",
+          "frame": { "x": 830, "y": 256, "w": 260, "h": 103 },
+          "shape": { "geometry": "rect", "fill": "#29223A" },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 3,
+              "effect": "dissolve",
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-14",
+          "frame": { "x": 830, "y": 707, "w": 260, "h": 103 },
+          "shape": { "geometry": "rect", "fill": "#29223A" },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 6,
+              "effect": "dissolve",
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-15",
+          "frame": { "x": 562, "y": 433, "w": 796, "h": 216 },
+          "shape": { "geometry": "rect", "fill": "#29223A" },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 7,
+              "effect": "dissolve",
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "path-16",
+          "frame": { "x": 843, "y": 424, "w": 231, "h": 231 },
+          "shape": { "geometry": "rect", "fill": "#000000", "cornerRadius": 16.9 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 8,
+              "effect": "fromDarkness",
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "path-17",
+          "frame": { "x": 958, "y": 458, "w": 85, "h": 85 },
+          "shape": {
+            "geometry": { "path": "M 0 0 L 81.38 81.38 L 0 81.38 L 0 0 Z M 0 0" },
+            "fill": "#CCCCCC"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 8,
+              "effect": "trace",
+              "direction": "right",
+              "delayMs": 700,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "path-18",
+          "frame": { "x": 877, "y": 540, "w": 84, "h": 84 },
+          "shape": {
+            "geometry": { "path": "M 0 0 L 81.38 81.38 L 81.38 0 L 0 0 Z M 0 0" },
+            "fill": "#CCCCCC"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 8,
+              "effect": "trace",
+              "direction": "right",
+              "delayMs": 800,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "path-19",
+          "frame": { "x": 958, "y": 540, "w": 85, "h": 84 },
+          "shape": {
+            "geometry": { "path": "M 0 81.38 L 81.38 0 L 0 0 L 0 81.38 Z M 0 81.38" },
+            "fill": "#808080"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 8,
+              "effect": "trace",
+              "direction": "left",
+              "delayMs": 600,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "path-20",
+          "frame": { "x": 877, "y": 458, "w": 84, "h": 85 },
+          "shape": {
+            "geometry": { "path": "M 81.38 0 L 0 81.38 L 81.38 81.38 L 81.38 0 Z M 81.38 0" },
+            "fill": "#FFFFFF"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 8,
+              "effect": "trace",
+              "direction": "right",
+              "delayMs": 500,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s15",
+      "title": "SHOW ME",
+      "background": "#313325",
+      "nodes": [
+        {
+          "id": "show-me",
+          "frame": { "x": 606, "y": 409.78, "w": 886.88, "h": 245.37 },
+          "text": {
+            "value": "SHOW ME",
+            "font": "Hanken Grotesk",
+            "size": 155,
+            "weight": 900,
+            "color": "#E3F272",
+            "lineHeight": 201.97
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s16",
+      "title": "Task-based profilers",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "task-based-profilers",
+          "frame": { "x": 56, "y": 935.98, "w": 896.64, "h": 123.47 },
+          "text": {
+            "value": "Task-based profilers",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "moveIn",
+              "direction": "left",
+              "after": "node#b1-1",
+              "delayMs": 100,
+              "durationMs": 1000,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 1826, "y": 935, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 0 0 L 0 21.34 C 3.55 21.58 6.44 21.99 8.72 22.78 C 16.77 25.71 23.13 32.05 26.06 40.09 C 27.22 43.27 27.78 46.62 27.78 50 C 27.78 53.38 27.22 56.73 26.06 59.91 C 23.13 67.95 16.77 74.29 8.72 77.22 C 6.44 78.01 3.55 78.42 0 78.66 L 0 100 L 100 100 L 100 0 L 0 0 Z M 0 0"
+            },
+            "fill": "#29223A"
+          }
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 1797, "y": 956, "w": 60, "h": 60 },
+          "shape": {
+            "geometry": {
+              "path": "M 51.53 11.21 C 62.68 22.42 62.68 40.59 51.53 51.8 C 40.38 63.01 22.3 63.01 11.15 51.8 C 0 40.59 0 22.42 11.15 11.21 C 22.3 0 40.38 0 51.53 11.21 Z M 51.53 11.21"
+            },
+            "fill": "#E3F272"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "pop", "durationMs": 600, "curve": "easeInOut" }
+          ]
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1803, "y": 966.39, "w": 84.12, "h": 49.37 },
+          "text": {
+            "value": "🐨",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "id": "b1-1",
+              "effect": "fromDarkness",
+              "delayMs": 300,
+              "durationMs": 200,
+              "curve": "easeInOut"
+            },
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 1652.05, "y": 966.39 }
+              },
+              "delayMs": 300,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "koala-2",
+          "frame": { "x": 1707, "y": 963.94, "w": 168.3, "h": 53.82 },
+          "text": {
+            "value": "Koala.2",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 42.9 },
+              "after": "node#b1-1",
+              "delayMs": 700,
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "specimen-task-based-profilers",
+          "frame": { "x": 340, "y": 93, "w": 1240, "h": 653 },
+          "specimen": { "ref": "jewel.taskBasedProfilers" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fromDarkness",
+              "after": "task-based-profilers",
+              "delayMs": 500,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s17",
+      "title": "SUCCESS ✨",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "rect-2",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1653, "y": 966.39, "w": 82.9, "h": 49.37 },
+          "text": {
+            "value": "🐨",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "koala-2",
+          "frame": { "x": 1707, "y": 963.94, "w": 168.3, "h": 53.82 },
+          "text": {
+            "value": "Koala.2",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "task-based-profilers",
+          "frame": { "x": 56, "y": 935.98, "w": 896.64, "h": 123.47 },
+          "text": {
+            "value": "Task-based profilers",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "first-testing-grounds",
+          "frame": { "x": 722, "y": 224.75, "w": 409.86, "h": 131.58 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "First testing\ngrounds" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 59.07
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "make-profiling-easier-to-und",
+          "frame": { "x": 1188, "y": 225.94, "w": 630.68, "h": 129.2 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Make profiling easier\nto understand" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 57.88
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "success",
+          "frame": { "x": 964, "y": 554.56, "w": 624.58, "h": 134.55 },
+          "text": {
+            "value": [
+              { "text": "SUCCESS " },
+              { "text": "✨", "font": "Noto Emoji", "weight": 700 }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "weight": 800,
+            "color": "#E3F272",
+            "lineHeight": 110.75
+          },
+          "builds": [
+            { "kind": "enter", "beat": 4, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "path-9",
+          "frame": { "x": 614, "y": -61, "w": 1175, "h": 43 },
+          "shape": {
+            "geometry": { "path": "M 1172.07 0 L 1172.07 40.1 L 0 40.1 L 0 0 Z M 1172.07 0" },
+            "fill": "#000000"
+          }
+        },
+        {
+          "id": "no-compose-bugs-reported",
+          "frame": { "x": 880, "y": 437.9, "w": 808.8, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "No Compose bugs reported" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "specimen-task-based-profilers",
+          "frame": { "x": -375, "y": 162, "w": 977, "h": 515 },
+          "specimen": { "ref": "jewel.taskBasedProfilers" }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s18",
+      "title": "Add Device flow",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "specimen-add-device-dialog",
+          "frame": { "x": 350, "y": -10, "w": 1220, "h": 908 },
+          "specimen": { "ref": "jewel.addDeviceDialog" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fromDarkness",
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "add-device-flow",
+          "frame": { "x": 56, "y": 935.98, "w": 723.4, "h": 123.47 },
+          "text": {
+            "value": "Add Device flow",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 1597, "y": 956, "w": 256.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "moveIn",
+              "direction": "left",
+              "after": "node#b2-1",
+              "delayMs": 100,
+              "durationMs": 1000,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 1826, "y": 935, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 0 0 L 0 21.34 C 3.55 21.58 6.44 21.99 8.72 22.78 C 16.77 25.71 23.13 32.05 26.06 40.09 C 27.22 43.27 27.78 46.62 27.78 50 C 27.78 53.38 27.22 56.73 26.06 59.91 C 23.13 67.95 16.77 74.29 8.72 77.22 C 6.44 78.01 3.55 78.42 0 78.66 L 0 100 L 100 100 L 100 0 L 0 0 Z M 0 0"
+            },
+            "fill": "#29223A"
+          }
+        },
+        {
+          "id": "path-6",
+          "frame": { "x": 1797, "y": 956, "w": 60, "h": 60 },
+          "shape": {
+            "geometry": {
+              "path": "M 51.53 11.21 C 62.68 22.42 62.68 40.59 51.53 51.8 C 40.38 63.01 22.3 63.01 11.15 51.8 C 0 40.59 0 22.42 11.15 11.21 C 22.3 0 40.38 0 51.53 11.21 Z M 51.53 11.21"
+            },
+            "fill": "#E3F272"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "pop", "durationMs": 600, "curve": "easeInOut" }
+          ]
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1806, "y": 966.39, "w": 76.8, "h": 49.37 },
+          "text": {
+            "value": "🐞",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "id": "b2-1",
+              "effect": "fromDarkness",
+              "delayMs": 300,
+              "durationMs": 200,
+              "curve": "easeInOut"
+            },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "frame": { "x": 1615.05, "y": 966.39 }
+              },
+              "delayMs": 300,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "ladybug-2",
+          "frame": { "x": 1671, "y": 963.94, "w": 219.54, "h": 53.82 },
+          "text": {
+            "value": "Ladybug.2",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 42.9 },
+              "after": "node#b2-1",
+              "delayMs": 700,
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s19",
+      "title": "Add Device flow",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "add-device-flow",
+          "frame": { "x": 56, "y": 935.98, "w": 723.4, "h": 123.47 },
+          "text": {
+            "value": "Add Device flow",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 1597, "y": 956, "w": 256.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 1826, "y": 935, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 0 0 L 0 21.34 C 3.55 21.58 6.44 21.99 8.72 22.78 C 16.77 25.71 23.13 32.05 26.06 40.09 C 27.22 43.27 27.78 46.62 27.78 50 C 27.78 53.38 27.22 56.73 26.06 59.91 C 23.13 67.95 16.77 74.29 8.72 77.22 C 6.44 78.01 3.55 78.42 0 78.66 L 0 100 L 100 100 L 100 0 L 0 0 Z M 0 0"
+            },
+            "fill": "#29223A"
+          }
+        },
+        {
+          "id": "path-6",
+          "frame": { "x": 1797, "y": 956, "w": 60, "h": 60 },
+          "shape": {
+            "geometry": {
+              "path": "M 51.53 11.21 C 62.68 22.42 62.68 40.59 51.53 51.8 C 40.38 63.01 22.3 63.01 11.15 51.8 C 0 40.59 0 22.42 11.15 11.21 C 22.3 0 40.38 0 51.53 11.21 Z M 51.53 11.21"
+            },
+            "fill": "#E3F272"
+          }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1616, "y": 966.39, "w": 75.58, "h": 49.37 },
+          "text": {
+            "value": "🐞",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "ladybug-2",
+          "frame": { "x": 1671, "y": 963.94, "w": 219.54, "h": 53.82 },
+          "text": {
+            "value": "Ladybug.2",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "refresh-outdated-design",
+          "frame": { "x": 715, "y": 158.43, "w": 539.18, "h": 131.58 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Refresh outdated\ndesign" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 59.07
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "path-9",
+          "frame": { "x": 614, "y": -61, "w": 1175, "h": 43 },
+          "shape": {
+            "geometry": { "path": "M 1172.07 0 L 1172.07 40.1 L 0 40.1 L 0 0 Z M 1172.07 0" },
+            "fill": "#000000"
+          }
+        },
+        {
+          "id": "optimize-for-common-cases",
+          "frame": { "x": 1319, "y": 158.43, "w": 475.74, "h": 131.58 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Optimize for\ncommon cases" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 59.07
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "first-compose-based-dialog",
+          "frame": { "x": 715, "y": 357.99, "w": 490.38, "h": 131.58 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "First Compose-\nbased dialog" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 59.07,
+            "align": "center"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "table-layout",
+          "frame": { "x": 1320, "y": 357.99, "w": 407.42, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Table layout" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 4, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "specimen-add-device-dialog",
+          "frame": { "x": -345, "y": 59, "w": 969, "h": 721 },
+          "specimen": { "ref": "jewel.addDeviceDialog" }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s20",
+      "title": "AI",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "ai",
+          "frame": { "x": 845.38, "y": 377.25, "w": 310.74, "h": 395.75 },
+          "text": {
+            "value": "AI",
+            "font": "Hanken Grotesk",
+            "size": 250,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 325.75
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s21",
+      "title": "Slide 21",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 834, "y": 414, "w": 252, "h": 252 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s22",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        { "autoAdvanceMs": 0 }
+      ],
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 66.4 },
+              "durationMs": 400,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 275.27, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "moveIn",
+              "direction": "left",
+              "after": "node#b2-1",
+              "delayMs": 100,
+              "durationMs": 1000,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 1826, "y": 935, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 0 0 L 0 21.34 C 3.55 21.58 6.44 21.99 8.72 22.78 C 16.77 25.71 23.13 32.05 26.06 40.09 C 27.22 43.27 27.78 46.62 27.78 50 C 27.78 53.38 27.22 56.73 26.06 59.91 C 23.13 67.95 16.77 74.29 8.72 77.22 C 6.44 78.01 3.55 78.42 0 78.66 L 0 100 L 100 100 L 100 0 L 0 0 Z M 0 0"
+            },
+            "fill": "#29223A"
+          }
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 1797, "y": 956, "w": 60, "h": 60 },
+          "shape": {
+            "geometry": {
+              "path": "M 51.53 11.21 C 62.68 22.42 62.68 40.59 51.53 51.8 C 40.38 63.01 22.3 63.01 11.15 51.8 C 0 40.59 0 22.42 11.15 11.21 C 22.3 0 40.38 0 51.53 11.21 Z M 51.53 11.21"
+            },
+            "fill": "#E3F272"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "pop", "durationMs": 600, "curve": "easeInOut" }
+          ]
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1807, "y": 966.39, "w": 75.58, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "id": "b2-1",
+              "effect": "fromDarkness",
+              "delayMs": 300,
+              "durationMs": 200,
+              "curve": "easeInOut"
+            },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "frame": { "x": 1606.05, "y": 966.39 }
+              },
+              "delayMs": 300,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 42.9 },
+              "after": "node#b2-1",
+              "delayMs": 700,
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "rewriting-chat-in-compose",
+          "frame": { "x": 616, "y": 301.28, "w": 783.18, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Rewriting chat in Compose" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s23",
+      "title": "🥱",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.61, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-7",
+          "frame": { "x": 614, "y": -61, "w": 1175, "h": 43 },
+          "shape": {
+            "geometry": { "path": "M 1172.07 0 L 1172.07 40.1 L 0 40.1 L 0 0 Z M 1172.07 0" },
+            "fill": "#000000"
+          }
+        },
+        {
+          "id": "feature-parity-with-swing",
+          "frame": { "x": 616, "y": 458.15, "w": 749.02, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Feature parity with Swing" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "frame": { "x": 585.27, "y": 458.15 }
+              },
+              "durationMs": 300,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1254, "y": 403.75, "w": 221.98, "h": 217.8 },
+          "text": {
+            "value": "🥱",
+            "font": "Noto Emoji",
+            "size": 150,
+            "weight": 700,
+            "color": "#E3F272",
+            "lineHeight": 175.8
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "rewriting-chat-in-compose",
+          "frame": { "x": 616, "y": 301.28, "w": 783.18, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Rewriting chat in Compose" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s24",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-7",
+          "frame": { "x": 614, "y": -61, "w": 1175, "h": 43 },
+          "shape": {
+            "geometry": { "path": "M 1172.07 0 L 1172.07 40.1 L 0 40.1 L 0 0 Z M 1172.07 0" },
+            "fill": "#000000"
+          }
+        },
+        {
+          "id": "logo-compose-multiplatform",
+          "frame": { "x": 625, "y": 256, "w": 110, "h": 120 },
+          "image": { "src": "compose-multiplatform.svg", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fadeMove",
+              "direction": "right",
+              "args": { "distance": 69 },
+              "durationMs": 300,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            },
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 625.01, "y": 206.14 }
+              },
+              "durationMs": 400,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "take-advantage-of-compose",
+          "frame": { "x": 798, "y": 244.26, "w": 628.24, "h": 153.04 },
+          "text": {
+            "value": "TAKE ADVANTAGE\nOF COMPOSE!",
+            "font": "Hanken Grotesk",
+            "size": 58,
+            "weight": 800,
+            "color": "#E3F272",
+            "lineHeight": 68.4
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 797.67, "y": 204.71 }
+              },
+              "delayMs": 100,
+              "durationMs": 350,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "manage-complexity",
+          "frame": { "x": 800, "y": 462.75, "w": 596.52, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Manage complexity" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "increase-polish",
+          "frame": { "x": 800, "y": 560.51, "w": 478.18, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Increase polish" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s25",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "specimen-gemini-auth-card",
+          "frame": { "x": 529, "y": 161, "w": 862, "h": 518 },
+          "specimen": { "ref": "jewel.geminiAuthCard" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s26",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "specimen-gemini-auth-card",
+          "frame": { "x": 1374, "y": 14, "w": 504, "h": 302 },
+          "specimen": { "ref": "jewel.geminiAuthCard" }
+        },
+        {
+          "id": "specimen-gemini-prompt-input",
+          "frame": { "x": 648, "y": 224, "w": 624, "h": 392 },
+          "specimen": { "ref": "jewel.geminiPromptInput" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s27",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "specimen-gemini-prompt-input",
+          "frame": { "x": 1187, "y": 434, "w": 623, "h": 392 },
+          "specimen": { "ref": "jewel.geminiPromptInput" }
+        },
+        {
+          "id": "specimen-gemini-auth-card",
+          "frame": { "x": 1374, "y": 14, "w": 504, "h": 302 },
+          "specimen": { "ref": "jewel.geminiAuthCard" }
+        },
+        {
+          "id": "specimen-gemini-streaming-chat",
+          "frame": { "x": 419, "y": 25, "w": 623, "h": 790 },
+          "specimen": { "ref": "jewel.geminiStreamingChat" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s28",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "specimen-gemini-prompt-input",
+          "frame": { "x": 1187, "y": 434, "w": 623, "h": 392 },
+          "specimen": { "ref": "jewel.geminiPromptInput" }
+        },
+        {
+          "id": "specimen-gemini-auth-card",
+          "frame": { "x": 1374, "y": 14, "w": 504, "h": 302 },
+          "specimen": { "ref": "jewel.geminiAuthCard" }
+        },
+        {
+          "id": "specimen-gemini-streaming-chat",
+          "frame": { "x": 16, "y": 25, "w": 623, "h": 790 },
+          "specimen": { "ref": "jewel.geminiStreamingChat" }
+        },
+        {
+          "id": "specimen-gemini-chat-composer",
+          "frame": { "x": 679, "y": 139, "w": 656, "h": 247 },
+          "specimen": { "ref": "jewel.geminiChatComposer" }
+        },
+        {
+          "id": "specimen-references-bouncy-expand",
+          "frame": { "x": 680, "y": 462, "w": 466, "h": 371 },
+          "opacity": 0,
+          "specimen": { "ref": "jewel.referencesBouncyExpand" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s29",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "specimen-gemini-prompt-input",
+          "frame": { "x": 1187, "y": 434, "w": 623, "h": 392 },
+          "specimen": { "ref": "jewel.geminiPromptInput" }
+        },
+        {
+          "id": "specimen-gemini-auth-card",
+          "frame": { "x": 1374, "y": 14, "w": 504, "h": 302 },
+          "specimen": { "ref": "jewel.geminiAuthCard" }
+        },
+        {
+          "id": "specimen-gemini-chat-composer",
+          "frame": { "x": 679, "y": 139, "w": 656, "h": 247 },
+          "specimen": { "ref": "jewel.geminiChatComposer" }
+        },
+        {
+          "id": "specimen-references-bouncy-expand",
+          "frame": { "x": 680, "y": 422, "w": 466, "h": 371 },
+          "specimen": { "ref": "jewel.referencesBouncyExpand" }
+        },
+        {
+          "id": "specimen-gemini-streaming-chat",
+          "frame": { "x": 16, "y": 25, "w": 623, "h": 790 },
+          "specimen": { "ref": "jewel.geminiStreamingChat" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s30",
+      "title": "Gemini in Android Studio",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "logo-gemini-lockup",
+          "frame": { "x": 51, "y": 937, "w": 99, "h": 99 },
+          "image": { "src": "gemini-lockup.svg", "fit": "contain" }
+        },
+        {
+          "id": "gemini-in-android-studio",
+          "frame": { "x": 172, "y": 935.98, "w": 1086.96, "h": 123.47 },
+          "text": {
+            "value": "Gemini in Android Studio",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1579, "y": 956, "w": 274.59, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "text": {
+            "value": "🔜",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "meerkat-1",
+          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "text": {
+            "value": "Meerkat.1",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "specimen-gemini-prompt-input",
+          "frame": { "x": 1217, "y": 454, "w": 623, "h": 392 },
+          "opacity": 0.25,
+          "specimen": { "ref": "jewel.geminiPromptInput" }
+        },
+        {
+          "id": "specimen-gemini-auth-card",
+          "frame": { "x": 1394, "y": -6, "w": 504, "h": 302 },
+          "opacity": 0.25,
+          "specimen": { "ref": "jewel.geminiAuthCard" }
+        },
+        {
+          "id": "specimen-references-bouncy-expand",
+          "frame": { "x": 680, "y": 491, "w": 466, "h": 371 },
+          "opacity": 0.25,
+          "specimen": { "ref": "jewel.referencesBouncyExpand" }
+        },
+        {
+          "id": "specimen-gemini-chat-composer",
+          "frame": { "x": 679, "y": 31, "w": 656, "h": 248 },
+          "opacity": 0.25,
+          "specimen": { "ref": "jewel.geminiChatComposer" }
+        },
+        {
+          "id": "specimen-gemini-streaming-chat",
+          "frame": { "x": -19, "y": 25, "w": 623, "h": 790 },
+          "opacity": 0.25,
+          "specimen": { "ref": "jewel.geminiStreamingChat" }
+        },
+        {
+          "id": "specimen-gemini-tool-window-full",
+          "frame": { "x": 678, "y": 35, "w": 564, "h": 857 },
+          "specimen": { "ref": "jewel.geminiToolWindowFull" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "fromDarkness",
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s31",
+      "title": "PREVIEW",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "markdown",
+          "frame": { "x": 352, "y": 272.58, "w": 1520.06, "h": 340.34 },
+          "text": {
+            "value": "MARKDOWN",
+            "font": "Hanken Grotesk",
+            "size": 215,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 280.14
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" },
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 351.73, "y": 252.86 }
+              },
+              "after": "preview#b1-1",
+              "durationMs": 700,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "preview",
+          "frame": { "x": 353, "y": 420.29, "w": 1518.84, "h": 470.15 },
+          "text": {
+            "value": "PREVIEW",
+            "font": "Hanken Grotesk",
+            "size": 297,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 386.99
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "id": "b1-1", "effect": "appear", "delayMs": 400 },
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 352.51, "y": 440.01 }
+              },
+              "delayMs": 100,
+              "durationMs": 700,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "line-3",
+          "frame": { "x": 353, "y": 490, "w": 1219, "h": 19 },
+          "shape": {
+            "geometry": "line",
+            "stroke": { "color": "#C7B3F1", "width": 16 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "lineDraw",
+              "direction": "fromCenter",
+              "args": { "includeEndpoints": true },
+              "after": "preview#b1-1",
+              "delayMs": 400,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "specimen-confetti-left",
+          "frame": { "x": -40, "y": 590, "w": 512, "h": 512 },
+          "specimen": { "ref": "jewel.confettiPartyPopper" },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "specimen-confetti-right",
+          "frame": { "x": 1451, "y": 590, "w": 512, "h": 512 },
+          "specimen": {
+            "ref": "jewel.confettiPartyPopper",
+            "params": { "mirrored": true }
+          },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "325",
+          "frame": { "x": 1396, "y": 195, "w": 185, "h": 85 },
+          "stack": {
+            "children": [
+              {
+                "id": "325-bg-1",
+                "frame": { "x": 3.16, "y": 15.75, "w": 132.82, "h": 65.79 },
+                "shape": { "geometry": "rect", "fill": "#FFFFFF", "cornerRadius": 32.9 }
+              },
+              {
+                "id": "325-bg-2",
+                "frame": { "x": 3.16, "y": 15.75, "w": 132.82, "h": 65.79 },
+                "shape": {
+                  "geometry": "rect",
+                  "stroke": { "color": "#DADCE0", "width": 3 },
+                  "cornerRadius": 32.9
+                }
+              },
+              {
+                "id": "325-bg-3",
+                "frame": { "x": 21.93, "y": 31.78, "w": 38.54, "h": 33.72 },
+                "shape": {
+                  "geometry": {
+                    "path": "M 14.45 4.82 L 9.63 4.82 L 9.63 14.45 L 0 14.45 L 0 19.27 L 9.63 19.27 L 9.63 28.9 L 14.45 28.9 L 14.45 19.27 L 24.09 19.27 L 24.09 14.45 L 14.45 14.45 Z M 31.31 33.72 L 38.54 33.72 L 38.54 0 L 26.49 0 L 26.49 7.23 L 31.31 7.23 Z"
+                  },
+                  "fill": "#1B73E8"
+                }
+              },
+              {
+                "id": "325-bg-4",
+                "frame": { "x": 76.84, "y": 3.54, "w": 104.84, "h": 64.79 },
+                "shape": { "geometry": "rect", "fill": "#178038", "cornerRadius": 32.4 }
+              },
+              {
+                "id": "325-bg-5",
+                "frame": { "x": 76.84, "y": 3.54, "w": 104.84, "h": 64.79 },
+                "shape": {
+                  "geometry": "rect",
+                  "stroke": { "color": "#FFFFFF", "width": 4 },
+                  "cornerRadius": 32.4
+                }
+              },
+              {
+                "id": "325-label",
+                "frame": { "x": 96.06, "y": 13.4, "w": 100.27, "h": 71.6 },
+                "text": {
+                  "value": "325",
+                  "font": "Roboto",
+                  "size": 38,
+                  "weight": 700,
+                  "color": "#FFFFFF",
+                  "lineHeight": 44.54
+                }
+              }
+            ]
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "pop", "durationMs": 500, "curve": "easeInOut" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s32",
+      "title": "Markdown preview",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "markdown-preview",
+          "frame": { "x": 61, "y": 935.98, "w": 842.96, "h": 123.47 },
+          "text": {
+            "value": "Markdown preview",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "path-2",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "moveIn",
+              "direction": "left",
+              "after": "node#b2-1",
+              "delayMs": 100,
+              "durationMs": 1000,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1826, "y": 935, "w": 103, "h": 103 },
+          "shape": {
+            "geometry": {
+              "path": "M 0 0 L 0 21.34 C 3.55 21.58 6.44 21.99 8.72 22.78 C 16.77 25.71 23.13 32.05 26.06 40.09 C 27.22 43.27 27.78 46.62 27.78 50 C 27.78 53.38 27.22 56.73 26.06 59.91 C 23.13 67.95 16.77 74.29 8.72 77.22 C 6.44 78.01 3.55 78.42 0 78.66 L 0 100 L 100 100 L 100 0 L 0 0 Z M 0 0"
+            },
+            "fill": "#29223A"
+          }
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 1797, "y": 956, "w": 60, "h": 60 },
+          "shape": {
+            "geometry": {
+              "path": "M 51.53 11.21 C 62.68 22.42 62.68 40.59 51.53 51.8 C 40.38 63.01 22.3 63.01 11.15 51.8 C 0 40.59 0 22.42 11.15 11.21 C 22.3 0 40.38 0 51.53 11.21 Z M 51.53 11.21"
+            },
+            "fill": "#E3F272"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "pop",
+              "after": "no-we-don-t-have-an-eta",
+              "durationMs": 600,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1810, "y": 966.39, "w": 67.04, "h": 49.37 },
+          "text": {
+            "value": "🔮",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "id": "b2-1",
+              "effect": "fromDarkness",
+              "after": "no-we-don-t-have-an-eta",
+              "delayMs": 300,
+              "durationMs": 200,
+              "curve": "easeInOut"
+            },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "frame": { "x": 1659.05, "y": 966.39 }
+              },
+              "delayMs": 300,
+              "durationMs": 800,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "text": {
+            "value": "??????",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 42.9 },
+              "after": "node#b2-1",
+              "delayMs": 700,
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "working-with-jetbrains",
+          "frame": { "x": 819, "y": 227.81, "w": 373.26, "h": 126.84 },
+          "text": {
+            "value": "Working with\nJetBrains!",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 56.7,
+            "align": "center"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "no-we-don-t-have-an-eta",
+          "frame": { "x": 812, "y": 388.71, "w": 390.34, "h": 126.84 },
+          "text": {
+            "value": [
+              { "text": "…no, we " },
+              { "text": "don’t\n", "weight": 700 },
+              { "text": "have an ETA" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 56.7
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "rect-9",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "we-re-very-excited",
+          "frame": { "x": 753, "y": 549.6, "w": 530.64, "h": 75.98 },
+          "text": {
+            "value": "We’re very excited!",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s33",
+      "title": "JCEF",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "markdown-preview",
+          "frame": { "x": 61, "y": 935.98, "w": 842.96, "h": 123.47 },
+          "text": {
+            "value": "Markdown preview",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "why-only-now",
+          "frame": { "x": 795, "y": 410.93, "w": 428.16, "h": 75.98 },
+          "text": {
+            "value": "Why only now?",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 795.3, "y": 360.45 }
+              },
+              "durationMs": 200,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "jcef",
+          "frame": { "x": 668, "y": 377.25, "w": 741.7, "h": 395.75 },
+          "text": {
+            "value": "JCEF",
+            "font": "Hanken Grotesk",
+            "size": 250,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 325.75
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "path-5",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "text": {
+            "value": "🔮",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "text": {
+            "value": "??????",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s34",
+      "title": "Markdown preview",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {},
+        {},
+        { "autoAdvanceMs": 0 }
+      ],
+      "nodes": [
+        {
+          "id": "markdown-preview",
+          "frame": { "x": 61, "y": 935.98, "w": 842.96, "h": 123.47 },
+          "text": {
+            "value": "Markdown preview",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "text": {
+            "value": "🔮",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "text": {
+            "value": "??????",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "rect-6",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "basic-markdown-rendering",
+          "frame": { "x": 373, "y": 322.65, "w": 812.46, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✅", "font": "Noto Emoji", "weight": 700, "color": "#E3F272" },
+              { "text": " Basic Markdown rendering" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "actual-markdown-preview",
+          "frame": { "x": 382, "y": 454.76, "w": 786.84, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "⏳", "font": "Noto Emoji", "weight": 700, "color": "#E3F272" },
+              { "text": " Actual Markdown preview" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 3, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "gemini-uses-this",
+          "frame": { "x": 1202, "y": 322.65, "w": 451.34, "h": 75.98 },
+          "text": {
+            "value": "Gemini uses this",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "italic": true,
+            "color": "#A74EBF",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fadeMove",
+              "direction": "left",
+              "args": { "distance": 48.2 },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "line-10",
+          "frame": { "x": 1050, "y": 350, "w": 117, "h": 8 },
+          "shape": {
+            "geometry": "line",
+            "stroke": {
+              "color": "#A74EBF",
+              "width": 5,
+              "dash": [5, 5]
+            }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "lineDraw",
+              "direction": "endToStart",
+              "args": { "includeEndpoints": true },
+              "delayMs": 200,
+              "durationMs": 700,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "tables-images-and-more",
+          "frame": { "x": 518, "y": 514.94, "w": 745.36, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Tables, images, and more" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 4, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 200, "curve": "easeOut" }
+    },
+    {
+      "id": "s35",
+      "title": "Markdown preview",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "markdown-preview",
+          "frame": { "x": 61, "y": 935.98, "w": 842.96, "h": 123.47 },
+          "text": {
+            "value": "Markdown preview",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-3",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "text": {
+            "value": "🔮",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "text": {
+            "value": "??????",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        },
+        {
+          "id": "basic-markdown-rendering",
+          "frame": { "x": 373, "y": 282.65, "w": 812.46, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✅", "font": "Noto Emoji", "weight": 700, "color": "#E3F272" },
+              { "text": " Basic Markdown rendering" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          }
+        },
+        {
+          "id": "actual-markdown-preview",
+          "frame": { "x": 382, "y": 414.76, "w": 786.84, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "⏳", "font": "Noto Emoji", "weight": 700, "color": "#E3F272" },
+              { "text": " Actual Markdown preview" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          }
+        },
+        {
+          "id": "gemini-uses-this",
+          "frame": { "x": 1202, "y": 282.65, "w": 451.34, "h": 75.98 },
+          "text": {
+            "value": "Gemini uses this",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "italic": true,
+            "color": "#A74EBF",
+            "lineHeight": 62.54
+          }
+        },
+        {
+          "id": "line-10",
+          "frame": { "x": 1050, "y": 310, "w": 117, "h": 8 },
+          "shape": {
+            "geometry": "line",
+            "stroke": {
+              "color": "#A74EBF",
+              "width": 5,
+              "dash": [5, 5]
+            }
+          }
+        },
+        {
+          "id": "tables-images-and-more",
+          "frame": { "x": 518, "y": 514.94, "w": 745.36, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Tables, images, and more" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          }
+        },
+        {
+          "id": "scroll-syncing",
+          "frame": { "x": 518, "y": 586.99, "w": 448.9, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Scroll syncing" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "actually-putting-it-in-the-i",
+          "frame": { "x": 518, "y": 659.03, "w": 810.02, "h": 75.98 },
+          "text": {
+            "value": [
+              { "text": "✦ ", "font": "Inter", "size": 38.4, "color": "#E3F272" },
+              { "text": "Actually putting it in the IDE" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C6B2F0",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            { "kind": "enter", "beat": 2, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s36",
+      "title": "Markdown preview",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-markdown-standalone",
+          "frame": { "x": 329, "y": -17, "w": 1262, "h": 974 },
+          "interactive": "keyboard",
+          "specimen": { "ref": "jewel.markdownStandaloneSample" }
+        },
+        {
+          "id": "markdown-preview",
+          "frame": { "x": 61, "y": 935.98, "w": 842.96, "h": 123.47 },
+          "text": {
+            "value": "Markdown preview",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": -62, "y": -2, "w": 43, "h": 843 },
+          "shape": { "geometry": "rect", "fill": "#000000" }
+        },
+        {
+          "id": "path-4",
+          "frame": { "x": 1622, "y": 956, "w": 231.48, "h": 57.4 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 28.7 }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "text": {
+            "value": "🔮",
+            "font": "Noto Emoji",
+            "size": 34,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 39.85
+          }
+        },
+        {
+          "id": "node-2",
+          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "text": {
+            "value": "??????",
+            "font": "Hanken Grotesk",
+            "size": 34,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 44.3
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s37",
+      "title": "WHAT NEXT",
+      "background": "#313325",
+      "nodes": [
+        {
+          "id": "what-next",
+          "frame": { "x": 531, "y": 409.78, "w": 1074.76, "h": 245.37 },
+          "text": {
+            "value": "WHAT NEXT",
+            "font": "Hanken Grotesk",
+            "size": 155,
+            "weight": 900,
+            "color": "#E3F272",
+            "lineHeight": 201.97
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s38",
+      "title": "Compose",
+      "background": "#29223A",
+      "beats": [
+        { "autoAdvanceMs": 500 }
+      ],
+      "nodes": [
+        {
+          "id": "compose",
+          "frame": { "x": 598, "y": 464.32, "w": 608.72, "h": 183.63 },
+          "text": {
+            "value": "Compose",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        },
+        {
+          "id": "first",
+          "frame": { "x": 1110, "y": 465.32, "w": 287.86, "h": 183.63 },
+          "text": {
+            "value": "First",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeOut" }
+    },
+    {
+      "id": "s39",
+      "title": "C",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "compose",
+          "frame": { "x": 598, "y": 464.32, "w": 608.72, "h": 183.63 },
+          "text": {
+            "value": "Compose",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          }
+        },
+        {
+          "id": "first",
+          "frame": { "x": 1110, "y": 465.32, "w": 287.86, "h": 183.63 },
+          "text": {
+            "value": "First",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "weight": 600,
+            "color": "#A74EBF",
+            "lineHeight": 151.15
+          }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s40",
+      "title": "NEW FEATURES",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "compose",
+          "frame": { "x": 715, "y": 190.71, "w": 419.62, "h": 123.47 },
+          "text": {
+            "value": "Compose",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C6B2F0",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "first",
+          "frame": { "x": 1061, "y": 190.71, "w": 208.56, "h": 123.47 },
+          "text": {
+            "value": "First",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#A74EBF",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "new-features",
+          "frame": { "x": 420, "y": 439.5, "w": 1350.48, "h": 245.37 },
+          "text": {
+            "value": "NEW FEATURES",
+            "font": "Hanken Grotesk",
+            "size": 155,
+            "weight": 900,
+            "color": "#C6B2F0",
+            "lineHeight": 201.97
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s41",
+      "title": "NEW FEATURES",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "compose",
+          "frame": { "x": 715, "y": 190.71, "w": 419.62, "h": 123.47 },
+          "text": {
+            "value": "Compose",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C6B2F0",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "first",
+          "frame": { "x": 1061, "y": 190.71, "w": 208.56, "h": 123.47 },
+          "text": {
+            "value": "First",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#A74EBF",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "new-features",
+          "frame": { "x": 420, "y": 349.5, "w": 1350.48, "h": 245.37 },
+          "text": {
+            "value": "NEW FEATURES",
+            "font": "Hanken Grotesk",
+            "size": 155,
+            "weight": 900,
+            "color": "#C6B2F0",
+            "lineHeight": 201.97
+          }
+        },
+        {
+          "id": "though-we-may-replace-old-ui",
+          "frame": { "x": 299, "y": 540.78, "w": 1621, "h": 119.84 },
+          "text": {
+            "value": "…though we may replace old UI if needed",
+            "font": "Hanken Grotesk",
+            "size": 75.7,
+            "color": "#C6B2F0",
+            "lineHeight": 98.64
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "keyboard",
+              "args": { "caret": true, "charsPerSec": 26, "seed": 7774 },
+              "durationMs": 1500
+            }
+          ]
+        }
+      ],
+      "transition": {
+        "type": "wipe",
+        "direction": "right",
+        "durationMs": 1500,
+        "curve": "easeInOut"
+      }
+    },
+    {
+      "id": "s42",
+      "title": "Interop",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "interop",
+          "frame": { "x": 788, "y": 464.32, "w": 451.34, "h": 183.63 },
+          "text": {
+            "value": "Interop",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "blur",
+              "delayMs": 500,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s43",
+      "title": "Interop",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "interop",
+          "frame": { "x": 1535, "y": 489.83, "w": 315.92, "h": 123.47 },
+          "text": {
+            "value": "Interop",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C6B2F0",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "specimen-swing-compose-interop",
+          "frame": { "x": 133, "y": 69, "w": 1284, "h": 942 },
+          "specimen": { "ref": "jewel.swingComposeInterop" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s44",
+      "title": "Easier to learn",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "easier-to-learn",
+          "frame": { "x": 606, "y": 464.32, "w": 892.98, "h": 183.63 },
+          "text": {
+            "value": "Easier to learn",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "blur",
+              "delayMs": 500,
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 300, "curve": "easeInOut" }
+    },
+    {
+      "id": "s45",
+      "title": "WEEKS DAYS",
+      "background": "#29223A",
+      "beats": [
+        { "autoAdvanceMs": 1000 }
+      ],
+      "nodes": [
+        {
+          "id": "weeks-days",
+          "frame": { "x": 546.65, "y": 437.39, "w": 1137.41, "h": 724 },
+          "text": {
+            "value": "WEEKS\nDAYS",
+            "font": "Hanken Grotesk",
+            "size": 250,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 234.09,
+            "align": "center"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": 529, "y": 223, "w": 948, "h": 289 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": 535, "y": 692, "w": 948, "h": 289 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "easier-to-learn",
+          "frame": { "x": 606, "y": 303.25, "w": 892.98, "h": 183.63 },
+          "text": {
+            "value": "Easier to learn",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 300, "curve": "easeInOut" }
+    },
+    {
+      "id": "s46",
+      "title": "WEEKS DAYS",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "weeks-days",
+          "frame": { "x": 546.65, "y": 203.39, "w": 1137.41, "h": 724 },
+          "text": {
+            "value": "WEEKS\nDAYS",
+            "font": "Hanken Grotesk",
+            "size": 250,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 234.09,
+            "align": "center"
+          },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "fromDarkness",
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": 529, "y": 223, "w": 948, "h": 289 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "rect-3",
+          "frame": { "x": 535, "y": 692, "w": 948, "h": 289 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "easier-to-learn",
+          "frame": { "x": 606, "y": 303.25, "w": 892.98, "h": 183.63 },
+          "text": {
+            "value": "Easier to learn",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "fromDarkness",
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s47",
+      "title": "What is our approach?",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "what-is-our-approach",
+          "frame": { "x": 395, "y": 464.32, "w": 1401.72, "h": 183.63 },
+          "text": {
+            "value": "What is our approach?",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "keyboard",
+              "args": { "caret": true, "charsPerSec": 21, "seed": 8322 },
+              "delayMs": 500,
+              "durationMs": 1000
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 750, "curve": "easeInOut" }
+    },
+    {
+      "id": "s48",
+      "title": "🖱️",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "node",
+          "frame": { "x": 880, "y": 313.7, "w": 302.5, "h": 326.7 },
+          "text": {
+            "value": "🖱️",
+            "font": "Noto Emoji",
+            "size": 225,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 263.7
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        },
+        {
+          "id": "interactions",
+          "frame": { "x": 740, "y": 655.81, "w": 567.24, "h": 134.55 },
+          "text": {
+            "value": "Interactions",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C7B3F1",
+            "lineHeight": 110.75
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 },
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "keyboard",
+              "args": { "caret": true, "charsPerSec": 24, "seed": 8006 },
+              "durationMs": 500
+            }
+          ]
+        },
+        {
+          "id": "microinteractions",
+          "frame": { "x": 633, "y": 655.81, "w": 828.32, "h": 134.55 },
+          "text": {
+            "value": "Microinteractions",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C7B3F1",
+            "lineHeight": 110.75
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "keyboard",
+              "args": { "caret": true, "charsPerSec": 34, "seed": 6688 },
+              "after": "interactions",
+              "durationMs": 500
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s49",
+      "title": "🖱️",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "node",
+          "frame": { "x": 603, "y": 805.73, "w": 170.74, "h": 166.98 },
+          "text": {
+            "value": "🖱️",
+            "font": "Noto Emoji",
+            "size": 115,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 134.78
+          }
+        },
+        {
+          "id": "microinteractions",
+          "frame": { "x": 743, "y": 822.4, "w": 763.66, "h": 123.47 },
+          "text": {
+            "value": "Microinteractions",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "specimen-microinteraction-scroll-fab",
+          "frame": { "x": 501, "y": 173, "w": 918, "h": 494 },
+          "specimen": { "ref": "jewel.microinteractionScrollFab" }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s50",
+      "title": "🖱️",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-microinteraction-enabled-button",
+          "frame": { "x": 686, "y": 79, "w": 548, "h": 681 },
+          "specimen": { "ref": "jewel.microinteractionEnabledButton" }
+        },
+        {
+          "id": "node",
+          "frame": { "x": 603, "y": 805.73, "w": 170.74, "h": 166.98 },
+          "text": {
+            "value": "🖱️",
+            "font": "Noto Emoji",
+            "size": 115,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 134.78
+          }
+        },
+        {
+          "id": "microinteractions",
+          "frame": { "x": 743, "y": 822.4, "w": 763.66, "h": 123.47 },
+          "text": {
+            "value": "Microinteractions",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "specimen-microinteraction-scroll-fab",
+          "frame": { "x": -472, "y": 173, "w": 917, "h": 494 },
+          "opacity": 0.5,
+          "specimen": { "ref": "jewel.microinteractionScrollFab" }
+        }
+      ],
+      "transition": {
+        "type": "push",
+        "direction": "left",
+        "durationMs": 750,
+        "curve": {
+          "bezier": [0.497, 0, 0.498, 0.996]
+        }
+      }
+    },
+    {
+      "id": "s51",
+      "title": "📐",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "node",
+          "frame": { "x": 841, "y": 313.7, "w": 318.36, "h": 326.7 },
+          "text": {
+            "value": "📐",
+            "font": "Noto Emoji",
+            "size": 225,
+            "weight": 700,
+            "color": "#C7B3F1",
+            "lineHeight": 263.7
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        },
+        {
+          "id": "adaptive-layout",
+          "frame": { "x": 662, "y": 655.81, "w": 753.9, "h": 134.55 },
+          "text": {
+            "value": "Adaptive layout",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C7B3F1",
+            "lineHeight": 110.75
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "keyboard",
+              "args": { "caret": true, "charsPerSec": 30, "seed": 7409 },
+              "after": "layout",
+              "durationMs": 500
+            }
+          ]
+        },
+        {
+          "id": "layout",
+          "frame": { "x": 838, "y": 655.81, "w": 331.78, "h": 134.55 },
+          "text": {
+            "value": "Layout",
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C7B3F1",
+            "lineHeight": 110.75
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 },
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "keyboard",
+              "args": { "caret": true, "charsPerSec": 12, "seed": 8106 },
+              "durationMs": 500
+            }
+          ]
+        }
+      ],
+      "transition": { "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s52",
+      "title": "jewel.adaptiveDemoWizard",
+      "background": "#252134",
+      "nodes": [
+        {
+          "id": "specimen-adaptive-demo-wizard",
+          "frame": { "x": 169, "y": -14, "w": 1560, "h": 1080 },
+          "specimen": { "ref": "jewel.adaptiveDemoWizard" }
+        }
+      ],
+      "transition": {
+        "type": "push",
+        "direction": "left",
+        "durationMs": 750,
+        "curve": {
+          "bezier": [0.497, 0, 0.498, 0.996]
+        }
+      }
+    },
+    {
+      "id": "s53",
+      "title": "jewel.adaptiveWireframePanes",
+      "background": "#262138",
+      "nodes": [
+        {
+          "id": "specimen-adaptive-wireframe-panes",
+          "frame": { "x": 162, "y": 106, "w": 1596, "h": 868 },
+          "specimen": {
+            "ref": "jewel.adaptiveWireframePanes",
+            "params": { "widthFraction": 0.72 }
+          }
+        }
+      ],
+      "transition": {
+        "type": "push",
+        "direction": "left",
+        "durationMs": 700,
+        "curve": {
+          "bezier": [0.497, 0, 0.498, 0.996]
+        }
+      }
+    },
+    {
+      "id": "s54",
+      "title": "🎢 Motion",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "motion",
+          "frame": { "x": 817.18, "y": 437.5, "w": 458.44, "h": 548 },
+          "text": {
+            "value": [
+              { "text": "🎢\n", "font": "Noto Emoji", "size": 225, "weight": 700 },
+              { "text": "Motion" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C7B3F1",
+            "lineHeight": 100.3
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        }
+      ],
+      "transition": { "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s55",
+      "title": "jewel.m3ExpressiveShowcase",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-m3-expressive-showcase",
+          "frame": { "x": -4, "y": -2, "w": 1928, "h": 1084 },
+          "specimen": { "ref": "jewel.m3ExpressiveShowcase" }
+        }
+      ],
+      "transition": {
+        "type": "reveal",
+        "direction": "up",
+        "durationMs": 500,
+        "curve": {
+          "bezier": [0.375, 0, 0.475, 0.088]
+        }
+      }
+    },
+    {
+      "id": "s56",
+      "title": "Material",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-spring-token-tree",
+          "frame": { "x": 601.98, "y": -1.87, "w": 1322.39, "h": 1083.73 },
+          "specimen": { "ref": "jewel.springTokenTree" }
+        },
+        {
+          "id": "material",
+          "frame": { "x": 89.53, "y": 210.47, "w": 364.2, "h": 123.47 },
+          "text": {
+            "value": "Material ",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C6B2F0",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "expressive",
+          "frame": { "x": 89.53, "y": 292.07, "w": 468.02, "h": 123.47 },
+          "text": {
+            "value": "Expressive ",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C6B2F0",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "motion",
+          "frame": { "x": 89.53, "y": 373.67, "w": 313.58, "h": 123.47 },
+          "text": {
+            "value": "Motion",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "color": "#C6B2F0",
+            "lineHeight": 101.63
+          }
+        }
+      ],
+      "transition": {
+        "type": "push",
+        "direction": "left",
+        "durationMs": 700,
+        "curve": {
+          "bezier": [0.497, 0, 0.498, 0.996]
+        }
+      }
+    },
+    {
+      "id": "s57",
+      "title": "jewel.geminiLoadingChoreography",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-gemini-loading-choreography",
+          "frame": { "x": 237, "y": 65, "w": 548, "h": 950 },
+          "specimen": { "ref": "jewel.geminiLoadingChoreography" }
+        },
+        {
+          "id": "specimen-references-bouncy-spring-v2",
+          "frame": { "x": 847, "y": 241, "w": 843, "h": 598 },
+          "specimen": { "ref": "jewel.referencesBouncySpringV2" }
+        }
+      ],
+      "transition": {
+        "type": "push",
+        "direction": "left",
+        "durationMs": 700,
+        "curve": {
+          "bezier": [0.497, 0, 0.498, 0.996]
+        }
+      }
+    },
+    {
+      "id": "s58",
+      "title": "🧩 Cohesion",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "cohesion",
+          "frame": { "x": 781.51, "y": 439.09, "w": 501.96, "h": 544 },
+          "text": {
+            "value": [
+              { "text": "🧩\n", "font": "Noto Emoji", "size": 225, "weight": 700 },
+              { "text": "Cohesion" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 85,
+            "color": "#C7B3F1",
+            "lineHeight": 100.3
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 }
+          ]
+        }
+      ],
+      "transition": { "durationMs": 700, "curve": "easeInOut" }
+    },
+    {
+      "id": "s59",
+      "title": "jewel.cohesionIdeShowcase",
+      "background": "#29223A",
+      "beats": [
+        {},
+        { "autoAdvanceMs": 500 }
+      ],
+      "nodes": [
+        {
+          "id": "specimen-cohesion-emulator",
+          "frame": { "x": 302, "y": 138, "w": 1316, "h": 808 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "emulator" }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "dissolve",
+              "durationMs": 500,
+              "curve": "easeInOut"
+            },
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "moveIn",
+              "direction": "right",
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.398, 0, 0.59, 0.5]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s60",
+      "title": "jewel.cohesionIdeShowcase",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-cohesion-ide-preview",
+          "frame": { "x": 372, "y": 92, "w": 1176, "h": 896 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "idePreview" }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "moveIn",
+              "direction": "up",
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s61",
+      "title": "jewel.cohesionIdeShowcase",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-cohesion-ide-preview",
+          "frame": { "x": -307.18, "y": 100, "w": 1163, "h": 880 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "idePreview" }
+          }
+        },
+        {
+          "id": "specimen-cohesion-emulator",
+          "frame": { "x": 924.07, "y": 142.5, "w": 406, "h": 795 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "emulator" }
+          }
+        },
+        {
+          "id": "specimen-cohesion-settings",
+          "frame": { "x": 1407.18, "y": 142.5, "w": 820, "h": 648 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "settings" }
+          }
+        }
+      ],
+      "transition": {
+        "type": "wipe",
+        "direction": "right",
+        "durationMs": 700,
+        "curve": "easeInOut"
+      }
+    },
+    {
+      "id": "s62",
+      "title": "jewel.cohesionIdeShowcase",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-cohesion-ide-full",
+          "frame": { "x": 189, "y": 58, "w": 1542, "h": 964 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "ideFull" }
+          }
+        }
+      ],
+      "transition": { "type": "magicMove", "durationMs": 500, "curve": "easeInOut" }
+    },
+    {
+      "id": "s63",
+      "title": "jewel.cohesionIdeShowcase",
+      "background": "#29223A",
+      "beats": [
+        {},
+        { "autoAdvanceMs": 500 }
+      ],
+      "nodes": [
+        {
+          "id": "specimen-cohesion-ide-full",
+          "frame": { "x": -243, "y": 51, "w": 1552, "h": 978 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "ideFull" }
+          }
+        },
+        {
+          "id": "specimen-cohesion-settings",
+          "frame": { "x": 1330, "y": 208, "w": 833, "h": 664 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "settings" }
+          },
+          "builds": [
+            {
+              "kind": "exit",
+              "beat": 1,
+              "effect": "moveIn",
+              "direction": "right",
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.364, 0, 0.74, 0.518]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s64",
+      "title": "jewel.cohesionIdeShowcase",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "specimen-cohesion-ide-full",
+          "frame": { "x": -243, "y": 51, "w": 1552, "h": 978 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "ideFull" }
+          }
+        },
+        {
+          "id": "specimen-cohesion-comparison",
+          "frame": { "x": 1325, "y": 212, "w": 813, "h": 656 },
+          "specimen": {
+            "ref": "jewel.cohesionIdeShowcase",
+            "params": { "panel": "comparison" }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "moveIn",
+              "direction": "left",
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.406, 0.5, 0.602, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s65",
+      "title": "ALMOST DONE",
+      "background": "#313325",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "almost-done",
+          "frame": { "x": 437, "y": 409.78, "w": 1295.58, "h": 245.37 },
+          "text": {
+            "value": "ALMOST DONE",
+            "font": "Hanken Grotesk",
+            "size": 155,
+            "weight": 900,
+            "color": "#E3F272",
+            "lineHeight": 201.97
+          },
+          "builds": [
+            { "kind": "enter", "beat": 0, "effect": "appear", "delayMs": 500 },
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 437, "y": 360.04 }
+              },
+              "durationMs": 200,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "coffee-soon",
+          "frame": { "x": 780, "y": 576.13, "w": 473.3, "h": 87.06 },
+          "text": {
+            "value": [
+              { "text": "☕️", "font": "Noto Emoji", "weight": 700 },
+              { "text": " coffee soon!" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 55,
+            "weight": 800,
+            "color": "#E3F272",
+            "lineHeight": 71.66
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s66",
+      "title": "Say it one more time!",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "say-it-one-more-time",
+          "frame": { "x": 734.09, "y": 466.88, "w": 578, "h": 75.98 },
+          "text": {
+            "value": "Say it one more time!",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s67",
+      "title": "These are early ideas and explorations",
+      "background": "#29223A",
+      "beats": [
+        { "autoAdvanceMs": 0 },
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "say-it-one-more-time",
+          "frame": { "x": 734, "y": 466.88, "w": 577, "h": 75.98 },
+          "text": {
+            "value": "Say it one more time!",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 733.91, "y": 416.46 }
+              },
+              "durationMs": 200,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "these-are-early-ideas-and-ex",
+          "frame": { "x": 277, "y": 489.37, "w": 1643, "h": 123.47 },
+          "text": {
+            "value": "These are early ideas and explorations",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        }
+      ],
+      "transition": {
+        "type": "wipe",
+        "direction": "right",
+        "durationMs": 400,
+        "curve": "easeInOut"
+      }
+    },
+    {
+      "id": "s68",
+      "title": "These are early ideas and explorations",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "these-are-early-ideas-and-ex",
+          "frame": { "x": 278.58, "y": 489.37, "w": 1641.42, "h": 123.47 },
+          "text": {
+            "value": [
+              { "text": "These are " },
+              { "text": "early", "color": "#E3F272" },
+              { "text": " ideas and explorations" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "say-it-one-more-time",
+          "frame": { "x": 734.09, "y": 416.46, "w": 578, "h": 75.98 },
+          "text": {
+            "value": "Say it one more time!",
+            "font": "Hanken Grotesk",
+            "size": 48,
+            "color": "#C7B3F1",
+            "lineHeight": 62.54
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s69",
+      "title": "NO PROMISES",
+      "background": "#29223A",
+      "beats": [
+        {},
+        { "autoAdvanceMs": 0 }
+      ],
+      "nodes": [
+        {
+          "id": "no-promises",
+          "frame": { "x": 581, "y": 434.93, "w": 633.12, "h": 123.47 },
+          "text": {
+            "value": "NO PROMISES",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 580.93, "y": 385.37 }
+              },
+              "durationMs": 300,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "no-etas",
+          "frame": { "x": 581, "y": 489.37, "w": 402.54, "h": 123.47 },
+          "text": {
+            "value": "NO ETAS",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s70",
+      "title": "NO PROMISES",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "no-promises",
+          "frame": { "x": 581, "y": 385.44, "w": 633.12, "h": 123.47 },
+          "text": {
+            "value": "NO PROMISES",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 580.93, "y": 335.37 }
+              },
+              "delayMs": 100,
+              "durationMs": 300,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "no-etas",
+          "frame": { "x": 581, "y": 489.37, "w": 402.54, "h": 123.47 },
+          "text": {
+            "value": "NO ETAS",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 580.93, "y": 439.37 }
+              },
+              "durationMs": 300,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "can-will-change",
+          "frame": { "x": 579, "y": 543.32, "w": 957.64, "h": 123.47 },
+          "text": {
+            "value": "CAN & WILL CHANGE",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s71",
+      "title": "Better Dev UX ➡️Better UX",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "beginning-of-a-journey",
+          "frame": { "x": 785.23, "y": 427.59, "w": 484, "h": 206 },
+          "text": {
+            "value": [
+              { "text": "Beginning of a\n" },
+              { "text": "JOURNEY", "size": 78, "weight": 600 }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 56,
+            "color": "#C7B3F1",
+            "lineHeight": 81.46
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 785, "y": 347.51 }
+              },
+              "durationMs": 200,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "better-dev-ux-better-ux",
+          "frame": { "x": 213.18, "y": 535.79, "w": 1706.82, "h": 309 },
+          "text": {
+            "value": [
+              { "text": "Better Dev UX " },
+              { "text": "➡️", "font": "Noto Emoji", "color": "#E3F272" },
+              { "text": "Better UX" }
+            ],
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "color": "#C6B2F0",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s72",
+      "title": "QUALITY",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "path-1",
+          "frame": { "x": 653, "y": 567, "w": 610.38, "h": 100 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 15 },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 653, "y": 492.26 }
+              },
+              "durationMs": 600,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "rect-2",
+          "frame": { "x": 629, "y": 566, "w": 662, "h": 130 },
+          "shape": { "geometry": "rect", "fill": "#29223A" }
+        },
+        {
+          "id": "quality",
+          "frame": { "x": 804, "y": 479.61, "w": 411.08, "h": 123.47 },
+          "text": {
+            "value": "QUALITY",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#29223A",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "raise",
+          "frame": { "x": 684, "y": 489.37, "w": 276.88, "h": 123.47 },
+          "text": {
+            "value": "RAISE",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 684.6, "y": 406.37 }
+              },
+              "durationMs": 500,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "the",
+          "frame": { "x": 917, "y": 489.37, "w": 203.68, "h": 123.47 },
+          "text": {
+            "value": "THE",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 916.51, "y": 406.37 }
+              },
+              "durationMs": 400,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "bar",
+          "frame": { "x": 1096, "y": 489.37, "w": 203.68, "h": 123.47 },
+          "text": {
+            "value": "BAR",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 1095.76, "y": 406.37 }
+              },
+              "durationMs": 400,
+              "curve": "easeInOut"
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s73",
+      "title": "#TheAndroidShow",
+      "background": "#29223A",
+      "beats": [
+        {},
+        {},
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "path-1",
+          "frame": { "x": 724, "y": 617, "w": 469.44, "h": 64.13 },
+          "shape": { "geometry": "rect", "fill": "#E3F272", "cornerRadius": 15 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fromDarkness",
+              "durationMs": 400,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "theandroidshow",
+          "frame": { "x": 640, "y": 379.97, "w": 828.32, "h": 123.47 },
+          "text": {
+            "value": "#TheAndroidShow",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear" }
+          ]
+        },
+        {
+          "id": "leadership-keynote",
+          "frame": { "x": 622, "y": 470.43, "w": 869.8, "h": 123.47 },
+          "text": {
+            "value": "Leadership Keynote",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "up",
+              "args": { "distance": 48.3 },
+              "after": "theandroidshow",
+              "delayMs": 300,
+              "durationMs": 400,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "5-00-pm-this-room",
+          "frame": { "x": 746, "y": 621.85, "w": 547.72, "h": 71.23 },
+          "text": {
+            "value": "5:00 PM — this room",
+            "font": "Hanken Grotesk",
+            "size": 45,
+            "weight": 700,
+            "color": "#29223A",
+            "lineHeight": 58.63
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "fromDarkness",
+              "delayMs": 200,
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
+        },
+        {
+          "id": "speaker-avatar-1",
+          "frame": { "x": 686, "y": 191, "w": 149, "h": 149 },
+          "image": { "src": "speaker-avatar-1.png", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 51.1 },
+              "after": "leadership-keynote",
+              "delayMs": 500,
+              "durationMs": 400,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "speaker-avatar-2",
+          "frame": { "x": 886, "y": 191, "w": 148, "h": 149 },
+          "image": { "src": "speaker-avatar-2.png", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 51.1 },
+              "after": "leadership-keynote",
+              "delayMs": 300,
+              "durationMs": 400,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "speaker-avatar-3",
+          "frame": { "x": 1085, "y": 191, "w": 149, "h": 149 },
+          "image": { "src": "speaker-avatar-3.png", "fit": "contain" },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "fadeMove",
+              "direction": "down",
+              "args": { "distance": 51.1 },
+              "after": "leadership-keynote",
+              "delayMs": 400,
+              "durationMs": 400,
+              "curve": {
+                "bezier": [0.311, 0.208, 0.201, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s74",
+      "title": "Come test the",
+      "background": "#29223A",
+      "nodes": [
+        {
+          "id": "come-test-the",
+          "frame": { "x": 698.31, "y": 305.77, "w": 633.38, "h": 123.47 },
+          "text": {
+            "value": "Come test the ",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "new-compose",
+          "frame": { "x": 698.31, "y": 397.57, "w": 636.18, "h": 123.47 },
+          "text": {
+            "value": "new Compose ",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "features-at-the",
+          "frame": { "x": 698.31, "y": 489.37, "w": 657.54, "h": 123.47 },
+          "text": {
+            "value": "features at the ",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 101.63
+          }
+        },
+        {
+          "id": "android-studio-office-hours",
+          "frame": { "x": 698.31, "y": 581.17, "w": 673.84, "h": 205.44 },
+          "text": {
+            "value": "Android Studio\noffice hours!",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#C7B3F1",
+            "lineHeight": 91.8
+          }
+        }
+      ],
+      "transition": { "type": "none" }
+    },
+    {
+      "id": "s75",
+      "title": "Thank you!",
+      "background": "#EF5350",
+      "beats": [
+        { "autoAdvanceMs": 0 },
+        {}
+      ],
+      "nodes": [
+        {
+          "id": "thank-you",
+          "frame": { "x": 727, "y": 460.61, "w": 702.66, "h": 183.63 },
+          "text": {
+            "value": "Thank you!",
+            "font": "Hanken Grotesk",
+            "size": 116,
+            "weight": 700,
+            "color": "#542859",
+            "lineHeight": 151.15
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 726.88, "y": 390.86 }
+              },
+              "delayMs": 1000,
+              "durationMs": 400,
+              "curve": "easeOut"
+            }
+          ]
+        },
+        {
+          "id": "enjoy-droidcon-london-2024",
+          "frame": { "x": 679, "y": 581.83, "w": 833.2, "h": 205.44 },
+          "text": {
+            "value": "ENJOY DROIDCON\nLONDON 2024",
+            "font": "Hanken Grotesk",
+            "size": 78,
+            "weight": 600,
+            "color": "#542859",
+            "lineHeight": 91.8,
+            "align": "center"
+          },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "appear", "delayMs": 1000 }
+          ]
+        }
+      ]
+    }
+  ]
+}

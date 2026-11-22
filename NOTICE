@@ -7,3 +7,10 @@ Copyright the Storyboard contributors.
 
 Ciacola retains Storyboard's Git history. The changes made for Ciacola are
 documented by that history and summarized in the repository README.
+
+This repository also incorporates third-party open-source libraries, TextMate
+grammars, and unmodified SIL Open Font License 1.1 fonts (including Assistant,
+Fredoka, Google Sans, Hanken Grotesk, Inter, JetBrains Mono, Montserrat, Nanum
+Pen Script, Noto Emoji, Plus Jakarta Sans, and Roboto). Full copyright headers,
+Reserved Font Name notices, upstream URLs, and verbatim license texts are
+maintained in OPEN_SOURCE_LICENSES.md.

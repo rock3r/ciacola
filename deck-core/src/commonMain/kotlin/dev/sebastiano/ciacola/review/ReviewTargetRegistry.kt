@@ -20,6 +20,7 @@ interface ReviewStageBridge {
         textSnippet: String,
         isContainer: Boolean,
         coordinates: LayoutCoordinates,
+        nodeId: String? = null,
     )
     fun unregisterTarget(key: Any)
 }
@@ -40,6 +41,7 @@ fun Modifier.reviewTarget(
     label: String,
     textSnippet: String = "",
     isContainer: Boolean = false,
+    nodeId: String? = null,
 ): Modifier {
     val bridge = LocalReviewStageBridge.current ?: return this
     val targetKey = remember { Any() }
@@ -50,6 +52,7 @@ fun Modifier.reviewTarget(
         label = label,
         textSnippet = textSnippet,
         isContainer = isContainer,
+        nodeId = nodeId,
     )
 }
 
@@ -60,6 +63,7 @@ private data class ReviewTargetElement(
     val label: String,
     val textSnippet: String,
     val isContainer: Boolean,
+    val nodeId: String?,
 ) : ModifierNodeElement<ReviewTargetNode>() {
     override fun create(): ReviewTargetNode = ReviewTargetNode(
         bridge = bridge,
@@ -68,6 +72,7 @@ private data class ReviewTargetElement(
         label = label,
         textSnippet = textSnippet,
         isContainer = isContainer,
+        nodeId = nodeId,
     )
 
     override fun update(node: ReviewTargetNode) {
@@ -77,6 +82,7 @@ private data class ReviewTargetElement(
         node.label = label
         node.textSnippet = textSnippet
         node.isContainer = isContainer
+        node.nodeId = nodeId
         node.publishCurrentCoordinates()
     }
 
@@ -84,6 +90,7 @@ private data class ReviewTargetElement(
         name = "reviewTarget"
         properties["kind"] = kind
         properties["label"] = label
+        properties["nodeId"] = nodeId
     }
 }
 
@@ -94,6 +101,7 @@ private class ReviewTargetNode(
     var label: String,
     var textSnippet: String,
     var isContainer: Boolean,
+    var nodeId: String?,
 ) : LayoutAwareModifierNode, Modifier.Node() {
     private var lastCoordinates: LayoutCoordinates? = null
 
@@ -112,6 +120,7 @@ private class ReviewTargetNode(
                 textSnippet = textSnippet,
                 isContainer = isContainer,
                 coordinates = coords,
+                nodeId = nodeId,
             )
         }
     }

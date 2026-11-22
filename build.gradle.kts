@@ -1,9 +1,22 @@
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import java.io.File
 import java.security.MessageDigest
+import java.time.Duration
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestListener
+import org.gradle.api.tasks.testing.TestResult
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.jvm.toolchain.JvmVendorSpec
+import org.gradle.process.CommandLineArgumentProvider
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.dokka.gradle.engine.parameters.VisibilityModifier
 import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
@@ -44,6 +57,85 @@ val ciacolaDeckModules = setOf(
 )
 
 val junitJupiterApiLib = libs.junit.jupiter.api
+
+class CiacolaWatchdogJvmArgProvider(
+    @get:Internal val token: String,
+) : CommandLineArgumentProvider {
+    override fun asArguments(): Iterable<String> = listOf("-Dciacola.watchdogToken=$token")
+}
+
+/**
+ * Dumps stacks and kills hung test worker JVMs matching [marker].
+ * Ciacola's test tasks run with default `maxParallelForks = 1` (single worker JVM per token).
+ */
+fun dumpAndKillWorkerProcesses(marker: String, toolchainHome: File?) {
+    val selfPid = ProcessHandle.current().pid()
+    val handles = LinkedHashMap<Long, ProcessHandle>()
+    runCatching {
+        ProcessHandle.allProcesses().forEach { ph ->
+            if (ph.pid() == selfPid || !ph.isAlive) return@forEach
+            val info = ph.info()
+            val cmdLineMatches = info.commandLine().map { it.contains(marker) }.orElse(false)
+            val argsMatch = info.arguments().map { args -> args.any { it.contains(marker) } }.orElse(false)
+            if (cmdLineMatches || argsMatch) {
+                handles[ph.pid()] = ph
+            }
+        }
+    }
+    if (handles.isEmpty()) {
+        runCatching {
+            val psOut = File.createTempFile("ciacola-watchdog-ps-", ".txt")
+            try {
+                val psProc = ProcessBuilder("ps", "-axo", "pid=,command=")
+                    .redirectErrorStream(true)
+                    .redirectOutput(psOut)
+                    .start()
+                if (psProc.waitFor(1_500, TimeUnit.MILLISECONDS)) {
+                    psOut.forEachLine { line ->
+                        if (line.contains(marker)) {
+                            val pid = line.trim().substringBefore(' ').trim().toLongOrNull()
+                            if (pid != null && pid != selfPid) {
+                                ProcessHandle.of(pid).ifPresent { ph ->
+                                    if (ph.isAlive) handles[pid] = ph
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    psProc.destroyForcibly()
+                }
+            } finally {
+                psOut.delete()
+            }
+        }
+    }
+
+    val jstackBin = toolchainHome?.resolve("bin/jstack")?.takeIf { it.canExecute() }?.absolutePath
+        ?: File(System.getProperty("java.home", ""), "bin/jstack").takeIf { it.canExecute() }?.absolutePath
+        ?: "jstack"
+
+    for ((pid, ph) in handles) {
+        runCatching {
+            val stackFile = File.createTempFile("ciacola-watchdog-jstack-$pid-", ".txt")
+            try {
+                val jstackProc = ProcessBuilder(jstackBin, pid.toString())
+                    .redirectErrorStream(true)
+                    .redirectOutput(stackFile)
+                    .start()
+                if (!jstackProc.waitFor(5, TimeUnit.SECONDS)) {
+                    jstackProc.destroyForcibly()
+                }
+                val dump = stackFile.takeIf { it.exists() }?.readText().orEmpty().trim()
+                if (dump.isNotEmpty()) {
+                    System.err.println("[TEST-TIMEOUT] jstack for worker PID $pid:\n$dump")
+                }
+            } finally {
+                stackFile.delete()
+            }
+        }
+        runCatching { ph.destroyForcibly() }
+    }
+}
 
 allprojects {
     val isDeckModule = project.path in ciacolaDeckModules
@@ -105,6 +197,10 @@ allprojects {
             }
             tasks.withType(Test::class.java).configureEach {
                 javaLauncher.set(jbr25Launcher)
+                jvmArgs("--enable-native-access=ALL-UNNAMED")
+            }
+            tasks.withType(JavaExec::class.java).configureEach {
+                jvmArgs("--enable-native-access=ALL-UNNAMED")
             }
             afterEvaluate {
                 tasks.findByName("check")?.dependsOn(rootProject.tasks.named("ciacolaStaticCheck"))
@@ -122,6 +218,99 @@ allprojects {
             // Prevent macOS AWT/Skiko test JVMs from registering a Dock icon or stealing focus.
             jvmArgs("-Dapple.awt.UIElement=true")
             systemProperty("apple.awt.UIElement", "true")
+        }
+
+        val isManualVideoExport = providers.systemProperty("ciacola.videoExportJob").isPresent ||
+            providers.environmentVariable("CIACOLA_VIDEO_EXPORT_JOB").isPresent
+        val rawTestTimeout = providers.gradleProperty("ciacola.testTimeoutSeconds")
+            .orElse(providers.systemProperty("ciacola.testTimeoutSeconds"))
+            .orNull
+        val rawTaskTimeout = providers.gradleProperty("ciacola.taskTimeoutMinutes")
+            .orElse(providers.systemProperty("ciacola.taskTimeoutMinutes"))
+            .orNull
+        val parsedTestTimeout = rawTestTimeout?.let { raw ->
+            raw.trim().toLongOrNull()
+                ?: throw GradleException("Invalid ciacola.testTimeoutSeconds='$raw': expected an integer >= 0")
+        }
+        val parsedTaskTimeout = rawTaskTimeout?.let { raw ->
+            raw.trim().toLongOrNull()
+                ?: throw GradleException("Invalid ciacola.taskTimeoutMinutes='$raw': expected an integer >= 0")
+        }
+        val hasExplicitTestTimeout = parsedTestTimeout != null
+        if (!sckRecording && !isManualVideoExport && (isDeckModule || hasExplicitTestTimeout)) {
+            val defaultTimeoutSeconds = if (name == "spectreTest") 120L else 60L
+            val timeoutSeconds = parsedTestTimeout ?: defaultTimeoutSeconds
+            val defaultTaskTimeoutMinutes = if (timeoutSeconds <= 0L) {
+                0L
+            } else if (name == "spectreTest") {
+                maxOf(12L, (timeoutSeconds * 12L) / 60L)
+            } else {
+                maxOf(10L, (timeoutSeconds * 10L) / 60L)
+            }
+            val taskTimeoutMinutes = parsedTaskTimeout ?: defaultTaskTimeoutMinutes
+            if (taskTimeoutMinutes > 0L) {
+                timeout.set(
+                    provider {
+                        if (debug || debugOptions.enabled.get()) null else Duration.ofMinutes(taskTimeoutMinutes)
+                    },
+                )
+            }
+            if (timeoutSeconds > 0L) {
+                val watchdogToken = UUID.randomUUID().toString()
+                val watchdogMarker = "-Dciacola.watchdogToken=$watchdogToken"
+                jvmArgumentProviders.add(CiacolaWatchdogJvmArgProvider(watchdogToken))
+                val taskPath = path
+                val launcherProvider = javaLauncher
+
+                addTestListener(object : TestListener {
+                    @Volatile
+                    private var scheduler: ScheduledExecutorService? = null
+                    private val activeTests = ConcurrentHashMap<TestDescriptor, ScheduledFuture<*>>()
+
+                    override fun beforeSuite(suite: TestDescriptor) {
+                        if (suite.parent == null) {
+                            scheduler?.shutdownNow()
+                            activeTests.clear()
+                            scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
+                                Executors.defaultThreadFactory().newThread(runnable).apply {
+                                    isDaemon = true
+                                    name = "ciacola-test-watchdog-$taskPath"
+                                }
+                            }
+                        }
+                    }
+
+                    override fun afterSuite(suite: TestDescriptor, result: TestResult) {
+                        if (suite.parent == null) {
+                            activeTests.values.forEach { it.cancel(false) }
+                            activeTests.clear()
+                            scheduler?.shutdownNow()
+                            scheduler = null
+                        }
+                    }
+
+                    override fun beforeTest(testDescriptor: TestDescriptor) {
+                        if (testDescriptor.isComposite || debug || debugOptions.enabled.get()) return
+                        val exec = scheduler ?: return
+                        val future = exec.schedule({
+                            activeTests.remove(testDescriptor)
+                            val fqName = "${testDescriptor.className ?: "<unknown>"}.${testDescriptor.name}"
+                            System.err.println(
+                                "[TEST-TIMEOUT] $fqName exceeded ${timeoutSeconds}s — dumping stack & killing hung worker"
+                            )
+                            dumpAndKillWorkerProcesses(
+                                marker = watchdogMarker,
+                                toolchainHome = launcherProvider.orNull?.metadata?.installationPath?.asFile,
+                            )
+                        }, timeoutSeconds, TimeUnit.SECONDS)
+                        activeTests.put(testDescriptor, future)?.cancel(false)
+                    }
+
+                    override fun afterTest(testDescriptor: TestDescriptor, result: TestResult) {
+                        activeTests.remove(testDescriptor)?.cancel(false)
+                    }
+                })
+            }
         }
     }
 
@@ -211,26 +400,26 @@ val ciacolaStaticCheck = tasks.register("ciacolaStaticCheck") {
 
         val forbiddenSymbolsByModule = mapOf(
             "deck-core" to listOf(
-                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.effects\b"""),
-                Regex("""\b(createFoundationDeck|FoundationDeck|DeckTextRenderer|DeckMagicText|AnimatedMeshBackdrop|PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|TimelineStudioController|TimelineOverridesStore|TimelineWindow)\b"""),
+                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector\.(element|design|lint|sync))\b"""),
+                Regex("""\b(DeckTextRenderer|AnimatedMeshBackdrop|PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|DocumentTimelineController|DocumentTimelineWindow|DocumentElementInspectorController|DocumentThemeInspectorController|DocumentDeckLintController)\b"""),
             ),
             "deck-effects" to listOf(
-                Regex("""\b(createFoundationDeck|FoundationDeck|PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|TimelineStudioController|TimelineOverridesStore|TimelineViewportState|TimelineWindow)\b"""),
+                Regex("""\b(PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|DocumentTimelineController|DocumentTimelineWindow|TimelineViewportState|DocumentElementInspectorController|DocumentThemeInspectorController|DocumentDeckLintController)\b"""),
             ),
             "deck-presenter" to listOf(
-                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector)\b"""),
-                Regex("""\b(createFoundationDeck|FoundationDeck|DeckTextRenderer|DeckMagicText|AnimatedMeshBackdrop|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|TimelineStudioController|TimelineOverridesStore|TimelineViewportState|TimelineWindow)\b"""),
+                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector\.(element|design|lint|sync))\b"""),
+                Regex("""\b(DeckTextRenderer|AnimatedMeshBackdrop|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|DocumentTimelineController|DocumentTimelineWindow|TimelineViewportState)\b"""),
             ),
             "deck-review" to listOf(
-                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector)\b"""),
-                Regex("""\b(createFoundationDeck|FoundationDeck|DeckTextRenderer|DeckMagicText|AnimatedMeshBackdrop|PresenterWindow|PresenterController|TimelineStudioController|TimelineOverridesStore|TimelineViewportState|TimelineWindow)\b"""),
+                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector\.(element|design|lint|sync))\b"""),
+                Regex("""\b(DeckTextRenderer|AnimatedMeshBackdrop|PresenterWindow|PresenterController|DocumentTimelineController|DocumentTimelineWindow|TimelineViewportState)\b"""),
             ),
             "deck-timeline" to listOf(
-                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector)\b"""),
-                Regex("""\b(createFoundationDeck|FoundationDeck|DeckTextRenderer|DeckMagicText|AnimatedMeshBackdrop|PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator)\b"""),
+                Regex("""\bimport\s+dev\.sebastiano\.ciacola\.(effects|inspector\.(element|design|lint|sync))\b"""),
+                Regex("""\b(DeckTextRenderer|AnimatedMeshBackdrop|PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator)\b"""),
             ),
             "deck-inspector" to listOf(
-                Regex("""\b(createFoundationDeck|FoundationDeck|PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|TimelineStudioController|TimelineOverridesStore|TimelineWindow)\b"""),
+                Regex("""\b(PresenterWindow|PresenterController|SlideReviewWindow|ReviewCommentStore|ReviewStageCoordinator|DocumentTimelineController|DocumentTimelineWindow)\b"""),
             ),
         )
 

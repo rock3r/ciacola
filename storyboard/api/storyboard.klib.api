@@ -96,6 +96,8 @@ final class dev.bnorm.storyboard/Storyboard { // dev.bnorm.storyboard/Storyboard
         final fun <get-format>(): dev.bnorm.storyboard/SceneFormat // dev.bnorm.storyboard/Storyboard.format.<get-format>|<get-format>(){}[0]
     final val indices // dev.bnorm.storyboard/Storyboard.indices|{}indices[0]
         final fun <get-indices>(): kotlinx.collections.immutable/ImmutableList<dev.bnorm.storyboard/Storyboard.Index> // dev.bnorm.storyboard/Storyboard.indices.<get-indices>|<get-indices>(){}[0]
+    final val sceneZIndex // dev.bnorm.storyboard/Storyboard.sceneZIndex|{}sceneZIndex[0]
+        final fun <get-sceneZIndex>(): kotlin/Function1<dev.bnorm.storyboard/Storyboard.Index, kotlin/Float>? // dev.bnorm.storyboard/Storyboard.sceneZIndex.<get-sceneZIndex>|<get-sceneZIndex>(){}[0]
     final val scenes // dev.bnorm.storyboard/Storyboard.scenes|{}scenes[0]
         final fun <get-scenes>(): kotlinx.collections.immutable/ImmutableList<dev.bnorm.storyboard/Scene<*>> // dev.bnorm.storyboard/Storyboard.scenes.<get-scenes>|<get-scenes>(){}[0]
     final val title // dev.bnorm.storyboard/Storyboard.title|{}title[0]
@@ -116,6 +118,7 @@ final class dev.bnorm.storyboard/Storyboard { // dev.bnorm.storyboard/Storyboard
     }
 
     final object Companion { // dev.bnorm.storyboard/Storyboard.Companion|null[0]
+        final fun build(kotlin/String, kotlin/String? = ..., dev.bnorm.storyboard/SceneFormat = ..., dev.bnorm.storyboard/ContentDecorator = ..., kotlin/Function1<dev.bnorm.storyboard/Storyboard.Index, kotlin/Float>?, kotlin/Function1<dev.bnorm.storyboard/StoryboardBuilder, kotlin/Unit>): dev.bnorm.storyboard/Storyboard // dev.bnorm.storyboard/Storyboard.Companion.build|build(kotlin.String;kotlin.String?;dev.bnorm.storyboard.SceneFormat;dev.bnorm.storyboard.ContentDecorator;kotlin.Function1<dev.bnorm.storyboard.Storyboard.Index,kotlin.Float>?;kotlin.Function1<dev.bnorm.storyboard.StoryboardBuilder,kotlin.Unit>){}[0]
         final fun build(kotlin/String, kotlin/String? = ..., dev.bnorm.storyboard/SceneFormat = ..., dev.bnorm.storyboard/ContentDecorator = ..., kotlin/Function1<dev.bnorm.storyboard/StoryboardBuilder, kotlin/Unit>): dev.bnorm.storyboard/Storyboard // dev.bnorm.storyboard/Storyboard.Companion.build|build(kotlin.String;kotlin.String?;dev.bnorm.storyboard.SceneFormat;dev.bnorm.storyboard.ContentDecorator;kotlin.Function1<dev.bnorm.storyboard.StoryboardBuilder,kotlin.Unit>){}[0]
     }
 }

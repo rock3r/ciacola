@@ -3,22 +3,24 @@ package dev.sebastiano.ciacola.effects
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
@@ -27,10 +29,12 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
+import dev.sebastiano.ciacola.theme.DeckThemeProvider
 import dev.sebastiano.ciacola.theme.DeckThemes
 import kotlin.math.abs
 import kotlin.test.Test
@@ -45,7 +49,6 @@ import kotlinx.coroutines.launch
 class KeynoteEffectsTest {
     @Test
     fun staggerProgressCascadesForwardInOrderAndReversesOrderOnBackwardStep() {
-        // 4 items, 300ms each, 50ms stagger -> total span = 300 + 3*50 = 450ms
         val f0 = computeStaggerItemProgress(0.5f, index = 0, count = 4, itemDurationMs = 300, staggerStepMs = 50, reverseOrder = false)
         val f1 = computeStaggerItemProgress(0.5f, index = 1, count = 4, itemDurationMs = 300, staggerStepMs = 50, reverseOrder = false)
         val f2 = computeStaggerItemProgress(0.5f, index = 2, count = 4, itemDurationMs = 300, staggerStepMs = 50, reverseOrder = false)
@@ -55,8 +58,6 @@ class KeynoteEffectsTest {
         assertEquals(0f, computeStaggerItemProgress(0f, index = 0, count = 4, itemDurationMs = 300, staggerStepMs = 50))
         assertEquals(1f, computeStaggerItemProgress(1f, index = 3, count = 4, itemDurationMs = 300, staggerStepMs = 50))
 
-        // Stepping backward (overallProgress dropping toward 0 with reverseOrder = true):
-        // the last item (index 3) must lead the exit (lowest remaining progress) while index 0 lingers longest!
         val b0 = computeStaggerItemProgress(0.5f, index = 0, count = 4, itemDurationMs = 300, staggerStepMs = 50, reverseOrder = true)
         val b3 = computeStaggerItemProgress(0.5f, index = 3, count = 4, itemDurationMs = 300, staggerStepMs = 50, reverseOrder = true)
         assertTrue(b0 > b3, "Backward reverse-order stagger must fade trailing item 3 before leading item 0, got b0=$b0, b3=$b3")
@@ -82,7 +83,6 @@ class KeynoteEffectsTest {
         assertNotNull(fullTip)
         assertTrue(abs(fullTip.position.x - 100f) < 0.5f)
 
-        // Multi-contour path (two 50px segments = 100px total): 75% progress must reach x=25 on contour 2 (y=20)
         val twoContours = Path().apply {
             moveTo(0f, 0f)
             lineTo(50f, 0f)
@@ -93,7 +93,6 @@ class KeynoteEffectsTest {
         assertNotNull(secondTip)
         assertTrue(abs(secondTip.position.x - 25f) < 0.5f && abs(secondTip.position.y - 20f) < 0.5f)
 
-        // Closed RoundRect callout outline trims smoothly without error
         val roundRectPath = Path().apply {
             addRoundRect(RoundRect(Rect(0f, 0f, 120f, 60f), 12f, 12f))
         }
@@ -172,7 +171,6 @@ class KeynoteEffectsTest {
         }
         assertEquals(0, redAtZero, "LineDraw must draw 0 red pixels when progress == 0f")
 
-        // Advance buildProgress 0f -> 0.5f -> 1f: first row must not jump vertically by even 0.05px!
         runOnIdle { buildProgress = 0.5f }
         waitForIdle()
         assertEquals(initialY, firstItemY, absoluteTolerance = 0.05f)
@@ -200,16 +198,13 @@ class KeynoteEffectsTest {
 
     @Test
     fun keynoteEffectsLabSceneStepsForwardAndBackwardThroughAllFiveBuildsAndMagnifierLoupe() = runComposeUiTest {
-        lateinit var animatic: dev.bnorm.storyboard.easel.Animatic
+        lateinit var animatic: Animatic
         lateinit var uiScope: CoroutineScope
-        val deck = createFoundationDeck(
-            theme = DeckThemes.keynoteLight(),
-            includeKeynoteEffectsLab = true,
-        )
+        val deck = buildFoundationTestStoryboard(themeName = "light")
         assertEquals(listOf(3, 2, 1, 3, 5), deck.scenes.map { it.frames.size })
 
         setContent {
-            uiScope = androidx.compose.runtime.rememberCoroutineScope()
+            uiScope = rememberCoroutineScope()
             animatic = rememberAnimatic(
                 initialIndex = Storyboard.Index(sceneIndex = 4, frameIndex = 0),
                 storyboard = { deck },
@@ -222,7 +217,6 @@ class KeynoteEffectsTest {
         waitForIdle()
         assertEquals(Storyboard.Index(4, 0), animatic.currentIndex)
 
-        // Step forward through B1 (stagger), B2 (LineDraw arrow + Pop stamp), B3 (Spotlight + Warp diff), B4 (Strikeout + Loupe)
         for (expectedFrame in 1..4) {
             runOnIdle { uiScope.launch { animatic.advance(AdvanceDirection.Forward) } }
             mainClock.advanceTimeBy(600)
@@ -230,7 +224,6 @@ class KeynoteEffectsTest {
             assertEquals(Storyboard.Index(4, expectedFrame), animatic.currentIndex)
         }
 
-        // Step backward from B4 -> B3 -> B2 to prove symmetric reverse transitions
         for (expectedFrame in 3 downTo 2) {
             runOnIdle { uiScope.launch { animatic.advance(AdvanceDirection.Backward) } }
             mainClock.advanceTimeBy(600)
@@ -245,30 +238,30 @@ class KeynoteEffectsTest {
         val darkTheme = DeckThemes.stageDark()
 
         setContent {
-            dev.sebastiano.ciacola.theme.DeckThemeProvider(darkTheme) {
+            DeckThemeProvider(darkTheme) {
                 Box(Modifier.size(640.dp, 360.dp).testTag("loupe-stage")) {
                     MagnifierLoupeStage(
                         targetKey = "target",
                         progress = { progress },
                         modifier = Modifier.fillMaxSize(),
+                        loupeAlignment = Alignment.CenterEnd,
+                        loupeDiameter = 220.dp,
+                        loupePadding = PaddingValues(end = 32.dp),
                         decorations = listOf(
-                            AnimatedLine(
-                                startKey = "origin",
-                                startAlignment = Alignment.TopCenter,
-                                endKey = "target",
-                                endAlignment = Alignment.BottomCenter,
+                            AnimatedCalloutOutline(
+                                targetKey = "target",
                                 progress = { 1f },
-                                color = Color.Green,
-                                gap = 0.dp,
+                                color = Color.Magenta,
+                                strokeWidth = 4.dp,
                             ),
                         ),
                     ) {
-                        Column(
-                            modifier = Modifier.align(Alignment.CenterStart),
-                            verticalArrangement = Arrangement.spacedBy(28.dp),
-                        ) {
-                            Text("BasicText(AnnotatedString)", color = Color.White, modifier = Modifier.decorate("target"))
-                            Text("IMMUTABLE", color = Color.White, modifier = Modifier.decorate("origin"))
+                        Box(Modifier.fillMaxSize().padding(start = 48.dp), contentAlignment = Alignment.CenterStart) {
+                            Text(
+                                text = "graphicsLayer",
+                                color = Color.Cyan,
+                                modifier = Modifier.decorate("target"),
+                            )
                         }
                     }
                 }
@@ -276,32 +269,37 @@ class KeynoteEffectsTest {
         }
 
         waitForIdle()
-        val fullPixels = onNodeWithTag("loupe-stage").captureToImage().toPixelMap()
-        // Right side holds the loupe lens; green AnimatedLine is on the left column only.
-        var greenInLoupeHalf = 0
-        for (y in 0 until fullPixels.height) {
-            for (x in (fullPixels.width / 2) until fullPixels.width) {
-                val c = fullPixels[x, y]
-                if (c.green > 0.75f && c.red < 0.25f && c.blue < 0.25f) greenInLoupeHalf++
+        val loupePixels = onNodeWithTag("ciacola-magnifier-loupe").captureToImage().toPixelMap()
+        var cyanInsideLens = 0
+        var magentaInsideLens = 0
+        val centerX = loupePixels.width / 2f
+        val centerY = loupePixels.height / 2f
+        val innerRadiusSq = (loupePixels.width * 0.35f) * (loupePixels.width * 0.35f)
+        for (y in 0 until loupePixels.height) {
+            for (x in 0 until loupePixels.width) {
+                val dx = x - centerX
+                val dy = y - centerY
+                if (dx * dx + dy * dy <= innerRadiusSq) {
+                    val c = loupePixels[x, y]
+                    if (c.red < 0.25f && c.green > 0.7f && c.blue > 0.7f) cyanInsideLens++
+                    if (c.red > 0.8f && c.green < 0.2f && c.blue > 0.8f) magentaInsideLens++
+                }
             }
         }
-        assertEquals(
-            0,
-            greenInLoupeHalf,
-            "MagnifierLoupeStage lens must not magnify stage decorations (found $greenInLoupeHalf green pixels in lens half)",
-        )
+        assertTrue(cyanInsideLens > 15, "Magnifier lens must render magnified cyan target text, got $cyanInsideLens")
+        assertEquals(0, magentaInsideLens, "Magnifier lens must NOT re-capture magenta callout decoration")
 
-        // At near-zero progress (p = 0.01f), the collapsing loupe ring must fade out rather than paint a bright pinhole dot.
-        runOnIdle { progress = 0.01f }
+        runOnIdle { progress = 0f }
         waitForIdle()
-        val tinyPixels = onNodeWithTag("loupe-stage").captureToImage().toPixelMap()
-        var brightAccentPinhole = 0
-        for (y in 0 until tinyPixels.height) {
-            for (x in (tinyPixels.width / 2) until tinyPixels.width) {
-                val c = tinyPixels[x, y]
-                if (c.red > 0.65f && c.blue < 0.55f) brightAccentPinhole++
+        val stageAtZero = onNodeWithTag("loupe-stage").captureToImage().toPixelMap()
+        // Right side where the loupe lived should contain zero cyan magnified text pixels at progress=0f.
+        var rightHalfCyan = 0
+        for (y in 0 until stageAtZero.height) {
+            for (x in stageAtZero.width / 2 until stageAtZero.width) {
+                val c = stageAtZero[x, y]
+                if (c.red < 0.25f && c.green > 0.7f && c.blue > 0.7f) rightHalfCyan++
             }
         }
-        assertEquals(0, brightAccentPinhole, "Collapsing loupe at p=0.01f must fade cleanly without leaving a bright pinhole")
+        assertEquals(0, rightHalfCyan, "Magnifier lens must fade out completely at progress=0f")
     }
 }

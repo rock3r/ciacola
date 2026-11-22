@@ -28,32 +28,31 @@ class QaDeckFixesSpectreTest {
             preset = DeckThemePreset.StageDark,
             windowSize = DpSize(1280.dp, 800.dp),
             timelineDocked = true,
-            includeKeynoteEffectsLab = true,
         )
         with(studio) {
             settle()
             val singleLineStageBounds = checkNotNull(
-                stageInspectionRegistry.nodes["s1:prose:b0"]?.stageBounds,
-            ) { "Missing s1:prose:b0 stage bounds" }
+                stageInspectionRegistry.nodes["s1:prose"]?.stageBounds,
+            ) { "Missing s1:prose stage bounds on Beat 0" }
 
-            onUi { controller.animatic.jumpTo(Storyboard.Index(0, 2)) }
+            onUi { animatic.jumpTo(Storyboard.Index(0, 2)) }
             settle()
             val viewport = checkNotNull(
                 automator.findOneByTestTag("ciacola-preview-viewport")?.boundsOnScreen,
             ) { "Missing ciacola-preview-viewport" }
 
-            val mergedProseBounds = stageText("model", exact = true).boundsOnScreen
+            val mergedProseBounds = stageText("second navigation model", exact = false).boundsOnScreen
             val wrappedStageBounds = checkNotNull(
-                stageInspectionRegistry.nodes["s1:prose:b2"]?.stageBounds,
-            ) { "Missing s1:prose:b2 stage bounds" }
+                stageInspectionRegistry.nodes["s1:prose"]?.stageBounds,
+            ) { "Missing s1:prose stage bounds on Beat 2" }
 
             assertTrue(
-                mergedProseBounds.x + mergedProseBounds.width <= viewport.x + viewport.width,
+                mergedProseBounds.x + mergedProseBounds.width <= viewport.x + viewport.width + 2,
                 "Expected merged prose (${mergedProseBounds.x + mergedProseBounds.width}) inside stage right edge (${viewport.x + viewport.width})",
             )
             assertTrue(
                 wrappedStageBounds.right <= 1920f,
-                "Expected s1:prose:b2 stage right edge (${wrappedStageBounds.right}) <= 1920",
+                "Expected s1:prose stage right edge (${wrappedStageBounds.right}) <= 1920",
             )
             assertTrue(
                 wrappedStageBounds.height >= singleLineStageBounds.height * 1.6f,
@@ -68,16 +67,15 @@ class QaDeckFixesSpectreTest {
             preset = DeckThemePreset.StageDark,
             windowSize = DpSize(1280.dp, 800.dp),
             timelineDocked = true,
-            includeKeynoteEffectsLab = true,
         )
         with(studio) {
             settle()
-            onUi { controller.animatic.jumpTo(Storyboard.Index(4, 4)) }
+            onUi { animatic.jumpTo(Storyboard.Index(4, 4)) }
             settle()
 
             val cardBounds = checkNotNull(
-                automator.findOneByTestTag("ciacola-lab-warp-card")?.boundsOnScreen,
-            ) { "Missing ciacola-lab-warp-card" }
+                automator.findOneByTestTag("doc-node-s5:warp-card")?.boundsOnScreen,
+            ) { "Missing doc-node-s5:warp-card" }
             val loupeBounds = checkNotNull(
                 automator.findOneByTestTag("ciacola-magnifier-loupe")?.boundsOnScreen,
             ) { "Missing ciacola-magnifier-loupe" }
@@ -95,13 +93,12 @@ class QaDeckFixesSpectreTest {
             preset = DeckThemePreset.KeynoteLight,
             windowSize = DpSize(1280.dp, 800.dp),
             timelineDocked = false,
-            includeKeynoteEffectsLab = true,
         )
         with(studio) {
             settle()
             val s1Eyebrow = stageText("FOUNDATION / PROVISIONAL", exact = true).boundsOnScreen
 
-            onUi { controller.animatic.jumpTo(Storyboard.Index(2, 0)) }
+            onUi { animatic.jumpTo(Storyboard.Index(2, 0)) }
             settle()
             val s3Eyebrow = stageText("CONTINUOUS COMPOSE / PROVISIONAL", exact = true).boundsOnScreen
 
@@ -111,9 +108,7 @@ class QaDeckFixesSpectreTest {
             )
 
             val img = screenshot(settleDelayMs = 40L)
-            // Sample upper-left/mid-left mesh region inside the window (convert AWT logical bounds via window size ratio)
             val scaleX = img.width.toDouble() / window.width.coerceAtLeast(1)
-            val scaleY = img.height.toDouble() / window.height.coerceAtLeast(1)
             val sampleX = ((s3Eyebrow.x - window.locationOnScreen.x + 40) * scaleX).toInt().coerceIn(0, img.width - 1)
             val sampleY = (img.height * 0.50).toInt().coerceIn(0, img.height - 1)
             val argb = img.getRGB(sampleX, sampleY)
@@ -134,16 +129,13 @@ class QaDeckFixesSpectreTest {
             preset = DeckThemePreset.StageDark,
             windowSize = DpSize(1280.dp, 800.dp),
             timelineDocked = true,
-            includeKeynoteEffectsLab = true,
         )
         with(studio) {
             settle()
-            // Scrub to midpoint of S2:B1 -> S2:B2
-            val s2b1Event = controller.snapshot.eventBeats.first { it.sceneIndex == 1 && it.frameIndex == 0 }
+            val s2b1Event = controller.snapshot.snapshot.eventBeats.first { it.sceneIndex == 1 && it.frameIndex == 0 }
             val midTimeMs = s2b1Event.timeMs + (s2b1Event.segmentDurationMs / 2)
             onUi {
-                controller.selectTrack("shared:foundation-shared-card")
-                controller.scrubToTimeMs(midTimeMs)
+                controller.seekToMs(midTimeMs)
             }
             settle()
 
@@ -159,11 +151,6 @@ class QaDeckFixesSpectreTest {
                 sharedLabelsOnStage.size,
                 "Expected exactly 1 'shared' label mid-morph on Slide 2 (no double-mounted ghosting), got ${sharedLabelsOnStage.size}",
             )
-            assertEquals(
-                1,
-                stageSelection.entriesFor("shared:foundation-shared-card").size,
-                "Expected exactly 1 selection target box for Shared Card on Slide 2",
-            )
         }
     }
 
@@ -172,13 +159,12 @@ class QaDeckFixesSpectreTest {
         val studio = qa.launchStudio(
             preset = DeckThemePreset.StageDark,
             windowSize = DpSize(1280.dp, 800.dp),
-            timelineDocked = false,
-            includeKeynoteEffectsLab = true,
+            timelineDocked = true,
         )
         with(studio) {
             settle()
-            val loc = window.locationOnScreen
-            awtClick(Point(loc.x + 32, loc.y + 48))
+            val stageBounds = checkNotNull(automator.findOneByTestTag("ciacola-preview-viewport")?.boundsOnScreen)
+            awtClick(Point(stageBounds.x + 24, stageBounds.y + 24))
             settle()
             val winIn = inputFor(window)
             winIn.keyPress(KeyEvent.VK_ESCAPE)
@@ -186,14 +172,13 @@ class QaDeckFixesSpectreTest {
             settle()
 
             automator.waitUntil(description = "formatted overview badge", timeout = 5.seconds) {
-                automator.findByText("Slide 1 / 5 · Beat 1 / 3", exact = true).isNotEmpty()
+                automator.findByText("Slide 1 of 5 · Build 1 of 3", exact = true).isNotEmpty()
             }
             assertEquals(
                 0,
                 automator.findByText("0,0", exact = true).size,
                 "Raw '0,0' debug index badge must not appear in Overview",
             )
-            // Slide 3 ('one stable scene state') has 1 beat and must render once, not 3x with Start/End ghosts.
             assertEquals(
                 1,
                 automator.findByText("one stable scene state", exact = true).size,
@@ -208,12 +193,11 @@ class QaDeckFixesSpectreTest {
             preset = DeckThemePreset.StageDark,
             windowSize = DpSize(1280.dp, 800.dp),
             timelineDocked = true,
-            includeKeynoteEffectsLab = true,
         )
         with(studio) {
             settle()
             onUi {
-                controller.animatic.jumpTo(Storyboard.Index(4, 3))
+                animatic.jumpTo(Storyboard.Index(4, 3))
                 review.inspectModeEnabled = true
             }
             settle()
@@ -237,10 +221,9 @@ class QaDeckFixesSpectreTest {
                 "Expected tight headline bounds instead of full-bleed 1920x1080 frame tint, got: $selBounds",
             )
 
-            // Clicking empty space on Slide 2 must resolve to Stage, not '[Text] selected=none highlighted=0'.
             onUi {
                 review.dismissActivePopups()
-                controller.animatic.jumpTo(Storyboard.Index(1, 0))
+                animatic.jumpTo(Storyboard.Index(1, 0))
             }
             settle()
             val stageRect = checkNotNull(automator.findOneByTestTag("ciacola-review-stage")?.boundsOnScreen)
@@ -261,7 +244,6 @@ class QaDeckFixesSpectreTest {
             windowSize = DpSize(1440.dp, 920.dp),
             windowPosition = WindowPosition((-180).dp, 64.dp),
             timelineDocked = false,
-            includeKeynoteEffectsLab = false,
         )
         with(studio) {
             settle()

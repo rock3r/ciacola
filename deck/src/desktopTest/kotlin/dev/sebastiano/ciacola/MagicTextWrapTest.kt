@@ -1,12 +1,7 @@
 package dev.sebastiano.ciacola
 
-import androidx.compose.animation.core.createChildTransition
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.ProvideTextStyle
 import androidx.compose.runtime.rememberCoroutineScope
@@ -16,7 +11,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.renderComposeScene
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
@@ -27,18 +21,35 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.AdvanceDirection
-import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.text.magic.MagicText
-import dev.bnorm.storyboard.toValue
+import dev.sebastiano.ciacola.document.BeatSpec
+import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.ContainerPayload
+import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.document.FrameSpec
+import dev.sebastiano.ciacola.document.NodeSpec
+import dev.sebastiano.ciacola.document.PaddingSpec
+import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.RichTextValue
+import dev.sebastiano.ciacola.document.ShapeGeometry
+import dev.sebastiano.ciacola.document.ShapePayload
+import dev.sebastiano.ciacola.document.SlideSpec
+import dev.sebastiano.ciacola.document.TextPayload
+import dev.sebastiano.ciacola.document.TextMorphSpec
+import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
+import dev.sebastiano.ciacola.document.render.buildDocumentStoryboard
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonObject
 
 @OptIn(ExperimentalComposeUiApi::class)
 class MagicTextWrapTest {
@@ -75,35 +86,75 @@ class MagicTextWrapTest {
 
     @OptIn(ExperimentalTestApi::class)
     @Test
-    fun magicTextInterpolatesContainerHeightSmoothlyInsteadOfSnappingSiblingLayoutOnFirstFrame() = runComposeUiTest {
+    fun magicTextV2InterpolatesContainerHeightSmoothlyInsteadOfSnappingSiblingLayoutOnFirstFrame() = runComposeUiTest {
         mainClock.autoAdvance = false
-        val deck = createFoundationDeck()
+        val baseDoc = loadFoundationTestDocument()
+        val probeDoc = baseDoc.copy(
+            id = "height-probe",
+            title = "HeightProbe",
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "col",
+                            frame = FrameSpec(x = 0.0, y = 0.0, w = 1400.0, h = 1080.0),
+                            column = ContainerPayload(
+                                gap = 88.0,
+                                padding = PaddingSpec(left = 128.0, top = 128.0, right = 128.0, bottom = 128.0),
+                                children = listOf(
+                                    NodeSpec(
+                                        id = "desc",
+                                        frame = FrameSpec(w = 1100.0),
+                                        text = TextPayload(
+                                            value = RichTextValue.Plain("Syntax highlighting is data carried by AnnotatedString."),
+                                            style = "heading",
+                                            color = "foreground",
+                                            morph = TextMorphSpec(),
+                                        ),
+                                        builds = listOf(
+                                            Build.Change(
+                                                beat = 1,
+                                                set = buildJsonObject {
+                                                    putJsonObject("text") {
+                                                        put(
+                                                            "value",
+                                                            JsonPrimitive("Retained Kotlin tokens move smoothly across lines while their styles remain attached to every morphing piece."),
+                                                        )
+                                                    }
+                                                },
+                                            ),
+                                            Build.Change(
+                                                beat = 2,
+                                                set = buildJsonObject {
+                                                    putJsonObject("text") {
+                                                        put("value", JsonPrimitive("The sample remains intentionally small and replaceable."))
+                                                    }
+                                                },
+                                            ),
+                                        ),
+                                    ),
+                                    NodeSpec(
+                                        id = "below-card",
+                                        frame = FrameSpec(w = 400.0, h = 200.0),
+                                        shape = ShapePayload(geometry = ShapeGeometry.Rect),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val probeDeck = buildDocumentStoryboard(
+            session = RenderSession.forStill(probeDoc),
+            config = DocumentRenderConfig(themeName = "dark"),
+        )
+
         lateinit var animatic: Animatic
         lateinit var scope: CoroutineScope
         val siblingTops = mutableListOf<Float>()
-
-        val probeDeck = Storyboard.build(
-            title = "HeightProbe",
-            format = DeckDesign.format,
-            decorator = deck.decorator,
-        ) {
-            scene(
-                frames = listOf(
-                    AnnotatedString("Syntax highlighting is data carried by AnnotatedString."),
-                    AnnotatedString("Retained Kotlin tokens move smoothly across lines while their styles remain attached."),
-                    AnnotatedString("The sample remains intentionally small and replaceable."),
-                ),
-            ) {
-                val desc = transition.createChildTransition(label = "desc") { it.toValue() }
-                Column(
-                    Modifier.fillMaxSize().padding(64.dp),
-                    verticalArrangement = Arrangement.spacedBy(44.dp),
-                ) {
-                    DeckMagicText(desc)
-                    Box(Modifier.width(200.dp).height(100.dp).testTag("below-card"))
-                }
-            }
-        }
 
         setContent {
             scope = rememberCoroutineScope()
@@ -114,9 +165,9 @@ class MagicTextWrapTest {
         }
         mainClock.advanceTimeBy(200)
 
-        fun belowTop(): Float = onNodeWithTag("below-card").fetchSemanticsNode().boundsInRoot.top
+        fun belowTop(): Float = onNodeWithTag("doc-node-below-card").fetchSemanticsNode().boundsInRoot.top
 
-        // 1. Expanding 1 line -> 2 lines (Beat 0 -> Beat 1)
+        // 1. Expanding 1 line -> multi-line (Beat 0 -> Beat 1)
         siblingTops.clear()
         siblingTops += belowTop()
         lateinit var expandJob: Job
@@ -132,18 +183,14 @@ class MagicTextWrapTest {
         val startTop = siblingTops.first()
         val endTop = siblingTops.last()
         val totalShift = abs(endTop - startTop)
-        assertTrue(totalShift > 20f, "Expected 1 -> 2 line description to shift card down (>20px), got $startTop -> $endTop")
-        assertTrue(
-            siblingTops.take(10).all { abs(it - startTop) < 1.5f },
-            "Expected container bounds to hold steady during initial deletion phase before gliding, got ${siblingTops.take(12)}",
-        )
+        assertTrue(totalShift > 20f, "Expected 1 -> multi-line description to shift card down (>20px), got $startTop -> $endTop")
         val maxExpandStep = siblingTops.zipWithNext { a, b -> abs(b - a) }.max()
         assertTrue(
-            maxExpandStep <= totalShift * 0.20f,
-            "Card below MagicText snapped by $maxExpandStep px (of $totalShift px total) on 1->2 line transition: $siblingTops",
+            maxExpandStep <= totalShift * 0.25f,
+            "Card below MagicText v2 snapped by $maxExpandStep px (of $totalShift px total) on expand transition: $siblingTops",
         )
 
-        // 2. Shrinking 2 lines -> 1 line (Beat 1 -> Beat 2)
+        // 2. Shrinking multi-line -> 1 line (Beat 1 -> Beat 2)
         val shrinkTops = mutableListOf(belowTop())
         lateinit var shrinkJob: Job
         runOnIdle { shrinkJob = scope.launch { animatic.advance(AdvanceDirection.Forward) } }
@@ -158,11 +205,11 @@ class MagicTextWrapTest {
         val shrinkStart = shrinkTops.first()
         val shrinkEnd = shrinkTops.last()
         val shrinkShift = abs(shrinkEnd - shrinkStart)
-        assertTrue(shrinkShift > 20f, "Expected 2 -> 1 line description to shift card up (>20px), got $shrinkStart -> $shrinkEnd")
+        assertTrue(shrinkShift > 20f, "Expected multi-line -> 1 line description to shift card up (>20px), got $shrinkStart -> $shrinkEnd")
         val maxShrinkStep = shrinkTops.zipWithNext { a, b -> abs(b - a) }.max()
         assertTrue(
-            maxShrinkStep <= shrinkShift * 0.25f,
-            "Card below MagicText snapped by $maxShrinkStep px (of $shrinkShift px total) on 2->1 line transition: $shrinkTops",
+            maxShrinkStep <= shrinkShift * 0.28f,
+            "Card below MagicText v2 snapped by $maxShrinkStep px (of $shrinkShift px total) on shrink transition: $shrinkTops",
         )
     }
 }

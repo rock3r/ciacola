@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.text.highlight.CodeStyle
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
+import kotlin.math.pow
 import ciacola.deck.generated.resources.Inter_Black
 import ciacola.deck.generated.resources.Inter_Bold
 import ciacola.deck.generated.resources.Inter_ExtraBold
@@ -616,4 +617,28 @@ fun DeckThemeProvider(
             content = content,
         )
     }
+}
+
+/**
+ * Computes WCAG 2.1 relative luminance for an sRGB [Color] in `[0f, 1f]`.
+ */
+fun relativeLuminance(color: Color): Float {
+    fun linearize(channel: Float): Float {
+        val c = channel.coerceIn(0f, 1f)
+        return if (c <= 0.03928f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
+    }
+    return 0.2126f * linearize(color.red) +
+        0.7152f * linearize(color.green) +
+        0.0722f * linearize(color.blue)
+}
+
+/**
+ * Computes the WCAG 2.1 contrast ratio (`1f..21f`) between [foreground] and [background].
+ */
+fun contrastRatio(foreground: Color, background: Color): Float {
+    val l1 = relativeLuminance(foreground)
+    val l2 = relativeLuminance(background)
+    val lighter = maxOf(l1, l2)
+    val darker = minOf(l1, l2)
+    return (lighter + 0.05f) / (darker + 0.05f)
 }

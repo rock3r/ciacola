@@ -52,7 +52,7 @@ val Transition<*>.segmentProgressFraction: Float
         return (root.playTimeNanos.toDouble() / effective.toDouble()).toFloat().coerceIn(0f, 1f)
     }
 
-internal fun Transition<*>.effectiveSegmentDurationNanos(): Long {
+fun Transition<*>.effectiveSegmentDurationNanos(): Long {
     if (currentState == targetState) return 0L
     var longest = 0L
     for (state in animations) {

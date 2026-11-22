@@ -18,14 +18,19 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
+import dev.bnorm.storyboard.easel.LocalStageViewportHairline
 import dev.bnorm.storyboard.easel.clampStoryboardIndex
 import dev.bnorm.storyboard.easel.onStoryNavigation
 import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+
+/** Optional provider of human-readable slide titles for [EaselOverview] cards and `⌘K` Quick Jump. */
+val LocalOverviewSlideTitleProvider = staticCompositionLocalOf<((Int) -> String?)?> { null }
 
 /** Whether [EaselOverview] shows the grid; hoist it to toggle the overview from outside (e.g. a menu). */
 @Stable
@@ -46,6 +51,8 @@ fun EaselOverview(
     animatic: Animatic,
     modifier: Modifier = Modifier,
     visibility: OverviewVisibility = rememberOverviewVisibility(),
+    slideTitle: ((Int) -> String?)? = null,
+    previewStoryboard: Storyboard? = null,
     content: @Composable () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -53,10 +60,12 @@ fun EaselOverview(
 
     val holder = rememberSaveableStateHolder()
 
-    val storyboard = animatic.storyboard
-    DisposableEffect(holder, storyboard) {
+    val effectiveSlideTitle = slideTitle ?: LocalOverviewSlideTitleProvider.current
+    val storyMountKey = animatic.storyboard
+    val storyboard = previewStoryboard ?: storyMountKey
+    DisposableEffect(holder, storyMountKey) {
         onDispose {
-            holder.removeState(storyboard)
+            holder.removeState(storyMountKey)
         }
     }
     val overviewState = remember(storyboard) {
@@ -119,6 +128,7 @@ fun EaselOverview(
                             overviewState = overviewState,
                             isVisible = isVisible,
                             useSharedElement = overviewVisible,
+                            slideTitle = effectiveSlideTitle,
                             onExitOverview = {
                                 job?.cancel()
                                 job = coroutineScope.launch {
@@ -132,7 +142,7 @@ fun EaselOverview(
                         )
                     }
                 } else {
-                    holder.SaveableStateProvider(storyboard) {
+                    holder.SaveableStateProvider(storyMountKey) {
                         var containerSize by remember { mutableStateOf(IntSize.Zero) }
                         var viewportSize by remember { mutableStateOf(IntSize.Zero) }
                         val isLetterboxedOrPillarboxed = containerSize.width > 0 &&
@@ -141,7 +151,8 @@ fun EaselOverview(
                             viewportSize.height > 0 &&
                             (abs(containerSize.width - viewportSize.width) > 1 ||
                                 abs(containerSize.height - viewportSize.height) > 1)
-                        val showViewportHairline = !LocalPresentingFullscreen.current || isLetterboxedOrPillarboxed
+                        val showViewportHairline = LocalStageViewportHairline.current &&
+                            (!LocalPresentingFullscreen.current || isLetterboxedOrPillarboxed)
                         val colors = MaterialTheme.colors
                         val hairlineColor = colors.onBackground.copy(alpha = if (colors.isLight) 0.16f else 0.18f)
 

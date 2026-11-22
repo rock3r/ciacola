@@ -197,6 +197,9 @@ class StageAnchorRegistry {
 /** Provides the enclosing slide's [StageAnchorRegistry] to [ElementConnector] and stage elements. */
 val LocalStageAnchorRegistry = compositionLocalOf<StageAnchorRegistry?> { null }
 
+/** Provides the active cross-slide Overlay [StageAnchorRegistry] during `Cross(A, B)` transitions. */
+val LocalOverlayStageAnchorRegistry = compositionLocalOf<StageAnchorRegistry?> { null }
+
 /**
  * Draws a live stage-space connector between registered slide elements ([fromId] -> [toId]) using
  * [LocalStageAnchorRegistry] (with fallback to [LocalStageInspectionRegistry]), tracking element
@@ -219,8 +222,9 @@ fun ElementConnector(
     headAngleDegrees: Float = 28f,
 ) {
     val anchorRegistry = LocalStageAnchorRegistry.current
+    val overlayAnchorRegistry = LocalOverlayStageAnchorRegistry.current
     val inspectionRegistry = LocalStageInspectionRegistry.current
-    if (anchorRegistry == null && inspectionRegistry == null) return
+    if (anchorRegistry == null && overlayAnchorRegistry == null && inspectionRegistry == null) return
     val rootHolder = LocalStageRootCoordinates.current
     val dragPreview = LocalStageDragPreview.current
     var canvasCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -233,6 +237,8 @@ fun ElementConnector(
         if (p <= 0f) return@Canvas
 
         // Subscribe DrawScope to anchor placements, snapshot updates, and active drags.
+        overlayAnchorRegistry?.versionOf(fromId)
+        overlayAnchorRegistry?.versionOf(toId)
         anchorRegistry?.versionOf(fromId)
         anchorRegistry?.versionOf(toId)
         val fromSnap = inspectionRegistry?.nodes?.get(fromId)
@@ -243,11 +249,13 @@ fun ElementConnector(
         val origin by lazy(LazyThreadSafetyMode.NONE) {
             resolveStageBounds(canvasCoords, rootHolder)?.topLeft ?: Offset.Zero
         }
-        val fromLocal = anchorRegistry?.boundsRelativeTo(fromId, canvasCoords)
+        val fromLocal = overlayAnchorRegistry?.boundsRelativeTo(fromId, canvasCoords)
+            ?: anchorRegistry?.boundsRelativeTo(fromId, canvasCoords)
             ?: (inspectionRegistry?.liveStageBoundsOf(fromId) ?: fromSnap?.stageBounds)
                 ?.translate(-origin.x, -origin.y)
             ?: return@Canvas
-        val toLocal = anchorRegistry?.boundsRelativeTo(toId, canvasCoords)
+        val toLocal = overlayAnchorRegistry?.boundsRelativeTo(toId, canvasCoords)
+            ?: anchorRegistry?.boundsRelativeTo(toId, canvasCoords)
             ?: (inspectionRegistry?.liveStageBoundsOf(toId) ?: toSnap?.stageBounds)
                 ?.translate(-origin.x, -origin.y)
             ?: return@Canvas

@@ -1,13 +1,13 @@
 package dev.sebastiano.ciacola.timeline
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import dev.bnorm.storyboard.Frame
-import dev.bnorm.storyboard.Storyboard
+import dev.sebastiano.ciacola.document.BeatSpec
+import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.document.FrameSpec
+import dev.sebastiano.ciacola.document.NodeSpec
+import dev.sebastiano.ciacola.document.RichTextValue
+import dev.sebastiano.ciacola.document.SlideSpec
+import dev.sebastiano.ciacola.document.TextPayload
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -15,47 +15,55 @@ import kotlin.test.assertTrue
 
 class TimelineBeatMarkersTest {
 
-    private fun multiSlideTestStoryboard(): Storyboard = Storyboard.build(
+    private fun multiSlideTestDocument(): DeckDocument = DeckDocument(
+        id = "beat-marker-fixture",
         title = "Beat Marker Fixture",
-    ) {
-        scene(frames = listOf(0, 1)) {
-            val p by transition.animateFloat(transitionSpec = { tween(durationMillis = 280) }) { f ->
-                when (f) {
-                    is Frame.Value -> f.value.toFloat()
-                    Frame.Start -> 0f
-                    Frame.End -> 1f
-                }
-            }
-            Box(Modifier.fillMaxSize()) { check(p >= 0f) }
-        }
-        scene(frames = listOf(0, 1, 2)) {
-            val p by transition.animateFloat(transitionSpec = { tween(durationMillis = 320) }) { f ->
-                when (f) {
-                    is Frame.Value -> f.value.toFloat()
-                    Frame.Start -> 0f
-                    Frame.End -> 2f
-                }
-            }
-            Box(Modifier.fillMaxSize()) { check(p >= 0f) }
-        }
-        scene(frames = listOf(0, 1)) {
-            val p by transition.animateFloat(transitionSpec = { tween(durationMillis = 240) }) { f ->
-                when (f) {
-                    is Frame.Value -> f.value.toFloat()
-                    Frame.Start -> 0f
-                    Frame.End -> 1f
-                }
-            }
-            Box(Modifier.fillMaxSize()) { check(p >= 0f) }
-        }
-    }
+        slides = listOf(
+            SlideSpec(
+                id = "s0",
+                beats = listOf(BeatSpec(), BeatSpec()),
+                nodes = listOf(
+                    NodeSpec(
+                        id = "s0-t",
+                        frame = FrameSpec(100.0, 100.0, 400.0, 80.0),
+                        text = TextPayload(value = RichTextValue.Plain("Slide 0")),
+                        builds = listOf(Build.Enter(beat = 1, effect = "dissolve", durationMs = 280)),
+                    ),
+                ),
+            ),
+            SlideSpec(
+                id = "s1",
+                beats = listOf(BeatSpec(), BeatSpec(), BeatSpec()),
+                nodes = listOf(
+                    NodeSpec(
+                        id = "s1-t",
+                        frame = FrameSpec(100.0, 100.0, 400.0, 80.0),
+                        text = TextPayload(value = RichTextValue.Plain("Slide 1")),
+                        builds = listOf(Build.Enter(beat = 1, effect = "dissolve", durationMs = 320)),
+                    ),
+                ),
+            ),
+            SlideSpec(
+                id = "s2",
+                beats = listOf(BeatSpec(), BeatSpec()),
+                nodes = listOf(
+                    NodeSpec(
+                        id = "s2-t",
+                        frame = FrameSpec(100.0, 100.0, 400.0, 80.0),
+                        text = TextPayload(value = RichTextValue.Plain("Slide 2")),
+                        builds = listOf(Build.Enter(beat = 1, effect = "dissolve", durationMs = 240)),
+                    ),
+                ),
+            ),
+        ),
+    )
 
     @Test
     fun emitsStartOfHoldBeatMarkersForEveryValueFrameIncludingFinalBeat() {
-        val storyboard = multiSlideTestStoryboard()
-        val snapshot = indexDeckTimeline(storyboard)
+        val doc = multiSlideTestDocument()
+        val snapshot = DocumentTimelinePlannerCache().buildSnapshot(doc).snapshot
 
-        val expectedTotalBeats = storyboard.scenes.sumOf { it.frames.size }
+        val expectedTotalBeats = doc.slides.sumOf { it.beats.size }
         assertEquals(7, expectedTotalBeats)
         assertEquals(
             expectedTotalBeats,
@@ -63,7 +71,6 @@ class TimelineBeatMarkersTest {
             "Every value frame including the final beat of the last slide must emit an EventBeatLine",
         )
 
-        // Verify every EventBeatLine sits at the START of its value state's hold span, not on the outgoing cliff.
         val holdByState = snapshot.stateSpans.filter { it.isHold }.associateBy { it.stateIndex }
         for (beat in snapshot.eventBeats) {
             val hold = holdByState[beat.stateIndex]
@@ -82,16 +89,16 @@ class TimelineBeatMarkersTest {
             assertEquals(
                 beat.stateIndex,
                 resolvedState,
-                "stateFractionForTimeMs(beat.timeMs) must resolve back to the same beat state (not an End boundary)",
+                "stateFractionForTimeMs(beat.timeMs) must resolve back to the same beat state",
             )
             assertEquals(0f, resolvedFrac, 1e-4f)
         }
 
-        // Verify final beat metadata specifically.
+        assertEquals(0, snapshot.eventBeats.first().segmentDurationMs)
         val finalBeat = snapshot.eventBeats.last()
         assertEquals(2, finalBeat.sceneIndex)
         assertEquals(1, finalBeat.frameIndex)
-        assertEquals(0, finalBeat.segmentDurationMs)
+        assertEquals(240, finalBeat.segmentDurationMs)
         assertFalse(finalBeat.isSlideBoundary)
     }
 
@@ -104,7 +111,6 @@ class TimelineBeatMarkersTest {
         val nextIntraSlideSeg = ScrubStepEndpoint(stateIndex = 3, toStateIndex = 4, fraction = 0.20f, sceneIndex = 0)
         val nextSlideSeg = ScrubStepEndpoint(stateIndex = 5, toStateIndex = 6, fraction = 0.20f, sceneIndex = 1)
 
-        // Strict same-segment scrub seeks in place with no intra-slide crossing.
         val forwardInSeg = scrubStepPolicy(prev = midSeg, next = sameSegLater, dragging = true)
         assertTrue(forwardInSeg.inPlace)
         assertTrue(forwardInSeg.sameSegmentInPlace)
@@ -112,34 +118,28 @@ class TimelineBeatMarkersTest {
         assertFalse(forwardInSeg.crossedIntraSlideBeat)
         assertFalse(forwardInSeg.reversedWithinSegment)
 
-        // Reverse inside same segment seeks in place and flags reversedWithinSegment.
         val reverseInSeg = scrubStepPolicy(prev = midSeg, next = sameSegEarlier, dragging = true)
         assertTrue(reverseInSeg.inPlace)
         assertTrue(reverseInSeg.sameSegmentInPlace)
         assertTrue(reverseInSeg.reversedWithinSegment)
 
-        // Dragging back to beat start (fraction 0) uses sameSlideDrag + flags crossedIntraSlideBeat.
         val dragBackToStart = scrubStepPolicy(prev = midSeg, next = backToBeatStart, dragging = true)
         assertTrue(dragBackToStart.inPlace)
         assertFalse(dragBackToStart.sameSegmentInPlace)
         assertTrue(dragBackToStart.sameSlideDrag)
         assertTrue(dragBackToStart.crossedIntraSlideBeat)
 
-        // Dragging across intra-slide beats seeks in place during drag and flags crossedIntraSlideBeat.
         val dragAcrossBeat = scrubStepPolicy(prev = midSeg, next = nextIntraSlideSeg, dragging = true)
         assertTrue(dragAcrossBeat.inPlace)
         assertTrue(dragAcrossBeat.sameSlideDrag)
         assertTrue(dragAcrossBeat.crossedIntraSlideBeat)
 
-        // Non-drag click across beat rebuilds cleanly.
         val clickAcrossBeat = scrubStepPolicy(prev = midSeg, next = nextIntraSlideSeg, dragging = false)
         assertFalse(clickAcrossBeat.inPlace)
 
-        // Crossing into another slide always rebuilds even while dragging.
         val crossSlide = scrubStepPolicy(prev = midSeg, next = nextSlideSeg, dragging = true)
         assertFalse(crossSlide.inPlace)
 
-        // Explicit forceRebuild overrides in-place seeking.
         val forced = scrubStepPolicy(prev = midSeg, next = sameSegLater, dragging = true, forceRebuild = true)
         assertFalse(forced.inPlace)
     }

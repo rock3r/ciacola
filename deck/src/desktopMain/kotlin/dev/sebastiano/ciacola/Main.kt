@@ -1,100 +1,173 @@
 package dev.sebastiano.ciacola
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.window.Window
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.application
-import androidx.compose.ui.window.rememberWindowState
-import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.AdvanceDirection
+import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.DesktopEasel
-import dev.bnorm.storyboard.easel.Easel
-import dev.bnorm.storyboard.easel.EaselWindow
+import dev.bnorm.storyboard.easel.overview.LocalOverviewChromeStyle
+import dev.bnorm.storyboard.easel.overview.LocalOverviewSlideTitleProvider
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.easel.resolveStoryboardWorkspaceRoot
 import dev.bnorm.storyboard.plus
-import dev.sebastiano.ciacola.authoring.DeckHostParams
+import dev.sebastiano.ciacola.decks.DECKS_DIR_SYSTEM_PROPERTY
+import dev.sebastiano.ciacola.decks.DeckSource
+import dev.sebastiano.ciacola.decks.resolveAppDataRecoveryRoot
+import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.render.AutoAdvanceEffect
+import dev.sebastiano.ciacola.document.render.DefaultMagicTextV2Renderer
+import dev.sebastiano.ciacola.document.render.DocumentKeyboardCaptureController
+import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
+import dev.sebastiano.ciacola.document.render.buildDocumentStoryboard
+import dev.sebastiano.ciacola.document.render.holdDurationForState
+import dev.sebastiano.ciacola.document.render.rememberDocumentStoryboard
+import dev.sebastiano.ciacola.document.render.resolveActiveThemeSpec
+import dev.sebastiano.ciacola.document.render.resolveDeckTheme
 import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
+import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageInteractiveRegistry
 import dev.sebastiano.ciacola.inspector.StageDragPreview
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageInteractiveRegistry
-import dev.sebastiano.ciacola.inspector.design.DesignSystemStore
-import dev.sebastiano.ciacola.inspector.design.rememberDesignSystemWindow
-import dev.sebastiano.ciacola.inspector.element.ElementOverridesStore
-import dev.sebastiano.ciacola.inspector.element.rememberElementEditorController
-import dev.sebastiano.ciacola.inspector.lint.DeckLintController
-import dev.sebastiano.ciacola.inspector.lint.DeckLintWindow
-import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintStageDecorator
-import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintWindow
+import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
+import dev.sebastiano.ciacola.inspector.design.rememberDocumentThemeInspectorWindow
+import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
+import dev.sebastiano.ciacola.inspector.element.DocumentStageDirectEditOverlay
+import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
+import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintStageOverlay
+import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintWindow
+import dev.sebastiano.ciacola.inspector.lint.rememberDocumentDeckLintWindow
+import dev.sebastiano.ciacola.inspector.sync.CloseGuardState
+import dev.sebastiano.ciacola.inspector.sync.DocumentSyncController
 import dev.sebastiano.ciacola.presenter.PresenterWindow
 import dev.sebastiano.ciacola.presenter.rememberPresenterWindow
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.SlideReviewWindow
 import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.review.rememberSlideReviewWindow
-import dev.sebastiano.ciacola.studio.DeckAnimaticPersistenceEffect
+import dev.sebastiano.ciacola.studio.ActiveDeckSession
+import dev.sebastiano.ciacola.studio.CiacolaVisualSmokeWindow
+import dev.sebastiano.ciacola.studio.DeckSessionAnimaticPersistenceEffect
+import dev.sebastiano.ciacola.studio.DeckSwitchProbeEffect
+import dev.sebastiano.ciacola.studio.DeckSwitchTimer
 import dev.sebastiano.ciacola.studio.DeckSwitcherDropdown
-import dev.sebastiano.ciacola.studio.StudioInspectorTab
+import dev.sebastiano.ciacola.studio.DocumentSpeakerNotesMemo
+import dev.sebastiano.ciacola.studio.StageShortcutToastOverlay
+import dev.sebastiano.ciacola.studio.StudioAppBarHost
+import dev.sebastiano.ciacola.studio.StudioBottomDockTabStrip
+import dev.sebastiano.ciacola.studio.StudioBottomIssuesDockBody
+import dev.sebastiano.ciacola.studio.StudioBottomIssuesDockHeaderTrailing
+import dev.sebastiano.ciacola.studio.StudioIssuesDock
+import dev.sebastiano.ciacola.studio.StudioThemeSheet
 import dev.sebastiano.ciacola.studio.StudioUnifiedInspectorPane
 import dev.sebastiano.ciacola.studio.StudioWorkspaceController
 import dev.sebastiano.ciacola.studio.StudioWorkspaceSyncEffects
+import dev.sebastiano.ciacola.studio.TimelineAnimaticSyncEffects
+import dev.sebastiano.ciacola.studio.awaitNextDrawnFrame
+import dev.sebastiano.ciacola.studio.buildDualPassVideoStoryboard
+import dev.sebastiano.ciacola.studio.buildPerThumbnailOverviewStoryboard
+import dev.sebastiano.ciacola.studio.clearDesktopQuitHandler
+import dev.sebastiano.ciacola.studio.externalDeckEntryFor
+import dev.sebastiano.ciacola.studio.flushOutgoingBeforeSwap
+import dev.sebastiano.ciacola.studio.formatStudioBreadcrumb
+import dev.sebastiano.ciacola.studio.installDesktopQuitHandler
 import dev.sebastiano.ciacola.studio.loadPersistedInspectorWidthDp
+import dev.sebastiano.ciacola.studio.openInitialDeckSession
+import dev.sebastiano.ciacola.studio.openRecoveryCopyIntoStore
 import dev.sebastiano.ciacola.studio.persistActiveDeckId
 import dev.sebastiano.ciacola.studio.persistInspectorWidthDp
+import dev.sebastiano.ciacola.studio.persistSelectedThemeForDeck
+import dev.sebastiano.ciacola.studio.pickDeckFileForCopyThemes
+import dev.sebastiano.ciacola.studio.pickDeckJsonFile
+import dev.sebastiano.ciacola.studio.preOpenDeckSession
+import dev.sebastiano.ciacola.studio.prepareToLeaveDeck
 import dev.sebastiano.ciacola.studio.rememberDeckMenuWindow
+import dev.sebastiano.ciacola.studio.rememberDocumentSyncGateWindow
+import dev.sebastiano.ciacola.studio.rememberStudioOverviewChromeStyle
+import dev.sebastiano.ciacola.studio.rememberStudioShellWindow
+import dev.sebastiano.ciacola.studio.resolveDeckAssetsRootDir
+import dev.sebastiano.ciacola.studio.resolveDeckFontsDir
 import dev.sebastiano.ciacola.studio.resolveInitialDeckId
+import dev.sebastiano.ciacola.studio.resolveSelectedThemeForDeck
+import dev.sebastiano.ciacola.studio.saveSpeakerNote
 import dev.sebastiano.ciacola.studio.storyboardDirForDeck
 import dev.sebastiano.ciacola.theme.DeckThemePreset
-import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
-import dev.sebastiano.ciacola.theme.ReducedMotionMode
 import dev.sebastiano.ciacola.theme.parseReducedMotionEnv
 import dev.sebastiano.ciacola.theme.rememberSystemReducedMotion
 import dev.sebastiano.ciacola.theme.resolveEffectiveReducedMotion
-import dev.sebastiano.ciacola.theme.withOverrides
-import dev.sebastiano.ciacola.timeline.DeckLoopClock
-import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
-import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
-import dev.sebastiano.ciacola.timeline.TimelineStageSelection
-import dev.sebastiano.ciacola.timeline.rememberTimelineStageDecorator
-import dev.sebastiano.ciacola.timeline.rememberTimelineStudioController
-import dev.sebastiano.ciacola.timeline.rememberTimelineStudioWindow
+import dev.sebastiano.ciacola.timeline.DocumentTimelineController
+import dev.sebastiano.ciacola.timeline.DocumentTimelineStageOverlay
+import dev.sebastiano.ciacola.timeline.DocumentTimelineWindow
+import dev.sebastiano.ciacola.timeline.rememberDocumentTimelineWindow
 import dev.sebastiano.ciacola.ui.AuthoringTextInputFocusTracker
+import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.LocalAuthoringTextInputTracker
-import java.awt.Rectangle
-import java.awt.Robot
-import java.io.File
 import java.nio.file.Files
-import java.util.Collections
-import java.util.WeakHashMap
-import javax.imageio.ImageIO
-import kotlinx.coroutines.delay
+import java.nio.file.Path
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-fun main() = application {
-    var preset by remember {
-        val envPreset = System.getenv("CIACOLA_THEME")
-        mutableStateOf(
-            if (envPreset.equals("light", ignoreCase = true)) {
-                DeckThemePreset.KeynoteLight
-            } else {
-                DeckThemePreset.StageDark
-            }
-        )
+private class VideoExportSessionHolder {
+    @Volatile
+    var session: RenderSession? = null
+}
+
+fun main() {
+    val smokeDirectory = System.getenv("DECK_VISUAL_SMOKE_DIR")
+    // Decode + lock the initial deck before any composition exists: the store's snapshot state must
+    // live in the global snapshot, never be created mid-composition from another thread.
+    val launch = if (smokeDirectory == null) StudioLaunch.resolve() else null
+    ciacolaApplication(smokeDirectory, launch)
+}
+
+private class StudioLaunch(
+    val workspaceRoot: Path,
+    val rootStoryboardDir: Path,
+    val recoveryRootDir: Path,
+    val initialSession: ActiveDeckSession,
+) {
+    companion object {
+        fun resolve(): StudioLaunch {
+            val workspaceRoot = resolveStoryboardWorkspaceRoot()
+            val rootStoryboardDir = workspaceRoot.resolve(".storyboard")
+            val recoveryRootDir = resolveAppDataRecoveryRoot()
+            val initialEntry = DeckCatalog.byId(resolveInitialDeckId(rootStoryboardDir))
+            return StudioLaunch(
+                workspaceRoot = workspaceRoot,
+                rootStoryboardDir = rootStoryboardDir,
+                recoveryRootDir = recoveryRootDir,
+                initialSession = openInitialDeckSession(initialEntry, recoveryRootDir),
+            )
+        }
     }
+}
+
+private fun ciacolaApplication(smokeDirectory: String?, launch: StudioLaunch?) = application {
     var motionMode by remember {
         mutableStateOf(parseReducedMotionEnv(System.getenv("CIACOLA_REDUCE_MOTION")))
     }
@@ -103,591 +176,919 @@ fun main() = application {
     val effectiveReducedMotion = resolveEffectiveReducedMotion(motionMode, systemReducedMotion)
     val textInputTracker = remember { AuthoringTextInputFocusTracker() }
 
-    val smokeDirectory = System.getenv("DECK_VISUAL_SMOKE_DIR")
-    if (smokeDirectory == null) {
-        val appScope = rememberCoroutineScope()
-        val workspaceRoot = remember { resolveStoryboardWorkspaceRoot() }
-        val rootStoryboardDir = remember(workspaceRoot) { workspaceRoot.resolve(".storyboard") }
-        var activeDeckId by remember(rootStoryboardDir) {
-            mutableStateOf(resolveInitialDeckId(rootStoryboardDir))
-        }
-        var deckSwitchCount by remember { mutableIntStateOf(0) }
-        val activeDeck = remember(activeDeckId) { DeckCatalog.byId(activeDeckId) }
-        val deckStoryboardDir = remember(rootStoryboardDir, activeDeck.id) {
-            storyboardDirForDeck(rootStoryboardDir, activeDeck.id)
-        }
-
-        // Theme / design system tokens stay global across decks; deck overrides & comments are per-deck.
-        val designSystemStore = remember(rootStoryboardDir) {
-            DesignSystemStore(storyboardDir = rootStoryboardDir)
-        }
-        val reviewStore = remember(deckStoryboardDir, workspaceRoot) {
-            ReviewCommentStore(storyboardDir = deckStoryboardDir, workspaceRoot = workspaceRoot)
-        }
-        val timelineOverridesStore = remember(deckStoryboardDir) {
-            TimelineOverridesStore(storyboardDir = deckStoryboardDir)
-        }
-        val elementOverridesStore = remember(deckStoryboardDir) {
-            ElementOverridesStore(storyboardDir = deckStoryboardDir)
-        }
-        DisposableEffect(designSystemStore) {
-            onDispose { designSystemStore.close() }
-        }
-        DisposableEffect(elementOverridesStore) {
-            onDispose { elementOverridesStore.close() }
-        }
-        val stageInspectionRegistry = remember(activeDeck.id) { StageInspectionRegistry() }
-        val stageInteractiveRegistry = remember(activeDeck.id) { StageInteractiveRegistry() }
-        var animaticHolder by remember { mutableStateOf<dev.bnorm.storyboard.easel.Animatic?>(null) }
-        val elementController = rememberElementEditorController(
-            overridesStore = elementOverridesStore,
-            inspectionRegistry = stageInspectionRegistry,
-            isStageSettlingProvider = { animaticHolder?.scrubSettling == true },
-        )
-        val lintController = remember(activeDeck.id) { DeckLintController() }
-
-        val designRev = designSystemStore.revision
-        val designOverrides = remember(preset, designRev) {
-            designSystemStore.overridesFor(preset)
-        }
-        val baseHostTheme = remember(preset) { DeckThemes.forPreset(preset) }
-        val hostTheme = remember(baseHostTheme, designOverrides) {
-            baseHostTheme.withOverrides(designOverrides)
-        }
-        val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
-        val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
-
-        val elementRev = elementOverridesStore.revision
-        val structuralRev = timelineOverridesStore.structuralRevision
-        val paramRev = timelineOverridesStore.parameterRevision
-
-        val deckLoopClock = remember(activeDeck.id) { DeckLoopClock() }
-        val motionPathPreview = remember { MotionPathPreviewState() }
-        val stageSelection = remember { TimelineStageSelection() }
-        val reviewStageCoordinator = rememberReviewStageCoordinator()
-
-        var workspaceHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
-
-        val presetRegistry = remember { StoryboardPresetRegistry() }
-        val stageLoopAndArcDecorator = rememberTimelineStageDecorator(
-            loopClock = deckLoopClock,
-            motionPathPreview = motionPathPreview,
-            overridesStore = timelineOverridesStore,
-            stageSelection = stageSelection,
-        )
-        val lintStageDecorator = rememberDeckLintStageDecorator(
-            controller = lintController,
-            isInspectionVisible = { workspaceHolder?.isLinterVisible == true },
-        )
-
-        val storyboard = rememberHotReloadStoryboard(
-            activeDeck.id,
-            preset,
-            effectiveReducedMotion,
-            reviewStageCoordinator,
-            structuralRev,
-        ) {
-            activeDeck.create(
-                DeckHostParams(
-                    theme = baseHostTheme,
-                    bundledPreset = preset,
-                    stageDecorator = stageLoopAndArcDecorator +
-                        reviewStageCoordinator.stageDecorator +
-                        elementController.stageDecorator +
-                        lintStageDecorator,
-                    timelineOverrides = timelineOverridesStore.data(),
-                    reducedMotion = effectiveReducedMotion,
-                    timelineOverridesProvider = {
-                        timelineOverridesStore.parameterRevision
-                        timelineOverridesStore.structuralRevision
-                        timelineOverridesStore.data()
-                    },
-                    elementOverridesProvider = {
-                        elementOverridesStore.revision
-                        elementOverridesStore.data()
-                    },
-                    designOverridesProvider = {
-                        designSystemStore.revision
-                        designSystemStore.overridesFor(preset)
-                    },
-                ),
-            ).also { built ->
-                presetRegistry.record(built, preset)
-            }
-        }
-
-        val buildAuditStoryboardForPreset: (DeckThemePreset) -> Storyboard = remember(
-            activeDeck,
-            timelineOverridesStore,
-            elementOverridesStore,
-            designSystemStore,
-            effectiveReducedMotion,
-        ) {
-            { targetPreset ->
-                val targetDesignOverrides = designSystemStore.overridesFor(targetPreset)
-                activeDeck.create(
-                    DeckHostParams(
-                        theme = DeckThemes.forPreset(targetPreset),
-                        bundledPreset = targetPreset,
-                        timelineOverrides = timelineOverridesStore.data(),
-                        reducedMotion = effectiveReducedMotion,
-                        elementOverrides = elementOverridesStore.data(),
-                        designOverrides = targetDesignOverrides,
-                    ),
-                )
-            }
-        }
-
-        val animatic = key(activeDeck.id) {
-            rememberAnimatic(
-                initialIndex = Storyboard.Index(0, 0),
-                storyboard = { storyboard },
+    DeckTextRendererProvider(DefaultMagicTextV2Renderer) {
+        if (smokeDirectory == null && launch != null) {
+            CiacolaStudioApplication(
+                launch = launch,
+                motionMode = motionMode,
+                onSelectMotionMode = { motionMode = it },
+                ambientLoopsPaused = ambientLoopsPaused,
+                onToggleAmbientLoopsPaused = { ambientLoopsPaused = it },
+                systemReducedMotion = systemReducedMotion,
+                effectiveReducedMotion = effectiveReducedMotion,
+                textInputTracker = textInputTracker,
+                onExitApplication = ::exitApplication,
             )
-        }.also { animaticHolder = it }
-        DeckAnimaticPersistenceEffect(
-            animatic = animatic,
-            storyboardDir = deckStoryboardDir,
-            restoreOnEnter = deckSwitchCount == 0,
-        )
-
-        val timelineController = rememberTimelineStudioController(
-            animatic = animatic,
-            overridesStore = timelineOverridesStore,
-            loopClock = deckLoopClock,
-            bakeDispatcher = reviewStore.asBakeDispatcher(),
-            bakeWorkspaceRoot = reviewStore.workspaceRoot,
-            bakeGradleTaskHint = reviewStore.config.gradleTaskHint,
-            motionPathPreview = motionPathPreview,
-            stageSelection = stageSelection,
-            externalTimingKey = designOverrides.motion,
-            externalInEditGesture = designSystemStore.isInEditGesture,
-        )
-
-        val studioWorkspace = remember(timelineController, designSystemStore) {
-            StudioWorkspaceController(
-                timelineController = timelineController,
-                timelineOverridesStore = timelineOverridesStore,
-                designSystemStore = designSystemStore,
-                elementOverridesStore = elementOverridesStore,
-                elementController = elementController,
-                lintController = lintController,
-                stageInspectionRegistry = stageInspectionRegistry,
-                initialInspectorWidthDp = loadPersistedInspectorWidthDp(rootStoryboardDir),
+        } else if (smokeDirectory != null) {
+            CiacolaVisualSmokeWindow(
+                smokeDirectory = smokeDirectory,
+                ambientLoopsPaused = ambientLoopsPaused,
+                effectiveReducedMotion = effectiveReducedMotion,
+                onExitApplication = ::exitApplication,
             )
-        }.also {
-            it.updateForDeckSwitch(
-                newTimelineOverridesStore = timelineOverridesStore,
-                newElementOverridesStore = elementOverridesStore,
-                newElementController = elementController,
-                newLintController = lintController,
-                newStageInspectionRegistry = stageInspectionRegistry,
-            )
-            it.onInspectorWidthPersisted = { widthDp ->
-                persistInspectorWidthDp(rootStoryboardDir, widthDp)
-            }
-            workspaceHolder = it
-        }
-
-        fun switchToDeck(target: DeckEntry) {
-            if (target.id == activeDeckId) return
-            elementController.commitInlineEdit(restoreStageFocus = false)
-            elementController.selectElement(null)
-            timelineController.exitLoopSubComp()
-            timelineController.stopPlayback()
-            timelineController.selectTrack(null)
-            reviewStageCoordinator.dismissActivePopups()
-            persistActiveDeckId(rootStoryboardDir, target.id)
-            deckSwitchCount++
-            activeDeckId = target.id
-        }
-
-        var presenterWindowHolder by remember { mutableStateOf<PresenterWindow?>(null) }
-
-        val isAnyTextInputActive = {
-            textInputTracker.hasFocusedTextInput ||
-                elementController.inlineEditingElementId != null ||
-                reviewStageCoordinator.pendingSelection != null ||
-                reviewStageCoordinator.selectedPinCommentId != null ||
-                presenterWindowHolder?.controller?.jumpDialogOpen == true
-        }
-        studioWorkspace.isTextInputActiveProvider = isAnyTextInputActive
-        studioWorkspace.onTogglePresenter = {
-            presenterWindowHolder?.let { it.visible = !it.visible }
-        }
-        studioWorkspace.onToggleDockedTimeline = {
-            timelineController.dockedInStoryWindow = !timelineController.dockedInStoryWindow
-        }
-        studioWorkspace.onToggleDetachedTimeline = {
-            val next = !timelineController.detachedWindowVisible
-            if (next) timelineController.dockedInStoryWindow = false
-            timelineController.detachedWindowVisible = next
-        }
-        studioWorkspace.onSelectDeckByIndex = { idx ->
-            DeckCatalog.entries.getOrNull(idx)?.let(::switchToDeck)
-        }
-
-        val reviewOwnsStageClick = {
-            reviewStageCoordinator.inspectModeEnabled ||
-                reviewStageCoordinator.pendingSelection != null ||
-                reviewStageCoordinator.selectedPinCommentId != null
-        }
-
-        stageSelection.pickingSuppressed = {
-            reviewOwnsStageClick() ||
-                timelineController.spaceHeld ||
-                elementController.inlineEditingElementId != null ||
-                (studioWorkspace.isStudioOpen && studioWorkspace.activeTab == StudioInspectorTab.Element)
-        }
-
-        remember(elementController, reviewStageCoordinator) {
-            elementController.onReturnFocusToStage = {
-                runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
-            }
-        }
-
-        val activeStoryboard = animatic.storyboard
-        SideEffect {
-            val activePreset = presetRegistry.presetFor(activeStoryboard, fallback = preset)
-            elementController.suppressPicking = {
-                reviewOwnsStageClick() || timelineController.spaceHeld
-            }
-            elementController.isStagePointOverHud = reviewStageCoordinator::isStagePointOverHud
-            elementController.isExternalTextInputActive = isAnyTextInputActive
-            elementController.currentSceneIndexProvider = { animatic.presentedIndex.sceneIndex }
-            elementController.currentBeatIndexProvider = { animatic.presentedIndex.frameIndex }
-            elementController.isStageSettlingProvider = { animatic.scrubSettling }
-            elementController.isDarkThemeProvider = { activePreset == DeckThemePreset.StageDark }
-        }
-
-        val themeWindow = rememberDesignSystemWindow(
-            store = designSystemStore,
-            currentPreset = preset,
-            onSelectPreset = { preset = it },
-            currentMotionMode = motionMode,
-            systemReducedMotion = systemReducedMotion,
-            ambientLoopsPaused = ambientLoopsPaused,
-            onSelectMotionMode = { motionMode = it },
-            onToggleAmbientLoopsPaused = { ambientLoopsPaused = it },
-            baseThemeProvider = { DeckThemes.forPreset(it) },
-            isEditorShownProvider = { studioWorkspace.isDesignEditorVisible },
-            onToggleEditor = { studioWorkspace.toggleDesignSystemEditor() },
-        )
-
-        var lintWindowHolder by remember { mutableStateOf<DeckLintWindow?>(null) }
-        val prevLintVisible = lintWindowHolder?.visible == true
-        val lintWindow = rememberDeckLintWindow(
-            controller = lintController,
-            animatic = animatic,
-            currentPresetProvider = {
-                presetRegistry.presetFor(animatic.storyboard, fallback = preset)
-            },
-            storyboardProvider = { animatic.storyboard },
-            presetsToCheck = DeckThemePreset.entries,
-            storyboardForPreset = buildAuditStoryboardForPreset,
-            timelineOverridesProvider = { timelineOverridesStore.data() },
-            fallbackBackgroundProvider = { hostTheme.colors.background },
-            externalRevisionKeyProvider = {
-                structuralRev + paramRev + elementRev + designRev
-            },
-            stageInspectionRegistry = stageInspectionRegistry,
-            onApplyElementPatch = { patch -> studioWorkspace.applyElementPatch(patch) },
-            onEditElement = { elementId, sceneIndex, beatIndex ->
-                studioWorkspace.openElementInInspector(
-                    elementId = elementId,
-                    animatic = animatic,
-                    scope = appScope,
-                    sceneIndex = sceneIndex,
-                    beatIndex = beatIndex,
-                )
-            },
-            onOpenThemeEditor = { studioWorkspace.toggleDesignSystemEditor() },
-            isLinterShownProvider = { studioWorkspace.isLinterVisible },
-            onToggleLinter = { studioWorkspace.toggleDeckLinter() },
-            onPreviewKeyHandler = { ev -> studioWorkspace.handleStudioPreviewKey(ev) },
-        ).also {
-            if (lintWindowHolder != null && lintWindowHolder !== it) {
-                it.visible = prevLintVisible
-            }
-            lintWindowHolder = it
-        }
-
-        studioWorkspace.designSidecarVisibleProvider = { themeWindow.visible }
-        studioWorkspace.setDesignSidecarVisible = { themeWindow.visible = it }
-        studioWorkspace.lintSidecarVisibleProvider = { lintWindow.visible }
-        studioWorkspace.setLintSidecarVisible = { lintWindow.visible = it }
-
-        StudioWorkspaceSyncEffects(studioWorkspace)
-
-        val presenterWindow = rememberPresenterWindow(
-            animatic = animatic,
-            currentPresetProvider = {
-                presetRegistry.presetFor(presenterWindowHolder?.controller?.animatic?.storyboard, fallback = preset)
-            },
-            isStudioOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
-            isInspectOpenProvider = { reviewStageCoordinator.inspectModeEnabled },
-            openAuthoringToolsProvider = {
-                buildList {
-                    if (timelineController.authoringActive) add("Timeline Studio is open (F5/F6)")
-                    if (themeWindow.visible) add("Design System Editor is open (F7)")
-                    if (lintWindow.visible) add("Deck Linter is open (F8)")
-                    if (reviewStageCoordinator.inspectModeEnabled) add("Review Inspect mode is active (F3)")
-                }
-            },
-            hasUnbakedOverridesProvider = {
-                timelineOverridesStore.structuralRevision
-                timelineOverridesStore.parameterRevision
-                elementOverridesStore.revision
-                designSystemStore.revision
-                timelineOverridesStore.data().hasOverrides ||
-                    elementOverridesStore.data().hasOverrides ||
-                    designSystemStore.data().hasOverrides
-            },
-            unbakedDomainsProvider = {
-                timelineOverridesStore.structuralRevision
-                timelineOverridesStore.parameterRevision
-                elementOverridesStore.revision
-                designSystemStore.revision
-                buildList {
-                    if (timelineOverridesStore.data().hasOverrides) add("Timeline")
-                    if (elementOverridesStore.data().hasOverrides) add("Element")
-                    if (designSystemStore.data().hasOverrides) add("Theme")
-                }
-            },
-            onEnterCleanShowMode = {
-                timelineController.dockedInStoryWindow = false
-                timelineController.detachedWindowVisible = false
-                themeWindow.visible = false
-                lintWindow.visible = false
-                elementController.cancelInlineEdit(restoreStageFocus = false)
-                elementController.selectElement(null)
-                reviewStageCoordinator.inspectModeEnabled = false
-                reviewStageCoordinator.dismissActivePopups()
-            },
-            isExternalTextInputActiveProvider = {
-                textInputTracker.hasFocusedTextInput ||
-                    elementController.inlineEditingElementId != null ||
-                    reviewStageCoordinator.pendingSelection != null ||
-                    reviewStageCoordinator.selectedPinCommentId != null
-            },
-            onRestoreStageFocus = {
-                runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
-            },
-            extraPreviewKeyHandler = { ev, _ ->
-                studioWorkspace.handleStudioPreviewKey(ev)
-            },
-        ).also { presenterWindowHolder = it }
-
-        val timelineWindow = rememberTimelineStudioWindow(
-            controller = timelineController,
-            currentPresetProvider = {
-                presetRegistry.presetFor(timelineController.animatic.storyboard, fallback = preset)
-            },
-            suppressShortcutsProvider = isAnyTextInputActive,
-            onReturnFocusToStage = {
-                runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
-            },
-            trailingPane = {
-                StudioUnifiedInspectorPane(
-                    workspace = studioWorkspace,
-                    animatic = animatic,
-                    currentPreset = preset,
-                    onSelectPreset = { preset = it },
-                    baseThemeProvider = { DeckThemes.forPreset(it) },
-                    storyboardForPreset = buildAuditStoryboardForPreset,
-                    scope = appScope,
-                )
-            },
-            leadingToolbarContent = {
-                DeckSwitcherDropdown(
-                    activeDeck = activeDeck,
-                    onSelectDeck = ::switchToDeck,
-                )
-            },
-            extraPreviewKeyHandler = { ev, _ ->
-                studioWorkspace.handleStudioPreviewKey(ev)
-            },
-            extraMenuContent = {
-                Menu("Studio Inspector") {
-                    for (tab in StudioInspectorTab.entries) {
-                        RadioButtonItem(
-                            text = tab.label,
-                            selected = studioWorkspace.isStudioOpen && studioWorkspace.activeTab == tab,
-                            onClick = { studioWorkspace.selectTabInStudio(tab) },
-                        )
-                    }
-                }
-            },
-        )
-
-        var reviewWindowHolder by remember { mutableStateOf<SlideReviewWindow?>(null) }
-        val prevReviewVisible = reviewWindowHolder?.visible == true
-        val reviewWindow = rememberSlideReviewWindow(
-            animatic = animatic,
-            store = reviewStore,
-            stageCoordinator = reviewStageCoordinator,
-            currentPresetProvider = {
-                val currentStoryboard = reviewWindowHolder?.animatic?.storyboard
-                presetRegistry.presetFor(currentStoryboard, fallback = preset)
-            },
-            timelineDockedProvider = { timelineController.dockedInStoryWindow },
-            onToggleTimeline = {
-                timelineController.dockedInStoryWindow = !timelineController.dockedInStoryWindow
-            },
-        ).also {
-            if (reviewWindowHolder != null && reviewWindowHolder !== it) {
-                it.visible = prevReviewVisible
-            }
-            reviewWindowHolder = it
-        }
-
-        val deckMenuWindow = rememberDeckMenuWindow(
-            activeDeckProvider = { activeDeck },
-            onSelectDeck = ::switchToDeck,
-            animaticProvider = { animatic },
-            isTextInputActiveProvider = isAnyTextInputActive,
-            isStudioOpenProvider = { studioWorkspace.isStudioOpen },
-            onBeforeNavigate = { presenterWindowHolder?.controller?.clearCurtain() },
-            extraPreviewKeyHandler = { ev -> workspaceHolder?.handleStudioPreviewKey(ev) == true },
-        )
-
-        // DeckMenuWindow sits outermost as a pure window-level key capture + focus guard; Timeline
-        // sits before Review so the hoisted right Inspector sidebar wraps the Stage cleanly.
-        val decoratedWindows = remember(presenterWindow, timelineWindow, reviewWindow, themeWindow, lintWindow, deckMenuWindow) {
-            listOf(
-                deckMenuWindow,
-                presenterWindow,
-                timelineWindow,
-                reviewWindow,
-                themeWindow,
-                lintWindow,
-            )
-        }
-
-        CompositionLocalProvider(
-            LocalAmbientLoopsPaused provides ambientLoopsPaused,
-            LocalAuthoringTextInputTracker provides textInputTracker,
-            LocalStageInteractiveRegistry provides stageInteractiveRegistry,
-        ) {
-            MaterialTheme(
-                colors = materialColors,
-                typography = materialTypography,
-            ) {
-                DesktopEasel(
-                    animatic = animatic,
-                    windows = decoratedWindows,
-                )
-            }
-        }
-    } else {
-        val hostTheme = remember(preset) { DeckThemes.forPreset(preset) }
-        val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
-        val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
-        CompositionLocalProvider(LocalAmbientLoopsPaused provides ambientLoopsPaused) {
-            val storyboard = rememberHotReloadStoryboard(preset, effectiveReducedMotion) {
-                createFoundationDeck(
-                    theme = hostTheme,
-                    bundledPreset = preset,
-                    reducedMotion = effectiveReducedMotion,
-                )
-            }
-            val animatic = rememberAnimatic(storyboard = { storyboard })
-            Window(
-                onCloseRequest = ::exitApplication,
-                title = "Deck visual smoke",
-                state = rememberWindowState(width = 960.dp, height = 540.dp),
-            ) {
-                MaterialTheme(colors = materialColors, typography = materialTypography) {
-                    Easel(animatic)
-                    LaunchedEffect(animatic, window) {
-                        val directory = File(smokeDirectory).apply { mkdirs() }
-                        val robot = Robot()
-
-                        suspend fun capture(name: String) {
-                            delay(150)
-                            val location = window.locationOnScreen
-                            val image = robot.createScreenCapture(
-                                Rectangle(location.x, location.y, window.width, window.height)
-                            )
-                            ImageIO.write(image, "png", File(directory, "$name.png"))
-                        }
-
-                        delay(750)
-                        capture("00-start")
-                        var forward = 1
-                        while (true) {
-                            val movement = launch { animatic.advance(AdvanceDirection.Forward) }
-                            delay(350)
-                            capture("f${forward.toString().padStart(2, '0')}-transition")
-                            movement.join()
-                            capture("f${forward.toString().padStart(2, '0')}-settled")
-                            if (animatic.currentIndex.sceneIndex == 2) {
-                                capture("loop-a")
-                                delay(1_000)
-                                capture("loop-b")
-                            }
-                            forward++
-                            if (animatic.currentIndex == animatic.storyboard.indices.last()) break
-                        }
-
-                        var backward = 1
-                        while (animatic.currentIndex != animatic.storyboard.indices.first()) {
-                            val movement = launch { animatic.advance(AdvanceDirection.Backward) }
-                            delay(350)
-                            capture("b${backward.toString().padStart(2, '0')}-transition")
-                            movement.join()
-                            capture("b${backward.toString().padStart(2, '0')}-settled")
-                            backward++
-                        }
-                        window.dispose()
-                        exitApplication()
-                    }
-                }
-            }
         }
     }
-}
-
-internal class StoryboardPresetRegistry {
-    private val map = Collections.synchronizedMap(WeakHashMap<Storyboard, DeckThemePreset>())
-
-    fun record(storyboard: Storyboard, preset: DeckThemePreset) {
-        map[storyboard] = preset
-    }
-
-    fun presetFor(storyboard: Storyboard?, fallback: DeckThemePreset): DeckThemePreset =
-        storyboard?.let { map[it] } ?: fallback
 }
 
 @Composable
-internal fun rememberThemeSwitcherWindow(
-    currentPreset: DeckThemePreset,
-    currentMotionMode: ReducedMotionMode = ReducedMotionMode.System,
-    systemReducedMotion: Boolean = false,
-    ambientLoopsPaused: Boolean = false,
-    onSelectMotionMode: (ReducedMotionMode) -> Unit = {},
-    onToggleAmbientLoopsPaused: (Boolean) -> Unit = {},
-    store: DesignSystemStore? = null,
-    onSelectPreset: (DeckThemePreset) -> Unit,
-): EaselWindow {
-    val ownsFallbackStore = store == null
-    val effectiveStore = store ?: remember {
-        DesignSystemStore(storyboardDir = Files.createTempDirectory("ciacola-theme-window-"))
+private fun ApplicationScope.CiacolaStudioApplication(
+    launch: StudioLaunch,
+    motionMode: dev.sebastiano.ciacola.theme.ReducedMotionMode,
+    onSelectMotionMode: (dev.sebastiano.ciacola.theme.ReducedMotionMode) -> Unit,
+    ambientLoopsPaused: Boolean,
+    onToggleAmbientLoopsPaused: (Boolean) -> Unit,
+    systemReducedMotion: Boolean,
+    effectiveReducedMotion: Boolean,
+    textInputTracker: AuthoringTextInputFocusTracker,
+    onExitApplication: () -> Unit,
+) {
+    val appScope = rememberCoroutineScope()
+    val workspaceRoot = launch.workspaceRoot
+    val rootStoryboardDir = launch.rootStoryboardDir
+    val recoveryRootDir = launch.recoveryRootDir
+
+    // Atomic deck session: decoded & opened BEFORE state swap for zero-flash deck switching.
+    var activeSession by remember { mutableStateOf(launch.initialSession) }
+    var deckSwitchCount by remember { mutableIntStateOf(0) }
+    var switchToken by remember { mutableIntStateOf(0) }
+    var switchJob by remember { mutableStateOf<Job?>(null) }
+    var switchingToDeckId by remember { mutableStateOf<String?>(null) }
+    val deckSwitchTimer = remember { DeckSwitchTimer() }
+    val activeDeck = activeSession.entry
+    val deckSource = activeSession.source
+    val store = activeSession.store
+    val fileSync = activeSession.fileSync
+
+    val deckStoryboardDir = remember(rootStoryboardDir, activeDeck.id) {
+        storyboardDirForDeck(rootStoryboardDir, activeDeck.id)
     }
-    DisposableEffect(effectiveStore, ownsFallbackStore) {
-        onDispose {
-            if (ownsFallbackStore) {
-                effectiveStore.close()
+    val resolvedDeckFilePath: String? = remember(deckSource, workspaceRoot) {
+        when (deckSource) {
+            is DeckSource.File -> deckSource.file.toAbsolutePath().normalize().toString()
+            is DeckSource.Resource -> workspaceRoot.resolve("deck/src/desktopMain/resources")
+                .resolve(deckSource.resourcePath)
+                .takeIf { Files.isRegularFile(it) }
+                ?.toAbsolutePath()
+                ?.normalize()
+                ?.toString()
+        }
+    }
+    val reviewStore = remember(deckStoryboardDir, workspaceRoot) {
+        ReviewCommentStore(storyboardDir = deckStoryboardDir, workspaceRoot = workspaceRoot)
+    }.also {
+        it.defaultDeckId = activeDeck.id
+        it.defaultDeckFilePath = resolvedDeckFilePath
+    }
+    val sessionOpenedExternalDecks = remember { mutableStateListOf<DeckEntry>() }
+    val discoverAvailableDecks: (Boolean) -> List<DeckEntry> = { forceRefresh ->
+        val discovered = DeckCatalog.discoverEntries(forceRefresh = forceRefresh)
+        val extras = sessionOpenedExternalDecks.filter { ext ->
+            discovered.none { d -> d.id == ext.id && d.externalFilePath == ext.externalFilePath }
+        }
+        discovered + extras
+    }
+
+    LaunchedEffect(fileSync) {
+        fileSync?.startBackgroundSync(this)
+    }
+    DisposableEffect(fileSync) {
+        onDispose { fileSync?.close() }
+    }
+    DisposableEffect(Unit) {
+        onDispose { switchJob?.cancel() }
+    }
+
+    val syncController: DocumentSyncController? = remember(store, fileSync, activeDeck.id) {
+        fileSync?.let { sync ->
+            DocumentSyncController(
+                store = store,
+                fileSync = sync,
+                onOpenRecoveryFile = { recoveryPath ->
+                    openRecoveryCopyIntoStore(recoveryPath, activeDeck, store)
+                },
+            )
+        }
+    }
+
+    val currentDoc = store.document
+    var selectedThemeName by remember(activeDeck.id) {
+        mutableStateOf<String?>(null)
+    }
+    val resolvedThemeName = selectedThemeName ?: remember(rootStoryboardDir, activeDeck.id, currentDoc.themes, currentDoc.defaultTheme) {
+        resolveSelectedThemeForDeck(rootStoryboardDir, activeDeck.id, currentDoc)
+    }
+
+    val activeThemeSpec = remember(currentDoc, resolvedThemeName) {
+        resolveActiveThemeSpec(currentDoc, resolvedThemeName)
+    }
+    val isLightPreset = activeThemeSpec?.preset.equals("stageLight", ignoreCase = true) ||
+        activeThemeSpec?.preset.equals("keynoteLight", ignoreCase = true)
+    val isDarkTheme = !isLightPreset
+    val currentPreset = if (isDarkTheme) DeckThemePreset.StageDark else DeckThemePreset.KeynoteLight
+    val hostTheme = remember(currentDoc, resolvedThemeName) {
+        resolveDeckTheme(currentDoc, resolvedThemeName)
+    }
+    val materialColors = remember(hostTheme) { hostTheme.toMaterialColors() }
+    val materialTypography = remember(hostTheme) { hostTheme.toMaterialTypography() }
+
+    val elementController = remember(store, activeDeck.id) {
+        DocumentElementInspectorController(
+            store = store,
+            specimens = activeDeck.specimens,
+        )
+    }
+    val themeController = remember(store, activeDeck.id) {
+        DocumentThemeInspectorController(
+            store = store,
+            initialThemeName = resolvedThemeName,
+        )
+    }
+    LaunchedEffect(themeController.activeThemeName, currentDoc.themes) {
+        val next = themeController.activeThemeName
+        if (currentDoc.themes.isNotEmpty() && next.isNotBlank() && next in currentDoc.themes && next != selectedThemeName) {
+            selectedThemeName = next
+            persistSelectedThemeForDeck(rootStoryboardDir, activeDeck.id, next)
+        }
+    }
+
+    // Isolated RenderSession #4: Lint Engine (owns its own Still RenderSession internally).
+    val lintController = remember(store, activeDeck.id, deckSource, fileSync) {
+        DocumentDeckLintController(
+            store = store,
+            specimens = activeDeck.specimens,
+            deckDir = (deckSource as? DeckSource.File)?.file?.toAbsolutePath()?.normalize()?.parent,
+            assetsDir = (deckSource as? DeckSource.File)?.assetsDir,
+            externalEditWarningsProvider = { fileSync?.externalEditLintWarnings.orEmpty() },
+        )
+    }
+    DisposableEffect(lintController) {
+        onDispose { lintController.close() }
+    }
+
+    val latestReducedMotion by rememberUpdatedState(effectiveReducedMotion)
+    val timelineController = remember(store, activeDeck.id) {
+        DocumentTimelineController(
+            store = store,
+            specimens = activeDeck.specimens,
+            themeNameProvider = { themeController.activeThemeName.ifBlank { store.document.defaultTheme } },
+            reducedMotionProvider = { latestReducedMotion },
+        )
+    }
+    LaunchedEffect(timelineController, effectiveReducedMotion, resolvedThemeName) {
+        timelineController.refreshSnapshot()
+    }
+
+    val reviewStageCoordinator = rememberReviewStageCoordinator()
+    val keyboardController = remember(activeDeck.id) { DocumentKeyboardCaptureController() }
+    val stageDragPreview = remember(activeDeck.id) { StageDragPreview() }
+    val stageInspectionRegistry = remember(activeDeck.id) { StageInspectionRegistry() }
+    val stageInteractiveRegistry = remember(activeDeck.id) { StageInteractiveRegistry() }
+
+    var workspaceHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
+    val studioWorkspace = remember(rootStoryboardDir) {
+        StudioWorkspaceController(
+            store = store,
+            timelineController = timelineController,
+            elementController = elementController,
+            themeController = themeController,
+            lintController = lintController,
+            syncController = syncController,
+            keyboardController = keyboardController,
+            initialInspectorWidthDp = loadPersistedInspectorWidthDp(rootStoryboardDir),
+        )
+    }.also {
+        it.updateBindings(
+            newStore = store,
+            newTimelineController = timelineController,
+            newElementController = elementController,
+            newThemeController = themeController,
+            newLintController = lintController,
+            newSyncController = syncController,
+            newKeyboardController = keyboardController,
+        )
+        it.onInspectorWidthPersisted = { widthDp ->
+            persistInspectorWidthDp(rootStoryboardDir, widthDp)
+        }
+        workspaceHolder = it
+    }
+
+    val assetsRootDir: String? = remember(deckSource, activeDeck) {
+        resolveDeckAssetsRootDir(deckSource, activeDeck.assetsResourceDir)
+    }
+    val deckFontsDir: String? = remember(deckSource) { resolveDeckFontsDir(deckSource) }
+
+    // Free-running ambient loop clock for Show Mode (paused under reducedMotion, user pause, or Studio scrub).
+    var freeClockMs by remember(activeDeck.id) { mutableLongStateOf(0L) }
+    val animateFreeLoops = !ambientLoopsPaused && !effectiveReducedMotion && !studioWorkspace.isStudioOpen
+    LaunchedEffect(activeDeck.id, animateFreeLoops) {
+        if (!animateFreeLoops) return@LaunchedEffect
+        var prevNanos = -1L
+        while (true) {
+            withFrameNanos { nanos ->
+                if (prevNanos >= 0L) {
+                    freeClockMs += ((nanos - prevNanos) / 1_000_000L).coerceAtLeast(0L)
+                }
+                prevNanos = nanos
             }
         }
     }
-    return rememberDesignSystemWindow(
-        store = effectiveStore,
-        currentPreset = currentPreset,
-        onSelectPreset = onSelectPreset,
-        currentMotionMode = currentMotionMode,
-        systemReducedMotion = systemReducedMotion,
-        ambientLoopsPaused = ambientLoopsPaused,
+
+    // Isolated RenderSessions #1 (Live Stage) and #2a/#2b (Presenter Current & Next previews).
+    // Keyed only on (store, activeDeck.id) so mid-drag tx.update frames never rebuild them.
+    fun newPresentSession(): RenderSession = RenderSession.forPresent(
+        store = store,
+        freeClockMillis = { freeClockMs },
+        masterPlayheadMillis = {
+            if (studioWorkspace.isStudioOpen || timelineController.hasActiveGesture) {
+                timelineController.playheadMs.toLong()
+            } else {
+                null
+            }
+        },
+        subCompositionScrubMillis = { timelineController.subCompositionScrubMillis },
+    )
+    var presenterWindowHolder by remember { mutableStateOf<PresenterWindow?>(null) }
+    val presenterVisible = presenterWindowHolder?.visible == true
+    val liveSession = remember(store, activeDeck.id) { newPresentSession() }
+    val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible) {
+        if (presenterVisible) newPresentSession() else null
+    }
+    val presenterNextSession = remember(store, activeDeck.id, presenterVisible) {
+        if (presenterVisible) newPresentSession() else null
+    }
+    // Committed document snapshot for Overview so mid-drag tx.update frames never rebuild Overview thumbnails.
+    var committedOverviewDoc by remember(activeDeck.id) { mutableStateOf(currentDoc) }
+    LaunchedEffect(currentDoc, store.hasOpenTransaction) {
+        if (!store.hasOpenTransaction) {
+            committedOverviewDoc = currentDoc
+        }
+    }
+    // Isolated RenderSession #6 holder: Video Export (Video @ 60 fps).
+    val videoExportSessionHolder = remember(activeDeck.id) { VideoExportSessionHolder() }
+
+    val directEditStageDecorator = remember(
+        elementController,
+        timelineController,
+        lintController,
+        studioWorkspace,
+        reviewStageCoordinator,
+    ) {
+        ContentDecorator { content ->
+            val reviewOwnsClick = reviewStageCoordinator.inspectModeEnabled ||
+                reviewStageCoordinator.pendingSelection != null ||
+                reviewStageCoordinator.selectedPinCommentId != null
+            val stageSpec = store.document.stage
+            DocumentStageDirectEditOverlay(
+                controller = elementController,
+                enabled = studioWorkspace.isElementPickingEnabled && !reviewOwnsClick,
+                keyboardCapturedProvider = { keyboardController.isCaptured },
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    content()
+                    DocumentTimelineStageOverlay(
+                        controller = timelineController,
+                        enabled = studioWorkspace.isStudioOpen,
+                        stageSelectedNodeIds = elementController.selectedNodeIds,
+                    )
+                    DocumentDeckLintStageOverlay(
+                        controller = lintController,
+                        activeSlideId = timelineController.currentPresentedSlideId ?: elementController.activeSlideId,
+                        activeBeatIndex = timelineController.currentPresentedBeatIndex,
+                        isInspectionVisible = studioWorkspace.isLinterVisible,
+                        stageFormatSize = IntSize(stageSpec.width, stageSpec.height),
+                    )
+                    StageShortcutToastOverlay(
+                        toast = studioWorkspace.lastShortcutToast,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }
+            }
+        }
+    }
+
+    val liveConfig = DocumentRenderConfig(
+        themeName = resolvedThemeName,
+        specimens = activeDeck.specimens,
+        reducedMotion = effectiveReducedMotion,
+        assetsRootDir = assetsRootDir,
+        fontsDir = deckFontsDir,
+        isEditMode = studioWorkspace.isStudioOpen,
+        keyboardController = keyboardController,
+        onNodeClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.selectNode(nodeId) },
+        onNodeDoubleClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.startInlineTextEdit(nodeId) },
+        stageDecorator = reviewStageCoordinator.stageDecorator + directEditStageDecorator,
+    )
+
+    val stillConfig = DocumentRenderConfig(
+        themeName = resolvedThemeName,
+        specimens = activeDeck.specimens,
+        reducedMotion = effectiveReducedMotion,
+        assetsRootDir = assetsRootDir,
+        fontsDir = deckFontsDir,
+        isEditMode = false,
+        keyboardController = null,
+        stageDecorator = ContentDecorator.None,
+    )
+
+    val liveStoryboard = rememberDocumentStoryboard(
+        session = liveSession,
+        config = liveConfig,
+    )
+    // Isolated RenderSession #3: Overview thumbnails each receive their own Still RenderSession.
+    val overviewStoryboard = remember(committedOverviewDoc, stillConfig) {
+        buildPerThumbnailOverviewStoryboard(
+            frozenDoc = committedOverviewDoc,
+            config = stillConfig,
+        )
+    }
+    val presenterCurrentStoryboard = if (presenterVisible && presenterCurrentSession != null) {
+        rememberDocumentStoryboard(
+            session = presenterCurrentSession,
+            config = stillConfig,
+        )
+    } else {
+        null
+    }
+    val presenterNextStoryboard = if (presenterVisible && presenterNextSession != null) {
+        rememberDocumentStoryboard(
+            session = presenterNextSession,
+            config = stillConfig,
+        )
+    } else {
+        null
+    }
+
+    // Isolated RenderSession #5 (PDF Export, Still) & #6a/#6b (Video Export measurement vs render pass).
+    val pdfExportStoryboardProvider: () -> Storyboard = remember(store, activeDeck, stillConfig) {
+        {
+            val pdfSession = RenderSession.forStill(documentSnapshot = store.document)
+            buildDocumentStoryboard(session = pdfSession, config = stillConfig)
+        }
+    }
+    val videoExportStoryboardProvider: () -> Storyboard = remember(store, activeDeck, stillConfig, videoExportSessionHolder) {
+        {
+            val frozenDoc = store.document
+            val measurementSession = RenderSession.forVideo(documentSnapshot = frozenDoc)
+            val renderSession = RenderSession.forVideo(documentSnapshot = frozenDoc)
+            videoExportSessionHolder.session = renderSession
+            buildDualPassVideoStoryboard(
+                frozenDoc = frozenDoc,
+                config = stillConfig,
+                measurementSession = measurementSession,
+                renderSession = renderSession,
+            )
+        }
+    }
+    val videoHoldDurationForState = remember(videoExportSessionHolder, liveSession) {
+        { index: Storyboard.Index ->
+            holdDurationForState(videoExportSessionHolder.session ?: liveSession, defaultHoldMs = 400L)(index)
+        }
+    }
+
+    val animatic = key(activeSession.entry.id, activeSession.loadToken) {
+        rememberAnimatic(
+            initialIndex = Storyboard.Index(0, 0),
+            storyboard = { liveStoryboard },
+        )
+    }
+
+    TimelineAnimaticSyncEffects(timelineController, animatic, appScope)
+
+    AutoAdvanceEffect(
+        animatic = animatic,
+        session = liveSession,
+        enabled = !studioWorkspace.isStudioOpen,
+        isScrubbing = timelineController.hasActiveGesture,
+    )
+
+    DeckSessionAnimaticPersistenceEffect(
+        animatic = animatic,
+        document = currentDoc,
+        rootStoryboardDir = rootStoryboardDir,
+        deckId = activeDeck.id,
+        restoreOnEnter = deckSwitchCount == 0,
+    )
+
+    // Guarded close & deck-switch flow.
+    var pendingCloseAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // `true` while a switch/quit flush is in flight; speaker-note editing is disabled meanwhile.
+    var closingDeckTransition by remember { mutableStateOf(false) }
+
+    fun isSameDeckTarget(a: DeckEntry, b: DeckEntry): Boolean =
+        a.id == b.id && a.externalFilePath == b.externalFilePath
+
+    fun performSwitchToDeck(target: DeckEntry, decksDirOverride: String? = null) {
+        if (isSameDeckTarget(target, activeSession.entry) && switchingToDeckId == null) return
+        if (target.id == switchingToDeckId && target.externalFilePath == null) return
+        switchJob?.cancel()
+        val token = ++switchToken
+        val outgoingRevision = store.revision
+        val outgoingDirty = store.isDirty
+        switchingToDeckId = target.id
+        deckSwitchTimer.markRequested(activeSession.entry.id, target.id)
+        switchJob = appScope.launch {
+            try {
+                val nextSession = preOpenDeckSession(
+                    entry = target,
+                    recoveryRootDir = recoveryRootDir,
+                    loadToken = token,
+                    decksDirProperty = decksDirOverride ?: System.getProperty(DECKS_DIR_SYSTEM_PROPERTY),
+                )
+                deckSwitchTimer.markPreOpened()
+                if (token != switchToken) {
+                    runCatching { nextSession.fileSync?.close() }
+                    return@launch
+                }
+                prepareToLeaveDeck(studioWorkspace, elementController, presenterWindowHolder?.controller)
+                if (!flushOutgoingBeforeSwap(syncController, outgoingRevision, outgoingDirty)) {
+                    runCatching { nextSession.fileSync?.close() }
+                    pendingCloseAction = { performSwitchToDeck(target, decksDirOverride) }
+                    return@launch
+                }
+                if (token != switchToken) {
+                    runCatching { nextSession.fileSync?.close() }
+                    return@launch
+                }
+                elementController.selectNode(null)
+                timelineController.clearSelection()
+                keyboardController.exitInteractive()
+                reviewStageCoordinator.dismissActivePopups()
+                presenterWindowHolder?.controller?.cancelEditingNotes()
+                persistActiveDeckId(rootStoryboardDir, target.id)
+                Snapshot.withMutableSnapshot {
+                    deckSwitchCount++
+                    activeSession = nextSession
+                    switchingToDeckId = null
+                }
+                awaitNextDrawnFrame()
+                deckSwitchTimer.markFirstFrameDrawn()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                val detail = t.message?.takeIf { it.isNotBlank() } ?: t::class.simpleName.orEmpty()
+                studioWorkspace.showShortcutToast("Failed to open '${target.title}': $detail")
+            } finally {
+                if (switchToken == token) switchingToDeckId = null
+            }
+        }
+    }
+
+    fun requestSwitchToDeck(target: DeckEntry, decksDirOverride: String? = null) {
+        if (isSameDeckTarget(target, activeSession.entry) && switchingToDeckId == null) return
+        if (target.id == switchingToDeckId && target.externalFilePath == null) return
+        // Cancel uncommitted gestures and commit an open speaker-notes draft BEFORE flushing/closing.
+        prepareToLeaveDeck(studioWorkspace, elementController, presenterWindowHolder?.controller)
+        val sync = syncController
+        if (sync != null) {
+            val action = { performSwitchToDeck(target, decksDirOverride) }
+            pendingCloseAction = action
+            closingDeckTransition = true
+            appScope.launch {
+                try {
+                    sync.requestClose(onAllowClose = {
+                        pendingCloseAction = null
+                        action()
+                    })
+                } finally {
+                    closingDeckTransition = false
+                }
+            }
+        } else {
+            performSwitchToDeck(target, decksDirOverride)
+        }
+    }
+
+    fun requestOpenDeckFile() {
+        val file = pickDeckJsonFile() ?: return
+        val entry = externalDeckEntryFor(file) ?: return
+        sessionOpenedExternalDecks.removeAll { it.externalFilePath == entry.externalFilePath }
+        sessionOpenedExternalDecks.add(entry)
+        requestSwitchToDeck(entry)
+    }
+
+    fun requestExitApplication() {
+        // Cancel uncommitted gestures and commit an open speaker-notes draft BEFORE flushing/closing.
+        prepareToLeaveDeck(studioWorkspace, elementController, presenterWindowHolder?.controller)
+        val sync = syncController
+        if (sync != null) {
+            pendingCloseAction = onExitApplication
+            closingDeckTransition = true
+            appScope.launch {
+                try {
+                    sync.requestClose(onAllowClose = {
+                        pendingCloseAction = null
+                        onExitApplication()
+                    })
+                } finally {
+                    closingDeckTransition = false
+                }
+            }
+        } else {
+            onExitApplication()
+        }
+    }
+
+    // Intercept macOS ⌘Q / Dock Quit / app menu Quit through the guarded close-hold flow.
+    val latestRequestExit by rememberUpdatedState(::requestExitApplication)
+    DisposableEffect(Unit) {
+        val installed = installDesktopQuitHandler {
+            latestRequestExit()
+        }
+        onDispose {
+            if (installed) {
+                clearDesktopQuitHandler()
+            }
+        }
+    }
+
+    val isAnyTextInputActive = {
+        textInputTracker.hasFocusedTextInput ||
+            elementController.textInputHasFocus ||
+            elementController.inlineEditingNodeId != null ||
+            reviewStageCoordinator.pendingSelection != null ||
+            reviewStageCoordinator.selectedPinCommentId != null ||
+            presenterWindowHolder?.controller?.jumpDialogOpen == true ||
+            presenterWindowHolder?.controller?.isEditingNotes == true
+    }
+    studioWorkspace.isTextInputActiveProvider = isAnyTextInputActive
+    studioWorkspace.onTogglePresenter = {
+        presenterWindowHolder?.let { it.visible = !it.visible }
+    }
+    studioWorkspace.onSelectDeckByIndex = { idx ->
+        discoverAvailableDecks(true).getOrNull(idx)?.let { requestSwitchToDeck(it) }
+    }
+    DeckSwitchProbeEffect(
+        timer = deckSwitchTimer,
+        onRequestSwitch = { requestSwitchToDeck(it) },
+        entriesProvider = { discoverAvailableDecks(false) },
+    )
+
+    val activeNonSkipped = remember(currentDoc) { currentDoc.slides.filterNot { it.skipped } }
+    val activeSceneIndex = animatic.presentedIndex.sceneIndex.coerceAtLeast(0)
+    val activeBeatIndex = animatic.presentedIndex.frameIndex.coerceAtLeast(0)
+    val activeSlideId = activeNonSkipped.getOrNull(activeSceneIndex)?.id
+    LaunchedEffect(timelineController, activeSlideId, activeSceneIndex, activeBeatIndex) {
+        timelineController.updatePresentedLocation(
+            slideId = activeSlideId,
+            sceneIndex = activeSceneIndex,
+            beatIndex = activeBeatIndex,
+        )
+    }
+    StudioWorkspaceSyncEffects(
+        workspace = studioWorkspace,
+        activeSlideId = activeSlideId,
+        activeBeatIndex = activeBeatIndex,
+        animatic = animatic,
+    )
+    reviewStageCoordinator.fallbackNodeIdResolver = { stagePoint, dragRect ->
+        stageInspectionRegistry.nodes.values
+            .filter { snap ->
+                snap.effectiveAlpha > 0.01f &&
+                    snap.stageBounds.width > 0f &&
+                    snap.stageBounds.height > 0f &&
+                    if (dragRect != null) snap.stageBounds.overlaps(dragRect) else snap.stageBounds.contains(stagePoint)
+            }
+            .minByOrNull { it.stageBounds.width * it.stageBounds.height }
+            ?.elementId
+    }
+
+    val themeWindow = rememberDocumentThemeInspectorWindow(
+        controller = themeController,
+        isDarkProvider = { isDarkTheme },
+        currentMotionModeProvider = { motionMode },
+        systemReducedMotionProvider = { systemReducedMotion },
+        ambientLoopsPausedProvider = { ambientLoopsPaused },
         onSelectMotionMode = onSelectMotionMode,
         onToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused,
+        isEditorShownProvider = { studioWorkspace.isDesignEditorVisible },
+        onToggleEditor = { studioWorkspace.toggleDesignSystemEditor() },
+        onPickDeckFileToCopyThemes = ::pickDeckFileForCopyThemes,
     )
+
+    var lintWindowHolder by remember { mutableStateOf<DocumentDeckLintWindow?>(null) }
+    val prevLintVisible = lintWindowHolder?.visible == true
+    val lintWindow = rememberDocumentDeckLintWindow(
+        controller = lintController,
+        isDarkProvider = { isDarkTheme },
+        currentSlideIndexProvider = {
+            val slides = store.document.slides
+            val targetId = activeSlideId
+            if (targetId != null) {
+                slides.indexOfFirst { it.id == targetId }.takeIf { it >= 0 } ?: 0
+            } else {
+                animatic.presentedIndex.sceneIndex.coerceAtLeast(0)
+            }
+        },
+        onJumpToIssue = { issue ->
+            val targetSceneIndex = store.document.slides
+                .filterNot { it.skipped }
+                .indexOfFirst { it.id == issue.slideId }
+                .takeIf { it >= 0 }
+            studioWorkspace.openNodeInElementInspector(
+                nodeId = issue.nodeId,
+                animatic = animatic,
+                scope = appScope,
+                sceneIndex = targetSceneIndex,
+                beatIndex = issue.beatIndex,
+            )
+        },
+        isLinterShownProvider = { studioWorkspace.isLinterVisible },
+        onToggleLinter = { studioWorkspace.toggleDeckLinter() },
+        onPreviewKeyHandler = { ev -> studioWorkspace.handleStudioPreviewKey(ev) },
+    ).also {
+        if (lintWindowHolder != null && lintWindowHolder !== it) {
+            it.visible = prevLintVisible
+        }
+        lintWindowHolder = it
+    }
+
+    studioWorkspace.designSidecarVisibleProvider = { themeWindow.visible }
+    studioWorkspace.setDesignSidecarVisible = { themeWindow.visible = it }
+    studioWorkspace.lintSidecarVisibleProvider = { lintWindow.visible }
+    studioWorkspace.setLintSidecarVisible = { lintWindow.visible = it }
+
+    val hoistedTrailingPane: @Composable () -> Unit = remember(studioWorkspace, animatic, appScope) {
+        {
+            StudioUnifiedInspectorPane(
+                workspace = studioWorkspace,
+                animatic = animatic,
+                scope = appScope,
+            )
+        }
+    }
+
+    var timelineWindowHolder by remember { mutableStateOf<DocumentTimelineWindow?>(null) }
+    val showBottomDockTabs = studioWorkspace.issuesDockOpen || timelineWindowHolder?.timelineExpanded == true
+    val bottomDockTabs: (@Composable () -> Unit)? = if (showBottomDockTabs) {
+        {
+            StudioBottomDockTabStrip(
+                issuesActive = studioWorkspace.issuesDockOpen,
+                errorCount = lintController.errorCount,
+                warningCount = lintController.warningCount,
+                onSelectTimeline = {
+                    studioWorkspace.issuesDockOpen = false
+                    timelineWindowHolder?.timelineExpanded = true
+                },
+                onSelectIssues = {
+                    studioWorkspace.issuesDockOpen = true
+                },
+            )
+        }
+    } else {
+        null
+    }
+    val timelineWindow = rememberDocumentTimelineWindow(
+        controller = timelineController,
+        currentPresetProvider = { currentPreset },
+        suppressShortcutsProvider = isAnyTextInputActive,
+        onReturnFocusToStage = {
+            runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
+        },
+        trailingPane = hoistedTrailingPane,
+        // The deck switcher lives in the App Bar now, never in the timeline transport bar.
+        leadingToolbarContent = null,
+        extraPreviewKeyHandler = { ev, _ ->
+            studioWorkspace.handleStudioPreviewKey(ev)
+        },
+        // Studio opens in Edit mode: timeline docked under the stage, collapsed to the header band.
+        initialDocked = true,
+        initialExpanded = false,
+        bottomDockHeaderLeading = bottomDockTabs,
+        bottomDockHeaderTrailing = if (studioWorkspace.issuesDockOpen) {
+            { StudioBottomIssuesDockHeaderTrailing(studioWorkspace) }
+        } else {
+            null
+        },
+        alternateBottomContent = if (studioWorkspace.issuesDockOpen) {
+            { StudioBottomIssuesDockBody(workspace = studioWorkspace, animatic = animatic, scope = appScope) }
+        } else {
+            null
+        },
+        showStudioChrome = studioWorkspace.isAppBarActive,
+    ).also {
+        timelineWindowHolder = it
+        studioWorkspace.timelineWindow = it
+        it.suppressFocusRecoveryProvider = { isAnyTextInputActive() || studioWorkspace.chromeHasFocus }
+    }
+
+    fun closeAuthoringChrome() {
+        timelineWindow.dockedInStoryWindow = false
+        timelineWindow.detachedWindowVisible = false
+        themeWindow.visible = false
+        lintWindow.visible = false
+        elementController.cancelInlineTextEdit()
+        elementController.selectNode(null)
+        reviewStageCoordinator.inspectModeEnabled = false
+        reviewStageCoordinator.dismissActivePopups()
+    }
+
+    val speakerNotesMemo = remember(store) { DocumentSpeakerNotesMemo() }
+    val presenterWindow = rememberPresenterWindow(
+        animatic = animatic,
+        speakerNotesProvider = { speakerNotesMemo.notesFor(store.document) },
+        documentProvider = { store.document },
+        onSaveSpeakerNote = if (store.isReadOnly) {
+            null
+        } else {
+            { slideId, beatIndex, note -> saveSpeakerNote(store, slideId, beatIndex, note) }
+        },
+        notesEditingBlockedProvider = { // No new note edits mid switch/quit (drafts commit first).
+            switchingToDeckId != null || closingDeckTransition ||
+                (syncController != null && syncController.closeGuard !is CloseGuardState.Idle)
+        },
+        previewStoryboardProvider = presenterCurrentStoryboard?.let { sb -> { sb } },
+        nextPreviewStoryboardProvider = presenterNextStoryboard?.let { sb -> { sb } },
+        currentPresetProvider = { currentPreset },
+        isStudioOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
+        isInspectOpenProvider = { reviewStageCoordinator.inspectModeEnabled },
+        openAuthoringToolsProvider = {
+            buildList {
+                if (timelineWindow.authoringActive) add("Timeline (F5)")
+                if (studioWorkspace.isDesignEditorVisible) add("Deck Theme (F7)")
+                if (studioWorkspace.isLinterVisible) add("Issues (F8)")
+                if (reviewStageCoordinator.inspectModeEnabled) add("Review Inspect (F3)")
+            }
+        },
+        onEnterCleanShowMode = {
+            closeAuthoringChrome()
+            studioWorkspace.markPresentMode()
+        },
+        isExternalTextInputActiveProvider = {
+            textInputTracker.hasFocusedTextInput ||
+                elementController.textInputHasFocus ||
+                elementController.inlineEditingNodeId != null ||
+                reviewStageCoordinator.pendingSelection != null ||
+                reviewStageCoordinator.selectedPinCommentId != null ||
+                presenterWindowHolder?.controller?.isEditingNotes == true
+        },
+        onRestoreStageFocus = {
+            runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
+        },
+        extraPreviewKeyHandler = { ev, _ ->
+            studioWorkspace.handleStudioPreviewKey(ev)
+        },
+    ).also { presenterWindowHolder = it }
+
+    var reviewWindowHolder by remember { mutableStateOf<SlideReviewWindow?>(null) }
+    val prevReviewVisible = reviewWindowHolder?.visible == true
+    val reviewWindow = rememberSlideReviewWindow(
+        animatic = animatic,
+        store = reviewStore,
+        stageCoordinator = reviewStageCoordinator,
+        currentPresetProvider = { currentPreset },
+        timelineDockedProvider = { timelineWindow.dockedInStoryWindow },
+        onToggleTimeline = { studioWorkspace.toggleStudioTimeline() },
+        deckIdProvider = { activeDeck.id },
+        deckFilePathProvider = { resolvedDeckFilePath },
+        slideIdProvider = { sceneIdx -> activeNonSkipped.getOrNull(sceneIdx)?.id },
+    ).also {
+        if (reviewWindowHolder != null && reviewWindowHolder !== it) {
+            it.visible = prevReviewVisible
+        }
+        reviewWindowHolder = it
+    }
+
+    val restoreStageFocus: () -> Unit = {
+        runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
+    }
+    studioWorkspace.setReviewInspectMode = { enabled ->
+        reviewStageCoordinator.inspectModeEnabled = enabled
+        if (enabled) reviewStageCoordinator.showStageBadges = true else reviewStageCoordinator.dismissActivePopups()
+    }
+    studioWorkspace.onToggleReviewInspect = {
+        val next = !reviewStageCoordinator.inspectModeEnabled
+        reviewStageCoordinator.inspectModeEnabled = next
+        if (next) reviewStageCoordinator.showStageBadges = true
+    }
+    studioWorkspace.onOpenReviewPanel = { reviewWindowHolder?.visible = true }
+    studioWorkspace.onEnterCleanShowMode = ::closeAuthoringChrome
+    studioWorkspace.onRestoreStageFocus = restoreStageFocus
+
+    val activeSlide = activeNonSkipped.getOrNull(activeSceneIndex)
+    val breadcrumb = formatStudioBreadcrumb(
+        sceneIndex = activeSceneIndex,
+        sceneCount = activeNonSkipped.size,
+        title = activeSlide?.title,
+        beatIndex = activeBeatIndex,
+        beatCount = activeSlide?.beats?.size ?: 1,
+    )
+    val shellWindow = rememberStudioShellWindow(
+        workspace = studioWorkspace,
+        appBar = {
+            StudioAppBarHost(
+                workspace = studioWorkspace,
+                breadcrumb = breadcrumb,
+                presenterOpen = presenterWindow.visible,
+                onTogglePresenter = { presenterWindow.visible = !presenterWindow.visible },
+                deckSwitcher = {
+                    DeckSwitcherDropdown(
+                        activeDeck = activeDeck,
+                        onSelectDeck = { requestSwitchToDeck(it) },
+                        entries = emptyList(),
+                        entriesProvider = { discoverAvailableDecks(true) },
+                        onOpenDeckFile = ::requestOpenDeckFile,
+                        onPopupClosed = restoreStageFocus,
+                    )
+                },
+            )
+        },
+        themeSheet = {
+            StudioThemeSheet(
+                workspace = studioWorkspace,
+                onPickDeckFileToCopyThemes = ::pickDeckFileForCopyThemes,
+            )
+        },
+        issuesDock = if (timelineWindow.dockedInStoryWindow) {
+            null
+        } else {
+            { StudioIssuesDock(workspace = studioWorkspace, animatic = animatic, scope = appScope) }
+        },
+    )
+
+    val deckMenuWindow = rememberDeckMenuWindow(
+        activeDeckProvider = { activeDeck },
+        onSelectDeck = { requestSwitchToDeck(it) },
+        animaticProvider = { animatic },
+        isTextInputActiveProvider = isAnyTextInputActive,
+        isStudioOpenProvider = { studioWorkspace.isStudioOpen },
+        keyboardController = keyboardController,
+        onBeforeNavigate = { presenterWindowHolder?.controller?.clearCurtain() },
+        extraPreviewKeyHandler = { ev -> workspaceHolder?.handleStudioPreviewKey(ev) == true },
+        entries = emptyList(),
+        entriesProvider = { discoverAvailableDecks(false) },
+    )
+
+    val syncGateWindow = rememberDocumentSyncGateWindow(
+        syncController = syncController,
+        store = store,
+        onAllowClose = {
+            val action = pendingCloseAction ?: onExitApplication
+            pendingCloseAction = null
+            action()
+        },
+    )
+
+    // Outermost first: the shell sits directly outside the timeline so the App Bar spans the stage
+    // and the hoisted right inspector.
+    val decoratedWindows = remember(
+        deckMenuWindow,
+        syncGateWindow,
+        presenterWindow,
+        shellWindow,
+        timelineWindow,
+        reviewWindow,
+        themeWindow,
+        lintWindow,
+    ) {
+        listOf(
+            deckMenuWindow,
+            syncGateWindow,
+            presenterWindow,
+            shellWindow,
+            timelineWindow,
+            reviewWindow,
+            themeWindow,
+            lintWindow,
+        )
+    }
+
+    CompositionLocalProvider(
+        LocalAmbientLoopsPaused provides ambientLoopsPaused,
+        LocalAuthoringTextInputTracker provides textInputTracker,
+        LocalStageDragPreview provides stageDragPreview,
+        LocalStageInspectionRegistry provides stageInspectionRegistry,
+        LocalStageInteractiveRegistry provides stageInteractiveRegistry,
+        LocalOverviewSlideTitleProvider provides { sceneIdx ->
+            activeNonSkipped.getOrNull(sceneIdx)?.title?.takeIf { it.isNotBlank() }
+        },
+    ) {
+        CiacolaJewelTheme(isDark = isDarkTheme) {
+            CompositionLocalProvider(LocalOverviewChromeStyle provides rememberStudioOverviewChromeStyle()) {
+                MaterialTheme(
+                    colors = materialColors,
+                    typography = materialTypography,
+                ) {
+                    DesktopEasel(
+                        animatic = animatic,
+                        windows = decoratedWindows,
+                        onCloseRequest = ::requestExitApplication,
+                        overviewStoryboard = overviewStoryboard,
+                        pdfExportStoryboardProvider = pdfExportStoryboardProvider,
+                        videoExportStoryboardProvider = videoExportStoryboardProvider,
+                        holdDurationForState = videoHoldDurationForState,
+                    )
+                }
+            }
+        }
+    }
 }

@@ -12,6 +12,8 @@ internal fun MenuBarScope.ExportMenu(
     pdfExporter: StoryboardPdfExporter,
     videoExporter: StoryboardVideoExporter,
     storyboard: Storyboard,
+    pdfStoryboardProvider: (() -> Storyboard)? = null,
+    videoStoryboardProvider: (() -> Storyboard)? = null,
 ) {
     val coroutineScope = rememberCoroutineScope()
 
@@ -22,7 +24,7 @@ internal fun MenuBarScope.ExportMenu(
             enabled = !coordinator.isExporting,
             onClick = {
                 coroutineScope.launch {
-                    pdfExporter.export(storyboard)
+                    pdfExporter.export(pdfStoryboardProvider?.invoke() ?: storyboard)
                 }
             },
         )
@@ -31,7 +33,7 @@ internal fun MenuBarScope.ExportMenu(
             enabled = !coordinator.isExporting,
             onClick = {
                 coroutineScope.launch {
-                    videoExporter.export(storyboard)
+                    videoExporter.export(videoStoryboardProvider?.invoke() ?: storyboard)
                 }
             },
         )

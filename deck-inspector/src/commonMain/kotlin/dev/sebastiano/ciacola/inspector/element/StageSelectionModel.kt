@@ -2,6 +2,7 @@ package dev.sebastiano.ciacola.inspector.element
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import dev.sebastiano.ciacola.inspector.StageInteractiveEntry
 import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
 
@@ -11,12 +12,28 @@ import dev.sebastiano.ciacola.inspector.StageNodeSnapshot
  * [contextParentId] identifies the container currently entered (or `null` at top-level stage
  * scope). Single-click selects direct children of [contextParentId], double-click enters a
  * container or begins inline editing on a text leaf, and `Esc` pops [contextParentId] up one level.
+ *
+ * [selectedElementIds] carries the full multi-selection (`Shift+Click`, marquee, `Cmd+A`) while
+ * [selectedElementId] stays the primary selection shown in the inspector. The primary is always a
+ * member of the set (enforced in `init`); change the selection through [withSingleSelection] or by
+ * passing BOTH fields, never `copy(selectedElementId = …)` alone.
  */
 @Immutable
 data class StageSelectionContext(
     val contextParentId: String? = null,
     val selectedElementId: String? = null,
-)
+    val selectedElementIds: Set<String> = selectedElementId?.let(::setOf) ?: emptySet(),
+) {
+    init {
+        require(selectedElementId == null || selectedElementId in selectedElementIds) {
+            "Primary selection '$selectedElementId' must be part of selectedElementIds $selectedElementIds"
+        }
+    }
+
+    /** Replaces the whole selection with [elementId] (or clears it), keeping both fields in sync. */
+    fun withSingleSelection(elementId: String?): StageSelectionContext =
+        copy(selectedElementId = elementId, selectedElementIds = setOfNotNull(elementId))
+}
 
 /**
  * Outcome of double-clicking a stage coordinate under [StageSelectionModel].
@@ -115,10 +132,63 @@ object StageSelectionModel {
         val byId = nodes.associateBy { it.elementId }
         val validContext = current.contextParentId?.takeIf { it in byId }
         val validSelected = current.selectedElementId?.takeIf { it in byId }
+        val validSet = current.selectedElementIds.filterTo(LinkedHashSet()) { it in byId }
+        if (validSelected != null) validSet.add(validSelected)
         return StageSelectionContext(
             contextParentId = validContext,
-            selectedElementId = validSelected,
+            selectedElementId = validSelected ?: validSet.lastOrNull(),
+            selectedElementIds = validSet,
         )
+    }
+
+    /**
+     * `Shift+Click` toggle: adds [elementId] to the multi-selection (making it primary) or removes
+     * it (promoting the most recently added remaining element to primary).
+     */
+    fun toggleAdditive(
+        current: StageSelectionContext,
+        elementId: String,
+    ): StageSelectionContext {
+        val next = LinkedHashSet(current.selectedElementIds)
+        current.selectedElementId?.let(next::add)
+        val primary = if (next.remove(elementId)) {
+            current.selectedElementId?.takeIf { it != elementId && it in next } ?: next.lastOrNull()
+        } else {
+            next.add(elementId)
+            elementId
+        }
+        return current.copy(selectedElementId = primary, selectedElementIds = next)
+    }
+
+    /** Top-level editable nodes (no editable parent), used by `Cmd+A` and marquee selection. */
+    fun topLevelEditable(nodes: List<StageNodeSnapshot>): List<StageNodeSnapshot> {
+        val byId = nodes.associateBy { it.elementId }
+        return nodes.filter { it.isEditable && effectiveParentId(it.elementId, byId) == null }
+    }
+
+    /**
+     * Rubber-band marquee: returns IDs of top-level editable nodes whose bounds intersect
+     * [marquee] (in stage coordinates) with a positive area, ordered top-to-bottom, left-to-right.
+     */
+    fun resolveMarquee(
+        marquee: Rect,
+        nodes: List<StageNodeSnapshot>,
+    ): List<String> {
+        val normalized = Rect(
+            left = minOf(marquee.left, marquee.right),
+            top = minOf(marquee.top, marquee.bottom),
+            right = maxOf(marquee.left, marquee.right),
+            bottom = maxOf(marquee.top, marquee.bottom),
+        )
+        if (normalized.width <= 0f || normalized.height <= 0f) return emptyList()
+        return topLevelEditable(nodes)
+            .filter { node ->
+                val b = node.stageBounds
+                minOf(b.right, normalized.right) > maxOf(b.left, normalized.left) &&
+                    minOf(b.bottom, normalized.bottom) > maxOf(b.top, normalized.top)
+            }
+            .sortedWith(compareBy({ it.stageBounds.top }, { it.stageBounds.left }, { it.elementId }))
+            .map { it.elementId }
     }
 
     /**

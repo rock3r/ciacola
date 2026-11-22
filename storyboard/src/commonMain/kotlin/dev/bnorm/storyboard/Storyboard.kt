@@ -11,6 +11,7 @@ public class Storyboard private constructor(
     public val scenes: ImmutableList<Scene<*>>,
     public val format: SceneFormat,
     public val decorator: ContentDecorator,
+    public val sceneZIndex: ((Index) -> Float)? = null,
 ) {
     @Immutable
     public class Index(
@@ -56,13 +57,38 @@ public class Storyboard private constructor(
             decorator: ContentDecorator = ContentDecorator.None,
             block: StoryboardBuilder.() -> Unit,
         ): Storyboard {
+            return build(
+                title = title,
+                description = description,
+                format = format,
+                decorator = decorator,
+                sceneZIndex = null,
+                block = block,
+            )
+        }
+
+        public fun build(
+            title: String,
+            description: String? = null,
+            format: SceneFormat = SceneFormat.Default,
+            decorator: ContentDecorator = ContentDecorator.None,
+            sceneZIndex: ((Index) -> Float)?,
+            block: StoryboardBuilder.() -> Unit,
+        ): Storyboard {
             // TODO it's possible for someone to use`Storyboard.build` during composition
             //  - this can potentially trigger recompositions if state is captured.
             //  - should we forcibly disable state reads for this function?
             //  - also seems to trigger an error with SeekableTransitionState being reused?
             val builder = StoryboardBuilderImpl()
             builder.block()
-            return Storyboard(title, description, builder.build().toImmutableList(), format, decorator)
+            return Storyboard(
+                title = title,
+                description = description,
+                scenes = builder.build().toImmutableList(),
+                format = format,
+                decorator = decorator,
+                sceneZIndex = sceneZIndex,
+            )
         }
     }
 

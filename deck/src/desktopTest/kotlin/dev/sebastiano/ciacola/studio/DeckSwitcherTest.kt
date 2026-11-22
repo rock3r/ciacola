@@ -3,8 +3,6 @@ package dev.sebastiano.ciacola.studio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -23,94 +21,46 @@ import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.DeckCatalog
 import dev.sebastiano.ciacola.DeckEntry
-import dev.sebastiano.ciacola.authoring.DeckHostParams
-import dev.sebastiano.ciacola.authoring.ciacolaDeck
-import dev.sebastiano.ciacola.effects.DeckEditableText
-import dev.sebastiano.ciacola.inspector.element.ElementOverridesStore
+import dev.sebastiano.ciacola.createLoadedTestDeckStore
+import dev.sebastiano.ciacola.decks.loadClasspathDeckDocument
+import dev.sebastiano.ciacola.document.DeckDocumentStore
+import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.RichTextValue
+import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
+import dev.sebastiano.ciacola.document.render.rememberDocumentStoryboard
 import dev.sebastiano.ciacola.presenter.PresenterDashboard
 import dev.sebastiano.ciacola.presenter.rememberPresenterWindow
-import dev.sebastiano.ciacola.theme.DeckThemePreset
-import dev.sebastiano.ciacola.theme.DeckThemes
-import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
-import dev.sebastiano.ciacola.theme.LocalDeckTheme
-import dev.sebastiano.ciacola.timeline.DeckLoopClock
-import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * Verifies §4.2 / D-18 / A-10:
- * - Default [DeckCatalog.entries] registers [DeckCatalog.foundation].
- * - Per-deck `.storyboard/` directory scoping (Foundation uses root `.storyboard/`; additional
- *   decks use `.storyboard/decks/<deckId>/`).
- * - `-Dciacola.deck=<id>` precedence over `.storyboard/active-deck`.
- * - Live switching across 3 catalog decks via [DeckSwitcherDropdown] (and [DeckMenuWindow]) resets
- *   each deck to `(0, 0)`, isolates per-deck stores cleanly, persists `.storyboard/active-deck`,
- *   and updates the Presenter top bar deck badge.
+ * Verifies document-deck catalog registration, [StudioSessionStore] persistence, and live switching
+ * across decks via [DeckSwitcherDropdown] + [PresenterDashboard]:
+ * - [DeckCatalog.entries] registers all 4 canonical document decks (`foundation`, `shaders-quickie-2025`,
+ *   `jewel-talk-2024`, `not-just-plain-text-2024`).
+ * - `-Dciacola.deck=<id>` takes precedence over `.storyboard/session.json`.
+ * - Switching decks resets to `(0, 0)`, isolates per-deck [DeckDocumentStore]s, persists `session.json`,
+ *   and updates the Presenter top bar deck title badge.
  */
 @OptIn(ExperimentalTestApi::class)
 class DeckSwitcherTest {
 
-    private companion object {
-        const val SYNTHETIC_ALPHA_ID = "synthetic-alpha"
-        const val SYNTHETIC_BETA_ID = "synthetic-beta"
-
-        val syntheticAlphaEntry = DeckEntry(
-            id = SYNTHETIC_ALPHA_ID,
-            title = "Synthetic Alpha",
-            create = { host ->
-                ciacolaDeck(id = SYNTHETIC_ALPHA_ID, title = "Alpha Talk", host = host) {
-                    slide(key = "alpha-1", title = "Alpha Intro", beats = 2) {
-                        val theme = LocalDeckTheme.current
-                        DeckEditableText(
-                            elementId = "alpha:s1:title",
-                            text = "Alpha Headline",
-                            style = theme.typography.title,
-                            color = theme.colors.foreground,
-                        )
-                    }
-                }
-            },
-        )
-
-        val syntheticBetaEntry = DeckEntry(
-            id = SYNTHETIC_BETA_ID,
-            title = "Synthetic Beta",
-            create = { host ->
-                ciacolaDeck(id = SYNTHETIC_BETA_ID, title = "Beta Talk", host = host) {
-                    slide(key = "beta-1", title = "Beta Intro", beats = 2) {
-                        val theme = LocalDeckTheme.current
-                        DeckEditableText(
-                            elementId = "beta:s1:title",
-                            text = "Beta Headline",
-                            style = theme.typography.title,
-                            color = theme.colors.foreground,
-                        )
-                    }
-                }
-            },
-        )
-
-        val threeDeckCatalog: List<DeckEntry> = listOf(
-            DeckCatalog.foundation,
-            syntheticAlphaEntry,
-            syntheticBetaEntry,
-        )
-    }
-
     @Test
-    fun deckStoreScopingAndInitialDeckResolution() {
+    fun deckCatalogAndSessionStoreResolution() {
         assertEquals(
-            listOf(DeckCatalog.foundation),
-            DeckCatalog.entries,
-            "Built-in DeckCatalog must ship only Foundation Deck by default",
+            listOf(
+                DeckCatalog.FOUNDATION_ID,
+                DeckCatalog.SHADERS_QUICKIE_ID,
+                DeckCatalog.JEWEL_TALK_ID,
+                DeckCatalog.NOT_JUST_PLAIN_TEXT_ID,
+            ),
+            DeckCatalog.entries.map { it.id },
+            "Built-in DeckCatalog must register all 4 canonical document decks",
         )
 
         val rootDir = Files.createTempDirectory("ciacola-deck-switch-unit-")
@@ -118,47 +68,38 @@ class DeckSwitcherTest {
             assertEquals(
                 rootDir,
                 storyboardDirForDeck(rootDir, DeckCatalog.FOUNDATION_ID),
-                "Foundation deck must keep the root .storyboard/ directory",
+                "Foundation deck keeps the root .storyboard/ directory for review comments",
             )
             assertEquals(
-                rootDir.resolve("decks").resolve(SYNTHETIC_ALPHA_ID),
-                storyboardDirForDeck(rootDir, SYNTHETIC_ALPHA_ID),
-            )
-            assertEquals(
-                rootDir.resolve("decks").resolve(SYNTHETIC_BETA_ID),
-                storyboardDirForDeck(rootDir, SYNTHETIC_BETA_ID),
+                rootDir.resolve("decks").resolve(DeckCatalog.SHADERS_QUICKIE_ID),
+                storyboardDirForDeck(rootDir, DeckCatalog.SHADERS_QUICKIE_ID),
             )
 
-            // Default falls back to Foundation.
             assertEquals(
                 DeckCatalog.FOUNDATION_ID,
-                resolveInitialDeckId(rootDir, systemPropertyOverride = null, entries = threeDeckCatalog),
+                resolveInitialDeckId(rootDir, systemPropertyOverride = null),
             )
 
-            // Persisted active-deck is honored when no system property is supplied.
-            persistActiveDeckId(rootDir, SYNTHETIC_ALPHA_ID)
+            persistActiveDeckId(rootDir, DeckCatalog.SHADERS_QUICKIE_ID)
+            assertTrue(Files.isRegularFile(rootDir.resolve(SESSION_FILE_NAME)))
             assertEquals(
-                SYNTHETIC_ALPHA_ID,
-                resolveInitialDeckId(rootDir, systemPropertyOverride = null, entries = threeDeckCatalog),
+                DeckCatalog.SHADERS_QUICKIE_ID,
+                resolveInitialDeckId(rootDir, systemPropertyOverride = null),
             )
 
-            // Explicit -Dciacola.deck=<id> takes precedence over persisted active-deck.
             assertEquals(
-                SYNTHETIC_BETA_ID,
+                DeckCatalog.JEWEL_TALK_ID,
                 resolveInitialDeckId(
                     rootDir,
-                    systemPropertyOverride = SYNTHETIC_BETA_ID,
-                    entries = threeDeckCatalog,
+                    systemPropertyOverride = DeckCatalog.JEWEL_TALK_ID,
                 ),
             )
 
-            // Unknown system property falls back to persisted active-deck rather than crashing.
             assertEquals(
-                SYNTHETIC_ALPHA_ID,
+                DeckCatalog.SHADERS_QUICKIE_ID,
                 resolveInitialDeckId(
                     rootDir,
                     systemPropertyOverride = "unknown-deck",
-                    entries = threeDeckCatalog,
                 ),
             )
         } finally {
@@ -167,10 +108,12 @@ class DeckSwitcherTest {
     }
 
     @Test
-    fun switcherCyclesAllThreeDecksWithIsolatedStoresAndPresenterBadge() = runComposeUiTest {
+    fun switcherCyclesDocumentDecksWithIsolatedStoresAndPresenterBadge() = runComposeUiTest {
         val rootDir = Files.createTempDirectory("ciacola-deck-switch-ui-")
+        val twoDeckSubset = listOf(DeckCatalog.foundation, DeckCatalog.shadersQuickie2025)
+        val storesById = mutableMapOf<String, DeckDocumentStore>()
         lateinit var currentAnimatic: Animatic
-        lateinit var currentElementStore: ElementOverridesStore
+        lateinit var currentStore: DeckDocumentStore
         lateinit var currentDeckEntry: DeckEntry
         lateinit var menuWindow: DeckMenuWindow
         lateinit var scope: CoroutineScope
@@ -183,36 +126,25 @@ class DeckSwitcherTest {
                         resolveInitialDeckId(
                             rootDir,
                             systemPropertyOverride = null,
-                            entries = threeDeckCatalog,
+                            entries = twoDeckSubset,
                         ),
                     )
                 }
-                val activeDeck = remember(activeDeckId) { DeckCatalog.byId(activeDeckId, threeDeckCatalog) }
+                val activeDeck = remember(activeDeckId) { DeckCatalog.byId(activeDeckId, twoDeckSubset) }
                 currentDeckEntry = activeDeck
 
-                val deckStoryboardDir = remember(activeDeck.id) {
-                    storyboardDirForDeck(rootDir, activeDeck.id)
+                val store = remember(activeDeck.id) {
+                    storesById.getOrPut(activeDeck.id) {
+                        createLoadedTestDeckStore(loadClasspathDeckDocument(activeDeck))
+                    }
                 }
-                val elementStore = remember(activeDeck.id) {
-                    ElementOverridesStore(storyboardDir = deckStoryboardDir)
-                }
-                DisposableEffect(elementStore) {
-                    onDispose { elementStore.close() }
-                }
-                currentElementStore = elementStore
+                currentStore = store
 
-                val storyboard = remember(activeDeck.id) {
-                    activeDeck.create(
-                        DeckHostParams(
-                            theme = DeckThemes.stageDark(),
-                            bundledPreset = DeckThemePreset.StageDark,
-                            elementOverridesProvider = {
-                                elementStore.revision
-                                elementStore.data()
-                            },
-                        ),
-                    )
-                }
+                val session = remember(store) { RenderSession.forPresent(store, freeClockMillis = { 0L }) }
+                val storyboard = rememberDocumentStoryboard(
+                    session = session,
+                    config = DocumentRenderConfig(specimens = activeDeck.specimens),
+                )
                 val animatic = key(activeDeck.id) {
                     rememberAnimatic(
                         initialIndex = Storyboard.Index(0, 0),
@@ -233,121 +165,73 @@ class DeckSwitcherTest {
                     animaticProvider = { animatic },
                     isTextInputActiveProvider = { false },
                     isStudioOpenProvider = { true },
-                    entries = threeDeckCatalog,
+                    entries = twoDeckSubset,
                 )
 
                 val presenterWindow = rememberPresenterWindow(animatic = animatic)
 
-                val frozenLoopClock = remember { DeckLoopClock().apply { masterTimeMillis = 0L } }
-                CompositionLocalProvider(
-                    LocalAmbientLoopsPaused provides true,
-                    LocalDeckLoopClock provides frozenLoopClock,
-                ) {
-                    CiacolaJewelTheme(isDark = true) {
-                        Column(Modifier.size(1024.dp, 680.dp)) {
-                            DeckSwitcherDropdown(
-                                activeDeck = activeDeck,
-                                onSelectDeck = selectDeck,
-                                entries = threeDeckCatalog,
-                            )
-                            PresenterDashboard(
-                                controller = presenterWindow.controller,
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                            )
-                        }
+                CiacolaJewelTheme(isDark = true) {
+                    Column(Modifier.size(1024.dp, 680.dp)) {
+                        DeckSwitcherDropdown(
+                            activeDeck = activeDeck,
+                            onSelectDeck = selectDeck,
+                            entries = twoDeckSubset,
+                        )
+                        PresenterDashboard(
+                            controller = presenterWindow.controller,
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                        )
                     }
                 }
             }
             waitForIdle()
 
-            // 1. Starts on Foundation Deck with Keynote Effects Lab included.
-            assertEquals(3, menuWindow.entries.size)
+            // 1. Starts on Foundation Deck (5 slides).
+            assertEquals(2, menuWindow.entries.size)
             assertEquals(DeckCatalog.FOUNDATION_ID, currentDeckEntry.id)
-            assertEquals("Ciacola", currentAnimatic.storyboard.title)
-            val baseFoundationScenes = dev.sebastiano.ciacola.createFoundationDeck(
-                includeKeynoteEffectsLab = false,
-            ).scenes.size
-            assertTrue(
-                currentAnimatic.storyboard.scenes.size > baseFoundationScenes,
-                "Foundation catalog entry must include Keynote Effects Lab scenes (${currentAnimatic.storyboard.scenes.size} vs base $baseFoundationScenes)",
-            )
-            onNodeWithTag("ciacola-presenter-deck-title").assertTextEquals("Ciacola")
+            assertEquals(5, currentAnimatic.storyboard.scenes.size)
+            onNodeWithTag("ciacola-presenter-deck-title").assertTextEquals(currentAnimatic.storyboard.title)
 
-            // Move off (0, 0) and write a Foundation-scoped element override.
+            // Jump to Slide 2 and edit Foundation's s1:eyebrow in its isolated store.
             runOnIdle {
                 scope.launch { currentAnimatic.jumpTo(Storyboard.Index(1, 0)) }
-                currentElementStore.updateElement("s1:eyebrow") {
-                    it.copy(text = "FOUNDATION OVERRIDE")
+                currentStore.edit("Edit Foundation Eyebrow") { doc ->
+                    doc.copy(
+                        slides = doc.slides.mapIndexed { idx, s ->
+                            if (idx == 0) {
+                                s.copy(
+                                    nodes = s.nodes.map { n ->
+                                        if (n.id == "s1:eyebrow") {
+                                            n.copy(text = n.text!!.copy(value = RichTextValue.Plain("FOUNDATION EDITED")))
+                                        } else {
+                                            n
+                                        }
+                                    },
+                                )
+                            } else {
+                                s
+                            }
+                        },
+                    )
                 }
             }
             waitForIdle()
             assertEquals(Storyboard.Index(1, 0), currentAnimatic.currentIndex)
-            assertTrue(Files.isRegularFile(rootDir.resolve("element-overrides.json")))
 
-            // 2. Switch to Synthetic Alpha via toolbar dropdown.
+            // 2. Switch to Shaders Quickie via toolbar dropdown -> lands on (0, 0) with clean isolated store!
             onNodeWithTag("ciacola-deck-switcher").performClick()
             waitForIdle()
-            onNodeWithTag("ciacola-deck-option-$SYNTHETIC_ALPHA_ID", useUnmergedTree = true).performClick()
+            onNodeWithTag("ciacola-deck-option-${DeckCatalog.SHADERS_QUICKIE_ID}", useUnmergedTree = true).performClick()
             waitForIdle()
 
-            assertEquals(SYNTHETIC_ALPHA_ID, currentDeckEntry.id)
-            assertEquals("Alpha Talk", currentAnimatic.storyboard.title)
+            assertEquals(DeckCatalog.SHADERS_QUICKIE_ID, currentDeckEntry.id)
+            assertEquals(Storyboard.Index(0, 0), currentAnimatic.currentIndex, "Switching decks must land on (0, 0)")
+            assertEquals(48, currentAnimatic.storyboard.scenes.size)
+            assertTrue(!currentStore.isDirty, "Shaders store must remain clean and isolated from Foundation edits")
+            onNodeWithTag("ciacola-presenter-deck-title").assertTextEquals(currentAnimatic.storyboard.title)
             assertEquals(
-                Storyboard.Index(0, 0),
-                currentAnimatic.currentIndex,
-                "Switching decks must land cleanly on (0, 0)",
-            )
-            onNodeWithTag("ciacola-presenter-deck-title").assertTextEquals("Alpha Talk")
-            assertNull(
-                currentElementStore.data().elements["s1:eyebrow"],
-                "Foundation overrides must not leak into Synthetic Alpha store",
-            )
-
-            // Persist an Alpha-only override and verify it lands under decks/synthetic-alpha/.
-            runOnIdle {
-                currentElementStore.updateElement("alpha:s1:title") {
-                    it.copy(text = "ALPHA OVERRIDE")
-                }
-            }
-            waitForIdle()
-            val alphaOverrideFile = rootDir
-                .resolve("decks")
-                .resolve(SYNTHETIC_ALPHA_ID)
-                .resolve("element-overrides.json")
-            assertTrue(Files.isRegularFile(alphaOverrideFile))
-
-            // 3. Switch to Synthetic Beta.
-            onNodeWithTag("ciacola-deck-switcher").performClick()
-            waitForIdle()
-            onNodeWithTag("ciacola-deck-option-$SYNTHETIC_BETA_ID", useUnmergedTree = true).performClick()
-            waitForIdle()
-
-            assertEquals(SYNTHETIC_BETA_ID, currentDeckEntry.id)
-            assertEquals("Beta Talk", currentAnimatic.storyboard.title)
-            assertEquals(Storyboard.Index(0, 0), currentAnimatic.currentIndex)
-            onNodeWithTag("ciacola-presenter-deck-title").assertTextEquals("Beta Talk")
-            assertFalse(currentElementStore.data().hasOverrides)
-
-            // 4. Switch back to Foundation Deck — lands on (0, 0) with Foundation store intact.
-            onNodeWithTag("ciacola-deck-switcher").performClick()
-            waitForIdle()
-            onNodeWithTag("ciacola-deck-option-${DeckCatalog.FOUNDATION_ID}", useUnmergedTree = true).performClick()
-            waitForIdle()
-
-            assertEquals(DeckCatalog.FOUNDATION_ID, currentDeckEntry.id)
-            assertEquals("Ciacola", currentAnimatic.storyboard.title)
-            assertEquals(Storyboard.Index(0, 0), currentAnimatic.currentIndex)
-            onNodeWithTag("ciacola-presenter-deck-title").assertTextEquals("Ciacola")
-            assertEquals(
-                "FOUNDATION OVERRIDE",
-                currentElementStore.data().elements["s1:eyebrow"]?.text,
-                "Foundation override must still exist in root .storyboard/ after round-trip deck switches",
-            )
-            assertNull(currentElementStore.data().elements["alpha:s1:title"])
-            assertEquals(
-                DeckCatalog.FOUNDATION_ID,
-                resolveInitialDeckId(rootDir, systemPropertyOverride = null, entries = threeDeckCatalog),
-                "active-deck persistence must record the latest deck id",
+                DeckCatalog.SHADERS_QUICKIE_ID,
+                studioSessionStore(rootDir).load().activeDeckId,
             )
         } finally {
             rootDir.toFile().deleteRecursively()

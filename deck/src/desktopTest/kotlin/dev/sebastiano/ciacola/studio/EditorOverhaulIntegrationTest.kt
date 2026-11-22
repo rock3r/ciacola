@@ -1,72 +1,57 @@
 package dev.sebastiano.ciacola.studio
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
-import androidx.compose.ui.test.performMouseInput
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
-import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.plus
-import dev.sebastiano.ciacola.createFoundationDeck
-import dev.sebastiano.ciacola.inspector.ElementPatch
+import dev.sebastiano.ciacola.createLoadedTestDeckStore
+import dev.sebastiano.ciacola.decks.AllDocumentDecks
+import dev.sebastiano.ciacola.document.CanonicalJson
+import dev.sebastiano.ciacola.document.DeckDocumentStore
+import dev.sebastiano.ciacola.document.DeckFileSync
+import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.RichTextValue
+import dev.sebastiano.ciacola.document.SyncState
+import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
+import dev.sebastiano.ciacola.document.render.rememberDocumentStoryboard
+import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
-import dev.sebastiano.ciacola.inspector.design.DesignSystemStore
-import dev.sebastiano.ciacola.inspector.element.ElementEditorController
-import dev.sebastiano.ciacola.inspector.element.ElementOverridesStore
-import dev.sebastiano.ciacola.inspector.element.rememberElementEditorController
-import dev.sebastiano.ciacola.inspector.lint.DeckLintController
-import dev.sebastiano.ciacola.inspector.lint.DeckLintIssue
-import dev.sebastiano.ciacola.inspector.lint.LintRuleId
+import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
+import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
+import dev.sebastiano.ciacola.inspector.element.DocumentStageDirectEditOverlay
+import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
 import dev.sebastiano.ciacola.inspector.lint.LintSeverity
-import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintController
-import dev.sebastiano.ciacola.inspector.lint.rememberDeckLintStageDecorator
+import dev.sebastiano.ciacola.loadFoundationTestDocument
 import dev.sebastiano.ciacola.presenter.PresenterController
 import dev.sebastiano.ciacola.presenter.PresenterWindow
 import dev.sebastiano.ciacola.presenter.StageCurtain
-import dev.sebastiano.ciacola.rememberHotReloadStoryboard
-import dev.sebastiano.ciacola.review.ReviewCommentStore
-import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
-import dev.sebastiano.ciacola.theme.DeckThemePreset
-import dev.sebastiano.ciacola.theme.DeckThemes
-import dev.sebastiano.ciacola.theme.TextStyleTokenOverride
-import dev.sebastiano.ciacola.theme.withOverrides
-import dev.sebastiano.ciacola.timeline.DeckLoopClock
-import dev.sebastiano.ciacola.timeline.MotionPathPreviewState
-import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
-import dev.sebastiano.ciacola.timeline.TimelineStageSelection
-import dev.sebastiano.ciacola.timeline.TimelineStudioWindow
-import dev.sebastiano.ciacola.timeline.rememberTimelineStageDecorator
-import dev.sebastiano.ciacola.timeline.rememberTimelineStudioController
-import dev.sebastiano.ciacola.timeline.rememberTimelineStudioWindow
+import dev.sebastiano.ciacola.timeline.DocumentTimelineController
+import dev.sebastiano.ciacola.timeline.DocumentTimelineWindow
+import dev.sebastiano.ciacola.timeline.rememberDocumentTimelineWindow
 import dev.sebastiano.ciacola.ui.AuthoringTextInputFocusTracker
+import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.LocalAuthoringTextInputTracker
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -74,293 +59,146 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 @OptIn(ExperimentalTestApi::class)
 class EditorOverhaulIntegrationTest {
 
     @Test
-    fun foundationDeckPassesFullDeckLintAuditWithZeroErrorsInStageDarkAndKeynoteLight() = runComposeUiTest {
-        val tempDir = Files.createTempDirectory("ciacola-lint-foundation-")
-        val storyboardDir = tempDir.resolve(".storyboard")
-        val designStore = DesignSystemStore(storyboardDir = storyboardDir)
-        val elementStore = ElementOverridesStore(storyboardDir = storyboardDir)
-        val timelineStore = TimelineOverridesStore(storyboardDir = storyboardDir)
-
-        lateinit var lintController: DeckLintController
-        lateinit var uiScope: CoroutineScope
-        lateinit var storyboardForPreset: (DeckThemePreset) -> Storyboard
-
-        setContent {
-            uiScope = rememberCoroutineScope()
-            lintController = rememberDeckLintController()
-            storyboardForPreset = remember {
-                { targetPreset ->
-                    val designOverrides = designStore.overridesFor(targetPreset)
-                    createFoundationDeck(
-                        theme = DeckThemes.forPreset(targetPreset),
-                        bundledPreset = targetPreset,
-                        includeKeynoteEffectsLab = true,
-                        timelineOverrides = timelineStore.data(),
-                        elementOverrides = elementStore.data(),
-                        designOverrides = designOverrides,
-                    )
-                }
-            }
-            Box(Modifier.size(64.dp))
+    fun foundationDeckPassesFullDeckLintAuditWithZeroErrorsInDarkAndLightThemes() = runBlocking {
+        val store = createLoadedTestDeckStore()
+        DocumentDeckLintController(
+            store = store,
+            specimens = AllDocumentDecks.foundation.specimens,
+        ).use { lintController ->
+            val report = lintController.engine.lintFullDeck(
+                document = store.document,
+                themeNames = listOf("dark", "light"),
+            )
+            val errors = report.issues.filter { it.severity == LintSeverity.Error }
+            assertTrue(
+                errors.isEmpty(),
+                "Expected 0 lint errors across dark + light on foundation.deck.json, found:\n" +
+                    errors.joinToString("\n") { "${it.code} (S${it.slideIndex + 1}:B${it.beatIndex + 1}): ${it.title} — ${it.detail}" },
+            )
         }
-        waitForIdle()
-
-        var auditedIssues: List<DeckLintIssue>? = null
-        runOnIdle {
-            uiScope.launch {
-                auditedIssues = lintController.runFullDeckAudit(
-                    storyboard = storyboardForPreset(DeckThemePreset.StageDark),
-                    presetsToCheck = listOf(DeckThemePreset.StageDark, DeckThemePreset.KeynoteLight),
-                    storyboardForPreset = storyboardForPreset,
-                    timelineOverrides = timelineStore.data(),
-                )
-            }
-        }
-        waitUntil(conditionDescription = "Full deck audit completes", timeoutMillis = 10_000) {
-            auditedIssues != null && !lintController.isAuditing
-        }
-
-        val issues = checkNotNull(auditedIssues)
-        val errors = issues.filter { it.severity == LintSeverity.Error }
-        assertTrue(
-            errors.isEmpty(),
-            "Expected 0 lint errors across StageDark + KeynoteLight FoundationDeck, found:\n" +
-                errors.joinToString("\n") { "${it.id} (${it.locationBadge}): ${it.title} — ${it.detail}" },
-        )
-
-        // 1.5. Full-deck audit with spotlightDimAlpha = 0.8f across both presets produces 0 errors
-        //      and introduces 0 LOW_CONTRAST issues on spotlight-dimmed elements.
-        val baselineContrastIds = issues.filter { it.ruleId == LintRuleId.LOW_CONTRAST }.map { it.id }.toSet()
-        runOnIdle {
-            designStore.updateColors(DeckThemePreset.StageDark) { it.copy(spotlightDimAlpha = 0.8f) }
-            designStore.updateColors(DeckThemePreset.KeynoteLight) { it.copy(spotlightDimAlpha = 0.8f) }
-        }
-        waitForIdle()
-        var dimmedIssues: List<DeckLintIssue>? = null
-        runOnIdle {
-            uiScope.launch {
-                dimmedIssues = lintController.runFullDeckAudit(
-                    storyboard = storyboardForPreset(DeckThemePreset.StageDark),
-                    presetsToCheck = listOf(DeckThemePreset.StageDark, DeckThemePreset.KeynoteLight),
-                    storyboardForPreset = storyboardForPreset,
-                    timelineOverrides = timelineStore.data(),
-                )
-            }
-        }
-        waitUntil(conditionDescription = "Spotlight 0.8 audit completes", timeoutMillis = 10_000) {
-            dimmedIssues != null && !lintController.isAuditing
-        }
-        val dimmedErrors = dimmedIssues!!.filter { it.severity == LintSeverity.Error }
-        assertTrue(
-            dimmedErrors.isEmpty(),
-            "Expected 0 lint errors with spotlightDimAlpha = 0.8f, got $dimmedErrors",
-        )
-        val newContrastIssues = dimmedIssues!!.filter {
-            it.ruleId == LintRuleId.LOW_CONTRAST && it.id !in baselineContrastIds
-        }
-        assertTrue(
-            newContrastIssues.isEmpty(),
-            "Expected 0 new LOW_CONTRAST issues with spotlightDimAlpha = 0.8f, got $newContrastIssues",
-        )
     }
 
     @Test
-    fun unifiedStudioWorkspacePropagatesThemeAndElementOverridesToStageAndLinterWithContextUndo() = runComposeUiTest {
-        val tempDir = Files.createTempDirectory("ciacola-studio-unified-")
-        val storyboardDir = tempDir.resolve(".storyboard")
-        val reviewStore = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempDir)
-        val timelineStore = TimelineOverridesStore(storyboardDir = storyboardDir)
-        val designStore = DesignSystemStore(storyboardDir = storyboardDir)
-        val elementStore = ElementOverridesStore(storyboardDir = storyboardDir)
+    fun unifiedStudioWorkspacePropagatesThemeAndElementEditsToStageAndLinterWithUnifiedUndo() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
         val textTracker = AuthoringTextInputFocusTracker()
-
-        var preset by mutableStateOf(DeckThemePreset.StageDark)
         var fullscreen by mutableStateOf(false)
 
         lateinit var workspace: StudioWorkspaceController
-        lateinit var lintController: DeckLintController
-        lateinit var elementController: ElementEditorController
-        lateinit var studioWindow: TimelineStudioWindow
+        lateinit var lintController: DocumentDeckLintController
+        lateinit var elementController: DocumentElementInspectorController
+        lateinit var themeController: DocumentThemeInspectorController
+        lateinit var studioWindow: DocumentTimelineWindow
         lateinit var presenterController: PresenterController
         lateinit var registry: StageInspectionRegistry
         lateinit var uiScope: CoroutineScope
-        lateinit var storyboardForPreset: (DeckThemePreset) -> Storyboard
 
         setContent {
             uiScope = rememberCoroutineScope()
             registry = remember { StageInspectionRegistry() }
-            var animaticHolder by remember { mutableStateOf<dev.bnorm.storyboard.easel.Animatic?>(null) }
-            elementController = rememberElementEditorController(
-                overridesStore = elementStore,
-                inspectionRegistry = registry,
-                isStageSettlingProvider = { animaticHolder?.scrubSettling == true },
-            )
-            lintController = rememberDeckLintController()
-
-            val designRev = designStore.revision
-            val elementRev = elementStore.revision
-            val structuralRev = timelineStore.structuralRevision
-            val paramRev = timelineStore.parameterRevision
-
-            val designOverrides = remember(preset, designRev) { designStore.overridesFor(preset) }
-            val baseHostTheme = remember(preset) { DeckThemes.forPreset(preset) }
-            val hostTheme = remember(baseHostTheme, designOverrides) {
-                baseHostTheme.withOverrides(designOverrides)
-            }
-            val elementOverrides = remember(elementRev) { elementStore.data() }
-            val timelineOverrides = remember(structuralRev, paramRev) { timelineStore.data() }
-
-            val loopClock = remember { DeckLoopClock() }
-            val motionPath = remember { MotionPathPreviewState() }
-            val stageSelection = remember { TimelineStageSelection() }
-            val reviewCoordinator = rememberReviewStageCoordinator()
-            var wsHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
-
-            val stageLoopDecorator = rememberTimelineStageDecorator(
-                loopClock = loopClock,
-                motionPathPreview = motionPath,
-                overridesStore = timelineStore,
-                stageSelection = stageSelection,
-            )
-            val lintDecorator = rememberDeckLintStageDecorator(
-                controller = lintController,
-                isInspectionVisible = { wsHolder?.isLinterVisible == true },
-            )
-
-            val sb = rememberHotReloadStoryboard(
-                preset,
-                structuralRev,
-            ) {
-                createFoundationDeck(
-                    theme = baseHostTheme,
-                    bundledPreset = preset,
-                    includeKeynoteEffectsLab = true,
-                    stageDecorator = stageLoopDecorator +
-                        reviewCoordinator.stageDecorator +
-                        elementController.stageDecorator +
-                        lintDecorator,
-                    timelineOverrides = timelineStore.data(),
-                    timelineOverridesProvider = {
-                        timelineStore.parameterRevision
-                        timelineStore.structuralRevision
-                        timelineStore.data()
-                    },
-                    elementOverridesProvider = {
-                        elementStore.revision
-                        elementStore.data()
-                    },
-                    designOverridesProvider = {
-                        designStore.revision
-                        designStore.overridesFor(preset)
-                    },
+            val timelineController = remember {
+                DocumentTimelineController(
+                    store = store,
+                    specimens = AllDocumentDecks.foundation.specimens,
                 )
             }
-
-            storyboardForPreset = remember(timelineStore, elementStore, designStore) {
-                { targetPreset ->
-                    val targetDesign = designStore.overridesFor(targetPreset)
-                    createFoundationDeck(
-                        theme = DeckThemes.forPreset(targetPreset),
-                        bundledPreset = targetPreset,
-                        includeKeynoteEffectsLab = true,
-                        timelineOverrides = timelineStore.data(),
-                        elementOverrides = elementStore.data(),
-                        designOverrides = targetDesign,
-                    )
-                }
+            elementController = remember {
+                DocumentElementInspectorController(
+                    store = store,
+                    specimens = AllDocumentDecks.foundation.specimens,
+                )
             }
-
-            val animatic = rememberAnimatic(storyboard = { sb }).also { animaticHolder = it }
-            val timelineController = rememberTimelineStudioController(
-                animatic = animatic,
-                overridesStore = timelineStore,
-                loopClock = loopClock,
-                bakeDispatcher = reviewStore.asBakeDispatcher(),
-                bakeWorkspaceRoot = tempDir,
-                motionPathPreview = motionPath,
-                stageSelection = stageSelection,
-                externalTimingKey = designOverrides.motion,
-                externalInEditGesture = designStore.isInEditGesture,
-            )
-
+            themeController = remember { DocumentThemeInspectorController(store = store) }
+            lintController = remember {
+                DocumentDeckLintController(
+                    store = store,
+                    specimens = AllDocumentDecks.foundation.specimens,
+                )
+            }
             workspace = remember(timelineController) {
                 StudioWorkspaceController(
+                    store = store,
                     timelineController = timelineController,
-                    timelineOverridesStore = timelineStore,
-                    designSystemStore = designStore,
-                    elementOverridesStore = elementStore,
                     elementController = elementController,
+                    themeController = themeController,
                     lintController = lintController,
-                    stageInspectionRegistry = registry,
                     isTextInputActiveProvider = { textTracker.hasFocusedTextInput },
                 )
-            }.also { wsHolder = it }
-
-            SideEffect {
-                elementController.currentSceneIndexProvider = { animatic.targetIndex.sceneIndex }
-                elementController.currentBeatIndexProvider = { animatic.targetIndex.frameIndex }
-                elementController.isStageSettlingProvider = { animatic.scrubSettling }
-                stageSelection.pickingSuppressed = {
-                    workspace.isStudioOpen && workspace.activeTab == StudioInspectorTab.Element
-                }
             }
 
-            StudioWorkspaceSyncEffects(workspace)
+            val session = remember { RenderSession.forPresent(store, freeClockMillis = { 0L }) }
+            val sb = rememberDocumentStoryboard(
+                session = session,
+                config = DocumentRenderConfig(
+                    themeName = themeController.activeThemeName,
+                    specimens = AllDocumentDecks.foundation.specimens,
+                ),
+            )
+            val animatic = rememberAnimatic(storyboard = { sb })
 
             presenterController = remember(animatic) {
                 PresenterController(
                     initialAnimatic = animatic,
                     isStudioOpenProvider = { workspace.isAnyAuthoringToolOpen },
                     isExternalTextInputActiveProvider = {
-                        textTracker.hasFocusedTextInput || elementController.inlineEditingElementId != null
+                        textTracker.hasFocusedTextInput || elementController.inlineEditingNodeId != null
                     },
                     onEnterCleanShowModeAction = {
-                        timelineController.dockedInStoryWindow = false
-                        elementController.cancelInlineEdit(false)
-                        elementController.selectElement(null)
+                        studioWindow.dockedInStoryWindow = false
+                        elementController.cancelInlineTextEdit()
+                        elementController.selectNode(null)
+                        // Production wiring also records Present mode, closing the Theme sheet / Issues dock.
+                        workspace.markPresentMode()
                     },
                 )
             }
 
-            studioWindow = rememberTimelineStudioWindow(
+            studioWindow = rememberDocumentTimelineWindow(
                 controller = timelineController,
-                currentPresetProvider = { preset },
                 suppressShortcutsProvider = { textTracker.hasFocusedTextInput },
-                inspectorSlot = {
-                    StudioUnifiedInspectorPane(
-                        workspace = workspace,
-                        animatic = animatic,
-                        currentPreset = preset,
-                        onSelectPreset = { preset = it },
-                        baseThemeProvider = { DeckThemes.forPreset(it) },
-                        storyboardForPreset = storyboardForPreset,
-                        scope = uiScope,
-                    )
+                trailingPane = {
+                    CiacolaJewelTheme(isDark = true) {
+                        StudioUnifiedInspectorPane(
+                            workspace = workspace,
+                            animatic = animatic,
+                            scope = uiScope,
+                        )
+                    }
                 },
                 extraPreviewKeyHandler = { ev, _ -> workspace.handleStudioPreviewKey(ev) },
             )
+            workspace.timelineWindow = studioWindow
+            StudioWorkspaceSyncEffects(
+                workspace = workspace,
+                activeSlideId = store.document.slides.filterNot { it.skipped }.getOrNull(animatic.presentedIndex.sceneIndex)?.id,
+                activeBeatIndex = animatic.presentedIndex.frameIndex.coerceAtLeast(0),
+            )
 
             val presenterWindow = remember(presenterController) {
-                PresenterWindow(
-                    controller = presenterController,
-                    currentPresetProvider = { preset },
-                )
+                PresenterWindow(controller = presenterController)
             }
 
             CompositionLocalProvider(
                 LocalAuthoringTextInputTracker provides textTracker,
                 LocalPresentingFullscreen provides fullscreen,
+                LocalStageInspectionRegistry provides registry,
             ) {
-                MaterialTheme(colors = hostTheme.toMaterialColors()) {
+                CiacolaJewelTheme(isDark = true) {
                     Box(Modifier.size(1280.dp, 820.dp)) {
                         (presenterWindow.decorator + studioWindow.decorator).decorate {
-                            Easel(animatic)
+                            DocumentStageDirectEditOverlay(
+                                controller = elementController,
+                                stageScale = 0.5f,
+                                enabled = workspace.isElementPickingEnabled && !fullscreen,
+                            ) {
+                                Easel(animatic)
+                            }
                         }
                     }
                 }
@@ -368,167 +206,93 @@ class EditorOverhaulIntegrationTest {
         }
         waitForIdle()
 
-        // 1. Show Mode zero-leak guarantee: no editor or lint overlays when Studio is closed.
-        assertTrue(onAllNodesWithTag("ciacola-direct-edit-overlay").fetchSemanticsNodes().isEmpty())
-        assertTrue(onAllNodesWithTag("ciacola-lint-overlay").fetchSemanticsNodes().isEmpty())
+        // 1. Show Mode zero-leak guarantee: no direct-edit overlay when Studio is closed.
+        assertTrue(onAllNodesWithTag("ciacola-doc-stage-direct-edit").fetchSemanticsNodes().isEmpty())
 
-        // 2. Dock Studio (F5) and verify unified Motion | Element | Theme | Lint tabs mount cleanly.
-        runOnIdle { workspace.timelineController.dockedInStoryWindow = true }
+        // 2. Dock Studio (F5) and verify the selection-scoped Design | Animate tabs mount cleanly
+        //    (deck-level Theme and Issues live in the App Bar sheet and bottom dock instead).
+        runOnIdle { studioWindow.dockedInStoryWindow = true }
         waitForIdle()
-        onNodeWithTag("ciacola-studio-tab-motion").assertExists()
-        onNodeWithTag("ciacola-studio-tab-element").assertExists()
-        onNodeWithTag("ciacola-studio-tab-theme").assertExists()
-        onNodeWithTag("ciacola-studio-tab-lint").assertExists()
+        onNodeWithTag("ciacola-studio-tab-design").assertExists()
+        onNodeWithTag("ciacola-studio-tab-animate").assertExists()
+        assertTrue(onAllNodesWithTag("ciacola-studio-tab-theme").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithTag("ciacola-studio-tab-lint").fetchSemanticsNodes().isEmpty())
 
-        // 3. Switch to Theme tab, apply live Design System background & eyebrow typography override,
-        //    and verify BOTH live stage snapshot AND offscreen Storyboard see the exact same override!
-        onNodeWithTag("ciacola-studio-tab-theme").performClick()
+        // 3. Open the deck Theme sheet (F7), update dark theme canvas color, and undo via workspace.undo().
+        runOnIdle { workspace.toggleDesignSystemEditor() }
         waitForIdle()
-        assertEquals(StudioInspectorTab.Theme, workspace.activeTab)
+        assertTrue(workspace.themeSheetOpen)
+        assertEquals(StudioInspectorTab.Design, workspace.activeTab, "Theme sheet must not hijack the inspector tabs")
 
-        val customDarkBg = Color(0xFF101928)
-        val customBgArgb = customDarkBg.toArgb().toLong() and 0xFFFFFFFFL
         runOnIdle {
-            designStore.updateColors(DeckThemePreset.StageDark) {
-                it.copy(backgroundArgb = customBgArgb)
-            }
-            designStore.updateTypography(DeckThemePreset.StageDark) {
-                it.copy(eyebrow = TextStyleTokenOverride(fontSizeSp = 22f))
-            }
+            themeController.setThemeColor("background", "#101928")
         }
         waitForIdle()
+        assertEquals("#101928", store.document.themes.getValue("dark").colors["background"])
 
-        val liveEyebrow = registry.nodesForSlide(0, 0).firstOrNull { it.elementId == "s1:eyebrow" }
-        assertNotNull(liveEyebrow, "Live StageInspectionRegistry should capture s1:eyebrow")
-        assertEquals(customDarkBg, liveEyebrow.effectiveBackground)
-        assertEquals(22f, liveEyebrow.effectiveFontSizeSp)
-
-        // Context-aware Undo on Theme tab undoes the typography override, then the color override.
-        runOnIdle { assertTrue(workspace.undoInActiveContext()) }
+        runOnIdle { assertTrue(workspace.undo()) }
         waitForIdle()
-        assertEquals(16f, registry.nodesForSlide(0, 0).first { it.elementId == "s1:eyebrow" }.effectiveFontSizeSp)
-        runOnIdle { assertTrue(workspace.undoInActiveContext()) }
-        waitForIdle()
+        assertNotNull(registry.nodes["s1:eyebrow"])
 
-        // 4. Switch to Element tab, apply direct text copy + low-contrast color override, verify live update.
-        onNodeWithTag("ciacola-studio-tab-element").performClick()
+        // 4. Switch to Element tab, edit s1:eyebrow text + low-contrast color, verify live update + lint detection.
+        onNodeWithTag("ciacola-studio-tab-design").performClick()
         waitForIdle()
-        assertEquals(StudioInspectorTab.Element, workspace.activeTab)
+        assertEquals(StudioInspectorTab.Design, workspace.activeTab)
+        assertTrue(onAllNodesWithTag("ciacola-doc-stage-direct-edit").fetchSemanticsNodes().isNotEmpty())
 
-        val lowContrastTextArgb = Color(0xFF181C26).toArgb().toLong() and 0xFFFFFFFFL
         runOnIdle {
-            elementController.selectElement("s1:eyebrow")
-            elementStore.updateElement("s1:eyebrow") {
-                it.copy(
-                    text = "CUSTOM EYEBROW COPY",
-                    textColorArgb = lowContrastTextArgb,
+            elementController.selectNode("s1:eyebrow")
+            store.edit("Edit s1:eyebrow copy and low-contrast color") { doc ->
+                doc.copy(
+                    slides = doc.slides.mapIndexed { idx, s ->
+                        if (idx == 0) {
+                            s.copy(
+                                nodes = s.nodes.map { n ->
+                                    if (n.id == "s1:eyebrow") {
+                                        n.copy(
+                                            text = n.text!!.copy(
+                                                value = RichTextValue.Plain("CUSTOM EYEBROW COPY"),
+                                                color = "#181C26",
+                                            ),
+                                        )
+                                    } else {
+                                        n
+                                    }
+                                },
+                            )
+                        } else {
+                            s
+                        }
+                    },
                 )
             }
         }
         waitForIdle()
+        assertEquals("CUSTOM EYEBROW COPY", registry.nodes["s1:eyebrow"]?.resolvedText)
 
-        val editedEyebrow = registry.nodesForSlide(0, 0).first { it.elementId == "s1:eyebrow" }
-        assertEquals("CUSTOM EYEBROW COPY", editedEyebrow.resolvedText)
-        assertEquals(Color(0xFF181C26), editedEyebrow.effectiveForeground)
-
-        // 5. Full-deck offscreen lint audit sees the exact same Element override, flags LOW_CONTRAST,
-        //    attaches a deterministic Fix Contrast patch, and applying that patch clears the error!
-        var brokenAudit: List<DeckLintIssue>? = null
-        runOnIdle {
-            uiScope.launch {
-                brokenAudit = lintController.runFullDeckAudit(
-                    storyboard = storyboardForPreset(DeckThemePreset.StageDark),
-                    presetsToCheck = listOf(DeckThemePreset.StageDark),
-                    storyboardForPreset = storyboardForPreset,
-                )
-            }
-        }
-        waitUntil(conditionDescription = "Audit detects injected contrast error", timeoutMillis = 10_000) {
-            brokenAudit != null && !lintController.isAuditing
-        }
-
-        val contrastIssue = brokenAudit!!.firstOrNull {
-            it.ruleId == LintRuleId.LOW_CONTRAST && it.elementId == "s1:eyebrow"
-        }
-        assertNotNull(contrastIssue, "Offscreen audit must flag LOW_CONTRAST on overridden s1:eyebrow")
-        val fixPatch = contrastIssue.quickFixes.firstOrNull { it.patch != null }?.patch
-        assertNotNull(fixPatch, "Contrast issue on s1:eyebrow must carry a Fix Contrast ElementPatch")
-
-        // Apply Fix Contrast via StudioWorkspaceController (must preserve custom text copy!).
-        runOnIdle { workspace.applyElementPatch(fixPatch) }
-        waitForIdle()
-        assertEquals("CUSTOM EYEBROW COPY", elementStore.patchFor("s1:eyebrow")?.text)
-
-        var fixedAudit: List<DeckLintIssue>? = null
-        runOnIdle {
-            uiScope.launch {
-                fixedAudit = lintController.runFullDeckAudit(
-                    storyboard = storyboardForPreset(DeckThemePreset.StageDark),
-                    presetsToCheck = listOf(DeckThemePreset.StageDark),
-                    storyboardForPreset = storyboardForPreset,
-                )
-            }
-        }
-        waitUntil(conditionDescription = "Re-audit completes after quick-fix", timeoutMillis = 10_000) {
-            fixedAudit != null && !lintController.isAuditing
+        // 5. Lint engine flags contrast issue on s1:eyebrow; unified undo clears it!
+        val brokenReport = runBlocking {
+            lintController.lintSlideNow(slideIndex = 0, themeNames = listOf("dark"))
         }
         assertTrue(
-            fixedAudit!!.none { it.ruleId == LintRuleId.LOW_CONTRAST && it.elementId == "s1:eyebrow" },
-            "Fix Contrast quick-fix must clear LOW_CONTRAST on re-audit",
+            brokenReport.issues.any { it.nodeId == "s1:eyebrow" && it.code.contains("CONTRAST", ignoreCase = true) },
+            "Lint audit must flag low contrast on overridden s1:eyebrow, got ${brokenReport.issues}",
         )
 
-        // 6. Lint 'Edit Element…' routes cleanly to Element tab with s1:eyebrow selected.
-        runOnIdle {
-            workspace.activeTab = StudioInspectorTab.Lint
-            workspace.openElementInInspector(
-                elementId = "s1:eyebrow",
-                animatic = workspace.timelineController.animatic,
-                scope = uiScope,
-                sceneIndex = 0,
-                beatIndex = 0,
-            )
+        runOnIdle { assertTrue(workspace.undo()) }
+        waitForIdle()
+        val restoredReport = runBlocking {
+            lintController.lintSlideNow(slideIndex = 0, themeNames = listOf("dark"))
         }
-        waitForIdle()
-        assertEquals(StudioInspectorTab.Element, workspace.activeTab)
-        assertEquals("s1:eyebrow", elementController.selectedElementId)
-
-        // Undo twice on Element tab restores both Fix Contrast and the initial element edit!
-        runOnIdle {
-            assertTrue(workspace.undoInActiveContext())
-            assertTrue(workspace.undoInActiveContext())
-        }
-        waitForIdle()
-        assertFalse(elementStore.data().hasOverrides)
-
-        // 6.5. Under KeynoteLight, StudioUnifiedInspectorPane provides KeynoteLight's DeckTheme to Element tab
-        //      so the first theme swatch equals KeynoteLight's foreground (#242124), not StageDark's!
-        runOnIdle { preset = DeckThemePreset.KeynoteLight }
-        waitForIdle()
-        onNodeWithTag("ciacola-element-textcolor-swatch", useUnmergedTree = true).performScrollTo().performClick()
-        waitForIdle()
-        onNodeWithTag("ciacola-element-textcolor-theme-swatch-0", useUnmergedTree = true).performScrollTo().performClick()
-        waitForIdle()
-        val expectedLightFgArgb = DeckThemes.KeynoteLightColors.foreground.toArgb().toLong() and 0xFFFFFFFFL
-        assertEquals(
-            expectedLightFgArgb,
-            elementStore.patchFor("s1:eyebrow")?.textColorArgb,
-            "First theme swatch on Element tab under KeynoteLight must apply KeynoteLight foreground",
+        assertTrue(
+            restoredReport.issues.none { it.nodeId == "s1:eyebrow" && it.severity == LintSeverity.Error },
+            "Unified undo must restore s1:eyebrow and clear contrast error",
         )
-        runOnIdle {
-            assertTrue(workspace.undoInActiveContext())
-            preset = DeckThemePreset.StageDark
-        }
-        waitForIdle()
 
-        // 7. Fullscreen presenting hides ALL stage authoring overlays even when Studio was open,
-        //    and focused authoring text inputs prevent B/W blackout curtains from firing!
-        runOnIdle {
-            workspace.activeTab = StudioInspectorTab.Element
-            fullscreen = true
-        }
+        // 6. Fullscreen presenting hides stage authoring overlays, and focused authoring text inputs guard B/W curtains!
+        runOnIdle { fullscreen = true }
         waitForIdle()
-        assertTrue(onAllNodesWithTag("ciacola-direct-edit-overlay").fetchSemanticsNodes().isEmpty())
-        assertTrue(onAllNodesWithTag("ciacola-lint-overlay").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithTag("ciacola-doc-stage-direct-edit").fetchSemanticsNodes().isEmpty())
 
         runOnIdle {
             fullscreen = false
@@ -545,146 +309,107 @@ class EditorOverhaulIntegrationTest {
         onRoot().performKeyInput { pressKey(Key.B) }
         waitForIdle()
         assertEquals(StageCurtain.Blackout, presenterController.curtain)
+
+        lintController.close()
     }
 
     @Test
-    fun offscreenLintAuditHonorsTimelineTrackEnterBeatOverrides() = runComposeUiTest {
-        val tempDir = Files.createTempDirectory("ciacola-lint-timeline-override-")
-        val storyboardDir = tempDir.resolve(".storyboard")
-        val timelineStore = TimelineOverridesStore(storyboardDir = storyboardDir)
-        val elementStore = ElementOverridesStore(storyboardDir = storyboardDir)
+    fun deckFileSyncDefersWritesDuringActiveGestureTransactionAndWritesOnceOnCommit(): Unit = runBlocking {
+        val tempDir = Files.createTempDirectory("ciacola-file-sync-gesture-")
+        val recoveryDir = tempDir.resolve("recovery")
+        val targetFile = tempDir.resolve("foundation.deck.json")
+        val initialDoc = loadFoundationTestDocument()
+        val initialText = CanonicalJson.print(initialDoc)
+        Files.writeString(targetFile, initialText, StandardCharsets.UTF_8)
 
-        // Move s5:stamp off-stage so it triggers STAGE_OUT_OF_BOUNDS whenever visible,
-        // and override its timeline track (defaultTriggerBeat = 2) to enter early at Beat 1!
-        elementStore.updateElement("s5:stamp") { it.copy(offsetXDp = 900f) }
-        elementStore.flushPendingPersistence()
-        timelineStore.updateTrack("lab-immutable-stamp") { it.copy(enterBeat = 1) }
+        val store = DeckDocumentStore()
+        DeckFileSync(
+            targetFile = targetFile,
+            recoveryRootDir = recoveryDir,
+            store = store,
+            specimenRegistry = AllDocumentDecks.foundation.specimens,
+            debounceMs = 20L,
+            pollIntervalMs = 15L,
+        ).use { sync ->
+            sync.open()
+            sync.startBackgroundSync(this)
 
-        lateinit var lintController: DeckLintController
-        lateinit var uiScope: CoroutineScope
-        lateinit var storyboard: Storyboard
-
-        setContent {
-            uiScope = rememberCoroutineScope()
-            lintController = rememberDeckLintController()
-            storyboard = remember {
-                createFoundationDeck(
-                    theme = DeckThemes.forPreset(DeckThemePreset.StageDark),
-                    bundledPreset = DeckThemePreset.StageDark,
-                    includeKeynoteEffectsLab = true,
-                    timelineOverrides = timelineStore.data(),
-                    elementOverrides = elementStore.data(),
-                )
+            // Begin explicit gesture transaction and perform 25 intermediate updates: disk file must stay untouched!
+            val tx = checkNotNull(store.begin("Drag node"))
+            repeat(25) { step ->
+                tx.update { doc ->
+                    doc.copy(title = "Dragging $step")
+                }
             }
-            Box(Modifier.size(32.dp))
-        }
-        waitForIdle()
-
-        var issues: List<DeckLintIssue>? = null
-        runOnIdle {
-            uiScope.launch {
-                issues = lintController.runFullDeckAudit(
-                    storyboard = storyboard,
-                    timelineOverrides = timelineStore.data(),
-                )
-            }
-        }
-        waitUntil(conditionDescription = "Audit with timeline override completes", timeoutMillis = 10_000) {
-            issues != null && !lintController.isAuditing
-        }
-
-        val beat1StampIssue = issues!!.firstOrNull {
-            it.ruleId == LintRuleId.STAGE_OUT_OF_BOUNDS &&
-                it.sceneIndex == 4 &&
-                it.beatIndex == 1 &&
-                it.elementId == "s5:stamp"
-        }
-        assertNotNull(
-            beat1StampIssue,
-            "Offscreen full-deck audit must apply timeline enterBeat=1 override so s5:stamp is audited on S5:B2",
-        )
-    }
-
-    @Test
-    fun storesDeferGestureDebounceCoalescedWritesAndFlushCleanly() {
-        val tempDir = Files.createTempDirectory("ciacola-store-io-bar-")
-        val designStore = DesignSystemStore(storyboardDir = tempDir)
-        val elementStore = ElementOverridesStore(storyboardDir = tempDir)
-
-        // 1. DesignSystemStore defers all disk writes during continuous color/slider drag gestures.
-        designStore.beginEditGesture()
-        repeat(25) { step ->
-            designStore.updateColors(DeckThemePreset.StageDark, coalesceKey = "color:accent", coalesce = true) {
-                it.copy(accentArgb = 0xFF112200L + step)
-            }
-        }
-        assertFalse(Files.exists(designStore.overridesFile), "DesignSystemStore must not write during active drag gesture")
-        designStore.endEditGesture()
-        assertTrue(Files.exists(designStore.overridesFile), "DesignSystemStore flushes once when gesture ends")
-
-        // 2. ElementOverridesStore debounces coalesced arrow-nudge auto-repeat bursts without per-repeat writes.
-        repeat(20) { step ->
-            elementStore.updateElement("s1:eyebrow", coalesce = true, coalesceKey = "nudge:s1:eyebrow") {
-                it.copy(offsetXDp = (step + 1).toFloat())
-            }
-        }
-        assertFalse(
-            Files.exists(elementStore.overridesFile),
-            "Coalesced key-repeat updates must debounce off-thread rather than writing synchronously per repeat",
-        )
-        elementStore.flushPendingPersistence()
-        assertTrue(Files.exists(elementStore.overridesFile), "flushPendingPersistence writes latest coalesced state")
-        assertEquals(20f, ElementOverridesStore(tempDir).patchFor("s1:eyebrow")?.offsetXDp)
-    }
-
-    @Test
-    fun inlineStageEditorCommitsLastKeystrokeSynchronouslyOnEnterAndClickOutside() = runComposeUiTest {
-        val tempDir = Files.createTempDirectory("ciacola-inline-sync-")
-        val elementStore = ElementOverridesStore(storyboardDir = tempDir)
-        lateinit var elementController: ElementEditorController
-
-        setContent {
-            val registry = remember { StageInspectionRegistry() }
-            elementController = rememberElementEditorController(
-                overridesStore = elementStore,
-                inspectionRegistry = registry,
+            kotlinx.coroutines.delay(60L)
+            assertEquals(
+                initialText,
+                Files.readString(targetFile, StandardCharsets.UTF_8),
+                "DeckFileSync must not write to disk while a gesture transaction is open",
             )
-            SideEffect {
-                elementController.editorActive = true
-                elementController.elementPickingEnabled = true
-            }
-            val sb = remember(elementStore.revision) {
-                createFoundationDeck(
-                    theme = DeckThemes.forPreset(DeckThemePreset.StageDark),
-                    bundledPreset = DeckThemePreset.StageDark,
-                    includeKeynoteEffectsLab = false,
-                    stageDecorator = elementController.stageDecorator,
-                    elementOverrides = elementStore.data(),
-                )
-            }
+
+            tx.commit()
+            assertEquals(SyncState.Saved, sync.flushNow())
+            val savedText = Files.readString(targetFile, StandardCharsets.UTF_8)
+            assertTrue(savedText.contains("\"Dragging 24\""))
+        }
+        tempDir.toFile().deleteRecursively()
+    }
+
+    @Test
+    fun inlineStageTextEditorCommitsSynchronouslyOnCmdEnterAndCommitButton() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        lateinit var elementController: DocumentElementInspectorController
+
+        setContent {
+            elementController = remember { DocumentElementInspectorController(store = store) }
+            val session = remember { RenderSession.forPresent(store, freeClockMillis = { 0L }) }
+            val sb = rememberDocumentStoryboard(
+                session = session,
+                config = DocumentRenderConfig(
+                    themeName = "dark",
+                    specimens = AllDocumentDecks.foundation.specimens,
+                ),
+            )
             val animatic = rememberAnimatic(storyboard = { sb })
-            Box(Modifier.size(960.dp, 540.dp)) {
-                Easel(animatic)
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(960.dp, 540.dp)) {
+                    DocumentStageDirectEditOverlay(
+                        controller = elementController,
+                        stageScale = 0.5f,
+                        enabled = true,
+                    ) {
+                        Easel(animatic)
+                    }
+                }
             }
         }
         waitForIdle()
 
-        // 1. Type and commit immediately with Enter in the same interaction sequence without waiting an extra frame.
-        runOnIdle { assertTrue(elementController.startInlineEdit("s1:eyebrow")) }
+        // 1. Open inline editor on s1:eyebrow, type text, and commit with Cmd+Enter.
+        runOnIdle { assertTrue(elementController.startInlineTextEdit("s1:eyebrow")) }
         waitForIdle()
-        onNodeWithTag("ciacola-inline-stage-editor-input").performTextInput(" Z")
-        onNodeWithTag("ciacola-inline-stage-editor-input").performKeyInput { pressKey(Key.Enter) }
-        waitForIdle()
-        assertEquals("FOUNDATION / PROVISIONAL Z", elementStore.patchFor("s1:eyebrow")?.text)
-
-        // 2. Type and commit immediately by clicking outside on the stage.
-        runOnIdle { assertTrue(elementController.startInlineEdit("s1:eyebrow")) }
-        waitForIdle()
-        onNodeWithTag("ciacola-inline-stage-editor-input").performTextInput("!")
-        onNodeWithTag("ciacola-direct-edit-overlay").performMouseInput {
-            click(Offset(width * 0.85f, height * 0.85f))
+        onNodeWithTag("ciacola-doc-inline-text-field").performTextInput(" Z")
+        onNodeWithTag("ciacola-doc-inline-text-field").performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.Enter)
+            keyUp(Key.MetaLeft)
         }
         waitForIdle()
-        assertEquals("FOUNDATION / PROVISIONAL Z!", elementStore.patchFor("s1:eyebrow")?.text)
+        assertEquals(
+            "FOUNDATION / PROVISIONAL Z",
+            store.document.slides[0].nodes.first { it.id == "s1:eyebrow" }.text?.value?.plainText,
+        )
+
+        // 2. Open inline editor again, type text, and click Commit button.
+        runOnIdle { assertTrue(elementController.startInlineTextEdit("s1:eyebrow")) }
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-inline-text-field").performTextInput("!")
+        onNodeWithTag("ciacola-doc-inline-text-commit").performClick()
+        waitForIdle()
+        assertEquals(
+            "FOUNDATION / PROVISIONAL Z!",
+            store.document.slides[0].nodes.first { it.id == "s1:eyebrow" }.text?.value?.plainText,
+        )
     }
 }

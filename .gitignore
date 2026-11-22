@@ -24,6 +24,7 @@ __pycache__/
 
 ### Storyboard ###
 .storyboard/
+**/.*.sync/
 
 ### Local agent worktrees, plans & isolated Gradle homes ###
 .worktrees/

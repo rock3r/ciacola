@@ -1,0 +1,775 @@
+{
+  "format": 1,
+  "id": "foundation",
+  "title": "Ciacola",
+  "themes": {
+    "dark": {
+      "colors": {
+        "accent": "#FF6B5E",
+        "background": "#0B0D12",
+        "border": "#2B3345",
+        "cardScrim": "#E6171B24",
+        "chipBackground": "#232A3A",
+        "codeBackground": "#171B24",
+        "codeForeground": "#F4F1EA",
+        "danger": "#FF6B6B",
+        "elevatedSurface": "#202634",
+        "foreground": "#F4F1EA",
+        "muted": "#A9B0C0",
+        "onAccent": "#0B0D12",
+        "positive": "#66D19E",
+        "secondary": "#71D7C5",
+        "stampFill": "#24FF6B5E",
+        "subtle": "#6E7687",
+        "surface": "#171B24",
+        "warning": "#FFC857"
+      },
+      "typography": {
+        "body": { "font": "Inter", "size": 60, "weight": 400, "lineHeight": 80 },
+        "bodyEmphasis": { "font": "Inter", "size": 60, "weight": 600, "lineHeight": 80 },
+        "callout": { "font": "Inter", "size": 50, "weight": 500, "lineHeight": 66 },
+        "caption": { "font": "Inter", "size": 30, "weight": 400, "lineHeight": 40 },
+        "cardBody": { "font": "Inter", "size": 36, "weight": 400, "lineHeight": 48 },
+        "cardTitle": { "font": "Inter", "size": 44, "weight": 600, "lineHeight": 56 },
+        "code": { "font": "JetBrains Mono", "size": 54, "weight": 400, "lineHeight": 72 },
+        "codeCompact": { "font": "JetBrains Mono", "size": 36, "weight": 400, "lineHeight": 52 },
+        "codeEmphasis": { "font": "JetBrains Mono", "size": 54, "weight": 700, "lineHeight": 72 },
+        "eyebrow": { "font": "Inter", "size": 32, "weight": 700, "lineHeight": 44, "tracking": 6 },
+        "heading": { "font": "Inter", "size": 92, "weight": 600, "lineHeight": 108 },
+        "hero": { "font": "Inter", "size": 180, "weight": 800, "lineHeight": 192, "tracking": -4 },
+        "stamp": { "font": "Inter", "size": 104, "weight": 800, "lineHeight": 116, "tracking": 2 },
+        "subheading": { "font": "Inter", "size": 72, "weight": 500, "lineHeight": 88 },
+        "title": { "font": "Inter", "size": 144, "weight": 700, "lineHeight": 156, "tracking": -2 }
+      },
+      "motion": {
+        "durationMs": 350,
+        "curve": {
+          "bezier": [0.2, 0, 0, 1]
+        },
+        "transition": { "durationMs": 300 }
+      }
+    },
+    "light": {
+      "preset": "keynoteLight",
+      "colors": {
+        "accent": "#C24A1C",
+        "background": "#EBEBEB",
+        "border": "#D2CED2",
+        "cardScrim": "#E6F8F8F8",
+        "chipBackground": "#DEDADE",
+        "codeBackground": "#2E282C",
+        "codeForeground": "#EDE8E6",
+        "danger": "#C93838",
+        "elevatedSurface": "#FFFFFF",
+        "foreground": "#242124",
+        "muted": "#6B666B",
+        "onAccent": "#FFFFFF",
+        "positive": "#267D4D",
+        "secondary": "#1BA890",
+        "stampFill": "#24C24A1C",
+        "subtle": "#9A949A",
+        "surface": "#F8F8F8",
+        "warning": "#D99B16"
+      },
+      "typography": {
+        "body": { "font": "Inter", "size": 60, "weight": 400, "lineHeight": 80 },
+        "bodyEmphasis": { "font": "Inter", "size": 60, "weight": 600, "lineHeight": 80 },
+        "callout": { "font": "Inter", "size": 50, "weight": 500, "lineHeight": 66 },
+        "caption": { "font": "Inter", "size": 30, "weight": 400, "lineHeight": 40 },
+        "cardBody": { "font": "Inter", "size": 36, "weight": 400, "lineHeight": 48 },
+        "cardTitle": { "font": "Inter", "size": 44, "weight": 600, "lineHeight": 56 },
+        "code": { "font": "JetBrains Mono", "size": 54, "weight": 400, "lineHeight": 72 },
+        "codeCompact": { "font": "JetBrains Mono", "size": 36, "weight": 400, "lineHeight": 52 },
+        "codeEmphasis": { "font": "JetBrains Mono", "size": 54, "weight": 700, "lineHeight": 72 },
+        "eyebrow": { "font": "Inter", "size": 32, "weight": 700, "lineHeight": 44, "tracking": 6 },
+        "heading": { "font": "Inter", "size": 92, "weight": 600, "lineHeight": 108 },
+        "hero": { "font": "Inter", "size": 180, "weight": 800, "lineHeight": 192, "tracking": -4 },
+        "stamp": { "font": "Inter", "size": 104, "weight": 800, "lineHeight": 116, "tracking": 2 },
+        "subheading": { "font": "Inter", "size": 72, "weight": 500, "lineHeight": 88 },
+        "title": { "font": "Inter", "size": 144, "weight": 700, "lineHeight": 156, "tracking": -2 }
+      },
+      "motion": {
+        "durationMs": 350,
+        "curve": {
+          "bezier": [0.2, 0, 0, 1]
+        },
+        "transition": { "durationMs": 300 }
+      }
+    }
+  },
+  "defaultTheme": "dark",
+  "fonts": [
+    { "family": "Inter", "src": "fonts/Inter-Thin.ttf", "weight": 100 },
+    { "family": "Inter", "src": "fonts/Inter-ExtraLight.ttf", "weight": 200 },
+    { "family": "Inter", "src": "fonts/Inter-Light.ttf", "weight": 300 },
+    { "family": "Inter", "src": "fonts/Inter-Regular.ttf", "weight": 400 },
+    { "family": "Inter", "src": "fonts/Inter-Medium.ttf", "weight": 500 },
+    { "family": "Inter", "src": "fonts/Inter-SemiBold.ttf", "weight": 600 },
+    { "family": "Inter", "src": "fonts/Inter-Bold.ttf", "weight": 700 },
+    { "family": "Inter", "src": "fonts/Inter-ExtraBold.ttf", "weight": 800 },
+    { "family": "Inter", "src": "fonts/Inter-Black.ttf", "weight": 900 },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Thin.ttf", "weight": 100 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-ThinItalic.ttf",
+      "weight": 100,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-ExtraLight.ttf", "weight": 200 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-ExtraLightItalic.ttf",
+      "weight": 200,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Light.ttf", "weight": 300 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-LightItalic.ttf",
+      "weight": 300,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Regular.ttf", "weight": 400 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-Italic.ttf",
+      "weight": 400,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Medium.ttf", "weight": 500 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-MediumItalic.ttf",
+      "weight": 500,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-SemiBold.ttf", "weight": 600 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-SemiBoldItalic.ttf",
+      "weight": 600,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-Bold.ttf", "weight": 700 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-BoldItalic.ttf",
+      "weight": 700,
+      "italic": true
+    },
+    { "family": "JetBrains Mono", "src": "fonts/JetBrainsMono-ExtraBold.ttf", "weight": 800 },
+    {
+      "family": "JetBrains Mono",
+      "src": "fonts/JetBrainsMono-ExtraBoldItalic.ttf",
+      "weight": 800,
+      "italic": true
+    }
+  ],
+  "loopPeriodsMs": { "foundation.ambientMesh/time": 6000 },
+  "slides": [
+    {
+      "id": "beats",
+      "title": "Beats",
+      "beats": [
+        {
+          "notes": "Overview: Open with the core promise: every beat is an explicit state, driven forward and backward by one transition model.\n\n[Pause] Establish the baseline state. Point out that nothing runs imperatively on click — advancing targets the next state."
+        },
+        {
+          "notes": "[Click] Highlight how MagicText diffs and moves retained words ('A scene', 'deterministic', 'state.') instead of cross-fading the whole sentence."
+        },
+        {
+          "notes": "[Click] Watch the bottom-right shared badge appear — it previews the cross-slide Magic Move handoff into Slide 2."
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s1:eyebrow",
+          "frame": { "x": 128, "y": 128, "w": 1664, "h": 44 },
+          "text": { "value": "FOUNDATION / PROVISIONAL", "style": "eyebrow", "color": "muted" }
+        },
+        {
+          "id": "s1:prose",
+          "frame": { "x": 128, "y": 240, "w": 1664 },
+          "text": {
+            "value": "A scene begins with one deterministic state.",
+            "style": "body",
+            "color": "foreground",
+            "morph": {}
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "text": { "value": "A scene advances to a deterministic next state." }
+              },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "text": {
+                  "value": "The same path is reversible without inventing a second navigation model."
+                }
+              },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "foundation-shared-card",
+          "frame": { "x": 1736, "y": 896, "w": 56, "h": 56 },
+          "stack": {
+            "surface": { "fill": "accent", "cornerRadius": 16 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 2,
+              "effect": "zoom",
+              "args": { "fromScale": 0.72 },
+              "durationMs": 350,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": {
+        "type": "magicMove",
+        "durationMs": 550,
+        "curve": {
+          "bezier": [0.2, 0, 0, 1]
+        },
+        "phases": {
+          "exit": { "durationMs": 200 },
+          "enter": { "delayMs": 470, "durationMs": 80 }
+        }
+      }
+    },
+    {
+      "id": "shared-move",
+      "title": "Shared Move",
+      "beats": [
+        {
+          "notes": "Overview: Demonstrates Storyboard sharedBounds across scenes and deterministic in-scene morphing.\n\nNotice the accent badge from Slide 1 landed cleanly in the top-left slot as a 240dp card."
+        },
+        {
+          "notes": "[Click] Card expands to center stage. Mention that reversing (←) or scrubbing follows the exact same arc trajectory."
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s2:eyebrow",
+          "frame": { "x": 128, "y": 128, "w": 1664, "h": 44 },
+          "text": { "value": "SHARED ELEMENT / PROVISIONAL", "style": "eyebrow", "color": "muted" }
+        },
+        {
+          "id": "foundation-shared-card",
+          "frame": { "x": 128, "y": 240, "w": 480, "h": 480 },
+          "stack": {
+            "children": [
+              {
+                "id": "s2:card-label",
+                "align": "center",
+                "text": {
+                  "value": "shared",
+                  "style": "heading",
+                  "color": "onAccent",
+                  "align": "center"
+                }
+              }
+            ],
+            "alignItems": "center",
+            "justify": "center",
+            "surface": { "fill": "accent", "cornerRadius": 48 }
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "frame": { "x": 624, "y": 260, "w": 672, "h": 672 },
+                "stack": {
+                  "surface": { "cornerRadius": 72 }
+                }
+              },
+              "durationMs": 550,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "durationMs": 300 }
+    },
+    {
+      "id": "ambient-loop",
+      "title": "Ambient Loop",
+      "beats": [
+        {
+          "notes": "Overview: Single resting beat with a continuous vertex-mesh backdrop.\n\nEmphasize separation of concerns: the ambient loop ticks independently without mutating slide navigation state, and adapts its palette to Stage Dark / Keynote Light."
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s3:mesh-backdrop",
+          "frame": { "x": 0, "y": 0, "w": 1920, "h": 1080 },
+          "specimen": { "ref": "foundation.ambientMesh" }
+        },
+        {
+          "id": "s3:eyebrow",
+          "frame": { "x": 128, "y": 128, "w": 1664, "h": 44 },
+          "text": {
+            "value": "CONTINUOUS COMPOSE / PROVISIONAL",
+            "style": "eyebrow",
+            "color": "muted"
+          }
+        },
+        {
+          "id": "s3:card",
+          "frame": { "x": 360, "y": 418, "w": 1200, "h": 356 },
+          "column": {
+            "children": [
+              {
+                "id": "s3:headline",
+                "text": {
+                  "value": "one stable scene state",
+                  "style": "heading",
+                  "color": "foreground",
+                  "align": "center"
+                }
+              },
+              {
+                "id": "s3:subhead",
+                "text": {
+                  "value": "the visual keeps moving",
+                  "style": "body",
+                  "color": "muted",
+                  "align": "center"
+                }
+              }
+            ],
+            "gap": 12,
+            "alignItems": "center",
+            "justify": "center",
+            "surface": {
+              "fill": "cardScrim",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 40,
+              "padding": 96
+            }
+          }
+        }
+      ],
+      "transition": { "durationMs": 300 }
+    },
+    {
+      "id": "highlighted-code",
+      "title": "Highlighted Code",
+      "beats": [
+        {
+          "notes": "Overview: Syntax-highlighted Kotlin carried as AnnotatedString spans through MagicText.\n\nStart with the single-expression function; point out that token styles live on the AnnotatedString itself."
+        },
+        {
+          "notes": "[Click] Expression body expands into a block. 'fun provisional()' slides cleanly while retaining its highlight colors."
+        },
+        {
+          "notes": "[Click] Introduce parameter 'message: String' and pass it to println — new tokens fade in around stable anchors."
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s4:eyebrow",
+          "frame": { "x": 128, "y": 128, "w": 1664, "h": 44 },
+          "text": {
+            "value": "MAGIC TEXT / KOTLIN / PROVISIONAL",
+            "style": "eyebrow",
+            "color": "muted"
+          }
+        },
+        {
+          "id": "s4:description",
+          "frame": { "x": 128, "y": 240, "w": 1664, "h": 80 },
+          "text": {
+            "value": "Syntax highlighting is data carried by AnnotatedString.",
+            "style": "body",
+            "color": "foreground",
+            "morph": {}
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "text": { "value": "Retained Kotlin tokens move while styles remain attached." }
+              },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "text": { "value": "The sample remains intentionally small and replaceable." }
+              },
+              "durationMs": 500,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            }
+          ]
+        },
+        {
+          "id": "s4:code",
+          "frame": { "x": 128, "y": 408, "w": 1664, "h": 380 },
+          "code": {
+            "value": "fun provisional() = Unit",
+            "language": "kotlin",
+            "fit": "fillWidth",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 40,
+              "padding": 72
+            }
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": {
+                "code": { "value": "fun provisional() {\n    println(\"foundation\")\n}" }
+              },
+              "durationMs": 280,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            },
+            {
+              "kind": "change",
+              "beat": 2,
+              "set": {
+                "code": { "value": "fun provisional(message: String) {\n    println(message)\n}" }
+              },
+              "durationMs": 280,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            }
+          ]
+        }
+      ],
+      "transition": { "durationMs": 300 }
+    },
+    {
+      "id": "keynote-effects-lab",
+      "title": "Keynote Effects Lab",
+      "beats": [
+        {
+          "notes": "Overview: Full choreography testbed: staggered rows, spring stamp, LineDraw callout, WarpCode morph, and Magnifier loupe.\n\nBaseline heading only: sets up the naive claim ('Fix with SpanStyle(alpha)!') before revealing the breakdown."
+        },
+        {
+          "notes": "[Click] Staggered leader rows + right-hand WarpCode card fade in together on a 55ms cascade."
+        },
+        {
+          "notes": "[Click] IMMUTABLE stamp pops in with a spring and draws the curved leader arrow up to BasicText(AnnotatedString)."
+        },
+        {
+          "notes": "[Click] WarpCode card expands to multiline parameters while the dashed callout outline draws around it and comparison rows dim."
+        },
+        {
+          "notes": "[Click] Punchline: animated red strikeout crosses out the old heading and the zoomed iris loupe highlights BasicText(AnnotatedString)."
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s5:eyebrow",
+          "frame": { "x": 128, "y": 128, "w": 1664, "h": 44 },
+          "text": {
+            "value": "KEYNOTE EFFECTS LAB / PROVISIONAL",
+            "style": "eyebrow",
+            "color": "muted"
+          }
+        },
+        {
+          "id": "s5:loupe-stage",
+          "frame": { "x": 80, "y": 192, "w": 1760, "h": 808 },
+          "loupe": {
+            "children": [
+              {
+                "id": "s5:headline",
+                "frame": { "x": 0, "y": 112, "w": 950, "h": 216 },
+                "text": {
+                  "value": "Fix with SpanStyle(alpha)!",
+                  "style": "heading",
+                  "color": "foreground"
+                },
+                "builds": [
+                  {
+                    "kind": "change",
+                    "beat": 3,
+                    "set": { "opacity": 0.4 },
+                    "durationMs": 260,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "kind": "change",
+                    "beat": 4,
+                    "set": { "opacity": 1 },
+                    "durationMs": 260,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "s5:headline-strikeout",
+                "frame": { "x": -16, "y": 208, "w": 956, "h": 24 },
+                "rotation": -1.6,
+                "shape": {
+                  "geometry": "line",
+                  "stroke": { "color": "danger", "width": 8, "cap": "round" }
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 4,
+                    "effect": "lineDraw",
+                    "direction": "startToEnd",
+                    "durationMs": 380,
+                    "curve": "keynote.lineDraw"
+                  }
+                ]
+              },
+              {
+                "id": "s5:row-web",
+                "frame": { "x": 0, "y": 352, "w": 950, "h": 68 },
+                "specimen": {
+                  "ref": "foundation.dottedLeaderRow",
+                  "params": {
+                    "highlight": 0,
+                    "leading": "Web",
+                    "trailing": "<span style=\"opacity\">",
+                    "trailingLineHeightSp": 24,
+                    "trailingSizeSp": 17
+                  }
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 1,
+                    "effect": "fadeMove",
+                    "direction": "up",
+                    "args": { "distance": 48 },
+                    "delayMs": 0,
+                    "durationMs": 350,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "kind": "change",
+                    "beat": 3,
+                    "set": { "opacity": 0.4 },
+                    "durationMs": 260,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "s5:row-compose",
+                "frame": { "x": 0, "y": 444, "w": 950, "h": 68 },
+                "specimen": {
+                  "ref": "foundation.dottedLeaderRow",
+                  "params": {
+                    "highlight": 0,
+                    "leading": "Compose",
+                    "trailing": "BasicText(AnnotatedString)",
+                    "trailingLineHeightSp": 24,
+                    "trailingSizeSp": 17
+                  }
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 1,
+                    "effect": "fadeMove",
+                    "direction": "up",
+                    "args": { "distance": 48 },
+                    "delayMs": 55,
+                    "durationMs": 350,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "kind": "change",
+                    "beat": 2,
+                    "set": {
+                      "specimen": {
+                        "params": { "highlight": 1 }
+                      }
+                    },
+                    "durationMs": 350,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "s5:compose-target",
+                "frame": { "x": 416, "y": 444, "w": 534, "h": 68 },
+                "stack": {}
+              },
+              {
+                "id": "s5:stamp",
+                "frame": { "x": 190, "y": 548, "w": 760, "h": 156 },
+                "text": {
+                  "value": "IMMUTABLE",
+                  "style": "stamp",
+                  "color": "accent",
+                  "align": "center",
+                  "surface": {
+                    "fill": "stampFill",
+                    "stroke": { "color": "accent", "width": 6 },
+                    "cornerRadius": 24,
+                    "padding": { "bottom": 20, "left": 48, "right": 48, "top": 20 }
+                  }
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 2,
+                    "effect": "pop",
+                    "curve": {
+                      "spring": { "damping": 0.65, "stiffness": 520 }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "s5:leader-arrow",
+                "connector": {
+                  "from": "s5:stamp",
+                  "to": "s5:compose-target",
+                  "fromAnchor": "topCenter",
+                  "toAnchor": "bottomCenter",
+                  "stroke": { "color": "accent", "width": 6, "cap": "round" },
+                  "heads": { "end": "filled" },
+                  "gap": 16
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 2,
+                    "effect": "lineDraw",
+                    "direction": "startToEnd",
+                    "durationMs": 340,
+                    "curve": "keynote.lineDraw"
+                  }
+                ]
+              },
+              {
+                "id": "s5:warp-card",
+                "frame": { "x": 1014, "y": 0, "w": 746, "h": 380 },
+                "code": {
+                  "value": "fun fade(s: String) {\n  BasicText(s)\n}",
+                  "language": "kotlin",
+                  "fit": "compact",
+                  "surface": {
+                    "fill": "codeBackground",
+                    "stroke": { "color": "border", "width": 2 },
+                    "cornerRadius": 40,
+                    "padding": 56
+                  }
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 1,
+                    "effect": "fromDarkness",
+                    "delayMs": 55,
+                    "durationMs": 380,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  },
+                  {
+                    "kind": "change",
+                    "beat": 3,
+                    "set": {
+                      "code": {
+                        "value": "fun fade(\n  s: String,\n  a: Float,\n) {\n  BasicText(s, alpha = a)\n}"
+                      }
+                    },
+                    "durationMs": 280,
+                    "curve": {
+                      "bezier": [0.2, 0, 0, 1]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "s5:warp-callout",
+                "frame": { "x": 998, "y": -16, "w": 778, "h": 412 },
+                "shape": {
+                  "geometry": "rect",
+                  "stroke": {
+                    "color": "secondary",
+                    "width": 6,
+                    "dash": [20, 14],
+                    "cap": "round"
+                  },
+                  "cornerRadius": 24
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 3,
+                    "effect": "lineDraw",
+                    "direction": "clockwise",
+                    "durationMs": 340,
+                    "curve": "keynote.lineDraw"
+                  }
+                ]
+              }
+            ],
+            "target": "s5:compose-target",
+            "zoom": 2.4,
+            "diameter": 328,
+            "align": "bottomEnd"
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 4,
+              "effect": "dissolve",
+              "durationMs": 420,
+              "curve": {
+                "bezier": [0.2, 0, 0, 1]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

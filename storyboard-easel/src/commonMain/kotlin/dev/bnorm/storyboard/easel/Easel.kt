@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import dev.bnorm.storyboard.*
 import dev.bnorm.storyboard.easel.internal.FixedSize
 import kotlinx.collections.immutable.ImmutableList
@@ -34,6 +35,7 @@ fun Easel(
     animatic: Animatic,
     mode: SceneMode = SceneMode.Story,
     modifier: Modifier = Modifier,
+    sceneZIndex: ((Storyboard.Index) -> Float)? = animatic.storyboard.sceneZIndex,
 ) {
     // Only the presenting (Story) Easel owns the animatic's frame clock and freeze capture; preview
     // Easels on the same animatic (e.g. an assistant's "current frame") must not take them over or
@@ -103,6 +105,7 @@ fun Easel(
                 storyboard = animatic.storyboard,
                 transition = animatic.transition,
                 mode = mode,
+                sceneZIndex = sceneZIndex,
             )
         }
     }
@@ -117,6 +120,11 @@ private class PresentedFrameRecording(var epoch: Int = -1)
  * Mounts only `setOf(currentState, targetState)` in deterministic order and wraps each state in
  * `Transition.AnimatedVisibility` so random-access scrubbing (`SeekableTransitionState.seekTo`)
  * never suffers from `AnimatedContent`'s internal `currentlyVisible` queue drift.
+ *
+ * When [zIndexOf] is `null` (default), active siblings stack in travel order (`[from, to]`),
+ * preserving legacy incoming-over-outgoing behavior. When [zIndexOf] is supplied, each sibling
+ * container receives `Modifier.zIndex(zIndexOf(state))` for deterministic canonical stacking
+ * independent of travel direction.
  */
 @Composable
 fun <S> Transition<S>.DeterministicStateHost(
@@ -124,6 +132,7 @@ fun <S> Transition<S>.DeterministicStateHost(
     enter: (S, S) -> EnterTransition = { _, _ -> fadeIn() },
     exit: (S, S) -> ExitTransition = { _, _ -> fadeOut() },
     contentKey: (S) -> Any? = { it },
+    zIndexOf: ((S) -> Float)? = null,
     content: @Composable AnimatedVisibilityScope.(S) -> Unit,
 ) {
     val (from, to) = stableSegment()
@@ -137,8 +146,14 @@ fun <S> Transition<S>.DeterministicStateHost(
     Box(modifier = modifier) {
         for (state in activeStates) {
             key(contentKey(state)) {
+                val siblingModifier = if (zIndexOf != null) {
+                    Modifier.zIndex(zIndexOf(state))
+                } else {
+                    Modifier
+                }
                 AnimatedVisibility(
                     visible = { contentKey(it) == contentKey(state) },
+                    modifier = siblingModifier,
                     enter = enter(from, to),
                     exit = exit(from, to),
                 ) {
@@ -155,33 +170,40 @@ fun Easel(
     transition: Transition<out Animatic.State<*>>,
     mode: SceneMode = SceneMode.Story,
     modifier: Modifier = Modifier,
+    sceneZIndex: ((Storyboard.Index) -> Float)? = storyboard.sceneZIndex,
 ) {
     val holder = rememberSaveableStateHolder()
-    SceneWrapper(storyboard, mode, modifier) {
-        SharedTransitionLayout {
-            transition.DeterministicStateHost(
-                modifier = Modifier.fillMaxSize(),
-                contentKey = { it.scene },
-                enter = { fromState, toState ->
-                    val direction = if (toState.scene >= fromState.scene) {
-                        AdvanceDirection.Forward
-                    } else {
-                        AdvanceDirection.Backward
+    val zIndexOf: ((Animatic.State<*>) -> Float)? = remember(sceneZIndex) {
+        sceneZIndex?.let { zIndexFor -> { state: Animatic.State<*> -> zIndexFor(state.index) } }
+    }
+    CompositionLocalProvider(LocalStoryboardTransition provides transition) {
+        SceneWrapper(storyboard, mode, modifier) {
+            SharedTransitionLayout {
+                transition.DeterministicStateHost(
+                    modifier = Modifier.fillMaxSize(),
+                    contentKey = { it.scene },
+                    zIndexOf = zIndexOf,
+                    enter = { fromState, toState ->
+                        val direction = if (toState.scene >= fromState.scene) {
+                            AdvanceDirection.Forward
+                        } else {
+                            AdvanceDirection.Backward
+                        }
+                        toState.scene.enterTransition(direction)
+                    },
+                    exit = { fromState, toState ->
+                        val direction = if (toState.scene >= fromState.scene) {
+                            AdvanceDirection.Forward
+                        } else {
+                            AdvanceDirection.Backward
+                        }
+                        fromState.scene.exitTransition(direction)
+                    },
+                ) { state ->
+                    val scene = state.scene
+                    holder.SaveableStateProvider(scene) {
+                        SceneContent(scene, transition)
                     }
-                    toState.scene.enterTransition(direction)
-                },
-                exit = { fromState, toState ->
-                    val direction = if (toState.scene >= fromState.scene) {
-                        AdvanceDirection.Forward
-                    } else {
-                        AdvanceDirection.Backward
-                    }
-                    fromState.scene.exitTransition(direction)
-                },
-            ) { state ->
-                val scene = state.scene
-                holder.SaveableStateProvider(scene) {
-                    SceneContent(scene, transition)
                 }
             }
         }

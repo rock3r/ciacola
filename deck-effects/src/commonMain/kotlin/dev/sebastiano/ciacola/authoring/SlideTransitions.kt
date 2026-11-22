@@ -33,22 +33,6 @@ private const val CONTENT_EXIT_END_FRACTION = 0.45f
 private const val CONTENT_ENTER_START_FRACTION = 0.35f
 
 /**
- * Scene enter transition for slides rendered inside [SlideLayers].
- *
- * Returns [EnterTransition.None] so the two-layer dissolve in [SlideLayers] drives both background
- * and foreground opacity while shared elements stay mounted above the dissolve.
- */
-fun slideEnterTransition(): SceneEnterTransition = SceneEnterTransition { EnterTransition.None }
-
-/**
- * Scene exit transition for slides rendered inside [SlideLayers].
- *
- * Returns [ExitTransition.None] so the two-layer dissolve in [SlideLayers] drives both background
- * and foreground opacity while shared elements stay mounted above the dissolve.
- */
-fun slideExitTransition(): SceneExitTransition = SceneExitTransition { ExitTransition.None }
-
-/**
  * Two-layer slide transition wrapper separating the background canvas from foreground content:
  *
  * - **Background layer:** holds the outgoing slide canvas at full opacity (`1f`) while crossfading

@@ -66,7 +66,6 @@ import dev.bnorm.storyboard.layout.decorated.Decoration
 import dev.bnorm.storyboard.layout.decorated.DecorationLayout
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
-import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
 import dev.sebastiano.ciacola.inspector.LocalStageParentElementId
 import dev.sebastiano.ciacola.inspector.ModifierLocalStageAlpha
@@ -96,19 +95,11 @@ fun DottedLeaderRow(
 ) {
     val theme = LocalDeckTheme.current
     val effectiveBg = effectiveBackgroundColor()
-    val overrides = LocalElementOverrides.current
     val dragPreview = LocalStageDragPreview.current
     val parentElementId = LocalStageParentElementId.current
     val childParentId = elementId ?: parentElementId
     val trailingId = elementId?.let { "$it:trailing" }
-    val trailingPatch = trailingId?.let { overrides.patchFor(it) }
-    val resolvedTrailingText = trailingPatch?.text ?: trailing
-    val (resolvedTrailingStyle, resolvedTrailingFontSizeSp) = resolveOverriddenTextStyle(
-        baseStyle = trailingStyle,
-        resolvedColor = trailingStyle.color,
-        patch = trailingPatch,
-    )
-    val trailingOverrideColor = trailingPatch?.textColorArgb?.let(::Color)
+    val resolvedTrailingFontSizeSp = if (trailingStyle.fontSize.isSp) trailingStyle.fontSize.value.coerceAtLeast(6f) else 16f
     var trailingCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var trailingLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var trailingAlphaProvider by remember { mutableStateOf<() -> Float>({ 1f }) }
@@ -131,14 +122,14 @@ fun DottedLeaderRow(
         Modifier.offset {
             val drag = dragPreview?.offsetFor(trailingId) ?: DpOffset.Zero
             IntOffset(
-                x = ((trailingPatch?.offsetXDp ?: 0f).dp + drag.x).roundToPx(),
-                y = ((trailingPatch?.offsetYDp ?: 0f).dp + drag.y).roundToPx(),
+                x = drag.x.roundToPx(),
+                y = drag.y.roundToPx(),
             )
         }
     } else {
         Modifier
     }
-    val effectiveTrailingColor = trailingOverrideColor ?: trailingHighlightColor(
+    val effectiveTrailingColor = trailingHighlightColor(
         base = theme.colors.foreground,
         accent = theme.colors.accent,
         progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
@@ -147,9 +138,9 @@ fun DottedLeaderRow(
         RecordStageTextInspection(
             elementId = trailingId,
             kind = "LeaderCode",
-            label = resolvedTrailingText,
+            label = trailing,
             defaultText = trailing,
-            resolvedText = resolvedTrailingText,
+            resolvedText = trailing,
             defaultTextColor = theme.colors.foreground,
             effectiveForeground = effectiveTrailingColor,
             effectiveBackground = effectiveBg,
@@ -200,13 +191,13 @@ fun DottedLeaderRow(
                     )
                 }
                 BasicText(
-                    text = resolvedTrailingText,
-                    style = resolvedTrailingStyle,
+                    text = trailing,
+                    style = trailingStyle,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     color = {
-                        trailingOverrideColor ?: trailingHighlightColor(
+                        trailingHighlightColor(
                             base = theme.colors.foreground,
                             accent = theme.colors.accent,
                             progress = highlightProgress?.invoke() ?: if (highlightTrailing) 1f else 0f,
@@ -289,159 +280,6 @@ fun loupeSampleClip(src: Rect, lensCenter: Offset, zoom: Float, padPx: Float): R
         right = lensCenter.x + (padded.right - src.center.x) * zoom,
         bottom = lensCenter.y + (padded.bottom - src.center.y) * zoom,
     )
-}
-
-@Composable
-fun KeynoteStamp(
-    text: String,
-    modifier: Modifier = Modifier,
-    color: Color = LocalDeckTheme.current.colors.accent,
-    elementId: String? = null,
-) {
-    val theme = LocalDeckTheme.current
-    val stampStyle = theme.styles.stamp
-    val parentBg = effectiveBackgroundColor()
-    val defaultFill = color.copy(alpha = 0.14f)
-    if (elementId != null) {
-        val patch = LocalElementOverrides.current.patchFor(elementId)
-        val effectiveBg = resolveBoxEffectiveBackground(patch, defaultFill, parentBg)
-        val hasCustomPadding = patch?.paddingDp != null
-        Box(
-            modifier = modifier
-                .editableBox(
-                    elementId = elementId,
-                    label = patch?.text ?: text,
-                    kind = "KeynoteStamp",
-                    defaultFill = defaultFill,
-                    defaultBorderColor = color,
-                    defaultBorderWidth = stampStyle.borderWidth,
-                    defaultCornerRadius = stampStyle.cornerRadius,
-                    defaultPadding = stampStyle.verticalPadding,
-                )
-                .let {
-                    if (hasCustomPadding) {
-                        it
-                    } else {
-                        // editableBox applied stampStyle.verticalPadding uniformly; match horizontalPadding on X.
-                        val extraH = (stampStyle.horizontalPadding - stampStyle.verticalPadding).coerceAtLeast(0.dp)
-                        it.padding(horizontal = extraH)
-                    }
-                },
-        ) {
-            CompositionLocalProvider(LocalEffectiveBackgroundColor provides effectiveBg) {
-                DeckEditableText(
-                    elementId = elementId,
-                    text = text,
-                    label = text,
-                    kind = "KeynoteStamp",
-                    style = theme.typography.stamp,
-                    color = color,
-                    mergeWithExistingBox = true,
-                )
-            }
-        }
-    } else {
-        val shape = RoundedCornerShape(stampStyle.cornerRadius)
-        val effectiveBg = compositeBackgroundOver(defaultFill, parentBg)
-        Box(
-            modifier = modifier
-                .reviewTarget(kind = "KeynoteStamp", label = text, textSnippet = text)
-                .background(defaultFill, shape)
-                .border(stampStyle.borderWidth, color, shape)
-                .padding(
-                    horizontal = stampStyle.horizontalPadding,
-                    vertical = stampStyle.verticalPadding,
-                ),
-        ) {
-            CompositionLocalProvider(LocalEffectiveBackgroundColor provides effectiveBg) {
-                Text(
-                    text = text,
-                    style = theme.typography.stamp,
-                    color = color,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DetourSign(
-    label: String = "Small detour",
-    symbol: String = "↱",
-    modifier: Modifier = Modifier,
-    elementId: String? = null,
-) {
-    val theme = LocalDeckTheme.current
-    val badge = theme.styles.detourBadge
-    val signShape = RoundedCornerShape(badge.cornerRadius)
-    val columnMod = if (elementId != null) {
-        modifier.editableBox(
-            elementId = elementId,
-            label = "$symbol $label",
-            kind = "DetourSign",
-        )
-    } else {
-        modifier.reviewTarget(
-            kind = "DetourSign",
-            label = "$symbol $label",
-            textSnippet = label,
-        )
-    }
-    val childParentId = elementId ?: LocalStageParentElementId.current
-    CompositionLocalProvider(LocalStageParentElementId provides childParentId) {
-        Column(
-            modifier = columnMod,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(28.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(badge.diamondSize)
-                    .rotate(45f)
-                    .background(theme.colors.warning, signShape)
-                    .border(badge.strokeWidth, Color(0xFF1E1B16), signShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                CompositionLocalProvider(LocalEffectiveBackgroundColor provides theme.colors.warning) {
-                    if (elementId != null) {
-                        DeckEditableText(
-                            elementId = "$elementId:symbol",
-                            text = symbol,
-                            label = symbol,
-                            kind = "DetourSymbol",
-                            style = theme.typography.heading,
-                            color = Color(0xFF1E1B16),
-                            modifier = Modifier.rotate(-45f),
-                        )
-                    } else {
-                        Text(
-                            text = symbol,
-                            style = theme.typography.heading,
-                            color = Color(0xFF1E1B16),
-                            modifier = Modifier.rotate(-45f),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            if (elementId != null) {
-                DeckEditableText(
-                    elementId = "$elementId:label",
-                    text = label,
-                    label = label,
-                    kind = "DetourLabel",
-                    style = theme.typography.subheading,
-                    color = theme.colors.foreground,
-                )
-            } else {
-                Text(
-                    text = label,
-                    style = theme.typography.subheading,
-                    color = theme.colors.foreground,
-                )
-            }
-        }
-    }
 }
 
 /** Endpoint pair for one outer tangent ray connecting the source pill to the circular lens. */

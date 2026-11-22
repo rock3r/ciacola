@@ -16,5 +16,17 @@ kotlin {
             api(project(":storyboard-warp"))
             implementation(compose.material)
         }
+        getByName("desktopTest").dependencies {
+            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+            implementation(compose.uiTest)
+            implementation(libs.pdfbox)
+        }
     }
+}
+
+tasks.named<Test>("desktopTest") {
+    systemProperty(
+        "ciacola.fonts.dir",
+        rootProject.file("deck/src/desktopMain/resources/fonts").absolutePath,
+    )
 }

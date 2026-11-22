@@ -1,22 +1,16 @@
 package dev.sebastiano.ciacola.inspector.lint
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -27,8 +21,6 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -37,17 +29,12 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.LocalSceneMode
-import dev.bnorm.storyboard.easel.LocalStoryboard
 import dev.bnorm.storyboard.easel.SceneMode
-import dev.sebastiano.ciacola.theme.LocalDeckTheme
-import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
-import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
-import org.jetbrains.jewel.foundation.theme.JewelTheme
-import org.jetbrains.jewel.ui.theme.colorPalette
+import dev.sebastiano.ciacola.document.LocalRenderSession
+import dev.sebastiano.ciacola.document.RenderPurpose
 
 /**
  * Returns `true` when [event] is an unmodified `F8` key press intended to toggle the Lint tab.
@@ -73,115 +60,37 @@ fun Modifier.onDeckLintShortcut(onToggleLint: () -> Unit): Modifier = onPreviewK
 }
 
 /**
- * Creates a [ContentDecorator] that records a clean [GraphicsLayer] of the active `SceneMode.Story`
- * stage when [isInspectionVisible] is `true` and renders [StageLintHighlightOverlay] above it.
- * Completely bypassed in Show Mode, Fullscreen, Overview, and offscreen preview renders.
+ * Draws amber/red dashed diagnostic callout boxes and compact `E1`/`W1` severity badges on the
+ * live stage for [DocumentDeckLintController.overlayIssuesFor]. Strictly hidden when
+ * [isInspectionVisible] is `false` or during Show / Fullscreen / Overview / Preview / offscreen.
  */
 @Composable
-fun rememberDeckLintStageDecorator(
-    controller: DeckLintController,
-    isInspectionVisible: () -> Boolean,
-    stageFormatSize: IntSize = IntSize(STAGE_WIDTH_PX.toInt(), STAGE_HEIGHT_PX.toInt()),
-): ContentDecorator = remember(controller, stageFormatSize) {
-    ContentDecorator { content ->
-        val visible = isInspectionVisible() &&
-            !LocalPresentingFullscreen.current &&
-            !LocalTimelineOffscreen.current &&
-            !LocalOverviewOpen.current &&
-            LocalSceneMode.current == SceneMode.Story
-
-        val storyboard = LocalStoryboard.current
-        val effectiveFormatSize = storyboard?.format?.size ?: stageFormatSize
-        val cleanLayer = if (visible) rememberGraphicsLayer() else null
-
-        if (visible && cleanLayer != null) {
-            DisposableEffect(controller, cleanLayer) {
-                controller.cleanStageGraphicsLayer = cleanLayer
-                onDispose {
-                    if (controller.cleanStageGraphicsLayer === cleanLayer) {
-                        controller.cleanStageGraphicsLayer = null
-                    }
-                    controller.stageRootCoordinates = null
-                    controller.stageBoundsInRoot = null
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .let { base ->
-                    if (visible) {
-                        base
-                            .testTag("ciacola-lint-stage")
-                            .onPlaced { coords ->
-                                controller.stageRootCoordinates = coords
-                                if (coords.isAttached) {
-                                    controller.stageBoundsInRoot = runCatching { coords.boundsInRoot() }.getOrNull()
-                                }
-                            }
-                    } else {
-                        base
-                    }
-                },
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .let { base ->
-                        if (visible && cleanLayer != null) {
-                            base.drawWithContent {
-                                cleanLayer.record { this@drawWithContent.drawContent() }
-                                drawLayer(cleanLayer)
-                            }
-                        } else {
-                            base
-                        }
-                    },
-            ) {
-                content()
-            }
-            if (visible) {
-                CiacolaJewelTheme(isDark = !LocalDeckTheme.current.isLight) {
-                    StageLintHighlightOverlay(
-                        controller = controller,
-                        isInspectionVisible = controller.showStageOverlay,
-                        stageFormatSize = effectiveFormatSize,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Draws amber/red dashed diagnostic callout boxes and compact severity badges on the stage for
- * [DeckLintController.activeBeatOverlayIssues]. Strictly hidden when [isInspectionVisible] is
- * `false` or during Fullscreen / Show Mode / Overview / Preview / offscreen renders.
- */
-@Composable
-fun StageLintHighlightOverlay(
-    controller: DeckLintController,
+fun DocumentDeckLintStageOverlay(
+    controller: DocumentDeckLintController,
+    activeSlideId: String?,
+    activeBeatIndex: Int,
     isInspectionVisible: Boolean,
     stageFormatSize: IntSize = IntSize(STAGE_WIDTH_PX.toInt(), STAGE_HEIGHT_PX.toInt()),
     modifier: Modifier = Modifier,
 ) {
+    val renderPurpose = LocalRenderSession.current?.purpose
     if (
         !isInspectionVisible ||
-        !controller.isStageSettled ||
+        !controller.showStageOverlay ||
         LocalPresentingFullscreen.current ||
-        LocalTimelineOffscreen.current ||
         LocalOverviewOpen.current ||
-        LocalSceneMode.current == SceneMode.Preview
+        LocalSceneMode.current == SceneMode.Preview ||
+        (renderPurpose != null && renderPurpose != RenderPurpose.Present)
     ) {
         return
     }
 
-    val issues = controller.activeBeatOverlayIssues
+    val issues = controller.overlayIssuesFor(activeSlideId, activeBeatIndex)
     if (issues.isEmpty()) return
 
-    val highlightedId = controller.highlightedIssueId
-    val palette = rememberLintPalette()
+    val highlightedId = controller.selectedIssueId
+    val errorColor = Color(0xFFE5484D)
+    val warningColor = Color(0xFFF5A623)
     val textMeasurer = rememberTextMeasurer()
     val badgeStyle = remember {
         TextStyle(
@@ -214,7 +123,7 @@ fun StageLintHighlightOverlay(
                 "W$warningCounter"
             }
             val isHighlighted = issue.id == highlightedId
-            val color = if (issue.severity == LintSeverity.Error) palette.error else palette.warning
+            val color = if (issue.severity == LintSeverity.Error) errorColor else warningColor
             val rawLeft = issue.stageBounds.left * sx
             val rawTop = issue.stageBounds.top * sy
             val rawRight = issue.stageBounds.right * sx
@@ -243,13 +152,7 @@ fun StageLintHighlightOverlay(
                 )
             } else {
                 drawRoundRect(
-                    color = color.copy(alpha = 0.05f),
-                    topLeft = topLeft,
-                    size = boxSize,
-                    cornerRadius = CornerRadius(4.dp.toPx()),
-                )
-                drawRoundRect(
-                    color = color.copy(alpha = 0.9f),
+                    color = color.copy(alpha = 0.90f),
                     topLeft = topLeft,
                     size = boxSize,
                     cornerRadius = CornerRadius(4.dp.toPx()),
@@ -257,52 +160,27 @@ fun StageLintHighlightOverlay(
                 )
             }
 
-            val badgeText = if (isHighlighted) "$codePrefix · ${issue.ruleId.shortLabel}" else codePrefix
-            val layout = textMeasurer.measure(badgeText, style = badgeStyle)
-            val padH = 5.dp.toPx()
+            // Compact severity badge pinned to top-left corner of the callout box.
+            val layoutResult = textMeasurer.measure(text = codePrefix, style = badgeStyle)
+            val padH = 4.dp.toPx()
             val padV = 2.dp.toPx()
-            val badgeW = layout.size.width + padH * 2f
-            val badgeH = layout.size.height + padV * 2f
+            val badgeW = layoutResult.size.width + padH * 2f
+            val badgeH = layoutResult.size.height + padV * 2f
             val badgeX = clampedLeft.coerceIn(2f, (size.width - badgeW - 2f).coerceAtLeast(2f))
-            val preferredY = clampedTop - badgeH - 3.dp.toPx()
-            val badgeY = if (preferredY >= 2f) {
-                preferredY
-            } else {
-                (clampedTop + 3.dp.toPx()).coerceIn(2f, (size.height - badgeH - 2f).coerceAtLeast(2f))
-            }
+            val badgeY = (clampedTop - badgeH - 2f).let { above ->
+                if (above >= 2f) above else clampedTop + 2f
+            }.coerceIn(2f, (size.height - badgeH - 2f).coerceAtLeast(2f))
 
             drawRoundRect(
                 color = color,
                 topLeft = Offset(badgeX, badgeY),
                 size = Size(badgeW, badgeH),
-                cornerRadius = CornerRadius(4.dp.toPx()),
+                cornerRadius = CornerRadius(3.dp.toPx()),
             )
             drawText(
-                textLayoutResult = layout,
+                textLayoutResult = layoutResult,
                 topLeft = Offset(badgeX + padH, badgeY + padV),
             )
         }
-    }
-}
-
-@Immutable
-internal data class LintUiPalette(
-    val error: Color,
-    val warning: Color,
-    val ok: Color,
-)
-
-@Composable
-internal fun rememberLintPalette(): LintUiPalette {
-    val globalColors = JewelTheme.globalColors
-    val colorPalette = JewelTheme.colorPalette
-    val isDark = JewelTheme.isDark
-    val uuid = JewelTheme.instanceUuid
-    return remember(uuid, isDark) {
-        LintUiPalette(
-            error = colorPalette.redOrNull(if (isDark) 6 else 5) ?: globalColors.outlines.error,
-            warning = colorPalette.yellowOrNull(if (isDark) 6 else 5) ?: globalColors.outlines.warning,
-            ok = colorPalette.greenOrNull(if (isDark) 6 else 5) ?: Color(0xFF2E8B57),
-        )
     }
 }

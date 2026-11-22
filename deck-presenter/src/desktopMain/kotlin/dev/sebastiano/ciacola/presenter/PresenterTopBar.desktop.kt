@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,7 +40,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,7 +52,6 @@ import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
-import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.PopupContainer
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
@@ -72,11 +71,10 @@ internal fun PresenterTopControlBar(
 ) {
     val scope = rememberCoroutineScope()
     val globalColors = JewelTheme.globalColors
-    val resolvedNotes = controller.resolvedCurrentNotes()
     val displays = controller.availableDisplays
 
-    val slideLabel = "Slide ${controller.currentSceneIndex + 1} / ${controller.slideCount.coerceAtLeast(1)}" +
-        " · Beat ${controller.currentBeatIndex + 1} / ${controller.currentBeatCount}"
+    val slideLabel = "Slide ${controller.currentSceneIndex + 1} of ${controller.slideCount.coerceAtLeast(1)}" +
+        " · Build ${controller.currentBeatIndex + 1} of ${controller.currentBeatCount}"
     val pace = controller.timer.paceStatus(
         elapsedSeconds = elapsedSeconds,
         flatBeatIndex = controller.flatBeatIndex,
@@ -87,168 +85,169 @@ internal fun PresenterTopControlBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(globalColors.toolwindowBackground)
+            .background(globalColors.panelBackground)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         // Row 1: Slide & Beat navigation, scene title, stage status, and live stage aids.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val wideBar = maxWidth >= 960.dp
+            val deckTitleMaxWidth = maxWidth * DECK_TITLE_MAX_WIDTH_FRACTION
+            val sceneTitle = controller.currentSlideTitle()
             Row(
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                PresenterIconButton(
-                    icon = AllIconsKeys.General.ChevronLeft,
-                    contentDescription = "Previous beat",
-                    tooltip = "Previous beat (← / ↑ / PgUp / Backspace)",
-                    enabled = controller.canStepBackward,
-                    testTag = "ciacola-presenter-prev-beat",
-                    onClick = { controller.step(scope, AdvanceDirection.Backward) },
-                )
-                PresenterIconButton(
-                    icon = AllIconsKeys.General.ChevronRight,
-                    contentDescription = "Next beat",
-                    tooltip = "Next beat (→ / ↓ / PgDn / Space / Enter)",
-                    enabled = controller.canStepForward,
-                    testTag = "ciacola-presenter-next-beat",
-                    onClick = { controller.step(scope, AdvanceDirection.Forward) },
-                )
-
-                val deckTitle = controller.animatic.storyboard.title.ifBlank { "Untitled Deck" }
-                Tooltip(tooltip = { Text("Active deck: $deckTitle") }) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = deckTitle,
-                            style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
-                            color = globalColors.text.normal,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .widthIn(max = 150.dp)
-                                .testTag("ciacola-presenter-deck-title"),
-                        )
-                    }
-                }
-
-                Text(
-                    text = slideLabel,
-                    style = JewelTheme.typography.medium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                    color = globalColors.text.normal,
-                    maxLines = 1,
-                    modifier = Modifier.testTag("ciacola-presenter-slide-beat"),
-                )
-
-                Tooltip(tooltip = { Text(resolvedNotes.sceneTitle) }) {
-                    Text(
-                        text = "· ${resolvedNotes.sceneTitle}",
-                        style = JewelTheme.typography.medium,
-                        color = globalColors.text.info,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .widthIn(max = 180.dp)
-                            .testTag("ciacola-presenter-scene-title"),
+                Row(
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PresenterIconButton(
+                        icon = AllIconsKeys.General.ChevronLeft,
+                        contentDescription = "Previous beat",
+                        tooltip = "Previous beat (← / ↑ / PgUp / Backspace)",
+                        enabled = controller.canStepBackward,
+                        testTag = "ciacola-presenter-prev-beat",
+                        onClick = { controller.step(scope, AdvanceDirection.Backward) },
                     )
-                }
+                    PresenterIconButton(
+                        icon = AllIconsKeys.General.ChevronRight,
+                        contentDescription = "Next beat",
+                        tooltip = "Next beat (→ / ↓ / PgDn / Space / Enter)",
+                        enabled = controller.canStepForward,
+                        testTag = "ciacola-presenter-next-beat",
+                        onClick = { controller.step(scope, AdvanceDirection.Forward) },
+                    )
 
-                StageStatusPill(
-                    isTransitioning = controller.isTransitioning,
-                    palette = palette,
-                )
-
-                if (controller.curtain != StageCurtain.None) {
-                    val curtainLabel = when (controller.curtain) {
-                        StageCurtain.Blackout -> "Blackout (B)"
-                        StageCurtain.Whiteout -> "Whiteout (W)"
-                        StageCurtain.None -> ""
-                    }
-                    Tooltip(tooltip = { Text("Click or press Esc / B / W to resume live stage") }) {
+                    val deckTitle = controller.animatic.storyboard.title.ifBlank { "Untitled Deck" }
+                    Tooltip(tooltip = { Text("Active deck: $deckTitle") }) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(palette.curtainActiveBg)
-                                .border(1.dp, palette.curtainActiveBorder, RoundedCornerShape(4.dp))
-                                .clickable { controller.clearCurtain() }
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                                .testTag("ciacola-presenter-curtain-pill"),
+                                .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         ) {
                             Text(
-                                text = curtainLabel,
+                                text = deckTitle,
                                 style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
-                                color = palette.curtainActiveInk,
+                                color = globalColors.text.normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .widthIn(max = deckTitleMaxWidth)
+                                    .testTag("ciacola-presenter-deck-title"),
                             )
                         }
                     }
-                }
-            }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Tooltip(tooltip = { Text("Jump to slide 1..${controller.slideCount} (⌘G)") }) {
-                    OutlinedButton(
-                        onClick = { controller.openJumpDialog(JumpDialogHost.Presenter) },
-                        modifier = Modifier.testTag("ciacola-presenter-jump-button"),
-                    ) {
-                        Text("Jump…", style = JewelTheme.typography.small)
+                    Text(
+                        text = slideLabel,
+                        style = JewelTheme.typography.medium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontFeatureSettings = "tnum",
+                        ),
+                        color = globalColors.text.normal,
+                        maxLines = 1,
+                        modifier = Modifier.testTag("ciacola-presenter-slide-beat"),
+                    )
+
+                    Tooltip(tooltip = { Text(sceneTitle) }) {
+                        Text(
+                            text = "· $sceneTitle",
+                            style = JewelTheme.typography.medium,
+                            color = globalColors.text.info,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .testTag("ciacola-presenter-scene-title"),
+                        )
                     }
-                }
 
-                CurtainToggleChip(
-                    label = "B",
-                    active = controller.curtain == StageCurtain.Blackout,
-                    tooltip = "Blackout audience stage (B)",
-                    testTag = "ciacola-presenter-blackout-button",
-                    palette = palette,
-                    onClick = { controller.toggleCurtain(StageCurtain.Blackout) },
-                )
-                CurtainToggleChip(
-                    label = "W",
-                    active = controller.curtain == StageCurtain.Whiteout,
-                    tooltip = "Whiteout audience stage (W)",
-                    testTag = "ciacola-presenter-whiteout-button",
-                    palette = palette,
-                    onClick = { controller.toggleCurtain(StageCurtain.Whiteout) },
-                )
+                    StageStatusPill(
+                        isTransitioning = controller.isTransitioning,
+                        palette = palette,
+                    )
 
-                if (displays.isNotEmpty()) {
-                    Box {
-                        Tooltip(tooltip = { Text("Route audience stage to a display or swap screens") }) {
-                            OutlinedButton(
-                                onClick = { onDisplayPopupOpenChange(!displayPopupOpen) },
-                                modifier = Modifier.testTag("ciacola-presenter-displays-button"),
+                    if (controller.curtain != StageCurtain.None) {
+                        val curtainLabel = when (controller.curtain) {
+                            StageCurtain.Blackout -> "Blackout (B)"
+                            StageCurtain.Whiteout -> "Whiteout (W)"
+                            StageCurtain.None -> ""
+                        }
+                        Tooltip(tooltip = { Text("Click or press Esc / B / W to resume live stage") }) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(palette.curtainActiveBg)
+                                    .border(1.dp, palette.curtainActiveBorder, RoundedCornerShape(4.dp))
+                                    .clickable { controller.clearCurtain() }
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .testTag("ciacola-presenter-curtain-pill"),
                             ) {
-                                Text("Present on…", style = JewelTheme.typography.small)
+                                Text(
+                                    text = curtainLabel,
+                                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                                    color = palette.curtainActiveInk,
+                                )
                             }
                         }
+                    }
+                }
 
-                        if (displayPopupOpen) {
-                            DisplayRoutingPopup(
-                                displays = displays,
-                                onSelectDisplay = { screen ->
-                                    onDisplayPopupOpenChange(false)
-                                    controller.presentOnDisplay(screen)
-                                },
-                                onSwapDisplays = {
-                                    onDisplayPopupOpenChange(false)
-                                    controller.swapAudienceAndPresenterDisplays()
-                                },
-                                onDismiss = { onDisplayPopupOpenChange(false) },
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PresenterToolbarButton(
+                        label = if (wideBar) "Jump (⌘G)" else "Jump",
+                        tooltip = "Jump to slide 1..${controller.slideCount} (⌘G)",
+                        testTag = "ciacola-presenter-jump-button",
+                        onClick = { controller.openJumpDialog(JumpDialogHost.Presenter) },
+                    )
+                    PresenterToolbarButton(
+                        label = if (wideBar) "Blackout (B)" else "Black",
+                        tooltip = "Blackout audience stage (B)",
+                        testTag = "ciacola-presenter-blackout-button",
+                        active = controller.curtain == StageCurtain.Blackout,
+                        palette = palette,
+                        onClick = { controller.toggleCurtain(StageCurtain.Blackout) },
+                    )
+                    PresenterToolbarButton(
+                        label = if (wideBar) "Whiteout (W)" else "White",
+                        tooltip = "Whiteout audience stage (W)",
+                        testTag = "ciacola-presenter-whiteout-button",
+                        active = controller.curtain == StageCurtain.Whiteout,
+                        palette = palette,
+                        onClick = { controller.toggleCurtain(StageCurtain.Whiteout) },
+                    )
+
+                    if (displays.isNotEmpty()) {
+                        Box {
+                            PresenterToolbarButton(
+                                label = "Displays ▾",
+                                tooltip = "Route audience stage to a display or swap screens",
+                                testTag = "ciacola-presenter-displays-button",
+                                active = displayPopupOpen,
+                                onClick = { onDisplayPopupOpenChange(!displayPopupOpen) },
                             )
+
+                            if (displayPopupOpen) {
+                                DisplayRoutingPopup(
+                                    displays = displays,
+                                    onSelectDisplay = { screen ->
+                                        onDisplayPopupOpenChange(false)
+                                        controller.presentOnDisplay(screen)
+                                    },
+                                    onSwapDisplays = {
+                                        onDisplayPopupOpenChange(false)
+                                        controller.swapAudienceAndPresenterDisplays()
+                                    },
+                                    onDismiss = { onDisplayPopupOpenChange(false) },
+                                )
+                            }
                         }
                     }
                 }
@@ -265,27 +264,31 @@ internal fun PresenterTopControlBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = wallClock,
-                    style = JewelTheme.typography.medium.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    color = globalColors.text.info,
-                    modifier = Modifier.testTag("ciacola-presenter-wall-clock"),
-                )
+                LabeledReadout(label = "Clock", labelTestTag = "ciacola-presenter-wall-clock-label") {
+                    Text(
+                        text = wallClock,
+                        style = JewelTheme.typography.medium.copy(
+                            fontFeatureSettings = "tnum",
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = globalColors.text.info,
+                        modifier = Modifier.testTag("ciacola-presenter-wall-clock"),
+                    )
+                }
 
                 Divider(Orientation.Vertical, Modifier.height(18.dp))
 
-                Text(
-                    text = PresenterTimerState.formatMmSs(elapsedSeconds),
-                    style = JewelTheme.typography.h2TextStyle.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    color = globalColors.text.normal,
-                    modifier = Modifier.testTag("ciacola-presenter-elapsed-timer"),
-                )
+                LabeledReadout(label = "Elapsed", labelTestTag = "ciacola-presenter-elapsed-label") {
+                    Text(
+                        text = PresenterTimerState.formatMmSs(elapsedSeconds),
+                        style = JewelTheme.typography.h2TextStyle.copy(
+                            fontFeatureSettings = "tnum",
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = globalColors.text.normal,
+                        modifier = Modifier.testTag("ciacola-presenter-elapsed-timer"),
+                    )
+                }
 
                 PresenterIconButton(
                     icon = if (timerRunning) AllIconsKeys.Actions.Pause else AllIconsKeys.Actions.Execute,
@@ -314,35 +317,31 @@ internal fun PresenterTopControlBar(
                     color = globalColors.text.info,
                 )
 
-                Tooltip(tooltip = { Text("Decrease target duration by 5 minutes") }) {
-                    OutlinedButton(
-                        onClick = { controller.timer.adjustTargetMinutes(-PresenterTimerState.TARGET_STEP_MINUTES) },
-                        enabled = controller.timer.targetDurationMinutes > PresenterTimerState.MIN_TARGET_MINUTES,
-                        modifier = Modifier.testTag("ciacola-presenter-target-dec"),
-                    ) {
-                        Text("-5m", style = JewelTheme.typography.small)
-                    }
-                }
+                PresenterToolbarButton(
+                    label = "−5m",
+                    tooltip = "Decrease target duration by 5 minutes",
+                    testTag = "ciacola-presenter-target-dec",
+                    enabled = controller.timer.targetDurationMinutes > PresenterTimerState.MIN_TARGET_MINUTES,
+                    onClick = { controller.timer.adjustTargetMinutes(-PresenterTimerState.TARGET_STEP_MINUTES) },
+                )
 
                 Text(
                     text = PresenterTimerState.formatMmSs(controller.timer.targetDurationMinutes * 60L),
                     style = JewelTheme.typography.medium.copy(
-                        fontFamily = FontFamily.Monospace,
+                        fontFeatureSettings = "tnum",
                         fontWeight = FontWeight.SemiBold,
                     ),
                     color = globalColors.text.normal,
                     modifier = Modifier.testTag("ciacola-presenter-target-duration"),
                 )
 
-                Tooltip(tooltip = { Text("Increase target duration by 5 minutes") }) {
-                    OutlinedButton(
-                        onClick = { controller.timer.adjustTargetMinutes(PresenterTimerState.TARGET_STEP_MINUTES) },
-                        enabled = controller.timer.targetDurationMinutes < PresenterTimerState.MAX_TARGET_MINUTES,
-                        modifier = Modifier.testTag("ciacola-presenter-target-inc"),
-                    ) {
-                        Text("+5m", style = JewelTheme.typography.small)
-                    }
-                }
+                PresenterToolbarButton(
+                    label = "+5m",
+                    tooltip = "Increase target duration by 5 minutes",
+                    testTag = "ciacola-presenter-target-inc",
+                    enabled = controller.timer.targetDurationMinutes < PresenterTimerState.MAX_TARGET_MINUTES,
+                    onClick = { controller.timer.adjustTargetMinutes(PresenterTimerState.TARGET_STEP_MINUTES) },
+                )
 
                 PaceStatusPill(
                     remainingText = PresenterTimerState.formatRemaining(
@@ -417,7 +416,7 @@ private fun PaceStatusPill(
         Text(
             text = "$remainingText · ${pace.label}",
             style = JewelTheme.typography.small.copy(
-                fontFamily = FontFamily.Monospace,
+                fontFeatureSettings = "tnum",
                 fontWeight = FontWeight.SemiBold,
             ),
             color = ink,
@@ -425,44 +424,82 @@ private fun PaceStatusPill(
     }
 }
 
+private const val DECK_TITLE_MAX_WIDTH_FRACTION = 0.34f
+
+/** Small caption label stacked beside a numeric readout (`Clock 14:30`, `Elapsed 12:03`). */
+@Composable
+private fun LabeledReadout(
+    label: String,
+    labelTestTag: String,
+    readout: @Composable () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = label,
+            style = JewelTheme.typography.small,
+            color = JewelTheme.globalColors.text.info,
+            modifier = Modifier.testTag(labelTestTag),
+        )
+        readout()
+    }
+}
+
+/**
+ * The one Presenter toolbar button style shared by `Jump`, `Blackout`, `Whiteout`, `Displays`, and
+ * the timer target steppers: 26dp, 1dp outline, active state as a tint (never a filled primary).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CurtainToggleChip(
+internal fun PresenterToolbarButton(
     label: String,
-    active: Boolean,
     tooltip: String,
     testTag: String,
-    palette: PresenterStatusPalette,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    palette: PresenterStatusPalette? = null,
     onClick: () -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
     var focused by remember { mutableStateOf(false) }
-    val bg = if (active) palette.curtainActiveBg else Color.Transparent
-    val border = if (active) palette.curtainActiveBorder else globalColors.borders.normal
-    val ink = if (active) palette.curtainActiveInk else globalColors.text.normal
+    val activeBg = palette?.curtainActiveBg ?: globalColors.outlines.focused.copy(alpha = 0.16f)
+    val activeBorder = palette?.curtainActiveBorder ?: globalColors.outlines.focused
+    val activeInk = palette?.curtainActiveInk ?: globalColors.text.normal
+    val bg = if (active) activeBg else Color.Transparent
+    val border = if (active) activeBorder else globalColors.borders.normal
+    val ink = when {
+        !enabled -> globalColors.text.disabled
+        active -> activeInk
+        else -> globalColors.text.normal
+    }
 
     Tooltip(tooltip = { Text(tooltip) }) {
         Box(
             modifier = Modifier
+                .height(26.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(bg)
                 .border(1.dp, border, RoundedCornerShape(4.dp))
                 .onFocusChanged { focused = it.isFocused }
                 .accessibleFocusRing(focused = focused, ringColor = focusRingColor, cornerRadius = 4.dp)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .clickable(role = Role.Checkbox, onClick = onClick)
-                .padding(horizontal = 8.dp, vertical = 3.dp)
+                .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .padding(horizontal = 10.dp)
                 .semantics {
                     contentDescription = tooltip
                     stateDescription = if (active) "Active" else "Off"
                 }
                 .testTag(testTag),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = label,
-                style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                style = JewelTheme.typography.regular.copy(fontWeight = FontWeight.Medium),
                 color = ink,
+                maxLines = 1,
             )
         }
     }

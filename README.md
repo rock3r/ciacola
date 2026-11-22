@@ -159,6 +159,14 @@ Ciacola is a fork of Brian Norman's
 `499cda890a7591c8fc56044726531f6f38a82e35`. This repository retains Storyboard's Git history and is
 distributed under the same [Apache License 2.0](LICENSE.txt). See [NOTICE](NOTICE) for attribution.
 
+### Open-source licences and bundled fonts
+
+All third-party libraries, TextMate grammars, build tooling, and bundled open-source fonts (SIL Open
+Font License 1.1 in `deck/src/desktopMain/resources/fonts/` and
+`examples/shared/src/commonMain/composeResources/font/`) are documented with their copyright
+notices, Reserved Font Names, upstream URLs, and full verbatim licence texts in
+[`OPEN_SOURCE_LICENSES.md`](OPEN_SOURCE_LICENSES.md).
+
 The vertex-mesh technique was studied in
 [Sina Samaki's ChromaDecks](https://github.com/sinasamaki/ChromaDecks), and the shared-text approach
 was compared with

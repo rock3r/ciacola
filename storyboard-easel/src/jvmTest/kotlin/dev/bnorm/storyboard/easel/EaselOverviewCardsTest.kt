@@ -47,7 +47,7 @@ class EaselOverviewCardsTest {
         )
         assertEquals(
             1,
-            onAllNodesWithText("Slide 1 / 3 · Beat 1 / 2").fetchSemanticsNodes().size,
+            onAllNodesWithText("Slide 1 of 3 · Build 1 of 2").fetchSemanticsNodes().size,
             "Expected human-readable 1-based slide/beat badge in Overview",
         )
     }

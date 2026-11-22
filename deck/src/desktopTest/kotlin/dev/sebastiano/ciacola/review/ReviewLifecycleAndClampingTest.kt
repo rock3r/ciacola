@@ -34,7 +34,7 @@ import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.overview.OverviewVisibility
 import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.readText
@@ -109,8 +109,7 @@ class ReviewLifecycleAndClampingTest {
         setContent {
             coordinator = rememberReviewStageCoordinator()
             overviewVisibility = rememberOverviewVisibility()
-            val deck = createFoundationDeck(
-                includeKeynoteEffectsLab = true,
+            val deck = buildFoundationTestStoryboard(
                 stageDecorator = coordinator.stageDecorator,
             )
             val animatic = rememberAnimatic(storyboard = { deck })
@@ -132,7 +131,7 @@ class ReviewLifecycleAndClampingTest {
         waitForIdle()
 
         // 1. Ctrl+Click stage to comment hint stays visible even when 1 comment is applying!
-        onNode(hasText("Ctrl+Click stage to comment")).assertIsDisplayed()
+        onNode(hasText("stage to comment", substring = true)).assertIsDisplayed()
         onNodeWithTag("ciacola-hud-applying-badge").assertIsDisplayed()
         onNode(hasText("1 applying…")).assertIsDisplayed()
 
@@ -185,8 +184,12 @@ class ReviewLifecycleAndClampingTest {
             writeText("#!/bin/sh\nexit 0\n")
             Files.setPosixFilePermissions(this, PosixFilePermissions.fromString("rwxr-xr-x"))
         }
-        val store = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
-        store.saveConfig(ReviewConfig(conversationId = "conv-slide-cap", agentApiBin = fakeAgentApi.toAbsolutePath().toString()))
+        val store = ReviewCommentStore(
+            storyboardDir = storyboardDir,
+            workspaceRoot = tempRoot,
+            envProvider = { key -> if (key == "CIACOLA_AGENTAPI_BIN") fakeAgentApi.toAbsolutePath().toString() else System.getenv(key) },
+        )
+        store.saveConfig(ReviewConfig(conversationId = "conv-slide-cap"))
 
         lateinit var coordinator: ReviewStageCoordinator
         lateinit var animaticRef: dev.bnorm.storyboard.easel.Animatic
@@ -195,8 +198,7 @@ class ReviewLifecycleAndClampingTest {
         setContent {
             scopeRef = androidx.compose.runtime.rememberCoroutineScope()
             coordinator = rememberReviewStageCoordinator()
-            val deck = createFoundationDeck(
-                includeKeynoteEffectsLab = true,
+            val deck = buildFoundationTestStoryboard(
                 stageDecorator = coordinator.stageDecorator,
             )
             animaticRef = rememberAnimatic(storyboard = { deck })
@@ -296,16 +298,19 @@ class ReviewLifecycleAndClampingTest {
             writeText("#!/bin/sh\nexit 0\n")
             Files.setPosixFilePermissions(this, PosixFilePermissions.fromString("rwxr-xr-x"))
         }
-        val store = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
-        store.saveConfig(ReviewConfig(conversationId = "conv-life", agentApiBin = fakeAgentApi.toAbsolutePath().toString()))
+        val store = ReviewCommentStore(
+            storyboardDir = storyboardDir,
+            workspaceRoot = tempRoot,
+            envProvider = { key -> if (key == "CIACOLA_AGENTAPI_BIN") fakeAgentApi.toAbsolutePath().toString() else System.getenv(key) },
+        )
+        store.saveConfig(ReviewConfig(conversationId = "conv-life"))
 
         lateinit var coordinator: ReviewStageCoordinator
         lateinit var reviewWindow: SlideReviewWindow
 
         setContent {
             coordinator = rememberReviewStageCoordinator()
-            val deck = createFoundationDeck(
-                includeKeynoteEffectsLab = true,
+            val deck = buildFoundationTestStoryboard(
                 stageDecorator = coordinator.stageDecorator,
             )
             val animatic = rememberAnimatic(storyboard = { deck })

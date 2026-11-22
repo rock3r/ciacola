@@ -630,6 +630,7 @@ class Animatic internal constructor(
                     }
                 }
                 transitionState.seekTo(transitionFractionFor(fraction), toState)
+                if (renderFrameClock != null) withFrameNanos { }
                 sceneCleanlySettled = wasCleanlySettled
             }
             return

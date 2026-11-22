@@ -2,7 +2,6 @@ package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -10,518 +9,239 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isAltPressed
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.isMetaPressed
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.isCtrlPressed as isPointerCtrlPressed
-import androidx.compose.ui.input.pointer.isMetaPressed as isPointerMetaPressed
-import androidx.compose.ui.input.pointer.isShiftPressed as isPointerShiftPressed
-import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.MenuScope
-import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.easel.EaselWindow
+import dev.bnorm.storyboard.easel.LocalOverviewOpen
+import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
-import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.awt.Cursor
-import java.awt.KeyboardFocusManager
-import java.awt.Window as AwtWindow
-import java.awt.event.WindowEvent
-import java.awt.event.WindowFocusListener
-import java.beans.PropertyChangeListener
-import kotlin.math.exp
-import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
-import org.jetbrains.jewel.ui.typography
 
-/** Complete After Effects Timeline Studio panel (Transport + Synchronized Tracks + optional Inspector). */
-@Composable
-fun TimelineStudioPanel(
-    controller: TimelineStudioController,
-    isDark: Boolean,
-    modifier: Modifier = Modifier,
-    surface: TimelineSurface = TimelineSurface.Docked,
-    showBlockInspector: Boolean = true,
-    inspectorSlot: (@Composable () -> Unit)? = null,
-    leadingToolbarContent: (@Composable () -> Unit)? = null,
-) {
-    val focusState = LocalStudioA11yFocusState.current ?: remember { StudioA11yFocusState() }
-    val panelFocusRequester = remember { FocusRequester() }
-    var panelHadFocus by remember { mutableStateOf(false) }
-    val activeSubLoopId = controller.loopClock.activeSubCompLoopId
-    var wasInSubComp by remember { mutableStateOf(activeSubLoopId != null) }
-    LaunchedEffect(activeSubLoopId) {
-        val nowInSubComp = activeSubLoopId != null
-        if (wasInSubComp && !nowInSubComp && panelHadFocus) {
-            withFrameNanos {}
-            runCatching { panelFocusRequester.requestFocus() }
-        }
-        wasInSubComp = nowInSubComp
-    }
-    CiacolaJewelTheme(isDark = isDark) {
-        CompositionLocalProvider(LocalStudioA11yFocusState provides focusState) {
-            Column(
-                modifier = modifier
-                    .fillMaxSize()
-                    .background(JewelTheme.globalColors.panelBackground)
-                    .focusRequester(panelFocusRequester)
-                    .onFocusChanged {
-                        if (it.hasFocus) panelHadFocus = true
-                        focusState.timelinePanelHasFocus = it.hasFocus
-                    }
-                    .focusable()
-                    .testTag("ciacola-timeline-studio"),
-            ) {
-                TimelineTransportBar(
-                    controller = controller,
-                    surface = surface,
-                    leadingToolbarContent = leadingToolbarContent,
-                )
-            Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-            controller.overridesStore.structuralRevision
-            if (controller.isPlayheadOnInjectedVirtualBeat()) {
-                val warnBg = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFF4D6)
-                val warnFg = if (isDark) Color(0xFFFFD87A) else Color(0xFF6B4C00)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(warnBg)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                        .testTag("ciacola-virtual-hold-banner"),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "◆ HOLD · Virtual Hold Beat — assign build tracks here, or Bake to Kotlin to add new text/code state",
-                        style = JewelTheme.typography.small,
-                        color = warnFg,
-                    )
-                }
-                Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-            }
-            Row(Modifier.fillMaxSize()) {
-                TimelineMultiTrackArea(
-                    controller = controller,
-                    surface = surface,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                )
-                if (inspectorSlot != null) {
-                    inspectorSlot()
-                } else if (showBlockInspector) {
-                    Divider(Orientation.Vertical, Modifier.fillMaxHeight())
-                    TimelineBlockInspector(controller = controller)
-                }
-            }
-        }
-        }
-    }
-}
+/** Inset around the docked stage preview in Edit mode. */
+internal val EDIT_STAGE_INSET = 8.dp
+
+/** Default stage share of the docked split when the timeline is expanded (timeline = 34%). */
+const val DEFAULT_TIMELINE_SPLIT_FRACTION: Float = 0.66f
+internal const val MIN_SPLIT_FRACTION: Float = 0.28f
+internal const val MAX_SPLIT_FRACTION: Float = 0.82f
 
 /**
- * After Effects keyboard map for the studio (active only while authoring):
- * - `Space` tap: play/pause (yields to focused buttons, pills, steppers, and layer rows);
- *   `Space` + drag: pan (hand tool) in the timeline or the preview.
- * - `[` / `]`: previous / next event beat.
- * - `Up` / `Down`: navigate layer rows when the layer list has focus; otherwise step slides.
- * - `=` / `-`: zoom the timeline in/out around the playhead; `;`: toggle fit / frame level.
- * - `.` / `,`: zoom the preview in/out; `/`: fit the preview.
- * - `Esc` inside Timeline Studio: exits an active Loop Sub-Composition first, then closes docked Studio.
- * - `F5`: dock/undock the timeline (always available).
+ * Storyboard [EaselWindow] hosting the analytical document-backed Timeline Studio (`F5` docked in
+ * the Story window, `F6` detached standalone window).
  */
-internal fun TimelineStudioController.handleStudioKey(
-    event: KeyEvent,
-    scope: CoroutineScope,
-    suppressed: Boolean,
-    focusState: StudioA11yFocusState = StudioA11yFocusState(),
-): Boolean {
-    if (suppressed) return false
-    if (event.key == Key.Escape && event.type == KeyEventType.KeyUp && focusState.swallowNextEscapeKeyUp) {
-        focusState.swallowNextEscapeKeyUp = false
-        return true
-    }
-    if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed && event.key == Key.F5) {
-        dockedInStoryWindow = !dockedInStoryWindow
-        if (!dockedInStoryWindow) {
-            spaceHeld = false
-            spaceUsedForPan = false
-        }
-        return true
-    }
-    if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed && event.key == Key.F6) {
-        val next = !detachedWindowVisible
-        if (next) dockedInStoryWindow = false
-        detachedWindowVisible = next
-        if (!authoringActive) {
-            spaceHeld = false
-            spaceUsedForPan = false
-        }
-        return true
-    }
-    if (!authoringActive) return false
-
-    if (event.key == Key.Escape) {
-        if (event.type == KeyEventType.KeyDown) {
-            focusState.swallowNextEscapeKeyUp = false
-        }
-        if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed) {
-            if (loopClock.activeSubCompLoopId != null && (focusState.timelinePanelHasFocus || detachedWindowVisible)) {
-                exitLoopSubComp()
-                focusState.swallowNextEscapeKeyUp = true
-                return true
-            }
-            if (dockedInStoryWindow && focusState.timelinePanelHasFocus) {
-                dockedInStoryWindow = false
-                spaceHeld = false
-                spaceUsedForPan = false
-                focusState.swallowNextEscapeKeyUp = true
-                return true
-            }
-        }
-        return false
-    }
-
-    if (focusState.textInputHasFocus) return false
-
-    if (event.type == KeyEventType.KeyDown && !event.isAltPressed) {
-        val primaryMod = event.isMetaPressed || event.isCtrlPressed
-        if (primaryMod && event.key == Key.Z) {
-            if (event.isShiftPressed) redo() else undo()
-            return true
-        }
-        if (event.isCtrlPressed && !event.isMetaPressed && !event.isShiftPressed && event.key == Key.Y) {
-            redo()
-            return true
-        }
-    }
-    if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed) return false
-
-    if (event.key == Key.Spacebar) {
-        if (event.type == KeyEventType.KeyUp && spaceHeld) {
-            val wasTap = spaceHeld && !spaceUsedForPan
-            spaceHeld = false
-            spaceUsedForPan = false
-            if (wasTap && !focusState.activatableControlHasFocus) {
-                togglePlayback(scope)
-            }
-            return true
-        }
-        if (focusState.activatableControlHasFocus) {
-            return false
-        }
-        if (event.type == KeyEventType.KeyDown && !spaceHeld) {
-            spaceHeld = true
-            spaceUsedForPan = false
-        }
-        return true
-    }
-    if (event.type != KeyEventType.KeyDown) return false
-    if (focusState.layerListHasFocus && (event.key == Key.DirectionUp || event.key == Key.DirectionDown)) {
-        return false
-    }
-    // Presenting keys work from anywhere in the studio: a click on the transport, a layer row or a
-    // slider moves keyboard focus off the stage, which would otherwise swallow ←/→.
-    val direction = when (event.key) {
-        Key.DirectionRight, Key.DirectionDown, Key.PageDown -> AdvanceDirection.Forward
-        Key.DirectionLeft, Key.DirectionUp, Key.PageUp -> AdvanceDirection.Backward
-        else -> null
-    }
-    if (direction != null) {
-        advance(scope, direction)
-        return true
-    }
-    val playheadX = viewport.xForTime(currentPlayheadTimeMs.toFloat()).coerceIn(0f, viewport.viewportWidthPx)
-    val previewCenter = Offset(preview.containerSize.width / 2f, preview.containerSize.height / 2f)
-    when (event.key) {
-        Key.LeftBracket -> stepBeat(-1)
-        Key.RightBracket -> stepBeat(+1)
-        Key.Equals, Key.Plus, Key.NumPadAdd -> viewport.zoomBy(1.25f, playheadX)
-        Key.Minus, Key.NumPadSubtract -> viewport.zoomBy(0.8f, playheadX)
-        Key.Semicolon -> viewport.toggleFitAndFrames(currentPlayheadTimeMs.toFloat())
-        Key.Period -> if (stageSelection.isStoryStageMounted) preview.zoomBy(1.25f, previewCenter) else return false
-        Key.Comma -> if (stageSelection.isStoryStageMounted) preview.zoomBy(0.8f, previewCenter) else return false
-        Key.Slash -> if (stageSelection.isStoryStageMounted) preview.reset() else return false
-        else -> return false
-    }
-    return true
-}
-
-fun createSpaceResetWindowFocusListener(
-    controller: TimelineStudioController,
-): WindowFocusListener = object : WindowFocusListener {
-    override fun windowGainedFocus(e: WindowEvent?) = Unit
-    override fun windowLostFocus(e: WindowEvent?) {
-        controller.spaceHeld = false
-        controller.spaceUsedForPan = false
-    }
-}
-
-@Composable
-private fun InstallSpaceResetOnWindowFocusLoss(controller: TimelineStudioController) {
-    DisposableEffect(controller) {
-        val listener = createSpaceResetWindowFocusListener(controller)
-        val attachedWindows = LinkedHashSet<AwtWindow>()
-        fun attachTo(window: AwtWindow?) {
-            if (window != null && attachedWindows.add(window)) {
-                window.addWindowFocusListener(listener)
-            }
-        }
-        AwtWindow.getWindows().forEach(::attachTo)
-        val kfm = KeyboardFocusManager.getCurrentKeyboardFocusManager()
-        val propListener = PropertyChangeListener { evt ->
-            attachTo(evt.newValue as? AwtWindow)
-        }
-        kfm.addPropertyChangeListener("focusedWindow", propListener)
-        onDispose {
-            kfm.removePropertyChangeListener("focusedWindow", propListener)
-            attachedWindows.forEach { it.removeWindowFocusListener(listener) }
-            attachedWindows.clear()
-        }
-    }
-}
-
-internal val LocalInsideStagePreviewViewport = staticCompositionLocalOf { false }
-
-/**
- * Story-window preview with After Effects composition-viewer navigation: mouse wheel zooms at
- * the cursor, Shift+wheel pans horizontally, Cmd/Ctrl+wheel pans vertically, and Space+drag or
- * middle-drag pans. Only active while authoring; presenting is never affected.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun StagePreviewViewport(
-    controller: TimelineStudioController,
-    enabled: Boolean,
-    isDark: Boolean,
-    content: @Composable () -> Unit,
-) {
-    val preview = controller.preview
-    val storyMounted = controller.stageSelection.isStoryStageMounted
-    val previewActive = enabled && storyMounted
-    LaunchedEffect(enabled) {
-        if (!enabled) preview.reset()
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .onSizeChanged { preview.containerSize = it.toSize() }
-            .pointerInput(previewActive) {
-                if (!previewActive) return@pointerInput
-                awaitPointerEventScope {
-                    var panning = false
-                    var last = Offset.Zero
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val change = event.changes.firstOrNull() ?: continue
-                        when (event.type) {
-                            PointerEventType.Scroll -> {
-                                val mods = event.keyboardModifiers
-                                val d = change.scrollDelta
-                                when {
-                                    mods.isPointerShiftPressed -> preview.panBy(Offset(-(if (d.x != 0f) d.x else d.y) * 40f, 0f))
-                                    mods.isPointerCtrlPressed || mods.isPointerMetaPressed -> preview.panBy(Offset(0f, -d.y * 40f))
-                                    d.x != 0f && d.y == 0f -> preview.panBy(Offset(-d.x * 40f, 0f))
-                                    else -> preview.zoomBy(exp(-d.y * 0.12f), change.position)
-                                }
-                                change.consume()
-                            }
-                            PointerEventType.Press -> {
-                                if (event.buttons.isTertiaryPressed || controller.spaceHeld) {
-                                    panning = true
-                                    controller.spaceUsedForPan = true
-                                    last = change.position
-                                    change.consume()
-                                }
-                            }
-                            PointerEventType.Move -> if (panning) {
-                                preview.panBy(change.position - last)
-                                last = change.position
-                                change.consume()
-                            }
-                            PointerEventType.Release -> if (panning) {
-                                panning = false
-                                change.consume()
-                            }
-                        }
-                    }
-                }
-            }
-            .then(if (previewActive && controller.spaceHeld) Modifier.pointerHoverIcon(PointerIcon.Hand, overrideDescendants = true) else Modifier)
-            .testTag("ciacola-preview-viewport")
-            .semantics {
-                contentDescription = "Slide preview viewport"
-                stateDescription = if (preview.isIdentity) {
-                    "Fit to window"
-                } else {
-                    "Zoomed to ${(preview.scale * 100).roundToInt()} percent"
-                }
-            },
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    transformOrigin = TransformOrigin(0f, 0f)
-                    scaleX = if (previewActive) preview.scale else 1f
-                    scaleY = if (previewActive) preview.scale else 1f
-                    translationX = if (previewActive) preview.offset.x else 0f
-                    translationY = if (previewActive) preview.offset.y else 0f
-                },
-        ) {
-            CompositionLocalProvider(LocalInsideStagePreviewViewport provides true) {
-                content()
-            }
-        }
-        if (previewActive && !preview.isIdentity) {
-            CiacolaJewelTheme(isDark = isDark) {
-                val focusRingColor = rememberAccessibleFocusRingColor()
-                val pct = (preview.scale * 100).roundToInt()
-                Tooltip(tooltip = { Text("Reset preview zoom to fit (/)") }) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(10.dp)
-                            .background(JewelTheme.globalColors.panelBackground.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
-                            .studioActivatableFocus(focusRingColor, cornerRadius = 6.dp)
-                            .clickable { preview.reset() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                            .testTag("ciacola-preview-zoom-badge")
-                            .semantics {
-                                role = Role.Button
-                                contentDescription = "Reset preview zoom from $pct percent to fit"
-                            },
-                    ) {
-                        Text(
-                            text = "$pct% · click or / to fit",
-                            style = JewelTheme.typography.small,
-                            color = JewelTheme.globalColors.text.info,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Storyboard [EaselWindow] integrating the After Effects Timeline Studio both as a dockable
- * bottom studio pane inside the Story window (`F5`) and as a detachable standalone window (`F6`).
- */
-class TimelineStudioWindow(
-    val controller: TimelineStudioController,
+@Stable
+class DocumentTimelineWindow(
+    controller: DocumentTimelineController,
     var currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     var suppressShortcutsProvider: () -> Boolean = { false },
     var onReturnFocusToStage: (() -> Unit)? = null,
-    var trailingPane: (@Composable () -> Unit)? = null,
-    var inspectorSlot: (@Composable () -> Unit)? = null,
+    trailingPane: (@Composable () -> Unit)? = null,
     var leadingToolbarContent: (@Composable () -> Unit)? = null,
     var extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
     var extraMenuContent: (@Composable MenuScope.() -> Unit)? = null,
+    initialDocked: Boolean = false,
+    initialDetachedVisible: Boolean = false,
+    initialExpanded: Boolean = false,
+    /** Full-width ~36dp App Bar rendered at the very top of the Story window (above stage + inspector). */
+    topBarContent: (@Composable () -> Unit)? = null,
+    /** Leading content of the bottom dock header (e.g. a `Timeline | Issues` tab switcher). */
+    bottomDockHeaderLeading: (@Composable () -> Unit)? = null,
+    /** Trailing content of the bottom dock header when [alternateBottomContent] is active. */
+    bottomDockHeaderTrailing: (@Composable () -> Unit)? = null,
+    /** When non-null, the bottom dock shows this (e.g. Issues) instead of the timeline tracks. */
+    alternateBottomContent: (@Composable () -> Unit)? = null,
+    /** Full-window overlay drawn above all Studio chrome (e.g. the App Bar Theme sheet). */
+    fullWindowOverlayContent: (@Composable () -> Unit)? = null,
+    /** When `false` (e.g. Present mode), the slide renders full-bleed with zero Studio chrome. */
+    showStudioChrome: Boolean = true,
+    /** Called whenever the user drags or resets the stage/timeline split (persist it per deck). */
+    onSplitFractionChanged: ((Float) -> Unit)? = null,
 ) : EaselWindow {
+    /**
+     * When `true`, the window never pulls focus back to the stage (text input, or focus on Studio
+     * chrome rendered outside this decorator: App Bar, Theme sheet, Issues dock).
+     */
+    var suppressFocusRecoveryProvider: () -> Boolean = { suppressShortcutsProvider() }
+
+    /** Snapshot-backed so a deck switch (new controller / pane) always recomposes the window. */
+    var controller: DocumentTimelineController by mutableStateOf(controller)
+    var trailingPane: (@Composable () -> Unit)? by mutableStateOf(trailingPane)
+
     override val name: String = "Timeline"
     override val minimumSize: DpSize get() = DpSize(720.dp, 420.dp)
-    override var visible: Boolean
-        get() = controller.detachedWindowVisible
-        set(value) {
-            controller.detachedWindowVisible = value
-        }
+
+    /** Full-width ~36dp App Bar rendered at the very top of the Story window (above stage + inspector). */
+    var topBarContent: (@Composable () -> Unit)? by mutableStateOf(topBarContent)
+
+    /** Leading content of the bottom dock header (e.g. a `Timeline | Issues` tab switcher). */
+    var bottomDockHeaderLeading: (@Composable () -> Unit)? by mutableStateOf(bottomDockHeaderLeading)
+
+    /** Trailing content of the bottom dock header when [alternateBottomContent] is active. */
+    var bottomDockHeaderTrailing: (@Composable () -> Unit)? by mutableStateOf(bottomDockHeaderTrailing)
+
+    /** When non-null, the bottom dock shows this (e.g. Issues) while stage + inspector stay visible. */
+    var alternateBottomContent: (@Composable () -> Unit)? by mutableStateOf(alternateBottomContent)
+
+    /** Full-window overlay drawn above all Studio chrome (e.g. the App Bar Theme sheet). */
+    var fullWindowOverlayContent: (@Composable () -> Unit)? by mutableStateOf(fullWindowOverlayContent)
+
+    /** When `false` (e.g. Present mode), the slide renders full-bleed with zero Studio chrome. */
+    var showStudioChrome: Boolean by mutableStateOf(showStudioChrome)
+
+    /** Called whenever the user drags or resets the stage/timeline split (persist it per deck). */
+    var onSplitFractionChanged: ((Float) -> Unit)? = onSplitFractionChanged
+
+    var dockedInStoryWindow: Boolean by mutableStateOf(initialDocked)
+    var detachedWindowVisible: Boolean by mutableStateOf(initialDetachedVisible)
 
     /**
-     * Stage-space decorator that provides [LocalDeckLoopClock] and [LocalMotionPathPreviewState],
-     * and draws curved shared-element motion-path previews on the `1920x1080` slide canvas.
+     * Whether the docked timeline shows full tracks. Defaults to collapsed: only the compact
+     * transport bar + header band (~60dp) sit under the stage until the author expands it.
      */
-    val stageDecorator: ContentDecorator = ContentDecorator { content ->
-        val inner = remember(controller.loopClock, controller.overridesStore) {
-            createTimelineStageDecorator(
-                loopClock = controller.loopClock,
-                motionPathPreview = controller.motionPathPreview,
-                overridesStore = controller.overridesStore,
-                stageSelection = controller.stageSelection,
-            )
-        }
-        inner.decorate(content)
+    var timelineExpanded: Boolean by mutableStateOf(initialExpanded)
+
+    /** Stage share of the docked split when expanded (`0.66f` → timeline gets 34% of the height). */
+    var splitFraction: Float by mutableFloatStateOf(DEFAULT_TIMELINE_SPLIT_FRACTION)
+
+    fun toggleTimelineExpanded() {
+        timelineExpanded = !timelineExpanded
     }
+
+    private fun updateSplitFraction(value: Float) {
+        val clamped = value.coerceIn(MIN_SPLIT_FRACTION, MAX_SPLIT_FRACTION)
+        if (clamped == splitFraction) return
+        splitFraction = clamped
+        onSplitFractionChanged?.invoke(clamped)
+    }
+
+    override var visible: Boolean
+        get() = detachedWindowVisible
+        set(value) {
+            detachedWindowVisible = value
+        }
+
+    val authoringActive: Boolean
+        get() = dockedInStoryWindow || detachedWindowVisible
 
     override val decorator: ContentDecorator = ContentDecorator { content ->
         val scope = rememberCoroutineScope()
+        val fallbackFocusRequester = remember { FocusRequester() }
+        var subtreeHasFocus by remember { mutableStateOf(false) }
+        val overviewOpen = LocalOverviewOpen.current
+        val presentingFullscreen = LocalPresentingFullscreen.current
+        // Overview (Esc), fullscreen Present and chrome-less modes always get the whole window:
+        // never squeezed by the App Bar, the timeline or the right-hand inspector.
+        val hideChrome = overviewOpen || presentingFullscreen || !this@DocumentTimelineWindow.showStudioChrome
+
+        val suppressFocusRecovery = suppressFocusRecoveryProvider()
+        // Keyed on the suppression too: closing chrome that held focus (Theme sheet via Esc/F7)
+        // re-runs recovery and returns focus to the stage.
+        LaunchedEffect(hideChrome, subtreeHasFocus, overviewOpen, suppressFocusRecovery) {
+            if (!subtreeHasFocus && !overviewOpen && !suppressFocusRecoveryProvider()) {
+                withFrameNanos {}
+                if (!subtreeHasFocus && !overviewOpen && !suppressFocusRecoveryProvider()) {
+                    onReturnFocusToStage?.invoke()
+                    withFrameNanos {}
+                    if (!subtreeHasFocus && !suppressFocusRecoveryProvider()) {
+                        runCatching { fallbackFocusRequester.requestFocus() }
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onFocusChanged { subtreeHasFocus = it.hasFocus }
+                .focusRequester(fallbackFocusRequester)
+                .focusable(),
+        ) {
+            if (hideChrome) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .onPreviewKeyEvent { ev -> extraPreviewKeyHandler?.invoke(ev, scope) == true }
+                        .testTag("ciacola-preview-viewport"),
+                ) { content() }
+            } else {
+                StudioDecoratedContent(content)
+            }
+        }
+    }
+
+    @Composable
+    private fun StudioDecoratedContent(content: @Composable () -> Unit) {
+        val scope = rememberCoroutineScope()
         val isDark = currentPresetProvider() == DeckThemePreset.StageDark
-        var totalHeightPx by remember { mutableStateOf(720f) }
+        var totalHeightPx by remember { mutableFloatStateOf(720f) }
         val rootFocusRequester = remember { FocusRequester() }
         val focusManager = LocalFocusManager.current
         val studioFocusState = remember { StudioA11yFocusState() }
         var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
-        val hoistedPane = trailingPane ?: inspectorSlot
-        InstallSpaceResetOnWindowFocusLoss(controller)
-        LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
-            if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
-                runCatching { rootFocusRequester.requestFocus() }
-            }
+        val hoistedPane = trailingPane
+        val topBar = topBarContent
+        val overlay = fullWindowOverlayContent
+
+        LaunchedEffect(controller) {
+            snapshotFlow { listOf(rootHasFocus, controller.store.canUndo, controller.store.canRedo, suppressFocusRecoveryProvider()) }
+                .collect { state ->
+                    val hasFocus = state[0]
+                    if (rootHadFocus && !hasFocus && !suppressFocusRecoveryProvider()) {
+                        withFrameNanos { }
+                        if (rootHadFocus && !rootHasFocus && !suppressFocusRecoveryProvider()) {
+                            runCatching { rootFocusRequester.requestFocus() }
+                        }
+                    }
+                }
         }
-        var wasDocked by remember { mutableStateOf(controller.dockedInStoryWindow) }
-        LaunchedEffect(controller.dockedInStoryWindow) {
-            val nowDocked = controller.dockedInStoryWindow
+
+        var wasDocked by remember { mutableStateOf(dockedInStoryWindow) }
+        LaunchedEffect(dockedInStoryWindow) {
+            val nowDocked = dockedInStoryWindow
             if (wasDocked && !nowDocked) {
-                controller.spaceHeld = false
-                controller.spaceUsedForPan = false
                 withFrameNanos {}
                 val onReturn = onReturnFocusToStage
                 if (onReturn != null) {
@@ -537,138 +257,187 @@ class TimelineStudioWindow(
         }
 
         CompositionLocalProvider(LocalStudioA11yFocusState provides studioFocusState) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onSizeChanged { totalHeightPx = it.height.toFloat().coerceAtLeast(240f) }
-                    .onFocusChanged { state ->
-                        if (state.hasFocus) rootHadFocus = true
-                        rootHasFocus = state.hasFocus
-                    }
-                    .focusRequester(rootFocusRequester)
-                    .focusable()
-                    .onPreviewKeyEvent { ev ->
-                        if (extraPreviewKeyHandler?.invoke(ev, scope) == true) {
-                            true
-                        } else {
-                            controller.handleStudioKey(
-                                event = ev,
-                                scope = scope,
-                                suppressed = suppressShortcutsProvider(),
-                                focusState = studioFocusState,
-                            )
+            Box(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize()) {
+                    if (topBar != null) {
+                        CiacolaJewelTheme(isDark = isDark) {
+                            Box(Modifier.fillMaxWidth().testTag("ciacola-studio-top-bar-slot")) { topBar() }
                         }
-                    },
-            ) {
-                if (controller.dockedInStoryWindow) {
-                    Column(
+                    }
+                    Row(
                         modifier = Modifier
+                            .fillMaxWidth()
                             .weight(1f)
-                            .fillMaxHeight(),
+                            .onSizeChanged {
+                                totalHeightPx = it.height.toFloat().coerceAtLeast(240f)
+                                totalHeightPxForDrag = totalHeightPx
+                            }
+                            .onFocusChanged { state ->
+                                if (state.hasFocus) rootHadFocus = true
+                                rootHasFocus = state.hasFocus
+                            }
+                            .focusRequester(rootFocusRequester)
+                            .focusable()
+                            .onPreviewKeyEvent { ev ->
+                                if (extraPreviewKeyHandler?.invoke(ev, scope) == true) {
+                                    true
+                                } else if (authoringActive && !suppressShortcutsProvider()) {
+                                    controller.handleKeyEvent(ev, studioFocusState.textInputHasFocus)
+                                } else {
+                                    false
+                                }
+                            },
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(controller.splitFraction.coerceIn(0.28f, 0.78f)),
-                        ) {
-                            StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
-                                content()
+                        if (dockedInStoryWindow) {
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                DockedStageAndBottomDock(isDark, hoistedPane == null, content)
                             }
-                        }
-                        CiacolaJewelTheme(isDark = isDark) {
-                            val splitHoverSource = remember { MutableInteractionSource() }
-                            val splitHovered by splitHoverSource.collectIsHoveredAsState()
-                            val splitBg = if (splitHovered) {
-                                JewelTheme.globalColors.outlines.focused
-                            } else {
-                                JewelTheme.globalColors.borders.normal
+                            if (hoistedPane != null) {
+                                CiacolaJewelTheme(isDark = isDark) {
+                                    Row(modifier = Modifier.fillMaxHeight()) { hoistedPane() }
+                                }
                             }
-                            @OptIn(ExperimentalFoundationApi::class)
-                            Tooltip(tooltip = { Text("Drag to resize stage preview and Studio split (double-click to reset)") }) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(5.dp)
-                                        .background(splitBg)
-                                        .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR)))
-                                        .combinedClickable(
-                                            interactionSource = splitHoverSource,
-                                            indication = null,
-                                            onClick = {},
-                                            onDoubleClick = { controller.splitFraction = 0.54f },
-                                        )
-                                        .pointerInput(Unit) {
-                                            detectVerticalDragGestures { change, dragAmount ->
-                                                change.consume()
-                                                val deltaFrac = dragAmount / totalHeightPx
-                                                controller.splitFraction =
-                                                    (controller.splitFraction + deltaFrac).coerceIn(0.28f, 0.78f)
-                                            }
-                                        }
-                                        .testTag("ciacola-studio-horizontal-splitter"),
-                                )
+                        } else if (detachedWindowVisible && hoistedPane != null) {
+                            Box(Modifier.weight(1f).fillMaxHeight().testTag("ciacola-preview-viewport")) { content() }
+                            CiacolaJewelTheme(isDark = isDark) {
+                                Row(modifier = Modifier.fillMaxHeight()) { hoistedPane() }
                             }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight((1f - controller.splitFraction).coerceIn(0.22f, 0.72f)),
-                        ) {
-                            TimelineStudioPanel(
-                                controller = controller,
-                                isDark = isDark,
-                                surface = TimelineSurface.Docked,
-                                showBlockInspector = hoistedPane == null,
-                                inspectorSlot = null,
-                                leadingToolbarContent = leadingToolbarContent,
-                            )
+                        } else {
+                            Box(Modifier.fillMaxSize().testTag("ciacola-preview-viewport")) { content() }
                         }
                     }
-                    if (hoistedPane != null) {
-                        CiacolaJewelTheme(isDark = isDark) {
-                            Row(modifier = Modifier.fillMaxHeight()) {
-                                hoistedPane()
-                            }
-                        }
-                    }
-                } else if (controller.detachedWindowVisible && hoistedPane != null) {
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
-                            content()
-                        }
-                    }
+                }
+                if (overlay != null) {
                     CiacolaJewelTheme(isDark = isDark) {
-                        Row(modifier = Modifier.fillMaxHeight()) {
-                            hoistedPane()
-                        }
-                    }
-                } else {
-                    Box(Modifier.fillMaxSize()) {
-                        StagePreviewViewport(controller, enabled = controller.authoringActive, isDark = isDark) {
-                            content()
-                        }
+                        Box(Modifier.fillMaxSize().testTag("ciacola-studio-overlay-slot")) { overlay() }
                     }
                 }
             }
         }
     }
 
+    /** Docked (Edit) stage preview: a crisp 8dp inset against the App Bar, inspector and dock. */
+    @Composable
+    private fun EditStageInset(content: @Composable () -> Unit) {
+        Box(Modifier.fillMaxSize().padding(EDIT_STAGE_INSET).testTag("ciacola-edit-stage-inset")) { content() }
+    }
+
+    /** Stage on top; below it either the collapsed bar, the expanded timeline, or the alternate tab. */
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun ColumnScope.DockedStageAndBottomDock(
+        isDark: Boolean,
+        showInlineInspector: Boolean,
+        content: @Composable () -> Unit,
+    ) {
+        val alternate = alternateBottomContent
+        val dockLeading = bottomDockHeaderLeading
+        val showSplit = alternate != null || timelineExpanded
+        if (!showSplit) {
+            Box(Modifier.fillMaxWidth().weight(1f).testTag("ciacola-preview-viewport")) { EditStageInset(content) }
+            CiacolaJewelTheme(isDark = isDark) {
+                Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+                Box(Modifier.fillMaxWidth().testTag("ciacola-timeline-studio")) {
+                    DocumentTimelineCollapsedBar(
+                        controller = controller,
+                        surface = TimelineSurface.Docked,
+                        leadingToolbarContent = leadingToolbarContent,
+                        headerLeadingContent = dockLeading,
+                        onToggleExpanded = ::toggleTimelineExpanded,
+                    )
+                }
+            }
+            return
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(splitFraction.coerceIn(MIN_SPLIT_FRACTION, MAX_SPLIT_FRACTION))
+                .testTag("ciacola-preview-viewport"),
+        ) { EditStageInset(content) }
+        CiacolaJewelTheme(isDark = isDark) {
+            val splitHoverSource = remember { MutableInteractionSource() }
+            val splitHovered by splitHoverSource.collectIsHoveredAsState()
+            val splitBg = if (splitHovered) JewelTheme.globalColors.outlines.focused else JewelTheme.globalColors.borders.normal
+            Tooltip(tooltip = { Text("Drag to resize the stage and timeline (double-click to reset)") }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .background(splitBg)
+                        .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR)))
+                        .combinedClickable(
+                            interactionSource = splitHoverSource,
+                            indication = null,
+                            onClick = {},
+                            onDoubleClick = { updateSplitFraction(DEFAULT_TIMELINE_SPLIT_FRACTION) },
+                        )
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures { change, dragAmount ->
+                                change.consume()
+                                updateSplitFraction(splitFraction + dragAmount / totalHeightPxForDrag)
+                            }
+                        }
+                        .testTag("ciacola-studio-horizontal-splitter"),
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight((1f - splitFraction).coerceIn(1f - MAX_SPLIT_FRACTION, 1f - MIN_SPLIT_FRACTION))
+                .testTag(if (alternate != null) "ciacola-bottom-dock-alternate" else "ciacola-timeline-studio"),
+        ) {
+            CiacolaJewelTheme(isDark = isDark) {
+                if (alternate != null) {
+                    Column(Modifier.fillMaxSize().background(JewelTheme.globalColors.panelBackground)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(STUDIO_CONTROL_HEIGHT + 8.dp).padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (dockLeading != null) {
+                                Box(Modifier.testTag("ciacola-timeline-dock-header-leading")) { dockLeading() }
+                            }
+                            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                            val dockTrailing = bottomDockHeaderTrailing
+                            if (dockTrailing != null) {
+                                Box(Modifier.testTag("ciacola-timeline-dock-header-trailing")) { dockTrailing() }
+                            }
+                        }
+                        Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
+                        Box(Modifier.fillMaxWidth().weight(1f)) { alternate() }
+                    }
+                } else {
+                    DocumentTimelineStudioPanel(
+                        controller = controller,
+                        surface = TimelineSurface.Docked,
+                        showInlineInspector = showInlineInspector,
+                        leadingToolbarContent = leadingToolbarContent,
+                        headerLeadingContent = dockLeading,
+                        onToggleExpanded = ::toggleTimelineExpanded,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Height of the docked column, used to convert splitter drags into split fractions. */
+    private var totalHeightPxForDrag: Float = 720f
+
     @Composable
     override fun MenuScope.Menu() {
-        val scope = rememberCoroutineScope()
-        // No accelerators: F5 and F6 are handled by onPreviewKeyEvent, and Swing menu
-        // accelerators would fire in addition to them and double-toggle visibility.
         CheckboxItem(
-            text = "Dock Timeline Studio in Story Window (F5)",
-            checked = controller.dockedInStoryWindow,
+            text = "Dock Timeline in Story Window (F5)",
+            checked = dockedInStoryWindow,
         ) {
-            controller.dockedInStoryWindow = it
+            dockedInStoryWindow = it
+            if (it) detachedWindowVisible = false
         }
         CheckboxItem(
             text = "Show Detached Timeline Window (F6)",
             checked = visible,
         ) {
-            if (it) controller.dockedInStoryWindow = false
+            if (it) dockedInStoryWindow = false
             visible = it
         }
         val extraMenu = extraMenuContent
@@ -677,16 +446,7 @@ class TimelineStudioWindow(
             extraMenu()
         }
         Separator()
-        Item(
-            text = if (controller.isPlaying) "Pause Timeline" else "Play Timeline",
-            onClick = { controller.togglePlayback(scope) },
-        )
-        Item(
-            text = "Insert Event Keyframe (+ Beat)",
-            onClick = { controller.insertEventBeatAtPlayhead() },
-        )
         Item(text = "Zoom Timeline to Fit", onClick = { controller.viewport.zoomToFit() })
-        Item(text = "Fit Preview", onClick = { controller.preview.reset() })
     }
 
     @Composable
@@ -697,17 +457,22 @@ class TimelineStudioWindow(
         val studioFocusState = remember { StudioA11yFocusState() }
         var rootHadFocus by remember { mutableStateOf(false) }
         var rootHasFocus by remember { mutableStateOf(false) }
-        val hoistedPane = trailingPane ?: inspectorSlot
-        InstallSpaceResetOnWindowFocusLoss(controller)
+        val hoistedPane = trailingPane
         LaunchedEffect(Unit) {
             if (!suppressShortcutsProvider()) {
                 runCatching { rootFocusRequester.requestFocus() }
             }
         }
-        LaunchedEffect(rootHasFocus, controller.overridesStore.canUndo, controller.overridesStore.canRedo) {
-            if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
-                runCatching { rootFocusRequester.requestFocus() }
-            }
+        LaunchedEffect(controller) {
+            snapshotFlow { Triple(rootHasFocus, controller.store.canUndo, controller.store.canRedo) }
+                .collect { (hasFocus, _, _) ->
+                    if (rootHadFocus && !hasFocus && !suppressShortcutsProvider()) {
+                        withFrameNanos { }
+                        if (rootHadFocus && !rootHasFocus && !suppressShortcutsProvider()) {
+                            runCatching { rootFocusRequester.requestFocus() }
+                        }
+                    }
+                }
         }
         CompositionLocalProvider(LocalStudioA11yFocusState provides studioFocusState) {
             Box(
@@ -722,58 +487,72 @@ class TimelineStudioWindow(
                     .onPreviewKeyEvent { ev ->
                         if (extraPreviewKeyHandler?.invoke(ev, scope) == true) {
                             true
+                        } else if (!suppressShortcutsProvider()) {
+                            controller.handleKeyEvent(ev, studioFocusState.textInputHasFocus)
                         } else {
-                            controller.handleStudioKey(
-                                event = ev,
-                                scope = scope,
-                                suppressed = suppressShortcutsProvider(),
-                                focusState = studioFocusState,
-                            )
+                            false
                         }
-                    },
+                    }
+                    .testTag("ciacola-timeline-studio"),
             ) {
-                TimelineStudioPanel(
-                    controller = controller,
-                    isDark = isDark,
-                    surface = TimelineSurface.Detached,
-                    showBlockInspector = hoistedPane == null,
-                    inspectorSlot = null,
-                    leadingToolbarContent = leadingToolbarContent,
-                )
+                CiacolaJewelTheme(isDark = isDark) {
+                    DocumentTimelineStudioPanel(
+                        controller = controller,
+                        surface = TimelineSurface.Detached,
+                        showInlineInspector = hoistedPane == null,
+                        leadingToolbarContent = leadingToolbarContent,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun rememberTimelineStudioWindow(
-    controller: TimelineStudioController,
+fun rememberDocumentTimelineWindow(
+    controller: DocumentTimelineController,
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     suppressShortcutsProvider: () -> Boolean = { false },
     onReturnFocusToStage: (() -> Unit)? = null,
     trailingPane: (@Composable () -> Unit)? = null,
-    inspectorSlot: (@Composable () -> Unit)? = null,
     leadingToolbarContent: (@Composable () -> Unit)? = null,
     extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
     extraMenuContent: (@Composable MenuScope.() -> Unit)? = null,
-): TimelineStudioWindow = remember(controller) {
-    TimelineStudioWindow(
+    initialDocked: Boolean = false,
+    initialExpanded: Boolean = false,
+    topBarContent: (@Composable () -> Unit)? = null,
+    bottomDockHeaderLeading: (@Composable () -> Unit)? = null,
+    bottomDockHeaderTrailing: (@Composable () -> Unit)? = null,
+    alternateBottomContent: (@Composable () -> Unit)? = null,
+    fullWindowOverlayContent: (@Composable () -> Unit)? = null,
+    showStudioChrome: Boolean = true,
+    onSplitFractionChanged: ((Float) -> Unit)? = null,
+): DocumentTimelineWindow = remember {
+    DocumentTimelineWindow(
         controller = controller,
         currentPresetProvider = currentPresetProvider,
         suppressShortcutsProvider = suppressShortcutsProvider,
         onReturnFocusToStage = onReturnFocusToStage,
         trailingPane = trailingPane,
-        inspectorSlot = inspectorSlot,
         leadingToolbarContent = leadingToolbarContent,
         extraPreviewKeyHandler = extraPreviewKeyHandler,
         extraMenuContent = extraMenuContent,
+        initialDocked = initialDocked,
+        initialExpanded = initialExpanded,
     )
 }.also {
+    it.topBarContent = topBarContent
+    it.bottomDockHeaderLeading = bottomDockHeaderLeading
+    it.bottomDockHeaderTrailing = bottomDockHeaderTrailing
+    it.alternateBottomContent = alternateBottomContent
+    it.fullWindowOverlayContent = fullWindowOverlayContent
+    it.showStudioChrome = showStudioChrome
+    it.onSplitFractionChanged = onSplitFractionChanged
+    it.controller = controller
     it.currentPresetProvider = currentPresetProvider
     it.suppressShortcutsProvider = suppressShortcutsProvider
     it.onReturnFocusToStage = onReturnFocusToStage
     it.trailingPane = trailingPane
-    it.inspectorSlot = inspectorSlot
     it.leadingToolbarContent = leadingToolbarContent
     it.extraPreviewKeyHandler = extraPreviewKeyHandler
     it.extraMenuContent = extraMenuContent

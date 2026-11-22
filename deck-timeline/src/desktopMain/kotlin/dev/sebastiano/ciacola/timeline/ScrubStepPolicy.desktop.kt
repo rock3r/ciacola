@@ -61,9 +61,11 @@ data class ScrubStepDecision(
     val reversedWithinSegment: Boolean,
 )
 
+fun scrubStepIsInPlace(activeFrom: Int, activeTo: Int, stateIndex: Int, fraction: Float): Boolean =
+    fraction > 0f && fraction < 1f && activeFrom == stateIndex && activeTo == stateIndex + 1
+
 /**
- * Pure scrub-step policy shared by [TimelineStudioController.runScrubWorker] and
- * `ScrubPathIndependenceTest`.
+ * Pure scrub-step policy governing in-segment and intra-slide seeking vs scene rebuilds.
  *
  * While dragging:
  * - Staying strictly inside the active segment (`sameSegmentInPlace`) seeks in place.

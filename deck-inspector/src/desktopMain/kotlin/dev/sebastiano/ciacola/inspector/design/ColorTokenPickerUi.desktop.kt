@@ -100,7 +100,7 @@ fun ColorTokenRow(
         modifier = modifier
             .fillMaxWidth()
             .background(
-                color = if (expanded) globalColors.toolwindowBackground else Color.Transparent,
+                color = if (expanded) globalColors.panelBackground else Color.Transparent,
                 shape = rowShape,
             )
             .then(

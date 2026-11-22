@@ -17,7 +17,7 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -97,7 +97,7 @@ class ReviewPolishAndPositioningTest {
 
         setContent {
             val coordinator = rememberReviewStageCoordinator()
-            val deck = createFoundationDeck(includeKeynoteEffectsLab = false, stageDecorator = coordinator.stageDecorator)
+            val deck = buildFoundationTestStoryboard(stageDecorator = coordinator.stageDecorator)
             val animatic = rememberAnimatic(storyboard = { deck })
             val reviewWindow = rememberSlideReviewWindow(
                 animatic = animatic,

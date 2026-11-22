@@ -46,9 +46,12 @@ class SlideReviewWindow(
     initialAnimatic: Animatic,
     val store: ReviewCommentStore,
     val stageCoordinator: ReviewStageCoordinator,
-    val currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
-    val timelineDockedProvider: () -> Boolean = { false },
-    val onToggleTimeline: (() -> Unit)? = null,
+    var currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
+    var timelineDockedProvider: () -> Boolean = { false },
+    var onToggleTimeline: (() -> Unit)? = null,
+    var deckIdProvider: () -> String? = { null },
+    var deckFilePathProvider: () -> String? = { null },
+    var slideIdProvider: ((sceneIndex: Int) -> String?)? = null,
 ) : EaselWindow {
     var animatic: Animatic by mutableStateOf(initialAnimatic)
         internal set
@@ -141,6 +144,9 @@ fun rememberSlideReviewWindow(
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     timelineDockedProvider: () -> Boolean = { false },
     onToggleTimeline: (() -> Unit)? = null,
+    deckIdProvider: () -> String? = { null },
+    deckFilePathProvider: () -> String? = { null },
+    slideIdProvider: ((sceneIndex: Int) -> String?)? = null,
 ): SlideReviewWindow = remember(store, stageCoordinator) {
     SlideReviewWindow(
         initialAnimatic = animatic,
@@ -149,9 +155,18 @@ fun rememberSlideReviewWindow(
         currentPresetProvider = currentPresetProvider,
         timelineDockedProvider = timelineDockedProvider,
         onToggleTimeline = onToggleTimeline,
+        deckIdProvider = deckIdProvider,
+        deckFilePathProvider = deckFilePathProvider,
+        slideIdProvider = slideIdProvider,
     )
 }.also {
     it.animatic = animatic
+    it.currentPresetProvider = currentPresetProvider
+    it.timelineDockedProvider = timelineDockedProvider
+    it.onToggleTimeline = onToggleTimeline
+    it.deckIdProvider = deckIdProvider
+    it.deckFilePathProvider = deckFilePathProvider
+    it.slideIdProvider = slideIdProvider
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -385,6 +400,9 @@ private fun ReviewOuterWindowOverlay(
                         noteState = composerNoteState,
                         draftRestored = draftWasRestored,
                         restoredFromTarget = restoredFromTarget,
+                        deckId = windowController.deckIdProvider(),
+                        deckFilePath = windowController.deckFilePathProvider(),
+                        slideId = windowController.slideIdProvider?.invoke(pending.sceneIndex),
                         onClearDraft = {
                             draftWasRestored = false
                             restoredFromTarget = null
@@ -445,6 +463,9 @@ private fun ReviewOuterWindowOverlay(
                         onConfigureAgent = {
                             coordinator.dismissActivePopups(fromEscapeKey = false)
                             windowController.openForAgentConfiguration()
+                        },
+                        onCopyPrompt = {
+                            store.copyPromptToClipboard(listOf(activePinComment))
                         },
                     )
                 }

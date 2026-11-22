@@ -3,7 +3,6 @@ package dev.sebastiano.ciacola.inspector.lint
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import dev.sebastiano.ciacola.inspector.ElementPatch
 
 const val STAGE_WIDTH_PX = 1920f
 const val STAGE_HEIGHT_PX = 1080f
@@ -56,7 +55,8 @@ enum class LintSeverityFilter {
 data class LintQuickFix(
     val label: String,
     val tooltip: String,
-    val patch: ElementPatch? = null,
+    val suggestedFontSizeSp: Float? = null,
+    val suggestedTextColorHex: String? = null,
     val opensElementEditor: Boolean = false,
     val opensThemeEditor: Boolean = false,
 )

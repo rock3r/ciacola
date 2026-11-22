@@ -46,6 +46,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import dev.sebastiano.ciacola.document.Curve
+import dev.sebastiano.ciacola.document.CurveEvaluator
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.util.Locale
 import kotlin.math.hypot
@@ -59,7 +61,9 @@ import org.jetbrains.jewel.ui.component.Dropdown
 import org.jetbrains.jewel.ui.component.GroupHeader
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.IconButton
+import org.jetbrains.jewel.ui.component.InfoText
 import org.jetbrains.jewel.ui.component.OutlinedButton
+import org.jetbrains.jewel.ui.component.Slider
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.TextField
 import org.jetbrains.jewel.ui.component.Tooltip
@@ -67,522 +71,441 @@ import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
 import org.jetbrains.jewel.ui.typography
 
-internal data class CurvePresetDefinition(
+internal data class DocumentCurvePreset(
     val id: String,
     val displayName: String,
     val tooltip: String,
-    val spec: TimelineCurveSpec,
+    val curve: Curve,
 )
 
-internal val TIMELINE_CURVE_PRESETS: List<CurvePresetDefinition> = listOf(
-    CurvePresetDefinition(
-        id = "Ease",
+internal val DOCUMENT_CURVE_PRESETS: List<DocumentCurvePreset> = listOf(
+    DocumentCurvePreset(
+        id = "ease",
         displayName = "Ease",
-        tooltip = "Keynote Ease (0.25, 0.10, 0.25, 1.00)",
-        spec = TimelineCurveSpec("KeynoteEase", 0.25f, 0.10f, 0.25f, 1.00f, isSpring = false),
+        tooltip = "Standard Ease (0.25, 0.10, 0.25, 1.00)",
+        curve = Curve.Preset("ease"),
     ),
-    CurvePresetDefinition(
-        id = "EaseIn",
-        displayName = "EaseIn",
+    DocumentCurvePreset(
+        id = "easeIn",
+        displayName = "Ease in",
         tooltip = "Accelerating entrance (0.42, 0.00, 1.00, 1.00)",
-        spec = TimelineCurveSpec("EaseIn", 0.42f, 0.00f, 1.00f, 1.00f, isSpring = false),
+        curve = Curve.Preset("easeIn"),
     ),
-    CurvePresetDefinition(
-        id = "EaseOut",
-        displayName = "EaseOut",
+    DocumentCurvePreset(
+        id = "easeOut",
+        displayName = "Ease out",
         tooltip = "Decelerating settle (0.00, 0.00, 0.58, 1.00)",
-        spec = TimelineCurveSpec("EaseOut", 0.00f, 0.00f, 0.58f, 1.00f, isSpring = false),
+        curve = Curve.Preset("easeOut"),
     ),
-    CurvePresetDefinition(
-        id = "EaseInOut",
-        displayName = "EaseInOut",
+    DocumentCurvePreset(
+        id = "easeInOut",
+        displayName = "Ease in-out",
         tooltip = "Symmetric S-curve (0.42, 0.00, 0.58, 1.00)",
-        spec = TimelineCurveSpec("EaseInOut", 0.42f, 0.00f, 0.58f, 1.00f, isSpring = false),
+        curve = Curve.Preset("easeInOut"),
     ),
-    CurvePresetDefinition(
-        id = "FastOutSlowIn",
-        displayName = "FastOutSlowIn",
+    DocumentCurvePreset(
+        id = "fastOutSlowIn",
+        displayName = "Standard",
         tooltip = "Material FastOutSlowIn (0.40, 0.00, 0.20, 1.00)",
-        spec = TimelineCurveSpec("FastOutSlowIn", 0.40f, 0.00f, 0.20f, 1.00f, isSpring = false),
+        curve = Curve.Preset("fastOutSlowIn"),
     ),
-    CurvePresetDefinition(
-        id = "Anticipate",
-        displayName = "Anticipate",
-        tooltip = "Pullback anticipation (0.36, -0.35, 0.66, 1.00)",
-        spec = TimelineCurveSpec("Anticipate", 0.36f, -0.35f, 0.66f, 1.00f, isSpring = false),
+    DocumentCurvePreset(
+        id = "keynote.magicMove",
+        displayName = "Keynote · Magic move",
+        tooltip = "Keynote Magic Move (0.40, 0.00, 0.20, 1.00)",
+        curve = Curve.Preset("keynote.magicMove"),
     ),
-    CurvePresetDefinition(
-        id = "Pop",
-        displayName = "Pop",
-        tooltip = "Pop overshoot curve (0.20, 1.25, 0.35, 1.00)",
-        spec = TimelineCurveSpec("Overshoot", 0.20f, 1.25f, 0.35f, 1.00f, isSpring = false),
+    DocumentCurvePreset(
+        id = "keynote.pop",
+        displayName = "Keynote · Pop",
+        tooltip = "Keynote Pop overshoot (0.17, 1.32, 0.32, 1.00)",
+        curve = Curve.Preset("keynote.pop"),
     ),
-    CurvePresetDefinition(
-        id = "Linear",
+    DocumentCurvePreset(
+        id = "linear",
         displayName = "Linear",
         tooltip = "Linear constant speed (0.00, 0.00, 1.00, 1.00)",
-        spec = TimelineCurveSpec("Linear", 0.00f, 0.00f, 1.00f, 1.00f, isSpring = false),
+        curve = Curve.Preset("linear"),
     ),
-    CurvePresetDefinition(
-        id = "Spring",
+    DocumentCurvePreset(
+        id = "spring",
         displayName = "Spring",
-        tooltip = "Spring physics interpolation",
-        spec = TimelineCurveSpec("Spring", isSpring = true),
+        tooltip = "Analytical spring physics interpolation",
+        curve = Curve.Spring(damping = 0.72, stiffness = 380.0),
     ),
 )
 
-internal fun formatCurveAsKotlin(curve: TimelineCurveSpec): String =
-    if (curve.isSpring) {
-        val damping = "%.2f".format(Locale.US, curve.dampingRatio.coerceIn(0.20f, 1.50f))
-        val stiffness = curve.stiffness.coerceIn(50f, 4_000f).roundToInt()
-        "spring(dampingRatio = ${damping}f, stiffness = ${stiffness}f)"
-    } else {
-        val x1 = "%.2f".format(Locale.US, curve.x1.coerceIn(0f, 1f))
-        val y1 = "%.2f".format(Locale.US, curve.y1.coerceIn(-0.6f, 1.6f))
-        val x2 = "%.2f".format(Locale.US, curve.x2.coerceIn(0f, 1f))
-        val y2 = "%.2f".format(Locale.US, curve.y2.coerceIn(-0.6f, 1.6f))
-        "CubicBezierEasing(${x1}f, ${y1}f, ${x2}f, ${y2}f)"
-    }
-
-private fun displayNameForCurve(curve: TimelineCurveSpec): String {
-    if (curve.isSpring) return "Spring"
-    return TIMELINE_CURVE_PRESETS.firstOrNull { !it.spec.isSpring && it.spec.preset == curve.preset }?.displayName
-        ?: curve.preset
+internal fun resolveBezierCoordinates(curve: Curve): Curve.Bezier = when (curve) {
+    is Curve.Bezier -> curve
+    is Curve.Preset -> CurveEvaluator.PRESET_BEZIERS[curve.name] ?: Curve.Bezier(0.42, 0.0, 0.58, 1.0)
+    is Curve.Spring -> Curve.Bezier(0.42, 0.0, 0.58, 1.0)
 }
 
+internal fun formatDocumentCurveAsKotlin(curve: Curve): String = when (curve) {
+    is Curve.Spring -> {
+        val damping = "%.2f".format(Locale.US, curve.damping.coerceIn(CurveEvaluator.SPRING_MIN_DAMPING, CurveEvaluator.SPRING_MAX_DAMPING))
+        val stiffness = curve.stiffness.coerceIn(CurveEvaluator.SPRING_MIN_STIFFNESS, CurveEvaluator.SPRING_MAX_STIFFNESS).roundToInt()
+        "spring(dampingRatio = ${damping}f, stiffness = ${stiffness}f)"
+    }
+    else -> {
+        val bez = resolveBezierCoordinates(curve)
+        val x1 = "%.2f".format(Locale.US, bez.x1.coerceIn(0.0, 1.0))
+        val y1 = "%.2f".format(Locale.US, bez.y1.coerceIn(-0.6, 1.6))
+        val x2 = "%.2f".format(Locale.US, bez.x2.coerceIn(0.0, 1.0))
+        val y2 = "%.2f".format(Locale.US, bez.y2.coerceIn(-0.6, 1.6))
+        "CubicBezierEasing(${x1}f, ${y1}f, ${x2}f, ${y2}f)"
+    }
+}
+
+private fun displayNameForDocumentCurve(curve: Curve): String = TimelineDisplayNames.curveName(curve)
+
+/**
+ * Interactive Cubic-Bezier & Spring Curve Editor wired directly to [DeckDocumentStore] via
+ * explicit gesture transactions (`beginGesture` / `commitActiveGesture` / `cancelActiveGesture`).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TimeInterpolationInspectorSection(
-    controller: TimelineStudioController,
-    trackId: String,
-    currentOverride: TrackOverride,
+fun DocumentTimelineCurveEditor(
+    targetKey: String,
+    curve: Curve,
+    onBeginGesture: () -> Unit,
+    onCommitGesture: () -> Unit,
+    onCancelGesture: () -> Unit,
+    onCurveChanged: (curve: Curve, inGesture: Boolean) -> Unit,
+    clipboardWriter: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     val globalColors = JewelTheme.globalColors
     val focusRingColor = rememberAccessibleFocusRingColor()
     val scope = rememberCoroutineScope()
-    val curve = currentOverride.curve ?: TimelineCurveSpec()
-    var copiedFlash by remember(trackId) { mutableStateOf(false) }
+    var copiedFlash by remember(targetKey) { mutableStateOf(false) }
     var flashJob by remember { mutableStateOf<Job?>(null) }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("ciacola-curve-editor"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        GroupHeader(
-            text = if (currentOverride.curve != null) "● Time interpolation:" else "Time interpolation:",
-            modifier = Modifier.weight(1f),
-        )
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (copiedFlash) {
-                Text(
-                    text = "Copied!",
-                    style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
-                    modifier = Modifier.testTag("ciacola-inspector-copy-curve-feedback"),
-                )
-            }
-            Tooltip(tooltip = { Text(if (copiedFlash) "Copied!" else "Copy Curve Kotlin") }) {
-                IconButton(
-                    onClick = {
-                        controller.clipboardWriter(formatCurveAsKotlin(curve))
-                        copiedFlash = true
-                        flashJob?.cancel()
-                        flashJob = scope.launch {
-                            delay(1_800L)
-                            copiedFlash = false
-                        }
-                    },
-                    modifier = Modifier
-                        .size(22.dp)
-                        .studioActivatableFocus(focusRingColor)
-                        .testTag("ciacola-inspector-copy-curve"),
-                ) {
-                    Icon(
-                        key = AllIconsKeys.Actions.Copy,
-                        contentDescription = "Copy Curve Kotlin",
-                        modifier = Modifier.size(13.dp),
+            Text(
+                text = "Shape",
+                style = studioLabelStyle(),
+                color = globalColors.text.normal,
+                modifier = Modifier.weight(1f),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (copiedFlash) {
+                    Text(
+                        text = "Copied!",
+                        style = JewelTheme.typography.small,
+                        color = globalColors.text.info,
+                        modifier = Modifier.testTag("ciacola-inspector-copy-curve-feedback"),
                     )
                 }
-            }
-        }
-    }
-
-    val primaryIds = remember { listOf("Ease", "Linear", "Pop", "Spring") }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        for (id in primaryIds) {
-            val preset = TIMELINE_CURVE_PRESETS.first { it.id == id }
-            val isSelected = if (preset.spec.isSpring) {
-                curve.isSpring
-            } else {
-                !curve.isSpring && curve.preset == preset.spec.preset
-            }
-            CurvePresetButton(
-                label = preset.displayName,
-                tooltip = preset.tooltip,
-                selected = isSelected,
-                modifier = Modifier.weight(1f),
-            ) {
-                val next = if (preset.spec.isSpring) {
-                    curve.copy(preset = "Spring", isSpring = true)
-                } else {
-                    preset.spec
-                }
-                controller.overridesStore.updateTrack(trackId) { it.copy(curve = next) }
-            }
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Preset",
-            style = JewelTheme.typography.small,
-            color = globalColors.text.info,
-        )
-        Dropdown(
-            modifier = Modifier
-                .width(176.dp)
-                .studioActivatableFocus(focusRingColor)
-                .testTag("ciacola-inspector-curve-preset-dropdown"),
-            menuContent = {
-                for (preset in TIMELINE_CURVE_PRESETS) {
-                    val isSelected = if (preset.spec.isSpring) {
-                        curve.isSpring
-                    } else {
-                        !curve.isSpring && curve.preset == preset.spec.preset
-                    }
-                    selectableItem(
-                        selected = isSelected,
+                Tooltip(tooltip = { Text(if (copiedFlash) "Copied!" else "Copy Curve Kotlin") }) {
+                    IconButton(
                         onClick = {
-                            val next = if (preset.spec.isSpring) {
-                                curve.copy(preset = "Spring", isSpring = true)
-                            } else {
-                                preset.spec
+                            clipboardWriter(formatDocumentCurveAsKotlin(curve))
+                            copiedFlash = true
+                            flashJob?.cancel()
+                            flashJob = scope.launch {
+                                delay(1_800L)
+                                copiedFlash = false
                             }
-                            controller.overridesStore.updateTrack(trackId) { it.copy(curve = next) }
                         },
+                        modifier = Modifier
+                            .size(22.dp)
+                            .studioActivatableFocus(focusRingColor)
+                            .testTag("ciacola-inspector-copy-curve"),
                     ) {
-                        Text(preset.displayName, style = JewelTheme.typography.small)
+                        Icon(
+                            key = AllIconsKeys.Actions.Copy,
+                            contentDescription = "Copy Curve Kotlin",
+                            modifier = Modifier.size(13.dp),
+                        )
                     }
                 }
-            },
+            }
+        }
+
+        val quickIds = remember { listOf("easeInOut", "linear", "keynote.pop", "spring") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for (id in quickIds) {
+                val preset = DOCUMENT_CURVE_PRESETS.first { it.id == id }
+                val isSelected = when {
+                    preset.curve is Curve.Spring -> curve is Curve.Spring
+                    curve is Curve.Preset -> curve.name == id
+                    else -> false
+                }
+                CurveQuickButton(
+                    label = when (id) { "easeInOut" -> "Ease"; "keynote.pop" -> "Pop"; else -> preset.displayName },
+                    tooltip = preset.tooltip,
+                    selected = isSelected,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    onCurveChanged(preset.curve, false)
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = displayNameForCurve(curve),
-                style = JewelTheme.typography.small,
-                maxLines = 1,
+                text = "Preset",
+                style = studioLabelStyle(),
+                color = globalColors.text.normal,
+            )
+            Dropdown(
+                modifier = Modifier
+                    .width(172.dp)
+                    .studioActivatableFocus(focusRingColor)
+                    .testTag("ciacola-inspector-curve-preset-dropdown"),
+                menuContent = {
+                    for (preset in DOCUMENT_CURVE_PRESETS) {
+                        val isSelected = when {
+                            preset.curve is Curve.Spring -> curve is Curve.Spring
+                            curve is Curve.Preset -> curve.name == preset.id
+                            else -> false
+                        }
+                        selectableItem(
+                            selected = isSelected,
+                            onClick = { onCurveChanged(preset.curve, false) },
+                        ) {
+                            Text(preset.displayName, style = JewelTheme.typography.small)
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    text = displayNameForDocumentCurve(curve),
+                    style = JewelTheme.typography.small,
+                    maxLines = 1,
+                )
+            }
+        }
+
+        if (curve is Curve.Spring) {
+            SpringCurveCanvasPreview(curve = curve)
+            DocumentSpringCurveControls(
+                targetKey = targetKey,
+                curve = curve,
+                onBeginGesture = onBeginGesture,
+                onCommitGesture = onCommitGesture,
+                onCurveChanged = onCurveChanged,
+            )
+        } else {
+            val bezier = resolveBezierCoordinates(curve)
+            DocumentBezierCurveCanvas(
+                targetKey = targetKey,
+                bezier = bezier,
+                label = displayNameForDocumentCurve(curve),
+                onBeginGesture = onBeginGesture,
+                onCommitGesture = onCommitGesture,
+                onCancelGesture = onCancelGesture,
+                onBezierChanged = { updated -> onCurveChanged(updated, true) },
+            )
+            DocumentBezierNumericInputsRow(
+                bezier = bezier,
+                onBezierCommitted = { updated -> onCurveChanged(updated, false) },
             )
         }
     }
+}
 
-    if (curve.isSpring) {
-        SpringCurveControls(
-            controller = controller,
-            trackId = trackId,
-            curve = curve,
-        )
-    } else {
-        BezierCurveEditorBox(
-            curve = curve,
-            onGestureStart = { controller.overridesStore.beginEditGesture() },
-            onGestureEnd = { controller.overridesStore.endEditGesture() },
-            onCurveChanged = { updatedCurve ->
-                controller.overridesStore.updateTrack(trackId, coalesce = true) {
-                    it.copy(curve = updatedCurve)
-                }
-            },
-        )
-        BezierNumericInputsRow(
-            curve = curve,
-            onCurveChanged = { updatedCurve ->
-                controller.overridesStore.updateTrack(trackId) {
-                    it.copy(curve = updatedCurve)
-                }
-            },
-        )
+@Composable
+private fun SpringCurveCanvasPreview(curve: Curve.Spring) {
+    val globalColors = JewelTheme.globalColors
+    val palette = JewelTheme.colorPalette
+    val isDark = JewelTheme.isDark
+    val lineColor = palette.tealOrNull(if (isDark) 6 else 5) ?: Color(0xFF35B5AC)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(84.dp)
+            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(6.dp))
+            .padding(8.dp),
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(68.dp)
+                .testTag("ciacola-spring-curve-preview"),
+        ) {
+            val w = size.width.coerceAtLeast(1f)
+            val h = size.height.coerceAtLeast(1f)
+            val yZero = h * 0.85f
+            val yOne = h * 0.22f
+            val spanY = yZero - yOne
+
+            drawLine(globalColors.borders.normal.copy(alpha = 0.45f), Offset(0f, yOne), Offset(w, yOne), strokeWidth = 1f)
+            drawLine(globalColors.borders.normal.copy(alpha = 0.35f), Offset(0f, yZero), Offset(w, yZero), strokeWidth = 1f)
+
+            val path = Path()
+            val samples = 64
+            for (i in 0..samples) {
+                val frac = i.toFloat() / samples.toFloat()
+                val v = CurveEvaluator.evaluateFraction(curve, frac)
+                val px = frac * w
+                val py = (yZero - v * spanY).coerceIn(0f, h)
+                if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+            }
+            drawPath(path, color = lineColor, style = Stroke(width = 2.2f))
+        }
     }
 }
 
 @Composable
-private fun SpringCurveControls(
-    controller: TimelineStudioController,
-    trackId: String,
-    curve: TimelineCurveSpec,
+private fun DocumentSpringCurveControls(
+    targetKey: String,
+    curve: Curve.Spring,
+    onBeginGesture: () -> Unit,
+    onCommitGesture: () -> Unit,
+    onCurveChanged: (Curve, Boolean) -> Unit,
 ) {
-    val clampedDamping = curve.dampingRatio.coerceIn(0.20f, 1.50f)
-    val clampedStiffness = curve.stiffness.coerceIn(50f, 4_000f)
-    NumericStepperRow(
-        label = "Damping",
-        valueText = "%.2f".format(Locale.US, clampedDamping),
-        decTag = "ciacola-inspector-damping-dec",
-        incTag = "ciacola-inspector-damping-inc",
-        onDec = {
-            val next = ((clampedDamping - 0.05f) * 100f).roundToInt() / 100f
-            controller.overridesStore.updateTrack(trackId) {
-                it.copy(curve = curve.copy(isSpring = true, dampingRatio = next.coerceIn(0.20f, 1.50f)))
-            }
-        },
-        onInc = {
-            val next = ((clampedDamping + 0.05f) * 100f).roundToInt() / 100f
-            controller.overridesStore.updateTrack(trackId) {
-                it.copy(curve = curve.copy(isSpring = true, dampingRatio = next.coerceIn(0.20f, 1.50f)))
-            }
-        },
-    )
-    TimelineSlider(
-        value = clampedDamping,
-        valueRange = 0.20f..1.50f,
-        gestureKey = "damping:$trackId",
-        onGestureStart = { controller.overridesStore.beginEditGesture() },
-        onGestureEnd = { controller.overridesStore.endEditGesture() },
-        onValueChange = { next ->
-            controller.overridesStore.updateTrack(trackId, coalesce = true) {
-                val baseCurve = it.curve ?: curve
-                it.copy(curve = baseCurve.copy(isSpring = true, dampingRatio = next.coerceIn(0.20f, 1.50f)))
-            }
-        },
-        modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-damping-slider"),
-    )
-    NumericStepperRow(
-        label = "Stiffness",
-        valueText = "${clampedStiffness.roundToInt()}",
-        decTag = "ciacola-inspector-stiffness-dec",
-        incTag = "ciacola-inspector-stiffness-inc",
-        onDec = {
-            controller.overridesStore.updateTrack(trackId) {
-                it.copy(curve = curve.copy(isSpring = true, stiffness = (clampedStiffness - 100f).coerceIn(50f, 4_000f)))
-            }
-        },
-        onInc = {
-            controller.overridesStore.updateTrack(trackId) {
-                it.copy(curve = curve.copy(isSpring = true, stiffness = (clampedStiffness + 100f).coerceIn(50f, 4_000f)))
-            }
-        },
-    )
-    TimelineSlider(
-        value = clampedStiffness,
-        valueRange = 50f..4_000f,
-        gestureKey = "stiffness:$trackId",
-        onGestureStart = { controller.overridesStore.beginEditGesture() },
-        onGestureEnd = { controller.overridesStore.endEditGesture() },
-        onValueChange = { next ->
-            controller.overridesStore.updateTrack(trackId, coalesce = true) {
-                val baseCurve = it.curve ?: curve
-                it.copy(curve = baseCurve.copy(isSpring = true, stiffness = next.coerceIn(50f, 4_000f)))
-            }
-        },
-        modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-stiffness-slider"),
-    )
-    org.jetbrains.jewel.ui.component.InfoText("Estimated settle: ~${curve.estimatedSpringDurationMs()}ms")
-}
+    val clampedDamping = curve.damping.coerceIn(CurveEvaluator.SPRING_MIN_DAMPING, CurveEvaluator.SPRING_MAX_DAMPING)
+    val clampedStiffness = curve.stiffness.coerceIn(CurveEvaluator.SPRING_MIN_STIFFNESS, CurveEvaluator.SPRING_MAX_STIFFNESS)
+    var draggingDamping by remember(targetKey) { mutableStateOf(false) }
+    var draggingStiffness by remember(targetKey) { mutableStateOf(false) }
 
-@Composable
-private fun BezierNumericInputsRow(
-    curve: TimelineCurveSpec,
-    onCurveChanged: (TimelineCurveSpec) -> Unit,
-) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            BezierCoordinateField(
-                label = "x1",
-                value = curve.x1,
-                min = 0f,
-                max = 1f,
-                testTag = "ciacola-bezier-input-x1",
-                modifier = Modifier.weight(1f),
-            ) { next ->
-                onCurveChanged(curve.copy(preset = "Custom", x1 = next, isSpring = false))
-            }
-            BezierCoordinateField(
-                label = "y1",
-                value = curve.y1,
-                min = -0.6f,
-                max = 1.6f,
-                testTag = "ciacola-bezier-input-y1",
-                modifier = Modifier.weight(1f),
-            ) { next ->
-                onCurveChanged(curve.copy(preset = "Custom", y1 = next, isSpring = false))
+            Text("Damping", style = studioLabelStyle(), color = JewelTheme.globalColors.text.normal)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        val next = ((clampedDamping - 0.05) * 100.0).roundToInt() / 100.0
+                        onCurveChanged(
+                            curve.copy(damping = next.coerceIn(CurveEvaluator.SPRING_MIN_DAMPING, CurveEvaluator.SPRING_MAX_DAMPING)),
+                            false,
+                        )
+                    },
+                    modifier = Modifier.testTag("ciacola-inspector-damping-dec"),
+                ) { Text("-", style = JewelTheme.typography.small) }
+                Text("%.2f".format(Locale.US, clampedDamping), style = JewelTheme.typography.small)
+                OutlinedButton(
+                    onClick = {
+                        val next = ((clampedDamping + 0.05) * 100.0).roundToInt() / 100.0
+                        onCurveChanged(
+                            curve.copy(damping = next.coerceIn(CurveEvaluator.SPRING_MIN_DAMPING, CurveEvaluator.SPRING_MAX_DAMPING)),
+                            false,
+                        )
+                    },
+                    modifier = Modifier.testTag("ciacola-inspector-damping-inc"),
+                ) { Text("+", style = JewelTheme.typography.small) }
             }
         }
+        Slider(
+            value = clampedDamping.toFloat(),
+            valueRange = CurveEvaluator.SPRING_MIN_DAMPING.toFloat()..CurveEvaluator.SPRING_MAX_DAMPING.toFloat(),
+            onValueChange = { raw ->
+                if (!draggingDamping) {
+                    draggingDamping = true
+                    onBeginGesture()
+                }
+                val snapped = (raw * 100f).roundToInt() / 100.0
+                onCurveChanged(
+                    curve.copy(damping = snapped.coerceIn(CurveEvaluator.SPRING_MIN_DAMPING, CurveEvaluator.SPRING_MAX_DAMPING)),
+                    true,
+                )
+            },
+            onValueChangeFinished = {
+                if (draggingDamping) {
+                    draggingDamping = false
+                    onCommitGesture()
+                }
+            },
+            modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-damping-slider"),
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            BezierCoordinateField(
-                label = "x2",
-                value = curve.x2,
-                min = 0f,
-                max = 1f,
-                testTag = "ciacola-bezier-input-x2",
-                modifier = Modifier.weight(1f),
-            ) { next ->
-                onCurveChanged(curve.copy(preset = "Custom", x2 = next, isSpring = false))
-            }
-            BezierCoordinateField(
-                label = "y2",
-                value = curve.y2,
-                min = -0.6f,
-                max = 1.6f,
-                testTag = "ciacola-bezier-input-y2",
-                modifier = Modifier.weight(1f),
-            ) { next ->
-                onCurveChanged(curve.copy(preset = "Custom", y2 = next, isSpring = false))
+            Text("Stiffness", style = studioLabelStyle(), color = JewelTheme.globalColors.text.normal)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        val next = (clampedStiffness - 100.0).coerceIn(CurveEvaluator.SPRING_MIN_STIFFNESS, CurveEvaluator.SPRING_MAX_STIFFNESS)
+                        onCurveChanged(curve.copy(stiffness = next), false)
+                    },
+                    modifier = Modifier.testTag("ciacola-inspector-stiffness-dec"),
+                ) { Text("-", style = JewelTheme.typography.small) }
+                Text("${clampedStiffness.roundToInt()}", style = JewelTheme.typography.small)
+                OutlinedButton(
+                    onClick = {
+                        val next = (clampedStiffness + 100.0).coerceIn(CurveEvaluator.SPRING_MIN_STIFFNESS, CurveEvaluator.SPRING_MAX_STIFFNESS)
+                        onCurveChanged(curve.copy(stiffness = next), false)
+                    },
+                    modifier = Modifier.testTag("ciacola-inspector-stiffness-inc"),
+                ) { Text("+", style = JewelTheme.typography.small) }
             }
         }
-    }
-}
-
-@Composable
-private fun BezierCoordinateField(
-    label: String,
-    value: Float,
-    min: Float,
-    max: Float,
-    testTag: String,
-    modifier: Modifier = Modifier,
-    onCommit: (Float) -> Unit,
-) {
-    val formatted = "%.2f".format(Locale.US, value)
-    val textState = rememberTextFieldState(initialText = formatted)
-    var isFocused by remember { mutableStateOf(false) }
-    var lastSyncedText by remember { mutableStateOf(formatted) }
-
-    LaunchedEffect(formatted, isFocused) {
-        if (!isFocused) {
-            lastSyncedText = formatted
-            if (textState.text.toString() != formatted) {
-                textState.setTextAndPlaceCursorAtEnd(formatted)
-            }
-        }
-    }
-
-    fun commitText(reformatField: Boolean) {
-        val parsed = textState.text.toString().trim().toFloatOrNull()
-        if (parsed != null && parsed.isFinite()) {
-            val clamped = parsed.coerceIn(min, max)
-            onCommit(clamped)
-            if (reformatField) {
-                val reformatted = "%.2f".format(Locale.US, clamped)
-                lastSyncedText = reformatted
-                textState.setTextAndPlaceCursorAtEnd(reformatted)
-            }
-        } else if (reformatField) {
-            lastSyncedText = formatted
-            textState.setTextAndPlaceCursorAtEnd(formatted)
-        }
-    }
-
-    val liveRaw = textState.text.toString()
-    LaunchedEffect(liveRaw, isFocused) {
-        if (isFocused) {
-            val raw = textState.text.toString().trim()
-            if (raw != lastSyncedText.trim() && raw.isNotEmpty() && raw != "-" && !raw.endsWith(".")) {
-                val parsed = raw.toFloatOrNull()
-                if (parsed != null && parsed.isFinite() && parsed in min..max) {
-                    lastSyncedText = raw
-                    onCommit(parsed)
+        Slider(
+            value = clampedStiffness.toFloat(),
+            valueRange = CurveEvaluator.SPRING_MIN_STIFFNESS.toFloat()..CurveEvaluator.SPRING_MAX_STIFFNESS.toFloat(),
+            onValueChange = { raw ->
+                if (!draggingStiffness) {
+                    draggingStiffness = true
+                    onBeginGesture()
                 }
-            }
-        }
-    }
-
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = JewelTheme.typography.small,
-            color = JewelTheme.globalColors.text.info,
+                val snapped = ((raw / 10f).roundToInt() * 10.0)
+                    .coerceIn(CurveEvaluator.SPRING_MIN_STIFFNESS, CurveEvaluator.SPRING_MAX_STIFFNESS)
+                onCurveChanged(curve.copy(stiffness = snapped), true)
+            },
+            onValueChangeFinished = {
+                if (draggingStiffness) {
+                    draggingStiffness = false
+                    onCommitGesture()
+                }
+            },
+            modifier = Modifier.fillMaxWidth().testTag("ciacola-inspector-stiffness-slider"),
         )
-        TextField(
-            state = textState,
-            modifier = Modifier
-                .weight(1f)
-                .studioTextInputFocus()
-                .onFocusChanged { state ->
-                    val wasFocused = isFocused
-                    isFocused = state.isFocused
-                    if (wasFocused && !state.isFocused) {
-                        commitText(reformatField = true)
-                    }
-                }
-                .onPreviewKeyEvent { ev ->
-                    if (ev.type == KeyEventType.KeyDown &&
-                        (ev.key == Key.Enter || ev.key == Key.NumPadEnter)
-                    ) {
-                        commitText(reformatField = true)
-                        true
-                    } else {
-                        false
-                    }
-                }
-                .testTag(testTag),
-        )
+        val settleMs = CurveEvaluator.springSettleDurationMs(clampedDamping, clampedStiffness)
+        InfoText("Estimated settle: ~${settleMs}ms")
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CurvePresetButton(
+private fun DocumentBezierCurveCanvas(
+    targetKey: String,
+    bezier: Curve.Bezier,
     label: String,
-    tooltip: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val focusRingColor = rememberAccessibleFocusRingColor()
-    val pillModifier = modifier
-        .studioActivatableFocus(focusRingColor)
-        .testTag("ciacola-inspector-curve-${label.lowercase()}")
-        .semantics {
-            this.selected = selected
-            this.role = Role.RadioButton
-            this.stateDescription = if (selected) "Selected" else "Not selected"
-        }
-    Tooltip(tooltip = { Text(tooltip) }) {
-        if (selected) {
-            DefaultButton(onClick = onClick, modifier = pillModifier) {
-                Text(label, style = JewelTheme.typography.small, maxLines = 1)
-            }
-        } else {
-            OutlinedButton(onClick = onClick, modifier = pillModifier) {
-                Text(label, style = JewelTheme.typography.small, maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BezierCurveEditorBox(
-    curve: TimelineCurveSpec,
-    onGestureStart: () -> Unit = {},
-    onGestureEnd: () -> Unit = {},
-    onCurveChanged: (TimelineCurveSpec) -> Unit,
+    onBeginGesture: () -> Unit,
+    onCommitGesture: () -> Unit,
+    onCancelGesture: () -> Unit,
+    onBezierChanged: (Curve.Bezier) -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
     val palette = JewelTheme.colorPalette
     val isDark = JewelTheme.isDark
     val p1Color = palette.tealOrNull(if (isDark) 6 else 5) ?: Color(0xFF35B5AC)
     val p2Color = palette.orangeOrNull(if (isDark) 6 else 5) ?: Color(0xFFE57C4E)
-    val latestCurve by rememberUpdatedState(curve)
-    val latestOnGestureStart by rememberUpdatedState(onGestureStart)
-    val latestOnGestureEnd by rememberUpdatedState(onGestureEnd)
-    val latestOnCurveChanged by rememberUpdatedState(onCurveChanged)
+
+    val latestBezier by rememberUpdatedState(bezier)
+    val latestOnBegin by rememberUpdatedState(onBeginGesture)
+    val latestOnCommit by rememberUpdatedState(onCommitGesture)
+    val latestOnCancel by rememberUpdatedState(onCancelGesture)
+    val latestOnChanged by rememberUpdatedState(onBezierChanged)
 
     Box(
         modifier = Modifier
@@ -597,54 +520,62 @@ private fun BezierCurveEditorBox(
                 .height(96.dp)
                 .testTag("ciacola-bezier-editor")
                 .semantics {
-                    contentDescription = "Cubic Bezier curve editor, preset ${latestCurve.preset}"
-                    stateDescription = "Control point 1 (${"%.2f".format(Locale.US, latestCurve.x1)}, ${"%.2f".format(Locale.US, latestCurve.y1)}), " +
-                        "Control point 2 (${"%.2f".format(Locale.US, latestCurve.x2)}, ${"%.2f".format(Locale.US, latestCurve.y2)})"
+                    contentDescription = "Cubic Bezier curve editor, $label"
+                    stateDescription = "P1(${"%.2f".format(Locale.US, latestBezier.x1)}, ${"%.2f".format(Locale.US, latestBezier.y1)}), " +
+                        "P2(${"%.2f".format(Locale.US, latestBezier.x2)}, ${"%.2f".format(Locale.US, latestBezier.y2)})"
                 }
-                // Keyed on Unit (reading latestCurve) so dragging a control handle is not cancelled
-                // when the first move updates the override and recomposes the Inspector.
-                .pointerInput(Unit) {
+                // Keyed ONLY on stable targetKey (never curve coordinates) so dragging handles
+                // survives recomposition and cancels cleanly on coroutine interruption.
+                .pointerInput(targetKey) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         down.consume()
-                        val startCurve = latestCurve
+                        val start = latestBezier
                         val w = size.width.toFloat().coerceAtLeast(1f)
                         val h = size.height.toFloat().coerceAtLeast(1f)
-                        val p1Px = Offset(startCurve.x1 * w, (1f - startCurve.y1.coerceIn(0f, 1f)) * h)
-                        val p2Px = Offset(startCurve.x2 * w, (1f - startCurve.y2.coerceIn(0f, 1f)) * h)
+                        val p1Px = Offset(start.x1.toFloat() * w, (1f - start.y1.toFloat().coerceIn(0f, 1f)) * h)
+                        val p2Px = Offset(start.x2.toFloat() * w, (1f - start.y2.toFloat().coerceIn(0f, 1f)) * h)
                         val dragP1 = hypot(down.position.x - p1Px.x, down.position.y - p1Px.y) <=
                             hypot(down.position.x - p2Px.x, down.position.y - p2Px.y)
 
-                        var latest = startCurve
-                        latestOnGestureStart()
+                        var current = start
+                        var completedNormally = false
+                        latestOnBegin()
                         try {
                             while (true) {
                                 val ev = awaitPointerEvent()
                                 val ch = ev.changes.firstOrNull() ?: break
-                                if (!ch.pressed) break
-                                ch.consume()
-                                val nx = (ch.position.x / w).coerceIn(0f, 1f)
-                                val ny = (1f - ch.position.y / h).coerceIn(-0.4f, 1.4f)
-                                latest = if (dragP1) {
-                                    latest.copy(preset = "Custom", x1 = nx, y1 = ny, isSpring = false)
-                                } else {
-                                    latest.copy(preset = "Custom", x2 = nx, y2 = ny, isSpring = false)
+                                if (!ch.pressed) {
+                                    completedNormally = true
+                                    break
                                 }
-                                latestOnCurveChanged(latest)
+                                ch.consume()
+                                val nx = ((ch.position.x / w).coerceIn(0f, 1f) * 100f).roundToInt() / 100.0
+                                val ny = ((1f - ch.position.y / h).coerceIn(-0.4f, 1.4f) * 100f).roundToInt() / 100.0
+                                current = if (dragP1) {
+                                    current.copy(x1 = nx, y1 = ny)
+                                } else {
+                                    current.copy(x2 = nx, y2 = ny)
+                                }
+                                latestOnChanged(current)
                             }
                         } finally {
-                            latestOnGestureEnd()
+                            if (completedNormally) {
+                                latestOnCommit()
+                            } else {
+                                latestOnCancel()
+                            }
                         }
                     }
                 },
         ) {
-            val activeCurve = latestCurve
+            val active = latestBezier
             val w = size.width
             val h = size.height
             val origin = Offset(0f, h)
             val dest = Offset(w, 0f)
-            val p1 = Offset(activeCurve.x1.coerceIn(0f, 1f) * w, (1f - activeCurve.y1.coerceIn(-0.2f, 1.2f)) * h)
-            val p2 = Offset(activeCurve.x2.coerceIn(0f, 1f) * w, (1f - activeCurve.y2.coerceIn(-0.2f, 1.2f)) * h)
+            val p1 = Offset(active.x1.toFloat().coerceIn(0f, 1f) * w, (1f - active.y1.toFloat().coerceIn(-0.2f, 1.2f)) * h)
+            val p2 = Offset(active.x2.toFloat().coerceIn(0f, 1f) * w, (1f - active.y2.toFloat().coerceIn(-0.2f, 1.2f)) * h)
 
             drawLine(globalColors.borders.normal.copy(alpha = 0.45f), origin, dest, strokeWidth = 1f)
             drawLine(p1Color.copy(alpha = 0.65f), origin, p1, strokeWidth = 1.5f)
@@ -658,5 +589,145 @@ private fun BezierCurveEditorBox(
             drawCircle(color = p1Color, radius = 5.5f, center = p1)
             drawCircle(color = p2Color, radius = 5.5f, center = p2)
         }
+    }
+}
+
+@Composable
+private fun DocumentBezierNumericInputsRow(
+    bezier: Curve.Bezier,
+    onBezierCommitted: (Curve.Bezier) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            BezierCoordInput(
+                label = "x1",
+                value = bezier.x1,
+                min = 0.0,
+                max = 1.0,
+                testTag = "ciacola-bezier-input-x1",
+                modifier = Modifier.weight(1f),
+            ) { next -> onBezierCommitted(bezier.copy(x1 = next)) }
+            BezierCoordInput(
+                label = "y1",
+                value = bezier.y1,
+                min = -0.6,
+                max = 1.6,
+                testTag = "ciacola-bezier-input-y1",
+                modifier = Modifier.weight(1f),
+            ) { next -> onBezierCommitted(bezier.copy(y1 = next)) }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            BezierCoordInput(
+                label = "x2",
+                value = bezier.x2,
+                min = 0.0,
+                max = 1.0,
+                testTag = "ciacola-bezier-input-x2",
+                modifier = Modifier.weight(1f),
+            ) { next -> onBezierCommitted(bezier.copy(x2 = next)) }
+            BezierCoordInput(
+                label = "y2",
+                value = bezier.y2,
+                min = -0.6,
+                max = 1.6,
+                testTag = "ciacola-bezier-input-y2",
+                modifier = Modifier.weight(1f),
+            ) { next -> onBezierCommitted(bezier.copy(y2 = next)) }
+        }
+    }
+}
+
+@Composable
+private fun BezierCoordInput(
+    label: String,
+    value: Double,
+    min: Double,
+    max: Double,
+    testTag: String,
+    modifier: Modifier = Modifier,
+    onCommit: (Double) -> Unit,
+) {
+    val formatted = "%.2f".format(Locale.US, value)
+    val textState = rememberTextFieldState(initialText = formatted)
+    var isFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(formatted, isFocused) {
+        if (!isFocused && textState.text.toString() != formatted) {
+            textState.setTextAndPlaceCursorAtEnd(formatted)
+        }
+    }
+
+    fun commitText() {
+        val parsed = textState.text.toString().trim().toDoubleOrNull()
+        if (parsed != null && parsed.isFinite()) {
+            val clamped = parsed.coerceIn(min, max)
+            onCommit(clamped)
+            textState.setTextAndPlaceCursorAtEnd("%.2f".format(Locale.US, clamped))
+        } else {
+            textState.setTextAndPlaceCursorAtEnd(formatted)
+        }
+    }
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = studioLabelStyle(), color = JewelTheme.globalColors.text.normal)
+        TextField(
+            state = textState,
+            modifier = Modifier
+                .weight(1f)
+                .studioTextInputFocus()
+                .onFocusChanged { state ->
+                    val wasFocused = isFocused
+                    isFocused = state.isFocused
+                    if (wasFocused && !state.isFocused) commitText()
+                }
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type == KeyEventType.KeyDown && (ev.key == Key.Enter || ev.key == Key.NumPadEnter)) {
+                        commitText()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .testTag(testTag),
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CurveQuickButton(
+    label: String,
+    tooltip: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val focusRingColor = rememberAccessibleFocusRingColor()
+    // Weight/size modifiers go on the Tooltip (the Row's direct child), selection is a tinted chip.
+    Tooltip(tooltip = { Text(tooltip) }, modifier = modifier) {
+        CompactToggleChip(
+            label = label,
+            selected = selected,
+            onClick = onClick,
+            tag = "ciacola-inspector-curve-${label.lowercase()}",
+            modifier = Modifier
+                .fillMaxWidth()
+                .studioActivatableFocus(focusRingColor)
+                .semantics {
+                    this.selected = selected
+                    this.role = Role.RadioButton
+                    this.stateDescription = if (selected) "Selected" else "Not selected"
+                },
+        )
     }
 }

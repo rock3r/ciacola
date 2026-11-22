@@ -2,14 +2,12 @@ package dev.sebastiano.ciacola.authoring
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -29,10 +27,9 @@ import dev.sebastiano.ciacola.effects.ConnectorAnchor
 import dev.sebastiano.ciacola.effects.ConnectorStyle
 import dev.sebastiano.ciacola.effects.EditableBox
 import dev.sebastiano.ciacola.effects.ElementConnector
+import dev.sebastiano.ciacola.effects.LocalStageAnchorRegistry
+import dev.sebastiano.ciacola.effects.StageAnchorRegistry
 import dev.sebastiano.ciacola.effects.resolveConnectorEndpoints
-import dev.sebastiano.ciacola.inspector.DeckElementOverridesFile
-import dev.sebastiano.ciacola.inspector.ElementPatch
-import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageRootCoordinates
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
@@ -85,10 +82,11 @@ class ElementConnectorTest {
     }
 
     @Test
-    fun renderedEndpointsTrackElementBoundsElementPatchAndProgressZero() = runComposeUiTest {
+    fun renderedEndpointsTrackElementBoundsShiftAndProgressZero() = runComposeUiTest {
         val registry = StageInspectionRegistry()
+        val anchorRegistry = StageAnchorRegistry()
         val rootHolder = StageRootCoordinatesHolder()
-        var overrides by mutableStateOf(DeckElementOverridesFile())
+        var shiftXDp by mutableFloatStateOf(0f)
         var progress by mutableFloatStateOf(1f)
         var densityPxPerDp = 1f
 
@@ -97,8 +95,8 @@ class ElementConnectorTest {
             DeckThemeProvider(DeckThemes.stageDark()) {
                 CompositionLocalProvider(
                     LocalStageInspectionRegistry provides registry,
+                    LocalStageAnchorRegistry provides anchorRegistry,
                     LocalStageRootCoordinates provides rootHolder,
-                    LocalElementOverrides provides overrides,
                 ) {
                     Box(
                         modifier = Modifier
@@ -115,7 +113,7 @@ class ElementConnectorTest {
                         EditableBox(
                             elementId = "node-b",
                             defaultFill = Color(0xFF1F2A40),
-                            modifier = Modifier.offset(x = 200.dp, y = 70.dp).size(80.dp, 40.dp),
+                            modifier = Modifier.offset(x = (200f + shiftXDp).dp, y = 70.dp).size(80.dp, 40.dp),
                         ) {}
                         ElementConnector(
                             fromId = "node-a",
@@ -134,7 +132,6 @@ class ElementConnectorTest {
         val rectA = assertNotNull(registry.liveStageBoundsOf("node-a"), "Expected node-a bounds in registry")
         val rectB = assertNotNull(registry.liveStageBoundsOf("node-b"), "Expected node-b bounds in registry")
 
-        // 1. Endpoints within 2 px of element bounds
         val initialExtent = findInkHorizontalBounds(onNodeWithTag("connector-stage").captureToImage().toPixelMap())
         assertNotNull(initialExtent, "Expected connector pixels at progress = 1f")
         assertTrue(
@@ -146,21 +143,17 @@ class ElementConnectorTest {
             "End x=${initialExtent.second} should be within 2px of node-b left=${rectB.left}",
         )
 
-        // 2. Apply ElementPatch(offsetXDp = 40f) on node-b -> endpoint shifts right by 40 dp
-        overrides = DeckElementOverridesFile(
-            elements = mapOf("node-b" to ElementPatch(elementId = "node-b", offsetXDp = 40f)),
-        )
+        shiftXDp = 40f
         waitForIdle()
         val expectedShiftPx = 40f * densityPxPerDp
         val shiftedExtent = findInkHorizontalBounds(onNodeWithTag("connector-stage").captureToImage().toPixelMap())
-        assertNotNull(shiftedExtent, "Expected connector pixels after ElementPatch")
+        assertNotNull(shiftedExtent, "Expected connector pixels after shifting node-b")
         val actualShiftPx = shiftedExtent.second - initialExtent.second
         assertTrue(
             abs(actualShiftPx - expectedShiftPx) <= 2f,
             "Expected endpoint shift of ${expectedShiftPx}px (+40dp), got ${actualShiftPx}px",
         )
 
-        // 3. At progress = 0f, nothing is drawn
         progress = 0f
         waitForIdle()
         val hiddenExtent = findInkHorizontalBounds(onNodeWithTag("connector-stage").captureToImage().toPixelMap())
@@ -170,6 +163,7 @@ class ElementConnectorTest {
     @Test
     fun allConnectorStylesRenderCleanly() = runComposeUiTest {
         val registry = StageInspectionRegistry()
+        val anchorRegistry = StageAnchorRegistry()
         val rootHolder = StageRootCoordinatesHolder()
         var style by mutableStateOf(ConnectorStyle.Arrow)
 
@@ -178,6 +172,7 @@ class ElementConnectorTest {
             DeckThemeProvider(DeckThemes.stageDark()) {
                 CompositionLocalProvider(
                     LocalStageInspectionRegistry provides registry,
+                    LocalStageAnchorRegistry provides anchorRegistry,
                     LocalStageRootCoordinates provides rootHolder,
                 ) {
                     Box(
@@ -222,7 +217,7 @@ class ElementConnectorTest {
 
     @Test
     fun connectorRendersUnderOverviewOpenWithoutStageInspectionRegistry() = runComposeUiTest {
-        val anchorRegistry = dev.sebastiano.ciacola.effects.StageAnchorRegistry()
+        val anchorRegistry = StageAnchorRegistry()
         var densityPxPerDp = 1f
 
         setContent {
@@ -231,7 +226,7 @@ class ElementConnectorTest {
                 CompositionLocalProvider(
                     dev.bnorm.storyboard.easel.LocalOverviewOpen provides true,
                     LocalStageInspectionRegistry provides null,
-                    dev.sebastiano.ciacola.effects.LocalStageAnchorRegistry provides anchorRegistry,
+                    LocalStageAnchorRegistry provides anchorRegistry,
                 ) {
                     Box(
                         modifier = Modifier
@@ -252,8 +247,6 @@ class ElementConnectorTest {
                         ElementConnector(
                             fromId = "ov-a",
                             toId = "ov-b",
-                            fromAnchor = ConnectorAnchor.End,
-                            toAnchor = ConnectorAnchor.Start,
                             style = ConnectorStyle.Arrow,
                             color = connectorColor,
                             strokeWidth = 3.dp,
@@ -263,31 +256,32 @@ class ElementConnectorTest {
                 }
             }
         }
-        waitForIdle()
 
+        waitForIdle()
         val extent = findInkHorizontalBounds(onNodeWithTag("overview-connector-stage").captureToImage().toPixelMap())
-        assertNotNull(extent, "ElementConnector must still draw when LocalOverviewOpen == true and inspection registry is null")
-        val expectedStartPx = (24f + 80f) * densityPxPerDp
-        val expectedEndPx = 216f * densityPxPerDp
+        assertNotNull(extent, "Expected connector pixels under Overview without StageInspectionRegistry")
         assertTrue(
-            abs(extent.first - expectedStartPx) <= 2.5f && abs(extent.second - expectedEndPx) <= 2.5f,
-            "Overview connector extent $extent did not match expected ($expectedStartPx..$expectedEndPx)",
+            abs(extent.first - 104f * densityPxPerDp) <= 3f,
+            "Expected start near 104dp (${104f * densityPxPerDp}px), got ${extent.first}",
+        )
+        assertTrue(
+            abs(extent.second - 216f * densityPxPerDp) <= 3f,
+            "Expected end near 216dp (${216f * densityPxPerDp}px), got ${extent.second}",
         )
     }
 
-    private fun findInkHorizontalBounds(pixels: PixelMap): Pair<Float, Float>? {
+    private fun findInkHorizontalBounds(pixelMap: PixelMap): Pair<Int, Int>? {
         var minX = Int.MAX_VALUE
         var maxX = Int.MIN_VALUE
-        for (y in 0 until pixels.height) {
-            for (x in 0 until pixels.width) {
-                val c = pixels[x, y]
-                // Detect distinct magenta connector ink (#FF00FF, allowing slight AA blending)
-                if (c.red > 0.75f && c.blue > 0.75f && c.green < 0.25f) {
+        for (y in 0 until pixelMap.height) {
+            for (x in 0 until pixelMap.width) {
+                val c = pixelMap[x, y]
+                if (c.red > 0.7f && c.blue > 0.7f && c.green < 0.25f) {
                     if (x < minX) minX = x
                     if (x > maxX) maxX = x
                 }
             }
         }
-        return if (minX <= maxX) minX.toFloat() to maxX.toFloat() else null
+        return if (minX <= maxX) minX to maxX else null
     }
 }

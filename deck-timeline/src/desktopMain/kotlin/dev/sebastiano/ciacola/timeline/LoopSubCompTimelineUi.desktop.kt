@@ -7,7 +7,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -22,13 +21,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,7 +42,6 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -66,22 +63,18 @@ import dev.sebastiano.ciacola.theme.relativeLuminance
 import java.awt.Cursor
 import java.util.Locale
 import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sin
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
-import org.jetbrains.jewel.ui.component.HorizontalScrollbar
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
-import org.jetbrains.jewel.ui.component.VerticalScrollbar
 import org.jetbrains.jewel.ui.theme.colorPalette
 import org.jetbrains.jewel.ui.typography
 
-internal val TIMELINE_SCROLLBAR_GUTTER_DP = 16.dp
-internal val TIMELINE_H_SCROLLBAR_GUTTER_DP = 12.dp
+internal val SUBCOMP_HEADER_HEIGHT = 48.dp
+internal val SUBCOMP_RIBBON_HEIGHT = 24.dp
 
 private data class TimelineTextLayoutCacheKey(
     val text: String,
@@ -93,7 +86,7 @@ private data class TimelineTextLayoutCacheKey(
 )
 
 /**
- * Bounded LRU cache for measured [TextLayoutResult] instances on 60 fps timeline canvas draw passes.
+ * Bounded LRU cache for measured [TextLayoutResult] instances on timeline canvas draw passes.
  */
 class TimelineTextLayoutCache(private val maxEntries: Int = 256) {
     private val entries = object : LinkedHashMap<TimelineTextLayoutCacheKey, TextLayoutResult>(64, 0.75f, true) {
@@ -136,7 +129,7 @@ class TimelineTextLayoutCache(private val maxEntries: Int = 256) {
     }
 }
 
-/** Shared 5-point pentagon playhead cap + vertical hair line used by both Master Deck and Loop Sub-Comp. */
+/** Shared 5-point pentagon playhead cap + vertical hairline used by Master Deck and Loop Sub-Comp. */
 internal fun DrawScope.drawPlayheadWithPentagonCap(
     x: Float,
     height: Float,
@@ -154,14 +147,15 @@ internal fun DrawScope.drawPlayheadWithPentagonCap(
     drawPath(cap, color = color)
 }
 
-/** Hover-highlighted 5 dp vertical splitter for resizing the layer column (`180..420.dp`, double-click resets). */
+/** Hover-highlighted 5 dp vertical splitter for resizing the track header column (`180..420.dp`). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun LayerColumnSplitter(
+internal fun DocumentLayerColumnSplitter(
     viewport: TimelineViewportState,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val latestDensity by rememberUpdatedState(density.density)
     val globalColors = JewelTheme.globalColors
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -181,14 +175,14 @@ internal fun LayerColumnSplitter(
                 .pointerInput(viewport) {
                     detectTapGestures(onDoubleTap = { viewport.resetLayerColumnWidth() })
                 }
-                .pointerInput(viewport, density.density) {
+                .pointerInput(viewport) {
                     detectHorizontalDragGestures(
                         onDragStart = { dragging = true },
                         onDragEnd = { dragging = false },
                         onDragCancel = { dragging = false },
                     ) { change, dragAmount ->
                         change.consume()
-                        viewport.resizeLayerColumnBy(dragAmount / density.density)
+                        viewport.resizeLayerColumnBy(dragAmount / latestDensity.coerceAtLeast(0.5f))
                     }
                 }
                 .testTag("ciacola-layer-column-splitter"),
@@ -204,161 +198,15 @@ internal fun LayerColumnSplitter(
     }
 }
 
-internal enum class DragMode {
-    ScrubPlayhead,
-    MoveBlockBeat,
-    ResizeLeftDelay,
-    ResizeRightDuration,
-    Pan,
-}
-
-internal fun chooseTickStepMs(pxPerMs: Float): Int {
-    val candidates = intArrayOf(10, 20, 50, 100, 200, 250, 500, 1_000, 2_000, 5_000, 10_000, 30_000)
-    return candidates.firstOrNull { it * pxPerMs >= 80f } ?: candidates.last()
-}
-
-fun formatTimelineTick(ms: Int, stepMs: Int): String {
-    val seconds = ms / 1000.0
-    return when {
-        stepMs >= 1000 -> "${ms / 1000}s"
-        stepMs >= 100 -> String.format(Locale.US, "%.1fs", seconds)
-        else -> String.format(Locale.US, "%.2fs", seconds)
-    }
-}
-
-internal fun effectiveBlockSpanMs(
-    row: TimelineTrackRow,
-    blk: TimelineBlockBar,
-    liveOvr: TrackOverride?,
-): Pair<Int, Int> {
-    val overrideDelayMs = liveOvr?.delayMs
-    val overrideDurationMs = liveOvr?.durationMs
-    val overrideCurve = liveOvr?.curve
-    val drawStartMs = if (
-        row.category != TrackCategory.SharedElement &&
-        row.category != TrackCategory.LoopSubComp &&
-        overrideDelayMs != null
-    ) {
-        val stepOffset = (blk.staggerIndex ?: 0) * (liveOvr.staggerStepMs ?: 55)
-        (blk.startMs - blk.delayMs) + overrideDelayMs + stepOffset
-    } else {
-        blk.startMs
-    }
-    val drawDurationMs = when {
-        row.category == TrackCategory.SharedElement || row.category == TrackCategory.LoopSubComp -> blk.durationMs
-        overrideCurve?.isSpring == true -> overrideCurve.estimatedSpringDurationMs()
-        row.category == TrackCategory.StaggerGroup && overrideDurationMs != null -> {
-            val count = (blk.staggerCount ?: 1).coerceAtLeast(1)
-            val step = liveOvr.staggerStepMs ?: 55
-            overrideDurationMs + (count - 1) * step
-        }
-        overrideDurationMs != null -> overrideDurationMs
-        else -> blk.durationMs
-    }
-    return drawStartMs to drawDurationMs
-}
-
-internal data class TimelineBlockHit(
-    val row: TimelineTrackRow,
-    val block: TimelineBlockBar,
-    val dragMode: DragMode,
-)
-
-internal fun resolveTimelineBlockHit(
-    pos: Offset,
-    snapshot: DeckTimelineSnapshot,
-    viewport: TimelineViewportState,
-    surface: TimelineSurface,
-    headerTotalPx: Float,
-    rowHeightPx: Float,
-    liveOverrides: Map<String, TrackOverride>,
-    tracks: List<TimelineTrackRow> = snapshot.tracks,
-): TimelineBlockHit? {
-    if (pos.y <= headerTotalPx) return null
-    val trackIdx = ((pos.y - headerTotalPx + viewport.verticalScroll.value) / rowHeightPx).toInt()
-    val hitRow = tracks.getOrNull(trackIdx) ?: return null
-    val pxPerMs = viewport.pxPerMs(surface)
-    val hitBlock = hitRow.blocks.firstOrNull { blk ->
-        val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(hitRow, blk, liveOverrides[blk.trackId])
-        val bx0 = viewport.xForTime(drawStartMs.toFloat(), surface)
-        val bx1 = bx0 + max(18f, drawDurationMs * pxPerMs)
-        pos.x in (bx0 - 6f)..(bx1 + 6f)
-    } ?: return null
-
-    val (drawStartMs, drawDurationMs) = effectiveBlockSpanMs(hitRow, hitBlock, liveOverrides[hitBlock.trackId])
-    val bx0 = viewport.xForTime(drawStartMs.toFloat(), surface)
-    val bx1 = bx0 + max(18f, drawDurationMs * pxPerMs)
-    val dragMode = when {
-        hitBlock.category == TrackCategory.LoopSubComp -> DragMode.ScrubPlayhead
-        abs(pos.x - bx1) <= 9f -> DragMode.ResizeRightDuration
-        abs(pos.x - bx0) <= 9f -> DragMode.ResizeLeftDelay
-        hitBlock.category == TrackCategory.SharedElement || hitBlock.category == TrackCategory.WarpCode -> DragMode.ScrubPlayhead
-        else -> DragMode.MoveBlockBeat
-    }
-    return TimelineBlockHit(hitRow, hitBlock, dragMode)
-}
-
-internal fun pointerIconForDragMode(dragMode: DragMode?): PointerIcon = when (dragMode) {
-    DragMode.ResizeLeftDelay, DragMode.ResizeRightDuration -> PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR))
-    DragMode.MoveBlockBeat -> PointerIcon(Cursor(Cursor.HAND_CURSOR))
-    DragMode.ScrubPlayhead, DragMode.Pan, null -> PointerIcon.Default
-}
-
-internal fun DrawScope.drawEllipsizedLabel(
-    textMeasurer: TextMeasurer,
-    textCache: TimelineTextLayoutCache,
-    text: String,
-    style: TextStyle,
-    left: Float,
-    top: Float,
-    availWidth: Float,
-    clipTop: Float,
-    clipBottom: Float,
-) {
-    val maxW = availWidth.roundToInt()
-    if (maxW < 8) return
-    val measured = textCache.measure(
-        textMeasurer = textMeasurer,
-        text = text,
-        style = style,
-        density = density,
-        maxWidthPx = maxW,
-        softWrap = true,
-        overflow = TextOverflow.Ellipsis,
-    )
-    if (measured.size.width > availWidth + 1.5f) return
-    clipRect(left = left - 1f, top = clipTop, right = left + availWidth, bottom = clipBottom) {
-        drawText(textLayoutResult = measured, topLeft = Offset(left, top))
-    }
-}
-
-internal fun DrawScope.drawHatchedOverlapZone(
-    left: Float,
-    top: Float,
-    width: Float,
-    height: Float,
-    accent: Color,
-) {
-    clipRect(left = left, top = top, right = left + width, bottom = top + height) {
-        drawRect(color = accent.copy(alpha = 0.20f), topLeft = Offset(left, top), size = Size(width, height))
-        var cursor = left - height
-        while (cursor < left + width + height) {
-            drawLine(
-                color = accent.copy(alpha = 0.55f),
-                start = Offset(cursor, top + height),
-                end = Offset(cursor + height, top),
-                strokeWidth = 1.5f,
-            )
-            cursor += 8f
-        }
-    }
-}
-
-/** Dedicated sub-composition timeline (`0..periodMs`) when the user drills into an ambient loop. */
+/**
+ * Restored Loop Sub-Composition Scrub Bar (`0..periodMs`) bound to [DocumentTimelineController].
+ * Scrubbing updates [DocumentTimelineController.subCompositionScrubMillis], driving live
+ * `RenderSession` loop phase on the stage.
+ */
 @Composable
-internal fun LoopSubCompTimelineView(
-    controller: TimelineStudioController,
-    loopId: String,
+internal fun DocumentLoopSubCompTimelineView(
+    controller: DocumentTimelineController,
+    ref: DocumentTimelineTrackRef.LoopTrackBar,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -374,24 +222,26 @@ internal fun LoopSubCompTimelineView(
             borderNormal = globalColors.borders.normal,
             textPrimary = globalColors.text.normal,
             focusedOutline = globalColors.outlines.focused,
-            injectedBeatLine = palette.yellowOrNull(if (isDark) 6 else 5) ?: Color(0xFFE0A82E),
-            boundaryLine = palette.tealOrNull(if (isDark) 6 else 5) ?: Color(0xFF2FA896),
             playhead = palette.redOrNull(if (isDark) 6 else 5) ?: Color(0xFFE5534B),
         )
     }
 
-    val desc = controller.loopClock.registeredLoops[loopId]
-        ?: LoopSubCompDescriptor(loopId = loopId, label = loopId, defaultPeriodMillis = 6_000L)
-    val periodMs = controller.loopClock.effectivePeriodMillis(loopId, desc.defaultPeriodMillis).toInt()
-    val channels = desc.harmonicChannels
-    val slideRibbonPx = with(density) { SLIDE_RIBBON_HEIGHT.toPx() }
-    val rulerPx = with(density) { HEADER_TOTAL_HEIGHT.toPx() }
+    val periodMs = ref.effectivePeriodMs.coerceAtLeast(100L)
+    val latestPeriodMs by rememberUpdatedState(periodMs)
+    val scrubMs = (controller.subCompositionScrubMillis ?: 0L).coerceIn(0L, periodMs)
+    val channels = remember(ref.loopId) {
+        listOf(
+            "Phase sin(2πt)",
+            "Quadrature cos(2πt)",
+            "Harmonic 2×",
+        )
+    }
+    val ribbonPx = with(density) { SUBCOMP_RIBBON_HEIGHT.toPx() }
+    val rulerPx = with(density) { SUBCOMP_HEADER_HEIGHT.toPx() }
     val rowPx = with(density) { 36.dp.toPx() }
     val verticalScroll = rememberScrollState()
-    var canvasWidthPx by remember { mutableFloatStateOf(0f) }
-    var hScrollPx by remember { mutableFloatStateOf(0f) }
 
-    Row(modifier = modifier.fillMaxSize()) {
+    Row(modifier = modifier.fillMaxSize().testTag("ciacola-loop-subcomp-view")) {
         Column(
             modifier = Modifier
                 .width(controller.viewport.layerColumnWidthDp.dp)
@@ -402,7 +252,7 @@ internal fun LoopSubCompTimelineView(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(HEADER_TOTAL_HEIGHT)
+                    .height(SUBCOMP_HEADER_HEIGHT)
                     .background(colors.headerBg)
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.CenterStart,
@@ -435,37 +285,37 @@ internal fun LoopSubCompTimelineView(
                         )
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
             }
         }
 
-        LayerColumnSplitter(controller.viewport)
+        DocumentLayerColumnSplitter(controller.viewport)
 
         Box(Modifier.weight(1f).fillMaxHeight()) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP)
                     .clipToBounds()
-                    .onSizeChanged { canvasWidthPx = it.width.toFloat() }
                     .testTag("ciacola-subcomp-canvas")
                     .semantics {
-                        contentDescription = "Loop sub-composition wave timeline for ${desc.label}"
-                        stateDescription = "Playhead at ${formatMillisForAccessibility(controller.currentPlayheadTimeMs)} " +
-                            "of ${formatMillisForAccessibility(periodMs)}"
+                        contentDescription = "Loop sub-composition scrub bar for ${ref.label}"
+                        stateDescription = "Scrub at ${formatMillisForAccessibility(scrubMs.toInt())} of ${formatMillisForAccessibility(periodMs.toInt())}"
                     }
-                    .pointerInput(periodMs) {
+                    // Keyed ONLY on stable loopId (never periodMs) so dragging never self-cancels.
+                    .pointerInput(ref.loopId) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             down.consume()
                             val usableW = (size.width - 32f).coerceAtLeast(1f)
-                            controller.scrubToTimeMs((((down.position.x - 16f + hScrollPx) / usableW) * periodMs).roundToInt())
+                            fun msAt(x: Float): Long =
+                                (((x - 16f) / usableW).coerceIn(0f, 1f) * latestPeriodMs).roundToLong()
+                            controller.scrubLoopSubComp(msAt(down.position.x))
                             while (true) {
                                 val ev = awaitPointerEvent()
                                 val ch = ev.changes.firstOrNull() ?: break
                                 if (!ch.pressed) break
                                 ch.consume()
-                                controller.scrubToTimeMs((((ch.position.x - 16f + hScrollPx) / usableW) * periodMs).roundToInt())
+                                controller.scrubLoopSubComp(msAt(ch.position.x))
                             }
                         }
                     },
@@ -477,7 +327,6 @@ internal fun LoopSubCompTimelineView(
 
                 drawRect(color = colors.bg)
 
-                // Scrollable harmonic wave channels (clipped below fixed header).
                 clipRect(top = rulerPx) {
                     channels.forEachIndexed { idx, _ ->
                         val yTop = rulerPx + idx * rowPx - scrollY + 4f
@@ -491,16 +340,18 @@ internal fun LoopSubCompTimelineView(
                         )
                         drawRoundRect(
                             color = teal.copy(alpha = 0.22f),
-                            topLeft = Offset(leftPad - hScrollPx, yTop),
+                            topLeft = Offset(leftPad, yTop),
                             size = Size(usableW, barH),
                             cornerRadius = CornerRadius(5f, 5f),
                         )
                         val wave = Path()
                         val samples = 72
+                        val freqMult = if (idx == 2) 2f else 1f
+                        val phaseOffset = if (idx == 1) (PI / 2.0).toFloat() else 0f
                         for (k in 0..samples) {
                             val f = k.toFloat() / samples.toFloat()
-                            val wx = leftPad - hScrollPx + f * usableW
-                            val phase = f * 2f * PI.toFloat() + idx * (PI.toFloat() / 2f)
+                            val wx = leftPad + f * usableW
+                            val phase = f * 2f * PI.toFloat() * freqMult + phaseOffset
                             val wy = yTop + barH * 0.5f - sin(phase) * (barH * 0.34f)
                             if (k == 0) wave.moveTo(wx, wy) else wave.lineTo(wx, wy)
                         }
@@ -508,97 +359,52 @@ internal fun LoopSubCompTimelineView(
                     }
                 }
 
-                // Fixed header matching Master Deck shading & ribbon style.
+                // Header ribbon + tick marks
                 drawRect(color = colors.headerBg, topLeft = Offset.Zero, size = Size(size.width, rulerPx))
                 val ribbonFill = teal.copy(alpha = 0.85f)
                 val ribbonInk = barLabelInkForFill(compositeColorOver(ribbonFill, colors.headerBg))
                 drawRoundRect(
                     color = ribbonFill,
-                    topLeft = Offset(leftPad - hScrollPx, 2f),
-                    size = Size(usableW, slideRibbonPx - 4f),
+                    topLeft = Offset(leftPad, 2f),
+                    size = Size(usableW, ribbonPx - 4f),
                     cornerRadius = CornerRadius(4f, 4f),
                 )
-                drawEllipsizedLabel(
+                val headerLabel = textCache.measure(
                     textMeasurer = textMeasurer,
-                    textCache = textCache,
-                    text = "⟳ ${desc.label} (${periodMs}ms cycle)",
+                    text = "⟳ ${ref.label} (${periodMs}ms cycle)",
                     style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = ribbonInk),
-                    left = (leftPad - hScrollPx + 6f).coerceAtLeast(6f),
-                    top = 5f,
-                    availWidth = (usableW - 12f).coerceAtLeast(0f),
-                    clipTop = 2f,
-                    clipBottom = slideRibbonPx - 2f,
+                    density = this.density,
+                    maxWidthPx = (usableW - 12f).toInt().coerceAtLeast(16),
+                    overflow = TextOverflow.Ellipsis,
                 )
+                drawText(headerLabel, topLeft = Offset(leftPad + 6f, 4f))
 
                 val steps = 6
                 val tickStyle = TextStyle(fontSize = 10.sp, color = colors.textSecondary, fontFamily = FontFamily.Monospace)
-                val rightMarginPx = 6.dp.toPx()
-                var lastDrawnTickRight = Float.NEGATIVE_INFINITY
+                var lastTickRight = Float.NEGATIVE_INFINITY
                 for (s in 0..steps) {
                     val frac = s.toFloat() / steps.toFloat()
-                    val x = leftPad - hScrollPx + frac * usableW
+                    val x = leftPad + frac * usableW
                     drawLine(
                         color = colors.gridLine,
-                        start = Offset(x, slideRibbonPx + 4f),
+                        start = Offset(x, ribbonPx + 2f),
                         end = Offset(x, size.height),
                         strokeWidth = 1f,
                     )
-                    val label = String.format(Locale.US, "%.2fs", (frac * periodMs) / 1000.0)
-                    val measured = textCache.measure(
-                        textMeasurer = textMeasurer,
-                        text = label,
-                        style = tickStyle,
-                        density = this.density,
-                    )
-                    val textX = if (s == steps) (x - measured.size.width - 3f).coerceAtLeast(0f) else x + 3f
-                    val fitsRight = textX >= 0f && (s == steps || textX + measured.size.width + rightMarginPx <= size.width)
-                    if (fitsRight && textX >= lastDrawnTickRight + rightMarginPx) {
-                        drawText(textLayoutResult = measured, topLeft = Offset(textX, slideRibbonPx + 3f))
-                        lastDrawnTickRight = textX + measured.size.width
+                    val label = formatTimelineRulerLabel((frac * periodMs).toInt(), (periodMs / steps).toInt(), maxVisibleMs = periodMs.toInt())
+                    val measured = textCache.measure(textMeasurer, label, tickStyle, this.density)
+                    val tx = if (s == steps) (x - measured.size.width - 3f).coerceAtLeast(0f) else x + 3f
+                    if (tx >= lastTickRight + 6f && tx + measured.size.width <= size.width) {
+                        drawText(measured, topLeft = Offset(tx, ribbonPx + 3f))
+                        lastTickRight = tx + measured.size.width
                     }
                 }
                 drawLine(colors.gridLine, Offset(0f, rulerPx), Offset(size.width, rulerPx), 1.5f)
 
-                val scrubFrac = (controller.currentPlayheadTimeMs.toFloat() / periodMs.coerceAtLeast(1)).coerceIn(0f, 1f)
-                val px = leftPad - hScrollPx + scrubFrac * usableW
-                if (px in -8f..(size.width + 8f)) {
-                    drawPlayheadWithPentagonCap(x = px, height = size.height, color = colors.playhead)
-                }
+                val scrubFrac = (scrubMs.toFloat() / periodMs.toFloat()).coerceIn(0f, 1f)
+                val px = leftPad + scrubFrac * usableW
+                drawPlayheadWithPentagonCap(x = px, height = size.height, color = colors.playhead)
             }
-
-            VerticalScrollbar(
-                scrollState = verticalScroll,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .fillMaxHeight()
-                    .padding(top = HEADER_TOTAL_HEIGHT, bottom = TIMELINE_H_SCROLLBAR_GUTTER_DP)
-                    .testTag("ciacola-subcomp-vscrollbar"),
-            )
-            val hScrollState = rememberScrollableState { delta ->
-                val maxH = 0f
-                val prev = hScrollPx
-                hScrollPx = (hScrollPx - delta).coerceIn(0f, maxH)
-                -(hScrollPx - prev)
-            }
-            val hAdapter = remember(canvasWidthPx, hScrollPx) {
-                object : ScrollbarAdapter {
-                    override val scrollOffset: Double get() = hScrollPx.toDouble()
-                    override val contentSize: Double get() = canvasWidthPx.coerceAtLeast(1f).toDouble()
-                    override val viewportSize: Double get() = canvasWidthPx.coerceAtLeast(1f).toDouble()
-                    override suspend fun scrollTo(scrollOffset: Double) {
-                        hScrollPx = 0f
-                    }
-                }
-            }
-            HorizontalScrollbar(
-                scrollState = hScrollState,
-                adapter = hAdapter,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(end = TIMELINE_SCROLLBAR_GUTTER_DP)
-                    .testTag("ciacola-subcomp-hscrollbar"),
-            )
         }
     }
 }

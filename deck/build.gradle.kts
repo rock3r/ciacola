@@ -48,12 +48,27 @@ val requestedDeckProp = providers.systemProperty("ciacola.deck")
     .orElse(providers.gradleProperty("ciacola.deck"))
 
 tasks.named<Test>("desktopTest") {
+    maxHeapSize = "3g"
     exclude("**/*SpectreTest.class")
-    listOf("CIACOLA_RENDER_WS3_PNGS").forEach { key ->
+    listOf("CIACOLA_RENDER_WS3_PNGS", "CIACOLA_VIDEO_EXPORT_JOB", "CIACOLA_VIDEO_EXPORT_OUT_DIR", "CIACOLA_VIDEO_EXPORT_SPANS_DIR").forEach { key ->
         providers.environmentVariable(key).orNull?.let { environment(key, it) }
     }
-    listOf("ciacola.renderWs3Pngs", "ciacola.deck").forEach { key ->
+    listOf(
+        "ciacola.renderWs3Pngs",
+        "ciacola.spotRenderDir",
+        "ciacola.deck",
+        "ciacola.foundationPreview.dir",
+        "ciacola.videoExportJob",
+        "ciacola.videoExportOutDir",
+        "ciacola.videoExportSpansDir",
+    ).forEach { key ->
         providers.systemProperty(key).orNull?.let { systemProperty(key, it) }
+    }
+    if (providers.systemProperty("ciacola.videoExportJob").isPresent ||
+        providers.environmentVariable("CIACOLA_VIDEO_EXPORT_JOB").isPresent
+    ) {
+        jvmArgs("-Dapple.awt.UIElement=true")
+        systemProperty("apple.awt.UIElement", "true")
     }
 }
 
@@ -64,6 +79,7 @@ val desktopTestTask = tasks.named<Test>("desktopTest")
 tasks.register<Test>("spectreTest") {
     description = "Runs real-window Spectre 0.9.0 E2E tests on JetBrains Runtime 25."
     group = "verification"
+    maxHeapSize = "3g"
     javaLauncher.set(jbr25)
     testClassesDirs = desktopTestTask.get().testClassesDirs
     classpath = desktopTestTask.get().classpath
@@ -79,11 +95,12 @@ tasks.register<Test>("spectreTest") {
         "CIACOLA_QA_WORKER",
         "CIACOLA_QA_ROOT",
         "CIACOLA_SPECTRE_CAPTURE_DIR",
+        "CIACOLA_DOGFOOD_OUT_DIR",
         "FFMPEG_BIN",
     ).forEach { key ->
         providers.environmentVariable(key).orNull?.let { environment(key, it) }
     }
-    listOf("ciacola.qa.worker", "ciacola.qa.root").forEach { key ->
+    listOf("ciacola.qa.worker", "ciacola.qa.root", "ciacola.dogfoodOutDir", "ciacola.dogfoodCuesDir").forEach { key ->
         providers.systemProperty(key).orNull?.let { systemProperty(key, it) }
     }
     requestedDeckProp.orNull?.let { systemProperty("ciacola.deck", it) }
@@ -102,9 +119,123 @@ compose.desktop {
     }
 }
 
+val decksSourceDir = project.file("src/desktopMain/resources/decks")
+val decksDirOverrideProp = providers.systemProperty("ciacola.decks.dir")
+    .orElse(providers.gradleProperty("ciacola.decks.dir"))
+
+val desktopMainCompilation = kotlin.targets.getByName("desktop").compilations.getByName("main")
+
+tasks.withType<Copy>().configureEach {
+    exclude("**/.*.sync/**")
+}
+
+val formatDecks = tasks.register<JavaExec>("formatDecks") {
+    description = "Formats all tracked <deckId>.deck.json files in canonical DeckDocument key order."
+    group = "formatting"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckCanonicalizerCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    args("--format", "--dir=${decksSourceDir.absolutePath}")
+}
+
+val verifyDecksCanonical = tasks.register<JavaExec>("verifyDecksCanonical") {
+    description = "Verifies all tracked <deckId>.deck.json files decode cleanly and match CanonicalJson.print byte-for-byte."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckCanonicalizerCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    args("--verify", "--dir=${decksSourceDir.absolutePath}")
+    inputs.files(fileTree(decksSourceDir) { exclude("**/.*.sync/**") })
+}
+
+val importLegacyOverrides = tasks.register<JavaExec>("importLegacyOverrides") {
+    description = "Imports legacy .storyboard/ element, timeline, and design-system overrides into <deckId>.deck.json and archives originals."
+    group = "migration"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckCanonicalizerCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    args(
+        "--import-legacy-overrides",
+        "--dir=${decksSourceDir.absolutePath}",
+        "--storyboard-dir=${rootProject.file(".storyboard").absolutePath}",
+    )
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+}
+
+fun ciacolaArgProp(name: String): Provider<String> =
+    providers.systemProperty(name).orElse(providers.gradleProperty(name))
+
+val requestedSlidesProp = ciacolaArgProp("ciacola.slides")
+val requestedBeatsProp = ciacolaArgProp("ciacola.beats")
+val requestedOutProp = ciacolaArgProp("ciacola.out")
+val requestedFpsProp = ciacolaArgProp("ciacola.fps")
+val requestedSizeProp = ciacolaArgProp("ciacola.size")
+val requestedThemeProp = ciacolaArgProp("ciacola.theme")
+val requestedFailOnProp = ciacolaArgProp("ciacola.failOn")
+val requestedJsonProp = ciacolaArgProp("ciacola.json")
+
+tasks.register<JavaExec>("lintDeck") {
+    description = "Lints a .deck.json deck using DocumentDeckLintEngine (use -Pciacola.deck=<id|path>)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    args("--lint", "--dir=${decksDirOverrideProp.getOrElse(decksSourceDir.absolutePath)}")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedSlidesProp.orNull?.let { args("--slides=$it") }
+    requestedThemeProp.orNull?.let { args("--theme=$it") }
+    requestedFailOnProp.orNull?.let { args("--fail-on=$it") }
+    if (requestedJsonProp.orNull.equals("true", ignoreCase = true)) {
+        args("--json")
+    }
+}
+
+tasks.register<JavaExec>("renderSlides") {
+    description = "Headlessly renders deterministic PNG slide stills and manifest.json (use -Pciacola.deck=<id|path>)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    args("--render-slides", "--dir=${decksDirOverrideProp.getOrElse(decksSourceDir.absolutePath)}")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedSlidesProp.orNull?.let { args("--slides=$it") }
+    requestedBeatsProp.orNull?.let { args("--beats=$it") }
+    requestedOutProp.orNull?.let { args("--out=$it") }
+    requestedSizeProp.orNull?.let { args("--size=$it") }
+    requestedThemeProp.orNull?.let { args("--theme=$it") }
+}
+
+tasks.register<JavaExec>("exportVideo") {
+    description = "Headlessly exports a deck (or slide subset) to CFR H.264 MP4 and .spans.tsv (use -Pciacola.deck=<id|path>)."
+    group = "distribution"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    args("--export-video", "--dir=${decksDirOverrideProp.getOrElse(decksSourceDir.absolutePath)}")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedSlidesProp.orNull?.let { args("--slides=$it") }
+    requestedOutProp.orNull?.let { args("--out=$it") }
+    requestedFpsProp.orNull?.let { args("--fps=$it") }
+    requestedSizeProp.orNull?.let { args("--size=$it") }
+    requestedThemeProp.orNull?.let { args("--theme=$it") }
+}
+
+tasks.named("check") {
+    dependsOn(verifyDecksCanonical)
+}
+
 afterEvaluate {
     tasks.withType<JavaExec>().configureEach {
-        workingDir = rootProject.projectDir
-        requestedDeckProp.orNull?.let { systemProperty("ciacola.deck", it) }
+        if (name != "formatDecks" && name != "verifyDecksCanonical" && name != "importLegacyOverrides") {
+            workingDir = rootProject.projectDir
+            requestedDeckProp.orNull?.let { systemProperty("ciacola.deck", it) }
+            systemProperty("ciacola.decks.dir", decksDirOverrideProp.getOrElse(decksSourceDir.absolutePath))
+        }
     }
 }

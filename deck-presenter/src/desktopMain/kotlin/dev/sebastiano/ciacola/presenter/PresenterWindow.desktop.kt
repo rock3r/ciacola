@@ -30,11 +30,11 @@ import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.EaselWindow
+import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Window as AwtWindow
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 
 /**
  * Storyboard [EaselWindow] providing Ciacola's Jewel-styled `F2` Presenter View, live stage
@@ -65,10 +65,7 @@ class PresenterWindow(
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
         LaunchedEffect(controller) {
-            while (true) {
-                controller.refreshDisplays()
-                delay(2_000L)
-            }
+            controller.refreshDisplays()
         }
         val displays = controller.availableDisplays
         val readiness = controller.readinessStatus()
@@ -92,12 +89,12 @@ class PresenterWindow(
         }
         Separator()
         Item(
-            text = "Previous Beat",
+            text = "Previous Build",
             enabled = controller.canStepBackward,
             onClick = { controller.step(scope, AdvanceDirection.Backward) },
         )
         Item(
-            text = "Next Beat",
+            text = "Next Build",
             enabled = controller.canStepForward,
             onClick = { controller.step(scope, AdvanceDirection.Forward) },
         )
@@ -164,6 +161,8 @@ class PresenterWindow(
                 modifier = Modifier
                     .fillMaxSize()
                     .onPreviewKeyEvent { ev ->
+                        // Inline notes editing owns every key except the window-level F2 toggle.
+                        if (controller.isEditingNotes && ev.key != Key.F2) return@onPreviewKeyEvent false
                         if (extraPreviewKeyHandler?.invoke(ev, scope) == true) {
                             return@onPreviewKeyEvent true
                         }
@@ -174,6 +173,7 @@ class PresenterWindow(
                             return@onPreviewKeyEvent true
                         }
                         if (!controller.jumpDialogOpen && !controller.isExternalTextInputActive &&
+                            !controller.isEditingNotes &&
                             !ev.isCtrlPressed && !ev.isMetaPressed && !ev.isAltPressed
                         ) {
                             when (ev.key) {
@@ -210,12 +210,15 @@ fun rememberPresenterWindow(
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     isStudioOpenProvider: () -> Boolean = { false },
     isInspectOpenProvider: () -> Boolean = { false },
-    hasUnbakedOverridesProvider: () -> Boolean = { false },
     openAuthoringToolsProvider: () -> List<String> = { emptyList() },
-    unbakedDomainsProvider: () -> List<String> = { emptyList() },
     onEnterCleanShowMode: () -> Unit = {},
     isExternalTextInputActiveProvider: () -> Boolean = { false },
     onRestoreStageFocus: () -> Boolean = { false },
+    previewStoryboardProvider: (() -> Storyboard)? = null,
+    nextPreviewStoryboardProvider: (() -> Storyboard)? = null,
+    documentProvider: (() -> DeckDocument?)? = null,
+    onSaveSpeakerNote: ((slideId: String, beatIndex: Int, note: String?) -> Unit)? = null,
+    notesEditingBlockedProvider: () -> Boolean = { false },
     displayRouter: DisplayRoutingAdapter = remember { AwtDisplayRouter() },
     extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
 ): PresenterWindow {
@@ -225,12 +228,15 @@ fun rememberPresenterWindow(
             speakerNotesProvider = speakerNotesProvider,
             isStudioOpenProvider = isStudioOpenProvider,
             isInspectOpenProvider = isInspectOpenProvider,
-            hasUnbakedOverridesProvider = hasUnbakedOverridesProvider,
             openAuthoringToolsProvider = openAuthoringToolsProvider,
-            unbakedDomainsProvider = unbakedDomainsProvider,
             onEnterCleanShowModeAction = onEnterCleanShowMode,
             isExternalTextInputActiveProvider = isExternalTextInputActiveProvider,
             onRestoreStageFocus = { onRestoreStageFocus() },
+            previewStoryboardProvider = previewStoryboardProvider,
+            nextPreviewStoryboardProvider = nextPreviewStoryboardProvider,
+            documentProvider = documentProvider,
+            onSaveSpeakerNote = onSaveSpeakerNote,
+            notesEditingBlockedProvider = notesEditingBlockedProvider,
             displayRouter = displayRouter,
         )
     }.also {
@@ -238,12 +244,15 @@ fun rememberPresenterWindow(
         it.speakerNotesProvider = speakerNotesProvider
         it.isStudioOpenProvider = isStudioOpenProvider
         it.isInspectOpenProvider = isInspectOpenProvider
-        it.hasUnbakedOverridesProvider = hasUnbakedOverridesProvider
         it.openAuthoringToolsProvider = openAuthoringToolsProvider
-        it.unbakedDomainsProvider = unbakedDomainsProvider
         it.onEnterCleanShowModeAction = onEnterCleanShowMode
         it.isExternalTextInputActiveProvider = isExternalTextInputActiveProvider
         it.onRestoreStageFocus = { onRestoreStageFocus() }
+        it.previewStoryboardProvider = previewStoryboardProvider
+        it.nextPreviewStoryboardProvider = nextPreviewStoryboardProvider
+        it.documentProvider = documentProvider
+        it.onSaveSpeakerNote = onSaveSpeakerNote
+        it.notesEditingBlockedProvider = notesEditingBlockedProvider
     }
 
     return remember(controller) {

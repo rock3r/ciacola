@@ -143,7 +143,7 @@ fun Modifier.stageInteractive(id: String, label: String = id): Modifier = compos
 
 /**
  * Ephemeral placement-phase `(dx, dy)` drag deltas written during active stage drags so moving
- * an element never writes to [LocalElementOverrides] or recomposes the slide on every frame.
+ * an element updates placement directly without recomposing the slide on every frame.
  */
 @Stable
 class StageDragPreview {

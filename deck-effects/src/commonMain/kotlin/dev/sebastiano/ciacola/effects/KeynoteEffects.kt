@@ -41,10 +41,6 @@ import dev.sebastiano.ciacola.inspector.provideStageVisibilityAlpha
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
-import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
-import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
-import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
-import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
 import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.timelineTarget
 import kotlin.math.PI
@@ -143,65 +139,28 @@ fun <S> Transition<S>.animateBuildProgress(
     easing: Easing = LocalDeckTheme.current.motion.standardEasing,
     visible: ((S) -> Boolean)? = null,
 ): State<Float> {
-    val sceneCtx = LocalActiveSceneTimeline.current
-    val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
-    val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
-    val collector = LocalTimelineHarvestCollector.current
     val reducedMotion = LocalReducedMotion.current
-
-    val maxBeat = ((sceneCtx?.totalBeats ?: 1) - 1).coerceAtLeast(0)
-    val effectiveDuration = override?.durationMs ?: durationMillis
-    val effectiveDelay = override?.delayMs ?: 0
-    val effectiveTriggerBeat = (override?.enterBeat ?: defaultTriggerBeat).let {
-        if (sceneCtx != null) it.coerceIn(0, maxBeat) else it
-    }
-    val effectiveExitBeat = override?.exitBeat
-
-    SideEffect {
-        if (sceneCtx != null) {
-            collector?.record(
-                HarvestedTrackRecord(
-                    trackId = resolvedTrackId,
-                    label = label,
-                    category = category,
-                    sceneIndex = sceneCtx.sceneIndex,
-                    triggerBeat = effectiveTriggerBeat.coerceIn(0, (sceneCtx.totalBeats - 1).coerceAtLeast(0)),
-                    durationMs = effectiveDuration,
-                    delayMs = effectiveDelay,
-                )
-            )
-        }
-    }
-
     return animateFloat(
         transitionSpec = {
-            val overrideCurve = override?.curve
             if (reducedMotion) {
                 tween(
-                    durationMillis = effectiveDuration.coerceAtMost(REDUCED_MOTION_FADE_DURATION_MS),
+                    durationMillis = durationMillis.coerceAtMost(REDUCED_MOTION_FADE_DURATION_MS),
                     delayMillis = 0,
                     easing = LinearOutSlowInEasing,
                 )
-            } else if (overrideCurve != null) {
-                overrideCurve.toAnimationSpec(effectiveDuration, effectiveDelay)
             } else {
                 tween(
-                    durationMillis = effectiveDuration,
-                    delayMillis = effectiveDelay,
+                    durationMillis = durationMillis,
+                    delayMillis = 0,
                     easing = easing,
                 )
             }
         },
         label = label,
     ) { state ->
-        val isVisible = if (sceneCtx != null) {
-            val beatIdx = sceneCtx.frameBeatIndexOf(state)
-            val afterEnter = beatIdx >= effectiveTriggerBeat
-            val beforeExit = effectiveExitBeat == null || beatIdx < effectiveExitBeat
-            afterEnter && beforeExit
-        } else {
-            visible?.invoke(state) ?: fallbackBeatIndexOf(state)?.let { it >= effectiveTriggerBeat } ?: false
-        }
+        val isVisible = visible?.invoke(state)
+            ?: fallbackBeatIndexOf(state)?.let { it >= defaultTriggerBeat }
+            ?: false
         if (isVisible) 1f else 0f
     }
 }
@@ -221,64 +180,26 @@ fun <S> Transition<S>.animateStaggerGroup(
     visible: ((S) -> Boolean)? = null,
 ): StaggerGroupState {
     val safeCount = count.coerceAtLeast(1)
-    val sceneCtx = LocalActiveSceneTimeline.current
-    val resolvedTrackId = trackId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:$label" else label
-    val override = LocalTimelineOverrides.current.tracks[resolvedTrackId]
-    val collector = LocalTimelineHarvestCollector.current
     val reducedMotion = LocalReducedMotion.current
-
-    val maxBeat = ((sceneCtx?.totalBeats ?: 1) - 1).coerceAtLeast(0)
-    val rawItemDuration = override?.durationMs ?: itemDurationMs
-    val rawStep = override?.staggerStepMs ?: staggerStepMs
-    val effectiveItemDuration = if (reducedMotion) rawItemDuration.coerceAtMost(REDUCED_MOTION_FADE_DURATION_MS) else rawItemDuration
-    val effectiveStep = if (reducedMotion) 0 else rawStep
-    val effectiveDelay = if (reducedMotion) 0 else (override?.delayMs ?: 0)
-    val effectiveTriggerBeat = (override?.enterBeat ?: defaultTriggerBeat).let {
-        if (sceneCtx != null) it.coerceIn(0, maxBeat) else it
-    }
+    val effectiveItemDuration = if (reducedMotion) itemDurationMs.coerceAtMost(REDUCED_MOTION_FADE_DURATION_MS) else itemDurationMs
+    val effectiveStep = if (reducedMotion) 0 else staggerStepMs
     val totalDurationMs = effectiveItemDuration + (safeCount - 1) * effectiveStep
 
-    SideEffect {
-        if (sceneCtx != null) {
-            collector?.record(
-                HarvestedTrackRecord(
-                    trackId = resolvedTrackId,
-                    label = label,
-                    category = TrackCategory.StaggerGroup,
-                    sceneIndex = sceneCtx.sceneIndex,
-                    triggerBeat = effectiveTriggerBeat.coerceIn(0, (sceneCtx.totalBeats - 1).coerceAtLeast(0)),
-                    durationMs = rawItemDuration + (safeCount - 1) * rawStep,
-                    delayMs = override?.delayMs ?: 0,
-                    staggerCount = safeCount,
-                    staggerStepMs = rawStep,
-                )
-            )
-        }
-    }
-
-    fun isVisibleAt(state: S): Boolean {
-        return if (sceneCtx != null) {
-            sceneCtx.frameBeatIndexOf(state) >= effectiveTriggerBeat
-        } else {
-            visible?.invoke(state) ?: fallbackBeatIndexOf(state)?.let { it >= effectiveTriggerBeat } ?: false
-        }
-    }
+    fun isVisibleAt(state: S): Boolean =
+        visible?.invoke(state) ?: fallbackBeatIndexOf(state)?.let { it >= defaultTriggerBeat } ?: false
 
     val progress = animateFloat(
         transitionSpec = {
-            val overrideCurve = override?.curve
             if (reducedMotion) {
                 tween(
                     durationMillis = totalDurationMs,
                     delayMillis = 0,
                     easing = LinearOutSlowInEasing,
                 )
-            } else if (overrideCurve != null) {
-                overrideCurve.toAnimationSpec(totalDurationMs, effectiveDelay)
             } else {
                 tween(
                     durationMillis = totalDurationMs,
-                    delayMillis = effectiveDelay,
+                    delayMillis = 0,
                     easing = easing,
                 )
             }
@@ -287,7 +208,7 @@ fun <S> Transition<S>.animateStaggerGroup(
     ) { state ->
         if (isVisibleAt(state)) 1f else 0f
     }
-    return remember(this, progress, safeCount, effectiveItemDuration, effectiveStep, override, reducedMotion) {
+    return remember(this, progress, safeCount, effectiveItemDuration, effectiveStep, reducedMotion) {
         StaggerGroupState(
             overallProgress = progress,
             count = safeCount,
@@ -303,69 +224,6 @@ fun trimPath(
     progress: Float,
     destination: Path = Path(),
 ): PathTipPose? = trimMultiContourPath(source, progress, destination)
-
-fun Modifier.keynoteDissolve(progress: () -> Float): Modifier =
-    provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
-        .graphicsLayer {
-            alpha = progress().coerceIn(0f, 1f)
-        }
-
-/**
- * Entrance start offset for [trackId] from the Inspector's spatial override, or [DpOffset.Zero] when
- * the track has none (so untouched slides stay pixel-identical).
- */
-@Composable
-fun spatialEntranceOffset(trackId: String): DpOffset {
-    val spatial = LocalTimelineOverrides.current.tracks[trackId]?.spatial ?: return DpOffset.Zero
-    return DpOffset(spatial.offsetXDp.dp, spatial.offsetYDp.dp)
-}
-
-@Composable
-fun Modifier.keynoteFadeMoveTracked(
-    trackId: String,
-    progress: () -> Float,
-    direction: SlideDirection = SlideDirection.Up,
-    distance: Dp = LocalDeckTheme.current.motion.fadeMoveDistance,
-    // Build progress (animateBuildProgress / animateStaggerGroup) is already eased by its curve, so
-    // the default here is linear; pass an easing only when driving the modifier with raw progress.
-    easing: Easing = LinearEasing,
-    itemIndex: Int? = null,
-): Modifier {
-    val spatial = LocalTimelineOverrides.current.tracks[trackId]?.spatial
-    // Report the built-in entrance offset so the Inspector's Offset X/Y start from it (24 dp below
-    // for the default upward fade-move) instead of 0 dp.
-    val collector = LocalTimelineHarvestCollector.current
-    val inScene = LocalActiveSceneTimeline.current != null
-    if (collector != null && inScene) {
-        val defaultOffset = when (direction) {
-            SlideDirection.Up -> 0f to distance.value
-            SlideDirection.Down -> 0f to -distance.value
-            SlideDirection.Left -> distance.value to 0f
-            SlideDirection.Right -> -distance.value to 0f
-        }
-        SideEffect { collector.recordDefaultOffset(trackId, defaultOffset.first, defaultOffset.second) }
-    }
-    val tagged = if (itemIndex != null) {
-        timelineTarget(trackId, "$trackId#item$itemIndex")
-    } else {
-        timelineTarget(trackId)
-    }
-    val reducedMotion = LocalReducedMotion.current
-    return if (spatial == null || reducedMotion) {
-        tagged.keynoteFadeMove(progress, direction, distance, easing)
-    } else {
-        val offset = DpOffset(spatial.offsetXDp.dp, spatial.offsetYDp.dp)
-        tagged
-            .provideStageVisibilityAlpha { progress().coerceIn(0f, 1f) }
-            .graphicsLayer {
-                val raw = progress().coerceIn(0f, 1f)
-                val eased = easing.transform(raw)
-                alpha = raw
-                translationX = (1f - eased) * offset.x.toPx()
-                translationY = (1f - eased) * offset.y.toPx()
-            }
-    }
-}
 
 @Composable
 fun Modifier.keynoteFadeMove(
@@ -526,29 +384,6 @@ fun Modifier.keynoteWipe(
     }
 }
 
-fun Modifier.keynoteSpotlight(
-    dimProgress: () -> Float,
-    dimmedAlpha: Float = 0.25f,
-): Modifier = provideStageVisibilityAlpha {
-    val d = dimProgress().coerceIn(0f, 1f)
-    1f - (1f - dimmedAlpha.coerceIn(0f, 1f)) * d
-}.graphicsLayer {
-    val d = dimProgress().coerceIn(0f, 1f)
-    alpha = 1f - (1f - dimmedAlpha.coerceIn(0f, 1f)) * d
-}
-
-fun Modifier.keynoteSpotlight(
-    activeFocusKey: () -> Any?,
-    itemKey: Any,
-    dimmedAlpha: Float = 0.25f,
-): Modifier = provideStageVisibilityAlpha {
-    val active = activeFocusKey()
-    if (active == null || active == itemKey) 1f else dimmedAlpha.coerceIn(0f, 1f)
-}.graphicsLayer {
-    val active = activeFocusKey()
-    alpha = if (active == null || active == itemKey) 1f else dimmedAlpha.coerceIn(0f, 1f)
-}
-
 fun AnimatedLine(
     startKey: Any,
     startAlignment: Alignment,
@@ -583,55 +418,6 @@ fun AnimatedLine(
     val fullPath = Path().apply {
         moveTo(startPos.x, startPos.y)
         lineTo(endPos.x, endPos.y)
-    }
-    drawTrimmedDecorationPath(
-        fullPath = fullPath,
-        progress = p,
-        color = color,
-        strokeWidthPx = strokeWidth.toPx(),
-        dashPattern = dashPattern,
-        arrowHead = arrowHead,
-        headLengthPx = headLength.toPx(),
-        headAngleDegrees = headAngleDegrees,
-    )
-}
-
-fun AnimatedCubicLine(
-    startKey: Any,
-    startAlignment: Alignment,
-    endKey: Any,
-    endAlignment: Alignment,
-    progress: () -> Float,
-    color: Color,
-    strokeWidth: Dp = 3.dp,
-    dashPattern: Pair<Dp, Dp>? = null,
-    arrowHead: ArrowHead = ArrowHead.Open,
-    headLength: Dp = 14.dp,
-    headAngleDegrees: Float = 28f,
-    modifier: Modifier = Modifier,
-): Decoration = Decoration(modifier) { layout ->
-    val p = progress().coerceIn(0f, 1f)
-    if (p <= 0f) return@Decoration
-    val startRect = layout.getBoundingBox(startKey) ?: return@Decoration
-    val endRect = layout.getBoundingBox(endKey) ?: return@Decoration
-
-    val startPos = borderPosition(startRect, startAlignment, layoutDirection)
-    val endPos = borderPosition(endRect, endAlignment, layoutDirection)
-    val bounds = endPos - startPos
-    val distance = when {
-        startAlignment is BiasAlignment && endAlignment is BiasAlignment -> when {
-            startAlignment.horizontalBias == 0f && endAlignment.horizontalBias == 0f -> abs(bounds.y)
-            startAlignment.verticalBias == 0f && endAlignment.verticalBias == 0f -> abs(bounds.x)
-            else -> minOf(abs(bounds.x), abs(bounds.y))
-        }
-        else -> minOf(abs(bounds.x), abs(bounds.y))
-    }
-    val startProj = startPos.projectOutward(startPos - startRect.center, distance / 2f)
-    val endProj = endPos.projectOutward(endPos - endRect.center, distance / 2f)
-
-    val fullPath = Path().apply {
-        moveTo(startPos.x, startPos.y)
-        cubicTo(startProj.x, startProj.y, endProj.x, endProj.y, endPos.x, endPos.y)
     }
     drawTrimmedDecorationPath(
         fullPath = fullPath,

@@ -14,7 +14,7 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
 import kotlin.test.Test
 
@@ -30,7 +30,7 @@ class ReviewChromeWhilePresentingTest {
         lateinit var coordinator: ReviewStageCoordinator
         setContent {
             coordinator = rememberReviewStageCoordinator()
-            val deck = remember { createFoundationDeck(stageDecorator = coordinator.stageDecorator) }
+            val deck = remember { buildFoundationTestStoryboard(stageDecorator = coordinator.stageDecorator) }
             val animatic = rememberAnimatic(storyboard = { deck })
             val window = rememberSlideReviewWindow(animatic = animatic, store = store, stageCoordinator = coordinator)
             CompositionLocalProvider(LocalPresentingFullscreen provides fullscreen) {
