@@ -630,4 +630,70 @@ class DocumentStoreAndSyncRegressionTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun keepMineOnOverwroteConflictPersistsResolutionAcrossReopenWhileRetainingQuarantine(): Unit = runBlocking {
+        val dir = Files.createTempDirectory("keep-mine-overwrote-persist")
+        try {
+            val target = dir.resolve("deck.deck.json")
+            Files.writeString(target, CanonicalJson.print(makeDoc("V1-base")))
+            val store1 = DeckDocumentStore()
+            var injectedExternal = false
+            val sync1 = DeckFileSync(
+                targetFile = target,
+                recoveryRootDir = dir.resolve("rec"),
+                store = store1,
+                stepHook = { step ->
+                    // Replace target right after the pre-exchange check so atomic exchange displaces it -> Overwrote.
+                    if (step == SyncStep.WriteAfterCheck && !injectedExternal) {
+                        injectedExternal = true
+                        writeCanonicalAtomic(target, makeDoc("V2-external-race"))
+                    }
+                },
+            )
+            val quarantinedTheirsPath: Path
+            try {
+                assertEquals(DeckLoadState.Loaded, sync1.open())
+                assertTrue(store1.edit { makeDoc("V2-mine") })
+
+                val conflict = assertIs<SyncState.Conflict>(sync1.flushNow())
+                assertEquals(ConflictKind.Overwrote, conflict.info.kind)
+                quarantinedTheirsPath = Path.of(conflict.info.theirsPath)
+                assertTrue(Files.isRegularFile(quarantinedTheirsPath))
+
+                // User explicitly resolves by choosing Keep mine, then closes without further edits.
+                assertEquals(SyncState.Saved, sync1.keepMine())
+                assertEquals(CloseFlushResult.Clean, sync1.flushOnClose())
+
+                // Quarantined .theirs bytes remain preserved and undismissed for recovery.
+                assertTrue(Files.isRegularFile(quarantinedTheirsPath))
+                val entries1 = sync1.listQuarantineEntries()
+                assertTrue(
+                    entries1.any { it.path == quarantinedTheirsPath && !it.dismissed },
+                    "keepMine must retain quarantined .theirs bytes for recovery: $entries1",
+                )
+            } finally {
+                sync1.close()
+            }
+
+            // Reopening must NOT recreate the already-resolved Overwrote conflict or block closing.
+            val store2 = DeckDocumentStore()
+            val sync2 = DeckFileSync(target, dir.resolve("rec"), store2)
+            try {
+                assertEquals(DeckLoadState.Loaded, sync2.open())
+                assertEquals(SyncState.Saved, store2.sync, "Resolved Overwrote conflict must not return on reopen")
+                assertEquals("V2-mine", store2.document.title)
+                assertEquals(CloseFlushResult.Clean, sync2.flushOnClose(), "Reopened clean deck must close cleanly")
+                assertTrue(Files.isRegularFile(quarantinedTheirsPath), "Quarantined .theirs file must remain on disk")
+                assertTrue(
+                    sync2.listQuarantineEntries().any { it.path == quarantinedTheirsPath && !it.dismissed },
+                    "Quarantined .theirs entry must remain available for recovery after reopen",
+                )
+            } finally {
+                sync2.close()
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

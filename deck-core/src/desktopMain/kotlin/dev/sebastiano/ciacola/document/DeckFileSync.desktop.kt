@@ -51,6 +51,7 @@ class DeckFileSync(
     val journalFile: Path = syncDir.resolve("journal")
     val lockFile: Path = syncDir.resolve("lock")
     private val dismissedFile: Path = syncDir.resolve("dismissed")
+    private val resolvedConflictsFile: Path = syncDir.resolve("resolved-conflicts")
 
     private val ioMutex = Mutex()
     private val closed = AtomicBoolean(false)
@@ -64,6 +65,7 @@ class DeckFileSync(
     private var inFlightTxId: String? = null
     private var inFlightRevision: Long? = null
     private val dismissedNames: MutableSet<String> = LinkedHashSet()
+    private val resolvedConflictNames: MutableSet<String> = LinkedHashSet()
     private val firstObservedMonoMs: MutableMap<String, Long> = LinkedHashMap()
     private val notices: MutableList<RecoveryNotice> = mutableListOf()
 
@@ -340,6 +342,10 @@ class DeckFileSync(
                 }
 
                 ConflictKind.Overwrote -> {
+                    val theirsName = Path.of(st.info.theirsPath).fileName?.toString()
+                    if (!theirsName.isNullOrBlank() && resolvedConflictNames.add(theirsName)) {
+                        SyncFilesHelper.persistDismissedSet(resolvedConflictsFile, syncDir, resolvedConflictNames, fileOps)
+                    }
                     store.setSyncState(if (store.isDirty) SyncState.Dirty else SyncState.Saved)
                 }
             }
@@ -424,6 +430,12 @@ class DeckFileSync(
                     store.setSyncState(SyncState.Dirty)
                     // Normal write protocol: step 2 checks target against diskHash.
                     writeIfDirtyInternal(forceWrite = true)
+                    if (store.sync == SyncState.Saved) {
+                        val theirsName = theirsPath.fileName?.toString()
+                        if (!theirsName.isNullOrBlank() && resolvedConflictNames.add(theirsName)) {
+                            SyncFilesHelper.persistDismissedSet(resolvedConflictsFile, syncDir, resolvedConflictNames, fileOps)
+                        }
+                    }
                     Result.success(recoveryCopy)
                 }
             }
@@ -505,6 +517,7 @@ class DeckFileSync(
         }
 
         SyncFilesHelper.loadDismissedSet(dismissedFile, dismissedNames)
+        SyncFilesHelper.loadDismissedSet(resolvedConflictsFile, resolvedConflictNames)
 
         when (val probe = fileOps.probeExchangeSupport(syncDir)) {
             is AtomicExchangeResult.Success -> Unit
@@ -923,6 +936,7 @@ class DeckFileSync(
             targetFile = targetFile,
             quarantineDir = quarantineDir,
             dismissedNames = dismissedNames,
+            resolvedConflictNames = resolvedConflictNames,
             store = store,
             onNotice = ::addNotice,
         )
@@ -934,6 +948,8 @@ class DeckFileSync(
         journalFile = journalFile,
         dismissedFile = dismissedFile,
         dismissedNames = dismissedNames,
+        resolvedConflictsFile = resolvedConflictsFile,
+        resolvedConflictNames = resolvedConflictNames,
         firstObservedMonoMs = firstObservedMonoMs,
         retentionMs = retentionMs,
         clock = clock,

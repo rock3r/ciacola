@@ -298,12 +298,13 @@ internal object SyncFilesHelper {
         targetFile: Path,
         quarantineDir: Path,
         dismissedNames: Set<String>,
+        resolvedConflictNames: Set<String> = emptySet(),
         store: DeckDocumentStore,
         onNotice: (RecoveryNotice) -> Unit,
     ) {
         val entries = scanQuarantineEntries(quarantineDir, dismissedNames)
             .filter { it.txid == txid && !it.dismissed }
-        val theirsEntry = entries.firstOrNull { it.kind == QuarantineKind.Theirs }
+        val theirsEntry = entries.firstOrNull { it.kind == QuarantineKind.Theirs && it.fileName !in resolvedConflictNames }
         val mineEntry = entries.firstOrNull { it.kind == QuarantineKind.Mine }
         val targetEqualsNew = meta != null && targetHash == meta.newHash
 
@@ -376,6 +377,8 @@ internal object SyncFilesHelper {
         journalFile: Path,
         dismissedFile: Path,
         dismissedNames: MutableSet<String>,
+        resolvedConflictsFile: Path,
+        resolvedConflictNames: MutableSet<String>,
         firstObservedMonoMs: MutableMap<String, Long>,
         retentionMs: Long,
         clock: SyncClock,
@@ -467,6 +470,9 @@ internal object SyncFilesHelper {
                         firstObservedMonoMs.remove(entry.fileName)
                         dismissedNames.remove(entry.fileName)
                         persistDismissedSet(dismissedFile, syncDir, dismissedNames, fileOps)
+                        if (resolvedConflictNames.remove(entry.fileName)) {
+                            persistDismissedSet(resolvedConflictsFile, syncDir, resolvedConflictNames, fileOps)
+                        }
                         stepHook(SyncStep.SweepAfterDeleteEntryBeforeMeta)
                         deleteMetaIfNoEntriesRemain(
                             txid = entry.txid,
