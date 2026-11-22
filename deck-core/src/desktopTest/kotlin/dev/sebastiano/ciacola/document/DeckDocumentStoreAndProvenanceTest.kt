@@ -736,4 +736,70 @@ class DeckDocumentStoreAndProvenanceTest {
         assertEquals(100.0, JsonMergePatch.resolveNodeBeforeBuild(outOfOrder, 0).frame?.x)
         assertEquals(200.0, JsonMergePatch.resolveNodeAfterBuild(outOfOrder, 0).frame?.x)
     }
+
+    @Test
+    fun beatZeroEditsReconcileBeatZeroChangeOverridesAfterDeletingBeatOne() {
+        val node = NodeSpec(
+            id = "n1",
+            frame = FrameSpec(x = 100.0, y = 200.0, w = 300.0, h = 80.0),
+            text = TextPayload(value = RichTextValue.Plain("Base"), color = "foreground"),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject {
+                        putJsonObject("frame") { put("x", 300.0) }
+                        putJsonObject("text") {
+                            put("value", "Beat 1 copy")
+                            put("color", "accent")
+                        }
+                        put("opacity", 0.5)
+                    },
+                ),
+            ),
+        )
+        val doc = DeckDocument(
+            format = 1,
+            id = "beat0-reconcile",
+            title = "Beat 0 Reconcile",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(node),
+                ),
+            ),
+        )
+        // Deleting beat 1 moves its Build.Change onto beat 0.
+        val afterDelete = DeckStructureEdits.deleteBeat(doc, "s1", beatIndex = 1)
+        val collapsed = afterDelete.slides.single().nodes.single()
+        assertEquals(300.0, JsonMergePatch.resolveNodeAtBeat(collapsed, 0).frame?.x)
+        assertEquals("Beat 1 copy", JsonMergePatch.resolveNodeAtBeat(collapsed, 0).text?.value?.plainText)
+
+        // Editing frame.x on beat 0 must update the resolved node while keeping untouched beat-0 keys.
+        val nudged = JsonMergePatch.applyEditAtBeat(
+            collapsed,
+            beat = 0,
+            patch = buildJsonObject { putJsonObject("frame") { put("x", 310.0) } },
+        )
+        val resolvedNudged = JsonMergePatch.resolveNodeAtBeat(nudged, 0)
+        assertEquals(310.0, resolvedNudged.frame?.x, "Beat-0 edit must not be shadowed by beat-0 Build.Change")
+        assertEquals(0.5, resolvedNudged.opacity, "Untouched keys in the beat-0 Build.Change must survive")
+
+        // Editing text on beat 0 via applyTextRangeEdit must also take effect on the resolved node.
+        val (textEditedDoc, _) = DeckStructureEdits.applyTextRangeEdit(
+            document = afterDelete,
+            slideId = "s1",
+            nodeId = "n1",
+            beat = 0,
+            edit = TextRangeEdit(start = 11, removedLength = 0, insertedText = "!"),
+        )
+        val resolvedText = JsonMergePatch.resolveNodeAtBeat(textEditedDoc.slides.single().nodes.single(), 0)
+        assertEquals("Beat 1 copy!", resolvedText.text?.value?.plainText)
+
+        // Resetting text.color on beat 0 must clear both base and beat-0 Build.Change.
+        val resetColor = JsonMergePatch.resetAtBeat(nudged, beat = 0, keyPath = listOf("text", "color"))
+        assertNull(JsonMergePatch.resolveNodeAtBeat(resetColor, 0).text?.color)
+    }
 }

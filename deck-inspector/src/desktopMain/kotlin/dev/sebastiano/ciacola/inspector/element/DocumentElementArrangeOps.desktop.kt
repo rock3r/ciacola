@@ -333,6 +333,7 @@ internal object DocumentElementArrangeOps {
         if (localMoves.isEmpty()) return false
 
         if (controller.editAllBuilds && controller.activeBeat > 0) {
+            val activeBeat = controller.activeBeat
             return controller.applyMutation(label, useActiveGesture = false) { doc ->
                 localMoves.entries.fold(doc) { acc, (id, pair) ->
                     val (localDelta, resolved) = pair
@@ -341,6 +342,7 @@ internal object DocumentElementArrangeOps {
                             node = node,
                             delta = FrameDelta(dx = localDelta.x.toDouble(), dy = localDelta.y.toDouble()),
                             fallbackBounds = resolved.localBounds,
+                            activeBeat = activeBeat,
                         )
                     }
                 }
@@ -378,9 +380,22 @@ internal object DocumentElementArrangeOps {
      * so per-build differences (motion between builds) survive `All builds` moves and resizes.
      * Width / height stay at least 1 stage unit; everything snaps to half units.
      */
-    fun offsetFrameAcrossAllBuilds(node: NodeSpec, delta: FrameDelta, fallbackBounds: Rect): NodeSpec {
-        fun overrides(key: String) = node.builds.any { b -> b is Build.Change && (b.set["frame"] as? JsonObject)?.containsKey(key) == true }
-        val implicitlyAlignedBase = node.frame?.x == null && node.frame?.y == null && !overrides("x") && !overrides("y")
+    fun offsetFrameAcrossAllBuilds(
+        node: NodeSpec,
+        delta: FrameDelta,
+        fallbackBounds: Rect,
+        activeBeat: Int = 0,
+    ): NodeSpec {
+        fun hasBeat0NumericOverride(key: String) = node.builds.any { b ->
+            b is Build.Change && b.beat == 0 && ((b.set["frame"] as? JsonObject)?.get(key) as? JsonPrimitive)?.doubleOrNull != null
+        }
+        fun overriddenAtOrBeforeActiveBeat(key: String) = node.builds.any { b ->
+            b is Build.Change && b.beat <= activeBeat && (b.set["frame"] as? JsonObject)?.containsKey(key) == true
+        }
+        val implicitlyAlignedBase = node.frame?.x == null &&
+            node.frame?.y == null &&
+            !hasBeat0NumericOverride("x") &&
+            !hasBeat0NumericOverride("y")
         val movingPos = moved(delta.dx) || moved(delta.dy)
         val keys = listOf(
             Triple("x", delta.dx, fallbackBounds.left.toDouble()),
@@ -400,7 +415,9 @@ internal object DocumentElementArrangeOps {
             val base = when (key) { "x" -> frame.x; "y" -> frame.y; "w" -> frame.w; else -> frame.h }
             val next = when {
                 base != null -> adjust(key, base, d)
-                !overrides(key) -> adjust(key, fallback, d)
+                hasBeat0NumericOverride(key) -> null
+                !overriddenAtOrBeforeActiveBeat(key) -> adjust(key, fallback, d)
+                key == "x" || key == "y" -> adjust(key, 0.0, d)
                 else -> null
             }
             frame = when (key) {
@@ -502,6 +519,7 @@ internal object DocumentElementArrangeOps {
             chains[id]?.let { nearestAncestorShift(it, stageShifts) } ?: Offset.Zero
         }
         if (controller.editAllBuilds && controller.activeBeat > 0) {
+            val activeBeat = controller.activeBeat
             // Relative change across base + every build (like `moveNodesBy`), never stamping this
             // build's absolute frame onto Beat 0. The transaction re-applies it to its start snapshot.
             return controller.applyMutation(label, useActiveGesture = true) { doc ->
@@ -516,7 +534,9 @@ internal object DocumentElementArrangeOps {
                         dw = (f.w ?: 0.0) - start.width,
                         dh = (f.h ?: 0.0) - start.height,
                     )
-                    DocumentThemeResolver.updateNodeInSlide(acc, slide.id, id) { offsetFrameAcrossAllBuilds(it, delta, startLocal) }
+                    DocumentThemeResolver.updateNodeInSlide(acc, slide.id, id) {
+                        offsetFrameAcrossAllBuilds(it, delta, startLocal, activeBeat = activeBeat)
+                    }
                 }
             }
         }

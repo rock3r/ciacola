@@ -1,12 +1,16 @@
 package dev.sebastiano.ciacola.timeline
 
-import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.ImageComposeScene
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.document.BeatSpec
 import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.Curve
@@ -37,7 +41,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -384,55 +387,47 @@ class DocumentTimelineAndStaggerTest {
         assertEquals(beforeInsert, store.document)
     }
 
-    @OptIn(ExperimentalComposeUiApi::class)
+    @OptIn(ExperimentalTestApi::class)
     @Test
-    fun timelineStudioPanelRendersBeatInspectorAndIntraTextFragmentExpansion() {
+    fun timelineStudioPanelRendersBeatInspectorAndIntraTextFragmentExpansion() = runComposeUiTest {
         val (_, controller) = createController()
         controller.selectBeatHeader("s1", 1)
 
-        val scene = ImageComposeScene(
-            width = 1280,
-            height = 720,
-            density = Density(1f),
-            coroutineContext = Dispatchers.Unconfined,
-        ) {
+        setContent {
             IntUiTheme {
-                DocumentTimelineStudioPanel(controller = controller)
+                Box(Modifier.size(1280.dp, 720.dp)) {
+                    DocumentTimelineStudioPanel(controller = controller)
+                }
             }
         }
-        try {
-            scene.render(0L).close()
-            val textsBeat = collectAllSemanticTexts(scene)
-            assertTrue(
-                textsBeat.any { it.contains("Motion Stagger", ignoreCase = true) || it.contains("Phases", ignoreCase = true) },
-                "Expected Motion Stagger / Phases UI when beat header is selected; found: ${textsBeat.take(25)}",
-            )
+        waitForIdle()
+        val textsBeat = collectAllSemanticTexts(onRoot(useUnmergedTree = true).fetchSemanticsNode())
+        assertTrue(
+            textsBeat.any { it.contains("Motion Stagger", ignoreCase = true) || it.contains("Phases", ignoreCase = true) },
+            "Expected Motion Stagger / Phases UI when beat header is selected; found: ${textsBeat.take(25)}",
+        )
 
-            // Switch selection to the text morph track and verify Intra-Text Fragment expansion renders!
-            val morphRef = controller.snapshot.trackRefsByTrackId.values
-                .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
-                .first { it.slideId == "s1" && it.nodeId == "headline" && it.isTextMorph }
-            controller.selectTrack(morphRef.trackId)
-            scene.render(16_000_000L).close()
-            val textsMorph = collectAllSemanticTexts(scene)
-            assertTrue(
-                textsMorph.any { it.contains("function#0") },
-                "Expected fragment tick 'function#0' when text morph track is expanded; found: ${textsMorph.take(30)}",
-            )
-        } finally {
-            scene.close()
-        }
+        // Switch selection to the text morph track and verify Intra-Text Fragment expansion renders.
+        val morphRef = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .first { it.slideId == "s1" && it.nodeId == "headline" && it.isTextMorph }
+        runOnIdle { controller.selectTrack(morphRef.trackId) }
+        waitForIdle()
+        val textsMorph = collectAllSemanticTexts(onRoot(useUnmergedTree = true).fetchSemanticsNode())
+        assertTrue(
+            textsMorph.any { it.contains("function#0") },
+            "Expected fragment tick 'function#0' when text morph track is expanded; found: ${textsMorph.take(30)}",
+        )
     }
 
-    @OptIn(ExperimentalComposeUiApi::class)
-    private fun collectAllSemanticTexts(scene: ImageComposeScene): List<String> {
+    private fun collectAllSemanticTexts(root: SemanticsNode): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {
             node.config.getOrNull(SemanticsProperties.Text)?.forEach { out += it.text }
             node.config.getOrNull(SemanticsProperties.ContentDescription)?.forEach { out += it }
             node.children.forEach(::walk)
         }
-        scene.semanticsOwners.forEach { walk(it.unmergedRootSemanticsNode) }
+        walk(root)
         return out
     }
 }

@@ -356,7 +356,9 @@ object JsonMergePatch {
 
     /**
      * Applies an edit [patch] to [node] while parked on [beat]:
-     * - Beat 0: applies [patch] directly to the base node via RFC 7386 Merge Patch.
+     * - Beat 0: applies [patch] to the base node via RFC 7386 Merge Patch and reconciles any
+     *   existing beat-0 `change` builds by stripping the patched keys so [resolveNodeAtBeat]
+     *   reflects the edit immediately (pruning empty anonymous beat-0 changes).
      * - Beat `b > 0`: merges [patch] into the **last** `change` build of [node] on beat `b`, or
      *   inserts a new `Build.Change(beat = b, set = patch)` before the first `change` build on a
      *   later beat so chronological override order is preserved.
@@ -366,7 +368,20 @@ object JsonMergePatch {
         if (beat == 0) {
             val baseJson = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
             val merged = apply(baseJson, patch).jsonObject
-            return strictJson.decodeFromJsonElement(NodeSpec.serializer(), merged)
+            val patchedBase = strictJson.decodeFromJsonElement(NodeSpec.serializer(), merged)
+            val reconciledBuilds = patchedBase.builds.mapNotNull { build ->
+                if (build !is Build.Change || build.beat != 0) {
+                    build
+                } else {
+                    val stripped = stripKeysFromSet(build.set, patch)
+                    if (stripped.isEmpty() && build.id == null && build.path == null && build.morph == null) {
+                        null
+                    } else {
+                        build.copy(set = stripped)
+                    }
+                }
+            }
+            return patchedBase.copy(builds = reconciledBuilds)
         }
         val lastChangeIdx = node.builds.indexOfLast { it is Build.Change && it.beat == beat }
         val updatedBuilds = node.builds.toMutableList()

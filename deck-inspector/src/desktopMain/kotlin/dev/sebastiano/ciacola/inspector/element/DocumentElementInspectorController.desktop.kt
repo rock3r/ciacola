@@ -838,9 +838,10 @@ class DocumentElementInspectorController(
                 (localSx + sw).toFloat(),
                 (localSy + sh).toFloat(),
             )
+            val beat = activeBeat
             return applyMutation("Resize ${displayNameOf(nodeId)}", useActiveGesture = true) { doc ->
                 DocumentThemeResolver.updateNodeInSlide(doc, slideId, nodeId) {
-                    DocumentElementArrangeOps.offsetFrameAcrossAllBuilds(it, delta, startLocalRect)
+                    DocumentElementArrangeOps.offsetFrameAcrossAllBuilds(it, delta, startLocalRect, activeBeat = beat)
                 }
             }
         }

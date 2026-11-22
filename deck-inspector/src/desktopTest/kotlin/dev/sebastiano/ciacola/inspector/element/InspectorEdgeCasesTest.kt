@@ -777,6 +777,91 @@ class InspectorEdgeCasesTest {
         assertEquals(40.0, findNode(store, "child").frame?.y)
     }
 
+    @Test
+    fun allBuildsNudgeOffsetsImplicitBaseCoordinatesEvenWhenLaterBuildOverrides() {
+        val implicitXNode = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "implicit-x",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(y = 100.0, w = 200.0, h = 60.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Slide"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 2,
+                    set = buildJsonObject { put("frame", buildJsonObject { put("x", 200.0) }) },
+                ),
+            ),
+        )
+        val alignedNode = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "aligned-later",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Centered"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 2,
+                    set = buildJsonObject { put("frame", buildJsonObject { put("x", 500.0); put("y", 160.0) }) },
+                ),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "all-builds-implicit-base",
+            title = "All Builds Implicit Base",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                    ),
+                    nodes = listOf(implicitXNode, alignedNode),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.stageBoundsProvider = { id ->
+            when (id) {
+                "aligned-later" -> Rect(200f, 160f, 400f, 240f)
+                else -> null
+            }
+        }
+        // Parked on beat 1 with All builds: implicit base X = 0 -> 10, beat 2 X = 200 -> 210.
+        c.selectLocation("s1", 1)
+        c.editAllBuilds = true
+        c.selectNode("implicit-x")
+        assertTrue(c.nudgeSelectedNodes(10.0, 0.0))
+        val afterBeat1 = findNode(store, "implicit-x")
+        assertEquals(10.0, JsonMergePatch.resolveNodeAtBeat(afterBeat1, 0).frame?.x)
+        assertEquals(10.0, JsonMergePatch.resolveNodeAtBeat(afterBeat1, 1).frame?.x)
+        assertEquals(210.0, JsonMergePatch.resolveNodeAtBeat(afterBeat1, 2).frame?.x)
+
+        // Undo and repeat while parked on beat 2 (where x = 200 is active): base must still shift 0 -> 10, not stamp 210.
+        store.undo()
+        c.selectLocation("s1", 2)
+        assertTrue(c.nudgeSelectedNodes(10.0, 0.0))
+        val afterBeat2 = findNode(store, "implicit-x")
+        assertEquals(10.0, JsonMergePatch.resolveNodeAtBeat(afterBeat2, 0).frame?.x)
+        assertEquals(10.0, JsonMergePatch.resolveNodeAtBeat(afterBeat2, 1).frame?.x)
+        assertEquals(210.0, JsonMergePatch.resolveNodeAtBeat(afterBeat2, 2).frame?.x)
+
+        // Implicitly aligned centered node nudged from beat 1 with All builds offsets both base (200 -> 210)
+        // and beat 2 (500 -> 510) while pinning base Y at 160 so alignment collapse does not jump Y to 0.
+        c.selectLocation("s1", 1)
+        c.selectNode("aligned-later")
+        assertTrue(c.nudgeSelectedNodes(10.0, 0.0))
+        val afterAligned = findNode(store, "aligned-later")
+        assertEquals(210.0, JsonMergePatch.resolveNodeAtBeat(afterAligned, 0).frame?.x)
+        assertEquals(160.0, JsonMergePatch.resolveNodeAtBeat(afterAligned, 0).frame?.y)
+        assertEquals(510.0, JsonMergePatch.resolveNodeAtBeat(afterAligned, 2).frame?.x)
+        assertEquals(160.0, JsonMergePatch.resolveNodeAtBeat(afterAligned, 2).frame?.y)
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,
