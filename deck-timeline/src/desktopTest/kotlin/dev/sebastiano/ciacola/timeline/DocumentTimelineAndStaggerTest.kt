@@ -420,6 +420,58 @@ class DocumentTimelineAndStaggerTest {
         )
     }
 
+    @Test
+    fun draggingSequencedBuildWithHashAfterReferenceComputesDelayRelativeToDependencyEnd() {
+        val doc = DeckDocument(
+            id = "hash-after-drag",
+            title = "Hash After Drag",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "card-a",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 200.0, h = 100.0),
+                            text = TextPayload(RichTextValue.Plain("First")),
+                            builds = listOf(
+                                Build.Enter(id = "intro", beat = 1, effect = "fade", durationMs = 400),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "card-b",
+                            frame = FrameSpec(x = 400.0, y = 100.0, w = 200.0, h = 100.0),
+                            text = TextPayload(RichTextValue.Plain("Second")),
+                            builds = listOf(
+                                Build.Enter(id = "follow", beat = 1, effect = "fade", after = "card-a#intro", durationMs = 300),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = dev.sebastiano.ciacola.document.DeckLoadState.Loaded)
+        val controller = DocumentTimelineController(store = store)
+        val followRef = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.nodeId == "card-b" && it.beatIndex == 1 }
+        assertEquals(400, followRef.trackPlan.startMs, "Initial start follows card-a#intro end (400ms)")
+
+        // Drag card-b's bar to 550ms -> delayMs must be 550 - 400 = 150ms so planned start lands at 550ms (not 950ms).
+        assertTrue(controller.beginGesture("Move follow"))
+        assertTrue(controller.dragTrackBarStart(followRef, 550, useActiveGesture = true))
+        controller.commitActiveGesture()
+
+        val updatedBuild = store.document.slides.single().nodes.first { it.id == "card-b" }.builds.single()
+        assertEquals(150, updatedBuild.delayMs, "delayMs must subtract card-a#intro's 400ms end time")
+        val updatedRef = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.nodeId == "card-b" && it.beatIndex == 1 }
+        assertEquals(550, updatedRef.trackPlan.startMs, "Re-planned start must match the dragged 550ms position")
+    }
+
     private fun collectAllSemanticTexts(root: SemanticsNode): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {

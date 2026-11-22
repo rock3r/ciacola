@@ -744,14 +744,18 @@ object DeckStructureEdits {
                         val currentValue = resolvedBefore.text?.value ?: return@rewriteNodeTree node
                         val oldText = currentValue.plainText
                         val newValue = RichTextValueEdits.applyRangeEdit(currentValue, edit)
+                        val newText = newValue.plainText
                         val patch = JsonMergePatch.nestedPatch(
                             listOf("text", "value"),
                             RichTextValueEdits.encodeJson(newValue),
                         )
                         val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
-                        remapTextNodeManualDelays(
-                            node = textPatched,
-                            beat = beat,
+                        FragmentProvenance.remapTextNodeManualDelays(
+                            nodeBefore = node,
+                            nodeAfter = textPatched,
+                            editedBeat = beat,
+                            oldText = oldText,
+                            newText = newText,
                             remap = { manual, by, isExit ->
                                 FragmentProvenance.remapForRangeEdit(oldText, edit, manual, by, isExit)
                             },
@@ -791,9 +795,12 @@ object DeckStructureEdits {
                             RichTextValueEdits.encodeJson(newValue),
                         )
                         val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
-                        remapTextNodeManualDelays(
-                            node = textPatched,
-                            beat = beat,
+                        FragmentProvenance.remapTextNodeManualDelays(
+                            nodeBefore = node,
+                            nodeAfter = textPatched,
+                            editedBeat = beat,
+                            oldText = oldText,
+                            newText = newText,
                             remap = { manual, by, isExit ->
                                 FragmentProvenance.remapForWholeReplacement(oldText, newText, manual, by, isExit)
                             },
@@ -804,83 +811,6 @@ object DeckStructureEdits {
             )
         }
         return updated to notices
-    }
-
-    private fun remapTextNodeManualDelays(
-        node: NodeSpec,
-        beat: Int,
-        remap: (manual: Map<String, Int>, by: MorphBy, isExit: Boolean) -> ManualDelayRemapResult,
-        noticesOut: MutableList<ManualDelayRemapNotice>,
-    ): NodeSpec {
-        val updatedText = node.text?.let { tp ->
-            val morph = tp.morph
-            val stagger = morph?.stagger
-            if (morph != null && stagger != null && stagger.manual.isNotEmpty()) {
-                val res = remap(stagger.manual, morph.by, false)
-                noticesOut += res.notices
-                tp.copy(morph = morph.copy(stagger = stagger.copy(manual = res.updatedManual)))
-            } else {
-                tp
-            }
-        }
-
-        val updatedBuilds = node.builds.map { build ->
-            when (build) {
-                is Build.Change -> {
-                    val morph = build.morph
-                    val stagger = morph?.stagger
-                    if (morph != null && stagger != null && stagger.manual.isNotEmpty()) {
-                        val isExit = build.beat > beat
-                        val res = remap(stagger.manual, morph.by, isExit)
-                        noticesOut += res.notices
-                        build.copy(morph = morph.copy(stagger = stagger.copy(manual = res.updatedManual)))
-                    } else {
-                        build
-                    }
-                }
-                is Build.Enter -> {
-                    val stagger = build.stagger
-                    val by = build.by.toMorphByOrNull()
-                    if (stagger != null && by != null && stagger.manual.isNotEmpty()) {
-                        val res = remap(stagger.manual, by, false)
-                        noticesOut += res.notices
-                        build.copy(stagger = stagger.copy(manual = res.updatedManual))
-                    } else {
-                        build
-                    }
-                }
-                is Build.Exit -> {
-                    val stagger = build.stagger
-                    val by = build.by.toMorphByOrNull()
-                    if (stagger != null && by != null && stagger.manual.isNotEmpty()) {
-                        val res = remap(stagger.manual, by, false)
-                        noticesOut += res.notices
-                        build.copy(stagger = stagger.copy(manual = res.updatedManual))
-                    } else {
-                        build
-                    }
-                }
-                is Build.Emphasis -> {
-                    val stagger = build.stagger
-                    val by = build.by.toMorphByOrNull()
-                    if (stagger != null && by != null && stagger.manual.isNotEmpty()) {
-                        val res = remap(stagger.manual, by, false)
-                        noticesOut += res.notices
-                        build.copy(stagger = stagger.copy(manual = res.updatedManual))
-                    } else {
-                        build
-                    }
-                }
-            }
-        }
-        return node.copy(text = updatedText, builds = updatedBuilds)
-    }
-
-    private fun DeliveryBy.toMorphByOrNull(): MorphBy? = when (this) {
-        DeliveryBy.Paragraph -> MorphBy.Paragraph
-        DeliveryBy.Word -> MorphBy.Word
-        DeliveryBy.Character -> MorphBy.Character
-        DeliveryBy.Whole, DeliveryBy.Child -> null
     }
 
     private fun shiftNodeBeatsOnInsert(node: NodeSpec, atBeat: Int): NodeSpec {

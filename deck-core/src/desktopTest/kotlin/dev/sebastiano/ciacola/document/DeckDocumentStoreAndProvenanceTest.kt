@@ -802,4 +802,98 @@ class DeckDocumentStoreAndProvenanceTest {
         val resetColor = JsonMergePatch.resetAtBeat(nudged, beat = 0, keyPath = listOf("text", "color"))
         assertNull(JsonMergePatch.resolveNodeAtBeat(resetColor, 0).text?.color)
     }
+
+    @Test
+    fun textEditOnLaterBeatPreservesUnaffectedBuildManualFragmentDelays() {
+        val node = NodeSpec(
+            id = "copy",
+            frame = FrameSpec(x = 100.0, y = 100.0, w = 600.0, h = 100.0),
+            text = TextPayload(
+                value = RichTextValue.Plain("alpha keep"),
+                morph = TextMorphSpec(
+                    by = MorphBy.Word,
+                    stagger = Stagger(manual = mapOf("alpha#0" to 50)),
+                ),
+            ),
+            builds = listOf(
+                Build.Enter(
+                    beat = 0,
+                    effect = "fade",
+                    by = DeliveryBy.Word,
+                    stagger = Stagger(manual = mapOf("alpha#0" to 100)),
+                ),
+                Build.Emphasis(
+                    beat = 0,
+                    effect = "pulse",
+                    by = DeliveryBy.Word,
+                    stagger = Stagger(manual = mapOf("alpha#0" to 110)),
+                ),
+                Build.Change(
+                    beat = 1,
+                    set = buildJsonObject { putJsonObject("text") { put("value", "beta keep") } },
+                    morph = TextMorphSpec(
+                        by = MorphBy.Word,
+                        stagger = Stagger(manual = mapOf("-alpha#0" to 80, "beta#0" to 120, "keep#0" to 130)),
+                    ),
+                ),
+                Build.Change(
+                    beat = 2,
+                    set = buildJsonObject { putJsonObject("text") { put("value", "delta keep") } },
+                    morph = TextMorphSpec(
+                        by = MorphBy.Word,
+                        stagger = Stagger(manual = mapOf("-beta#0" to 90, "delta#0" to 140)),
+                    ),
+                ),
+                Build.Exit(
+                    beat = 3,
+                    effect = "fade",
+                    by = DeliveryBy.Word,
+                    stagger = Stagger(manual = mapOf("delta#0" to 150)),
+                ),
+            ),
+        )
+        val doc = DeckDocument(
+            format = 1,
+            id = "scoped-fragment-remap",
+            title = "Scoped Fragment Remap",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec(), BeatSpec(), BeatSpec()),
+                    nodes = listOf(node),
+                ),
+            ),
+        )
+
+        // Edit beat 1 text from "beta keep" -> "gamma keep" (replaces "beta" at 0..4 with "gamma").
+        val (updatedDoc, notices) = DeckStructureEdits.applyTextRangeEdit(
+            document = doc,
+            slideId = "s1",
+            nodeId = "copy",
+            beat = 1,
+            edit = TextRangeEdit(start = 0, removedLength = 4, insertedText = "gamma"),
+        )
+        val updated = updatedDoc.slides.single().nodes.single()
+
+        // Beat-0 text ("alpha keep") and Beat-2/3 text ("delta keep") did NOT change -> delays preserved!
+        assertEquals(mapOf("alpha#0" to 50), updated.text?.morph?.stagger?.manual)
+        assertEquals(mapOf("alpha#0" to 100), (updated.builds[0] as Build.Enter).stagger?.manual)
+        assertEquals(mapOf("alpha#0" to 110), (updated.builds[1] as Build.Emphasis).stagger?.manual)
+        assertEquals(mapOf("delta#0" to 150), (updated.builds[4] as Build.Exit).stagger?.manual)
+
+        // Beat-1 Change: exit side ("alpha keep") unchanged -> "-alpha#0" preserved; target side ("beta" -> "gamma")
+        // prunes "beta#0" and keeps "keep#0".
+        assertEquals(
+            mapOf("-alpha#0" to 80, "keep#0" to 130),
+            (updated.builds[2] as Build.Change).morph?.stagger?.manual,
+        )
+        // Beat-2 Change: exit side ("beta keep" -> "gamma keep") prunes "-beta#0"; target side ("delta keep") untouched!
+        assertEquals(
+            mapOf("delta#0" to 140),
+            (updated.builds[3] as Build.Change).morph?.stagger?.manual,
+        )
+        assertEquals(setOf("beta#0", "-beta#0"), notices.mapTo(HashSet()) { it.oldAddress })
+    }
 }

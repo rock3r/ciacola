@@ -527,15 +527,18 @@ internal object DocumentTimelineMutationSupport {
 
         val afterRef = build.after
         val afterEnd = if (afterRef != null) {
-            val dotIdx = afterRef.indexOf('.')
-            val targetTrack = if (dotIdx > 0) {
-                val targetNodeId = afterRef.substring(0, dotIdx)
-                val targetBuildId = afterRef.substring(dotIdx + 1)
+            val hashIdx = afterRef.indexOf('#')
+            val targetTrack = if (hashIdx >= 0) {
+                val targetNodeId = afterRef.substring(0, hashIdx)
+                val targetBuildId = afterRef.substring(hashIdx + 1)
                 beatPlan.tracks.firstOrNull { it.nodeId == targetNodeId && it.buildId == targetBuildId }
             } else {
                 beatPlan.tracks.lastOrNull { it.nodeId == afterRef }
             }
-            targetTrack?.endMs ?: 0
+            val validTarget = targetTrack?.takeUnless {
+                it.nodeId == ref.nodeId && (it.buildIndex?.let { idx -> idx >= ref.buildIndex } == true)
+            }
+            validTarget?.endMs ?: 0
         } else {
             0
         }

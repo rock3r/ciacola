@@ -353,4 +353,194 @@ object FragmentProvenance {
             else -> null // Overlaps token
         }
     }
+
+    /**
+     * Remaps `stagger.manual` entries across [nodeAfter]'s text morph and builds, comparing each
+     * build's actual before/after text states against [nodeBefore] so unaffected beats and builds
+     * keep their fragment delays untouched.
+     */
+    internal fun remapTextNodeManualDelays(
+        nodeBefore: NodeSpec,
+        nodeAfter: NodeSpec,
+        editedBeat: Int,
+        oldText: String,
+        newText: String,
+        remap: (manual: Map<String, Int>, by: MorphBy, isExit: Boolean) -> ManualDelayRemapResult,
+        noticesOut: MutableList<ManualDelayRemapNotice>,
+    ): NodeSpec {
+        fun textAtBeat(n: NodeSpec, b: Int): String =
+            JsonMergePatch.resolveNodeAtBeat(n, b).text?.value?.plainText.orEmpty()
+
+        fun textBeforeBuild(n: NodeSpec, idx: Int): String =
+            JsonMergePatch.resolveNodeBeforeBuild(n, idx).text?.value?.plainText.orEmpty()
+
+        fun textAfterBuild(n: NodeSpec, idx: Int): String =
+            JsonMergePatch.resolveNodeAfterBuild(n, idx).text?.value?.plainText.orEmpty()
+
+        fun remapSide(
+            manual: Map<String, Int>,
+            by: MorphBy,
+            beforeText: String,
+            afterText: String,
+            isExit: Boolean,
+        ): Map<String, Int> {
+            if (manual.isEmpty() || beforeText == afterText) return manual
+            val res = if (beforeText == oldText && afterText == newText) {
+                remap(manual, by, isExit)
+            } else {
+                remapForWholeReplacement(beforeText, afterText, manual, by, isExit)
+            }
+            noticesOut += res.notices
+            return res.updatedManual
+        }
+
+        val oldIndexForNewBuild: List<Int?> = mapOldBuildIndices(nodeBefore, nodeAfter, editedBeat)
+        var inheritedMorphTargetChange: Pair<String, String>? = null
+        var inheritedMorphExitChange: Pair<String, String>? = null
+
+        val updatedBuilds = nodeAfter.builds.mapIndexed { newIdx, build ->
+            val oldIdx = oldIndexForNewBuild[newIdx]
+            when (build) {
+                is Build.Change -> {
+                    val beforeSrc = if (oldIdx != null) {
+                        textBeforeBuild(nodeBefore, oldIdx)
+                    } else {
+                        textAtBeat(nodeBefore, (build.beat - 1).coerceAtLeast(0))
+                    }
+                    val afterSrc = textBeforeBuild(nodeAfter, newIdx)
+                    val beforeDst = if (oldIdx != null) {
+                        textAfterBuild(nodeBefore, oldIdx)
+                    } else {
+                        textAtBeat(nodeBefore, build.beat)
+                    }
+                    val afterDst = textAfterBuild(nodeAfter, newIdx)
+
+                    val morph = build.morph
+                    if (morph == null) {
+                        if (beforeDst != afterDst && inheritedMorphTargetChange == null) {
+                            inheritedMorphTargetChange = beforeDst to afterDst
+                        }
+                        if (beforeSrc != afterSrc && inheritedMorphExitChange == null) {
+                            inheritedMorphExitChange = beforeSrc to afterSrc
+                        }
+                        build
+                    } else {
+                        val stagger = morph.stagger
+                        if (stagger != null && stagger.manual.isNotEmpty()) {
+                            var manual = remapSide(stagger.manual, morph.by, beforeDst, afterDst, isExit = false)
+                            manual = remapSide(manual, morph.by, beforeSrc, afterSrc, isExit = true)
+                            if (manual == stagger.manual) {
+                                build
+                            } else {
+                                build.copy(morph = morph.copy(stagger = stagger.copy(manual = manual)))
+                            }
+                        } else {
+                            build
+                        }
+                    }
+                }
+                is Build.Enter -> {
+                    val stagger = build.stagger
+                    val by = deliveryToMorphBy(build.by)
+                    if (stagger != null && by != null && stagger.manual.isNotEmpty()) {
+                        val before = textAtBeat(nodeBefore, build.beat)
+                        val after = textAtBeat(nodeAfter, build.beat)
+                        val manual = remapSide(stagger.manual, by, before, after, isExit = false)
+                        if (manual == stagger.manual) build else build.copy(stagger = stagger.copy(manual = manual))
+                    } else {
+                        build
+                    }
+                }
+                is Build.Exit -> {
+                    val stagger = build.stagger
+                    val by = deliveryToMorphBy(build.by)
+                    if (stagger != null && by != null && stagger.manual.isNotEmpty()) {
+                        val exitBeat = if (build.beat > 0) build.beat - 1 else build.beat
+                        val before = textAtBeat(nodeBefore, exitBeat)
+                        val after = textAtBeat(nodeAfter, exitBeat)
+                        val manual = remapSide(stagger.manual, by, before, after, isExit = false)
+                        if (manual == stagger.manual) build else build.copy(stagger = stagger.copy(manual = manual))
+                    } else {
+                        build
+                    }
+                }
+                is Build.Emphasis -> {
+                    val stagger = build.stagger
+                    val by = deliveryToMorphBy(build.by)
+                    if (stagger != null && by != null && stagger.manual.isNotEmpty()) {
+                        val before = textAtBeat(nodeBefore, build.beat)
+                        val after = textAtBeat(nodeAfter, build.beat)
+                        val manual = remapSide(stagger.manual, by, before, after, isExit = false)
+                        if (manual == stagger.manual) build else build.copy(stagger = stagger.copy(manual = manual))
+                    } else {
+                        build
+                    }
+                }
+            }
+        }
+
+        val updatedText = nodeAfter.text?.let { tp ->
+            val morph = tp.morph
+            val stagger = morph?.stagger
+            if (morph != null && stagger != null && stagger.manual.isNotEmpty()) {
+                val baseBefore = textAtBeat(nodeBefore, 0)
+                val baseAfter = textAtBeat(nodeAfter, 0)
+                var manual = stagger.manual
+                val targetPair = if (baseBefore != baseAfter) baseBefore to baseAfter else inheritedMorphTargetChange
+                if (targetPair != null) {
+                    manual = remapSide(manual, morph.by, targetPair.first, targetPair.second, isExit = false)
+                }
+                val exitPair = inheritedMorphExitChange
+                if (exitPair != null) {
+                    manual = remapSide(manual, morph.by, exitPair.first, exitPair.second, isExit = true)
+                }
+                if (manual == stagger.manual) tp else tp.copy(morph = morph.copy(stagger = stagger.copy(manual = manual)))
+            } else {
+                tp
+            }
+        }
+
+        return nodeAfter.copy(text = updatedText, builds = updatedBuilds)
+    }
+
+    private fun mapOldBuildIndices(
+        nodeBefore: NodeSpec,
+        nodeAfter: NodeSpec,
+        editedBeat: Int,
+    ): List<Int?> {
+        if (editedBeat > 0) {
+            if (nodeAfter.builds.size == nodeBefore.builds.size) {
+                return List(nodeAfter.builds.size) { it }
+            }
+            val insertIdx = nodeBefore.builds.indexOfFirst { it is Build.Change && it.beat > editedBeat }
+                .let { if (it >= 0) it else nodeBefore.builds.size }
+            return List(nodeAfter.builds.size) { newIdx ->
+                when {
+                    newIdx < insertIdx -> newIdx
+                    newIdx == insertIdx -> null
+                    else -> newIdx - 1
+                }
+            }
+        }
+        val result = ArrayList<Int?>(nodeAfter.builds.size)
+        var oldCursor = 0
+        for (afterBuild in nodeAfter.builds) {
+            if (afterBuild !is Build.Change || afterBuild.beat != 0) {
+                while (oldCursor < nodeBefore.builds.size && nodeBefore.builds[oldCursor] != afterBuild) {
+                    oldCursor++
+                }
+            } else {
+                while (oldCursor < nodeBefore.builds.size) {
+                    val cand = nodeBefore.builds[oldCursor]
+                    if (cand is Build.Change && cand.beat == 0 && cand.id == afterBuild.id && cand.path == afterBuild.path && cand.morph == afterBuild.morph) {
+                        break
+                    }
+                    oldCursor++
+                }
+            }
+            result += oldCursor.takeIf { it < nodeBefore.builds.size }
+            if (oldCursor < nodeBefore.builds.size) oldCursor++
+        }
+        return result
+    }
 }
