@@ -1321,6 +1321,102 @@ class InspectorEdgeCasesTest {
         assertTrue("-alpha#0" in noticedAddrs, "Expected notice for removed inherited morph exit -alpha#0: $noticedAddrs")
     }
 
+    @Test
+    fun inlineTextCommitSurvivesExternalReloadAndStoreEditCancelsOnThrow() {
+        val baseNode = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "title",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 100.0, w = 400.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("abcdef"),
+            ),
+            builds = listOf(
+                Build.Enter(
+                    beat = 0,
+                    effect = "fade",
+                    by = dev.sebastiano.ciacola.document.DeliveryBy.Word,
+                    stagger = dev.sebastiano.ciacola.document.Stagger(manual = mapOf("x#0" to 120)),
+                ),
+            ),
+        )
+        val initialDoc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "inline-external-reload",
+            title = "Inline External Reload",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(baseNode),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(initialDoc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 0)
+
+        // 1. Open inline editor on "abcdef", then simulate an external reload replacing it with "x".
+        assertTrue(c.startInlineTextEdit("title"))
+        val reloadedDoc = initialDoc.copy(
+            slides = listOf(
+                initialDoc.slides.single().copy(
+                    nodes = listOf(
+                        baseNode.copy(
+                            text = baseNode.text!!.copy(
+                                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("x"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        store.applyExternalChange(reloadedDoc, label = "External change", markAsSaved = true)
+
+        // Appending "g" at offset 6 (recorded against "abcdef") must NOT throw on 1-char "x" or leak a transaction.
+        assertTrue(
+            c.commitInlineTextEdits(
+                capturedEdits = listOf(dev.sebastiano.ciacola.document.TextRangeEdit(start = 6, removedLength = 0, insertedText = "g")),
+                finalText = "abcdefg",
+            ),
+        )
+        assertFalse(store.hasOpenTransaction, "Store transaction must not leak")
+        assertEquals("abcdefg", findNode(store, "title").text?.value?.plainText)
+        assertTrue(c.remapNotices.any { it.oldAddress == "x#0" }, "Stale delay on reloaded 'x' must emit notice: ${c.remapNotices}")
+
+        // 2. Single-range commitInlineTextEdit also handles external shrink cleanly.
+        assertTrue(c.startInlineTextEdit("title"))
+        store.applyExternalChange(reloadedDoc, label = "External change 2", markAsSaved = true)
+        assertTrue(c.commitInlineTextEdit("abcdefgh"))
+        assertFalse(store.hasOpenTransaction)
+        assertEquals("abcdefgh", findNode(store, "title").text?.value?.plainText)
+
+        // 3. External reload deleting the edited node makes commit a clean no-op without throwing.
+        assertTrue(c.startInlineTextEdit("title"))
+        store.applyExternalChange(
+            initialDoc.copy(slides = listOf(initialDoc.slides.single().copy(nodes = emptyList()))),
+            label = "External delete",
+            markAsSaved = true,
+        )
+        assertTrue(
+            c.commitInlineTextEdits(
+                capturedEdits = listOf(dev.sebastiano.ciacola.document.TextRangeEdit(start = 8, removedLength = 0, insertedText = "!")),
+                finalText = "abcdefgh!",
+            ),
+        )
+        assertFalse(store.hasOpenTransaction)
+
+        // 4. DeckDocumentStore.edit cancels its transaction if the transform throws.
+        var threw = false
+        try {
+            store.edit("Throwing transform") { throw IllegalStateException("boom") }
+        } catch (_: IllegalStateException) {
+            threw = true
+        }
+        assertTrue(threw)
+        assertFalse(store.hasOpenTransaction, "Throwing store.edit transform must cancel active transaction")
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,

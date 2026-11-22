@@ -621,14 +621,18 @@ class DocumentElementInspectorController(
     /** Runs provenance-safe text edits in ONE `store.edit`, collecting manual-delay remap notices. */
     private fun applyTextEdits(
         nodeId: String?,
+        targetSlideId: String? = null,
+        targetBeat: Int? = null,
         edit: (DeckDocument, String, String, Int) -> Pair<DeckDocument, List<ManualDelayRemapNotice>>,
     ): Boolean {
         val id = nodeId ?: return false
-        val slideId = activeSlide()?.id ?: return false
-        val beat = activeBeat
+        val slideId = targetSlideId ?: activeSlide()?.id ?: return false
+        val beat = targetBeat ?: activeBeat
         var capturedNotices: List<ManualDelayRemapNotice> = emptyList()
         val allBuilds = editAllBuilds && beat > 0
         val ok = store.edit("Edit text") { doc ->
+            val slide = doc.slides.firstOrNull { it.id == slideId } ?: return@edit doc
+            if (beat !in slide.beats.indices) return@edit doc
             val (updated, notices) = edit(doc, slideId, id, beat)
             if (allBuilds) {
                 // Apply the resulting text across every beat first, then remap every build's
@@ -930,6 +934,9 @@ class DocumentElementInspectorController(
         )
     }
 
+    private var inlineStartSlideId: String? = null
+    private var inlineStartBeat: Int = 0
+
     fun startInlineTextEdit(nodeId: String): Boolean {
         if (store.isReadOnly) return false
         val slide = activeSlide() ?: return false
@@ -939,6 +946,8 @@ class DocumentElementInspectorController(
         selectedNodeId = nodeId
         inlineEditingNodeId = nodeId
         inlineOriginalText = text
+        inlineStartSlideId = slide.id
+        inlineStartBeat = activeBeat
         textInputHasFocus = true
         return true
     }
@@ -953,13 +962,20 @@ class DocumentElementInspectorController(
     ): Boolean {
         val id = inlineEditingNodeId ?: return false
         val oldText = inlineOriginalText
-        inlineEditingNodeId = null
-        inlineOriginalText = ""
-        textInputHasFocus = false
+        val startSlideId = inlineStartSlideId
+        val startBeat = inlineStartBeat
+        cancelInlineTextEdit()
 
         val rangeEdit = explicitRangeEdit ?: DocumentThemeResolver.computeTextRangeEdit(oldText, newText)
             ?: return false
-        return applyTextRangeEdit(rangeEdit, nodeId = id)
+        return commitInlineEditsInternal(
+            id = id,
+            oldText = oldText,
+            finalText = newText,
+            startSlideId = startSlideId,
+            startBeat = startBeat,
+            editsToApply = listOf(rangeEdit),
+        )
     }
 
     /**
@@ -975,9 +991,9 @@ class DocumentElementInspectorController(
     ): Boolean {
         val id = inlineEditingNodeId ?: return false
         val oldText = inlineOriginalText
-        inlineEditingNodeId = null
-        inlineOriginalText = ""
-        textInputHasFocus = false
+        val startSlideId = inlineStartSlideId
+        val startBeat = inlineStartBeat
+        cancelInlineTextEdit()
 
         if (oldText == finalText) return false
 
@@ -989,7 +1005,35 @@ class DocumentElementInspectorController(
         }
         if (editsToApply.isEmpty()) return false
 
-        return applyTextEdits(id) { doc, slideId, nodeId, beat ->
+        return commitInlineEditsInternal(
+            id = id,
+            oldText = oldText,
+            finalText = finalText,
+            startSlideId = startSlideId,
+            startBeat = startBeat,
+            editsToApply = editsToApply,
+        )
+    }
+
+    private fun commitInlineEditsInternal(
+        id: String,
+        oldText: String,
+        finalText: String,
+        startSlideId: String?,
+        startBeat: Int,
+        editsToApply: List<TextRangeEdit>,
+    ): Boolean = applyTextEdits(id, targetSlideId = startSlideId, targetBeat = startBeat) { doc, slideId, nodeId, beat ->
+        val currentText = resolvedNodeText(doc, slideId, nodeId, beat)
+            ?: return@applyTextEdits doc to emptyList()
+        if (currentText != oldText) {
+            // An external reload or intervening edit changed this node while the popover was open:
+            // never apply stale UTF-16 ranges recorded against `oldText` to a mismatched string.
+            if (currentText == finalText) {
+                doc to emptyList()
+            } else {
+                DeckStructureEdits.applyWholeTextReplacement(doc, slideId, nodeId, beat, finalText)
+            }
+        } else {
             val collectedNotices = mutableListOf<ManualDelayRemapNotice>()
             var current = doc
             for (edit in editsToApply) {
@@ -1004,6 +1048,8 @@ class DocumentElementInspectorController(
     fun cancelInlineTextEdit() {
         inlineEditingNodeId = null
         inlineOriginalText = ""
+        inlineStartSlideId = null
+        inlineStartBeat = 0
         textInputHasFocus = false
     }
 

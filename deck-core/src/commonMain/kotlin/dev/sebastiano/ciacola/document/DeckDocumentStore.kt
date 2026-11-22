@@ -229,8 +229,13 @@ class DeckDocumentStore(
      */
     fun edit(label: String = "Edit", transform: (DeckDocument) -> DeckDocument): Boolean {
         val tx = begin(label) ?: return false
-        tx.update(transform)
-        return tx.commit()
+        return try {
+            tx.update(transform)
+            tx.commit()
+        } catch (t: Throwable) {
+            tx.cancel()
+            throw t
+        }
     }
 
     /**
