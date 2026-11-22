@@ -3,12 +3,16 @@ package dev.sebastiano.ciacola.inspector.design
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -37,6 +42,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +50,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
@@ -493,23 +501,188 @@ internal fun ModifiedDotBadge(
     }
 }
 
+/** Shared metrics for the flat, compact inspector chrome (Design, Theme, Issues). */
+internal object InspectorTokens {
+    val RowHeight: Dp = 24.dp
+    val RowGap: Dp = 4.dp
+    val Corner: Dp = 4.dp
+    val SectionHorizontalPadding: Dp = 12.dp
+    val SectionHeaderHeight: Dp = 30.dp
+    val Caption = 11.sp
+    val Body = 12.sp
+    val Title = 13.sp
+}
+
+/** Unified Jewel focus/accent colour used for every selection and active state. */
+@Composable
+internal fun inspectorAccent(): Color = JewelTheme.globalColors.outlines.focused
+
+/** Caption text style (11sp, secondary). */
+@Composable
+internal fun inspectorCaptionStyle(): TextStyle =
+    JewelTheme.typography.small.copy(fontSize = InspectorTokens.Caption, fontFeatureSettings = "tnum")
+
+/** Label / value text style (12sp, tabular figures). */
+@Composable
+internal fun inspectorBodyStyle(): TextStyle =
+    JewelTheme.typography.regular.copy(fontSize = InspectorTokens.Body, fontFeatureSettings = "tnum")
+
 /**
- * Subtle section card container following flat JetBrains Int UI conventions (border + fill delta, no shadow).
+ * Flat collapsible inspector section: 12sp semibold header with chevron, optional trailing header
+ * content, 12dp horizontal padding, and a 1dp divider rule underneath. No card fill or border.
  */
 @Composable
-internal fun DesignSectionCard(
+internal fun FlatCollapsibleSection(
+    title: String,
+    testTag: String,
     modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
+    initiallyExpanded: Boolean = true,
+    stateKey: Any = title,
+    headerTrailing: (@Composable RowScope.() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
-    val globalColors = JewelTheme.globalColors
-    val shape = RoundedCornerShape(6.dp)
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(globalColors.toolwindowBackground, shape)
-            .border(1.dp, globalColors.borders.normal, shape)
-            .padding(10.dp),
-    ) {
-        content()
+    var expanded by remember(stateKey) { mutableStateOf(initiallyExpanded) }
+    val colors = JewelTheme.globalColors
+    Column(modifier = modifier.fillMaxWidth().testTag(testTag)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(InspectorTokens.SectionHeaderHeight)
+                .padding(start = 6.dp, end = InspectorTokens.SectionHorizontalPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(InspectorTokens.Corner))
+                    .clickable { expanded = !expanded }
+                    .semantics {
+                        role = Role.Button
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    }
+                    .padding(vertical = 4.dp)
+                    .testTag("$testTag-header"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    key = if (expanded) AllIconsKeys.General.ChevronDown else AllIconsKeys.General.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                )
+                Text(
+                    text = title,
+                    style = inspectorBodyStyle(),
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.text.normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            headerTrailing?.invoke(this)
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = InspectorTokens.SectionHorizontalPadding,
+                        end = InspectorTokens.SectionHorizontalPadding,
+                        bottom = 10.dp,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(InspectorTokens.RowGap),
+                content = content,
+            )
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.borders.normal.copy(alpha = 0.6f)))
     }
 }
+
+/**
+ * Compact segmented control. The selected segment uses a tinted accent fill with a 1dp accent
+ * border (never the solid primary-button fill).
+ */
+@Composable
+internal fun <T> InspectorSegmented(
+    options: List<T>,
+    selected: T?,
+    label: (T) -> String,
+    testTag: (T) -> String,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    tooltip: ((T) -> String)? = null,
+    equalWidths: Boolean = true,
+    content: (@Composable (T, Boolean) -> Unit)? = null,
+) {
+    val colors = JewelTheme.globalColors
+    val accent = inspectorAccent()
+    val shape = RoundedCornerShape(InspectorTokens.Corner)
+    Row(
+        modifier = modifier
+            .height(InspectorTokens.RowHeight)
+            .clip(shape)
+            .border(1.dp, colors.borders.normal, shape),
+    ) {
+        options.forEachIndexed { index, option ->
+            val isSelected = option == selected
+            val cell: @Composable () -> Unit = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .then(if (equalWidths) Modifier.fillMaxWidth() else Modifier)
+                        .then(if (isSelected) Modifier.background(accent.copy(alpha = 0.18f)).border(1.dp, accent, shape) else Modifier)
+                        .clickable { onSelect(option) }
+                        .semantics {
+                            this.selected = isSelected
+                            role = Role.RadioButton
+                            contentDescription = tooltip?.invoke(option) ?: label(option)
+                        }
+                        .padding(horizontal = 8.dp)
+                        .testTag(testTag(option)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (content != null) {
+                        content(option, isSelected)
+                    } else {
+                        Text(
+                            text = label(option),
+                            style = inspectorBodyStyle(),
+                            color = if (isSelected) colors.text.normal else colors.text.info,
+                            fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+            }
+            val weighted = if (equalWidths) Modifier.weight(1f) else Modifier
+            Box(weighted.fillMaxHeight()) {
+                val tip = tooltip?.invoke(option)
+                if (tip != null) {
+                    InspectorTooltip(tip) { cell() }
+                } else {
+                    cell()
+                }
+            }
+            if (index < options.lastIndex) {
+                Box(Modifier.fillMaxHeight().width(1.dp).background(colors.borders.normal))
+            }
+        }
+    }
+}
+
+/** Jewel [Tooltip] wrapper. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun InspectorTooltip(text: String, content: @Composable () -> Unit) {
+    Tooltip(tooltip = { Text(text) }, content = content)
+}
+
+/** `elevatedSurface` → `Elevated Surface`, `onAccent` → `On Accent`. */
+fun humanizeTokenKey(key: String): String =
+    dev.sebastiano.ciacola.document.DeckDisplayNames.tokenDisplayName(key)
+
+/** Readable curve names instead of serialised `Bezier(...)` tuples. */
+fun curveDisplayName(curve: Curve?): String =
+    dev.sebastiano.ciacola.document.DeckDisplayNames.curveDisplayName(curve)

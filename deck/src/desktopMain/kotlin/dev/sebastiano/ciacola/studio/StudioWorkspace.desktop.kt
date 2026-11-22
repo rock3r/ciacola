@@ -1,40 +1,12 @@
 package dev.sebastiano.ciacola.studio
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -43,114 +15,131 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
-import dev.sebastiano.ciacola.inspector.ElementPatch
-import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
-import dev.sebastiano.ciacola.inspector.design.DesignSystemEditorPanel
-import dev.sebastiano.ciacola.inspector.design.DesignSystemStore
-import dev.sebastiano.ciacola.inspector.element.ElementEditorController
-import dev.sebastiano.ciacola.inspector.element.ElementEditorPanel
-import dev.sebastiano.ciacola.inspector.element.ElementOverridesStore
-import dev.sebastiano.ciacola.inspector.lint.DeckLintController
-import dev.sebastiano.ciacola.inspector.lint.DeckLintPanel
-import dev.sebastiano.ciacola.theme.DeckTheme
-import dev.sebastiano.ciacola.theme.DeckThemePreset
-import dev.sebastiano.ciacola.theme.DeckThemeProvider
-import dev.sebastiano.ciacola.timeline.TimelineBlockInspector
-import dev.sebastiano.ciacola.timeline.TimelineOverridesStore
-import dev.sebastiano.ciacola.timeline.TimelineStudioController
-import dev.sebastiano.ciacola.ui.accessibleFocusRing
-import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
-import java.awt.Cursor
+import dev.sebastiano.ciacola.document.DeckDocumentStore
+import dev.sebastiano.ciacola.document.render.DocumentKeyboardCaptureController
+import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
+import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
+import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
+import dev.sebastiano.ciacola.inspector.sync.DocumentSyncController
+import dev.sebastiano.ciacola.timeline.DocumentTimelineController
+import dev.sebastiano.ciacola.timeline.DocumentTimelineWindow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import org.jetbrains.jewel.foundation.theme.JewelTheme
-import org.jetbrains.jewel.ui.Orientation
-import org.jetbrains.jewel.ui.component.Divider
-import org.jetbrains.jewel.ui.component.Text
-import org.jetbrains.jewel.ui.component.Tooltip
-import org.jetbrains.jewel.ui.theme.colorPalette
-import org.jetbrains.jewel.ui.typography
 
 const val DEFAULT_STUDIO_INSPECTOR_WIDTH_DP = 388f
 const val MIN_STUDIO_INSPECTOR_WIDTH_DP = 320f
 const val MAX_STUDIO_INSPECTOR_WIDTH_DP = 520f
 
+/** Below this window width the right inspector is clamped to [NARROW_WINDOW_INSPECTOR_WIDTH_DP]. */
+const val NARROW_WINDOW_THRESHOLD_DP = 1200f
+const val NARROW_WINDOW_INSPECTOR_WIDTH_DP = 320f
+
 /**
- * Tabs hosted inside the unified right-hand Studio Inspector pane when Timeline Studio (`F5`/`F6`)
- * is active.
+ * The two selection-scoped tabs of the right-hand Studio inspector.
+ *
+ * Deck-level surfaces live elsewhere: the theme opens as the App Bar `Theme` sheet (`F7`) and lint
+ * findings open in the bottom `Issues` dock (`F8`).
  */
 enum class StudioInspectorTab(
     val label: String,
     val tooltip: String,
 ) {
-    Motion(
-        label = "Motion",
-        tooltip = "Keyframe timing, Bezier curves, and spatial motion inspector",
+    Design(
+        label = "Design",
+        tooltip = "Layout, appearance, text, and parameters of the selected element",
     ),
-    Element(
-        label = "Element",
-        tooltip = "Direct stage element text copy, typography, fill, border, and offset inspector",
+    Animate(
+        label = "Animate",
+        tooltip = "Builds, timing, and stagger for the selected element, build, or transition",
     ),
-    Theme(
-        label = "Theme",
-        tooltip = "Live Design System tokens and WCAG 2.1 contrast editor (F7)",
-    ),
-    Lint(
-        label = "Lint",
-        tooltip = "Live slide and full-deck diagnostic linter (F8)",
-    ),
-}
+    ;
 
-enum class UndoDomain {
-    Motion,
-    Element,
-    Theme,
+    companion object {
+        /** Legacy alias for [Design] (the pre-overhaul `Element` tab). */
+        val Element: StudioInspectorTab get() = Design
+
+        /** Legacy alias for [Animate] (the pre-overhaul `Motion` tab). */
+        val Motion: StudioInspectorTab get() = Animate
+    }
 }
 
 /**
- * Coordinates the unified Studio Inspector tabs (`Motion | Element | Theme | Lint`), `F7`/`F8`
- * routing between docked/detached Studio tabs and standalone sidecar windows (preventing window
- * sprawl), Lint quick-fix application, and context-aware `Cmd+Z` / `Cmd+Shift+Z` Undo/Redo.
+ * The three top-level working modes selected from the App Bar segmented control.
+ *
+ * - [Edit]: authoring chrome (docked timeline + `Design | Animate` inspector).
+ * - [Review]: click-to-comment inspect mode with review pins and the review panel.
+ * - [Present]: Clean Show Mode. Every authoring surface closes and the App Bar hides.
+ */
+enum class StudioMode(val label: String, val tooltip: String) {
+    Edit(label = "Edit", tooltip = "Edit slides with the timeline and inspector"),
+    Review(label = "Review", tooltip = "Click the stage to leave review comments"),
+    Present(label = "Present", tooltip = "Clean show mode for live presenting (Esc returns to Edit)"),
+}
+
+/** Plain-language persistence state shown by the App Bar save indicator. */
+enum class StudioSaveState(val label: String) {
+    Saved("Saved"),
+    Saving("Saving…"),
+    ReadOnly("Read-only"),
+    Conflict("Conflict"),
+    Failed("Save failed"),
+    Invalid("File invalid"),
+}
+
+/**
+ * Coordinates the document-backed Studio shell: App Bar mode (`Edit | Review | Present`), the
+ * `Design | Animate` inspector, the deck-level Theme sheet (`F7`), the bottom Issues dock (`F8`),
+ * `F2`/`F5`/`F6` routing, `⌘⌥1..9` deck switching, and unified `⌘Z` / `⇧⌘Z`
+ * (`DeckDocumentStore.undo()` / `redo()`) with text-input focus protection.
  */
 @Stable
 class StudioWorkspaceController(
-    val timelineController: TimelineStudioController,
-    timelineOverridesStore: TimelineOverridesStore,
-    val designSystemStore: DesignSystemStore,
-    elementOverridesStore: ElementOverridesStore,
-    elementController: ElementEditorController,
-    lintController: DeckLintController,
-    stageInspectionRegistry: StageInspectionRegistry,
+    store: DeckDocumentStore,
+    timelineController: DocumentTimelineController,
+    elementController: DocumentElementInspectorController,
+    themeController: DocumentThemeInspectorController,
+    lintController: DocumentDeckLintController,
+    syncController: DocumentSyncController? = null,
+    keyboardController: DocumentKeyboardCaptureController? = null,
     var isTextInputActiveProvider: () -> Boolean = { false },
     initialInspectorWidthDp: Float = DEFAULT_STUDIO_INSPECTOR_WIDTH_DP,
 ) {
-    var timelineOverridesStore by mutableStateOf(timelineOverridesStore)
-    var elementOverridesStore by mutableStateOf(elementOverridesStore)
-    var elementController by mutableStateOf(elementController)
-    var lintController by mutableStateOf(lintController)
-    var stageInspectionRegistry by mutableStateOf(stageInspectionRegistry)
+    var store: DeckDocumentStore by mutableStateOf(store)
+    var timelineController: DocumentTimelineController by mutableStateOf(timelineController)
+    var elementController: DocumentElementInspectorController by mutableStateOf(elementController)
+    var themeController: DocumentThemeInspectorController by mutableStateOf(themeController)
+    var lintController: DocumentDeckLintController by mutableStateOf(lintController)
+    var syncController: DocumentSyncController? by mutableStateOf(syncController)
+    var keyboardController: DocumentKeyboardCaptureController? by mutableStateOf(keyboardController)
+    var timelineWindow: DocumentTimelineWindow? by mutableStateOf(null)
 
-    var activeTab by mutableStateOf(StudioInspectorTab.Motion)
-    var inspectorWidthDp by mutableFloatStateOf(
+    var activeTab: StudioInspectorTab by mutableStateOf(StudioInspectorTab.Design)
+    var mode: StudioMode by mutableStateOf(StudioMode.Edit)
+        private set
+    var themeSheetOpen: Boolean by mutableStateOf(false)
+    var issuesDockOpen: Boolean by mutableStateOf(false)
+
+    /** Studio shell width measured by the App Bar shell (`NaN` until first layout). */
+    var shellWidthDp: Float by mutableFloatStateOf(Float.NaN)
+
+    /** `true` while the Esc Overview grid is open (hides the App Bar and all Studio chrome). */
+    var overviewOpen: Boolean by mutableStateOf(false)
+
+    /** `true` while focus sits on Studio chrome (App Bar, Theme sheet, Issues dock) outside the timeline. */
+    var chromeHasFocus: Boolean by mutableStateOf(false)
+
+    var inspectorWidthDp: Float by mutableFloatStateOf(
         initialInspectorWidthDp.coerceIn(MIN_STUDIO_INSPECTOR_WIDTH_DP, MAX_STUDIO_INSPECTOR_WIDTH_DP),
     )
-    var lastEditedDomain by mutableStateOf(UndoDomain.Motion)
-    var swallowNextEscapeKeyUp by mutableStateOf(false)
+    var swallowNextEscapeKeyUp: Boolean by mutableStateOf(false)
+
+    /** Top-center stage toast `(seq, message)` emitted on `⌘Z`/`⇧⌘Z`/gesture cancel. */
+    var lastShortcutToast: Pair<Long, String>? by mutableStateOf(null)
+        private set
+    private var shortcutToastSeq: Long = 0L
 
     var designSidecarVisibleProvider: () -> Boolean = { false }
     var setDesignSidecarVisible: (Boolean) -> Unit = {}
@@ -163,71 +152,255 @@ class StudioWorkspaceController(
     var onToggleDetachedTimeline: (() -> Unit)? = null
     var onSelectDeckByIndex: ((Int) -> Unit)? = null
 
-    fun updateForDeckSwitch(
-        newTimelineOverridesStore: TimelineOverridesStore,
-        newElementOverridesStore: ElementOverridesStore,
-        newElementController: ElementEditorController,
-        newLintController: DeckLintController,
-        newStageInspectionRegistry: StageInspectionRegistry,
+    /** Turns review click-to-comment inspect mode on/off (wired to `ReviewStageCoordinator`). */
+    var setReviewInspectMode: (Boolean) -> Unit = {}
+
+    /** Toggles review click-to-comment inspect mode (`F3`) regardless of which Studio pane holds focus. */
+    var onToggleReviewInspect: (() -> Unit)? = null
+
+    /** Opens the review panel when entering [StudioMode.Review]. */
+    var onOpenReviewPanel: (() -> Unit)? = null
+
+    /** Closes every authoring surface for [StudioMode.Present] (Clean Show Mode). */
+    var onEnterCleanShowMode: (() -> Unit)? = null
+
+    /** Restores keyboard focus to the stage after a mode switch. */
+    var onRestoreStageFocus: (() -> Unit)? = null
+
+    init {
+        bindControllerHooks()
+    }
+
+    fun showShortcutToast(message: String) {
+        shortcutToastSeq += 1L
+        lastShortcutToast = shortcutToastSeq to message
+    }
+
+    fun updateBindings(
+        newStore: DeckDocumentStore,
+        newTimelineController: DocumentTimelineController,
+        newElementController: DocumentElementInspectorController,
+        newThemeController: DocumentThemeInspectorController,
+        newLintController: DocumentDeckLintController,
+        newSyncController: DocumentSyncController?,
+        newKeyboardController: DocumentKeyboardCaptureController? = keyboardController,
     ) {
-        timelineOverridesStore = newTimelineOverridesStore
-        elementOverridesStore = newElementOverridesStore
+        store = newStore
+        timelineController = newTimelineController
         elementController = newElementController
+        themeController = newThemeController
         lintController = newLintController
-        stageInspectionRegistry = newStageInspectionRegistry
+        syncController = newSyncController
+        keyboardController = newKeyboardController
+        bindControllerHooks()
+    }
+
+    private fun bindControllerHooks() {
+        val tl = timelineController
+        val el = elementController
+        val th = themeController
+        tl.onUndoRequest = { undo() }
+        tl.onRedoRequest = { redo() }
+        tl.onBeforeBeginGesture = { commitOtherActiveGestures(except = tl) }
+        el.onUndoRequest = { undo() }
+        el.onRedoRequest = { redo() }
+        el.onBeforeBeginGesture = { commitOtherActiveGestures(except = el) }
+        th.onUndoRequest = { undo() }
+        th.onRedoRequest = { redo() }
+        th.onBeforeBeginGesture = { commitOtherActiveGestures(except = th) }
+    }
+
+    /**
+     * Commits any dangling open gesture transaction on sibling controllers before starting a new
+     * edit so slider/drag transactions never lock out cross-pane edits or fragment undo.
+     */
+    fun commitOtherActiveGestures(except: Any? = null) {
+        if (except !== timelineController && timelineController.hasActiveGesture) {
+            timelineController.commitActiveGesture()
+        }
+        if (except !== elementController && elementController.hasActiveTransaction) {
+            elementController.commitGesture()
+        }
+        if (except !== themeController && themeController.hasActiveTransaction) {
+            themeController.commitGesture()
+        }
     }
 
     val isStudioOpen: Boolean
-        get() = timelineController.authoringActive
+        get() = timelineWindow?.authoringActive == true
+
+    /** Whether full timeline tracks are open (expanded docked tracks or detached F6 window). */
+    val isTimelineTracksOpen: Boolean
+        get() = (timelineWindow?.dockedInStoryWindow == true &&
+            timelineWindow?.timelineExpanded == true &&
+            !issuesDockOpen) ||
+            timelineWindow?.detachedWindowVisible == true
+
+    /** `true` when the App Bar owns the window chrome (not presenting, not in Overview). */
+    val isAppBarActive: Boolean
+        get() = mode != StudioMode.Present && !overviewOpen
+
+    /** Stage clicks select nodes in Edit mode on either inspector tab (never while reviewing). */
+    val isElementPickingEnabled: Boolean
+        get() = isStudioOpen && mode == StudioMode.Edit
 
     val isDesignEditorVisible: Boolean
-        get() = (isStudioOpen && activeTab == StudioInspectorTab.Theme) || designSidecarVisibleProvider()
+        get() = themeSheetOpen || designSidecarVisibleProvider()
 
     val isLinterVisible: Boolean
-        get() = (isStudioOpen && activeTab == StudioInspectorTab.Lint) || lintSidecarVisibleProvider()
+        get() = issuesDockOpen || lintSidecarVisibleProvider()
 
     val isAnyAuthoringToolOpen: Boolean
-        get() = isStudioOpen || designSidecarVisibleProvider() || lintSidecarVisibleProvider()
+        get() = isStudioOpen || themeSheetOpen || issuesDockOpen ||
+            designSidecarVisibleProvider() || lintSidecarVisibleProvider()
+
+    /** Inspector width after the narrow-window clamp (`< 1200dp` → at most `320dp`). */
+    val effectiveInspectorWidthDp: Float
+        get() = effectiveInspectorWidthFor(inspectorWidthDp, shellWidthDp)
+
+    val saveState: StudioSaveState
+        get() = studioSaveStateFor(store)
 
     fun selectTabInStudio(tab: StudioInspectorTab) {
-        if (!timelineController.authoringActive) {
-            timelineController.dockedInStoryWindow = true
+        val tw = timelineWindow
+        if (tw != null && !tw.authoringActive) {
+            tw.dockedInStoryWindow = true
         }
-        setDesignSidecarVisible(false)
-        setLintSidecarVisible(false)
+        if (mode == StudioMode.Present) mode = StudioMode.Edit
         activeTab = tab
     }
 
-    fun toggleDesignSystemEditor() {
-        if (timelineController.authoringActive) {
-            setDesignSidecarVisible(false)
-            activeTab = if (activeTab == StudioInspectorTab.Theme) {
-                StudioInspectorTab.Motion
-            } else {
-                StudioInspectorTab.Theme
+    /**
+     * Switches the App Bar mode. `Edit` docks the timeline, `Review` enables click-to-comment inspect
+     * mode with the review panel, and `Present` enters Clean Show Mode.
+     */
+    fun switchMode(target: StudioMode) {
+        when (target) {
+            StudioMode.Edit -> {
+                setReviewInspectMode(false)
+                timelineWindow?.let { tw ->
+                    if (!tw.authoringActive) tw.dockedInStoryWindow = true
+                }
             }
+
+            StudioMode.Review -> {
+                cancelAnyActiveGesture()
+                elementController.cancelInlineTextEdit()
+                elementController.selectNode(null)
+                themeSheetOpen = false
+                // Reviewing is stage-first: fold the editing chrome so pins and comments get the room.
+                timelineWindow?.dockedInStoryWindow = false
+                setReviewInspectMode(true)
+                onOpenReviewPanel?.invoke()
+            }
+
+            StudioMode.Present -> {
+                cancelAnyActiveGesture()
+                elementController.cancelInlineTextEdit()
+                elementController.selectNode(null)
+                themeSheetOpen = false
+                issuesDockOpen = false
+                setReviewInspectMode(false)
+                onEnterCleanShowMode?.invoke()
+            }
+        }
+        mode = target
+        onRestoreStageFocus?.invoke()
+    }
+
+    /** Records an externally entered Clean Show Mode (e.g. the Presenter readiness banner). */
+    fun markPresentMode() {
+        themeSheetOpen = false
+        issuesDockOpen = false
+        mode = StudioMode.Present
+    }
+
+    /** Leaves Present mode when an authoring tool reopens (e.g. `F5`). */
+    fun syncModeWithOpenTools() {
+        if (mode == StudioMode.Present && (isStudioOpen || themeSheetOpen || issuesDockOpen)) {
+            mode = StudioMode.Edit
+        }
+    }
+
+    fun toggleDesignSystemEditor() {
+        if (mode != StudioMode.Present) {
+            setDesignSidecarVisible(false)
+            themeSheetOpen = !themeSheetOpen
         } else {
-            val next = !designSidecarVisibleProvider()
-            setDesignSidecarVisible(next)
+            setDesignSidecarVisible(!designSidecarVisibleProvider())
         }
     }
 
     fun toggleDeckLinter() {
-        if (timelineController.authoringActive) {
+        if (mode != StudioMode.Present) {
             setLintSidecarVisible(false)
-            activeTab = if (activeTab == StudioInspectorTab.Lint) {
-                StudioInspectorTab.Motion
-            } else {
-                StudioInspectorTab.Lint
-            }
+            issuesDockOpen = !issuesDockOpen
         } else {
-            val next = !lintSidecarVisibleProvider()
-            setLintSidecarVisible(next)
+            setLintSidecarVisible(!lintSidecarVisibleProvider())
         }
     }
 
-    fun openElementInInspector(
-        elementId: String,
+    fun toggleDockedTimeline() {
+        val custom = onToggleDockedTimeline
+        if (custom != null) {
+            custom()
+        } else {
+            timelineWindow?.let { tw ->
+                val next = !tw.dockedInStoryWindow
+                tw.dockedInStoryWindow = next
+                if (next) tw.detachedWindowVisible = false
+            }
+        }
+        syncModeWithOpenTools()
+    }
+
+    /**
+     * Toggles the Timeline tracks (`F5` / App Bar Timeline button):
+     * - in `Edit` mode with a docked timeline, switches away from `Issues` (if open) or toggles
+     *   [DocumentTimelineWindow.timelineExpanded] between the compact header band and full tracks;
+     * - in `Edit` mode with an undocked/detached timeline, docks and expands it;
+     * - in `Review` or `Present` mode, enters `Edit` mode with the docked timeline expanded.
+     */
+    fun toggleStudioTimeline() {
+        val custom = onToggleDockedTimeline
+        if (custom != null) {
+            custom()
+            syncModeWithOpenTools()
+            return
+        }
+        val tw = timelineWindow
+        if (mode != StudioMode.Edit) {
+            switchMode(StudioMode.Edit)
+            issuesDockOpen = false
+            if (tw != null) {
+                tw.detachedWindowVisible = false
+                tw.dockedInStoryWindow = true
+                tw.timelineExpanded = true
+            }
+            return
+        }
+        if (tw != null) {
+            if (!tw.dockedInStoryWindow) {
+                tw.detachedWindowVisible = false
+                tw.dockedInStoryWindow = true
+                issuesDockOpen = false
+                tw.timelineExpanded = true
+            } else if (issuesDockOpen) {
+                issuesDockOpen = false
+                tw.timelineExpanded = true
+            } else {
+                tw.toggleTimelineExpanded()
+            }
+        }
+        syncModeWithOpenTools()
+    }
+
+    /**
+     * Opens [nodeId] in the `Design` tab (jumping to its slide/beat). The Issues dock stays open so
+     * the list and its context remain visible while the node is edited.
+     */
+    fun openNodeInElementInspector(
+        nodeId: String?,
         animatic: Animatic,
         scope: CoroutineScope,
         sceneIndex: Int? = null,
@@ -239,480 +412,265 @@ class StudioWorkspaceController(
                 scope.launch { animatic.jumpTo(target) }
             }
         }
-        selectTabInStudio(StudioInspectorTab.Element)
-        elementController.selectElement(elementId)
-    }
-
-    fun applyElementPatch(patch: ElementPatch) {
-        lastEditedDomain = UndoDomain.Element
-        elementOverridesStore.updateElement(
-            elementId = patch.elementId,
-            coalesce = false,
-            coalesceKey = "lint-fix:${patch.elementId}",
-        ) { existing ->
-            existing.copy(
-                text = patch.text ?: existing.text,
-                textColorArgb = patch.textColorArgb ?: existing.textColorArgb,
-                fontSizeSp = patch.fontSizeSp ?: existing.fontSizeSp,
-                fontWeight = patch.fontWeight ?: existing.fontWeight,
-                fillColorArgb = patch.fillColorArgb ?: existing.fillColorArgb,
-                borderColorArgb = patch.borderColorArgb ?: existing.borderColorArgb,
-                borderWidthDp = patch.borderWidthDp ?: existing.borderWidthDp,
-                cornerRadiusDp = patch.cornerRadiusDp ?: existing.cornerRadiusDp,
-                paddingDp = patch.paddingDp ?: existing.paddingDp,
-                offsetXDp = patch.offsetXDp ?: existing.offsetXDp,
-                offsetYDp = patch.offsetYDp ?: existing.offsetYDp,
-            )
+        if (mode == StudioMode.Review) {
+            setReviewInspectMode(false)
+            mode = StudioMode.Edit
         }
+        selectTabInStudio(StudioInspectorTab.Design)
+        elementController.selectNode(nodeId)
     }
 
-    fun activeUndoDomain(): UndoDomain = when {
-        designSidecarVisibleProvider() && !isStudioOpen -> UndoDomain.Theme
-        lintSidecarVisibleProvider() && !isStudioOpen -> lastEditedDomain
-        activeTab == StudioInspectorTab.Theme -> UndoDomain.Theme
-        activeTab == StudioInspectorTab.Element -> UndoDomain.Element
-        activeTab == StudioInspectorTab.Lint -> lastEditedDomain
-        else -> UndoDomain.Motion
-    }
-
-    fun undoInActiveContext(): Boolean = when (activeUndoDomain()) {
-        UndoDomain.Theme -> designSystemStore.undo()
-        UndoDomain.Element -> elementOverridesStore.undo()
-        UndoDomain.Motion -> {
-            timelineController.undo()
-            true
+    /** Cancels any active gesture transaction across Timeline, Element, Theme, or Store. */
+    fun cancelAnyActiveGesture(): Boolean {
+        var cancelled = false
+        if (timelineController.hasActiveGesture) {
+            cancelled = timelineController.cancelActiveGesture() || cancelled
         }
+        if (elementController.hasActiveTransaction) {
+            cancelled = elementController.cancelGesture() || cancelled
+        }
+        if (themeController.hasActiveTransaction) {
+            cancelled = themeController.cancelGesture() || cancelled
+        }
+        if (store.hasOpenTransaction) {
+            store.cancelActiveTransaction()
+            cancelled = true
+        }
+        return cancelled
     }
 
-    fun redoInActiveContext(): Boolean = when (activeUndoDomain()) {
-        UndoDomain.Theme -> designSystemStore.redo()
-        UndoDomain.Element -> elementOverridesStore.redo()
-        UndoDomain.Motion -> {
-            timelineController.redo()
-            true
+    /** Unified undo on [DeckDocumentStore]. Mid-gesture undo cancels the active gesture first. */
+    fun undo(): Boolean {
+        if (cancelAnyActiveGesture()) {
+            showShortcutToast("Canceled gesture")
+            return true
         }
+        if (!store.canUndo) return false
+        store.undo()
+        timelineController.refreshSnapshot()
+        showShortcutToast("⌘Z Undo")
+        return true
+    }
+
+    /** Unified redo on [DeckDocumentStore]. */
+    fun redo(): Boolean {
+        if (!store.canRedo) return false
+        store.redo()
+        timelineController.refreshSnapshot()
+        showShortcutToast("⇧⌘Z Redo")
+        return true
     }
 
     /**
      * Capture-phase shortcut router shared by the Story window and Studio panels:
-     * - `F7` / `F8`: toggle/focus Design System Editor or Deck Linter without window sprawl.
-     * - When an element is selected on the `Element` tab (and no text input has focus): `Arrow`
-     *   keys nudge `1 dp` (`Shift+Arrow` `10 dp`), `Cmd+Backspace` resets the element, and `Esc`
-     *   clears selection without opening the Overview grid.
-     * - `Cmd+Z` / `Cmd+Shift+Z` (and `Ctrl+Z` / `Ctrl+Y`): routes Undo/Redo to the active editor
-     *   tab (`Motion`, `Element`, `Theme`, or last quick-fixed domain on `Lint`).
+     * - `F2` / `F5` / `F6` / `F7` / `F8`: Presenter View, docked/detached timeline, Theme sheet, Issues dock.
+     * - `⌘⌥1..9`: switch active deck.
+     * - `Esc` mid-gesture cancels the active gesture transaction and restores the exact prior document.
+     * - Node nudging (`Arrow` / `Shift+Arrow`), delete (`⌘⌫`), and selection clear (`Esc`).
+     * - Unified `⌘Z` / `⇧⌘Z` (`Ctrl+Z` / `Ctrl+Y`) routed to `store.undo()` / `store.redo()`,
+     *   strictly yielding whenever a text input holds focus.
      */
     fun handleStudioPreviewKey(event: KeyEvent): Boolean {
         if (event.key == Key.Escape && event.type == KeyEventType.KeyUp && swallowNextEscapeKeyUp) {
             swallowNextEscapeKeyUp = false
             return true
         }
-        if (isTextInputActiveProvider()) return false
-
-        if (event.type == KeyEventType.KeyDown && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed) {
-            when (event.key) {
-                Key.F2 -> {
-                    onTogglePresenter?.let {
-                        it()
-                        return true
-                    }
-                }
-                Key.F5 -> {
-                    onToggleDockedTimeline?.let {
-                        it()
-                        return true
-                    }
-                }
-                Key.F6 -> {
-                    val custom = onToggleDetachedTimeline
-                    if (custom != null) {
-                        custom()
-                    } else {
-                        val next = !timelineController.detachedWindowVisible
-                        if (next) timelineController.dockedInStoryWindow = false
-                        timelineController.detachedWindowVisible = next
-                    }
-                    return true
-                }
-                Key.F7 -> {
-                    toggleDesignSystemEditor()
-                    return true
-                }
-                Key.F8 -> {
-                    toggleDeckLinter()
-                    return true
-                }
-            }
-        }
-
-        val deckSwitcherMod = (event.isMetaPressed || event.isCtrlPressed) && event.isAltPressed && !event.isShiftPressed
-        if (event.type == KeyEventType.KeyDown && deckSwitcherMod) {
-            val deckIndex = when (event.key) {
-                Key.One -> 0
-                Key.Two -> 1
-                Key.Three -> 2
-                else -> -1
-            }
-            if (deckIndex >= 0 && onSelectDeckByIndex != null) {
-                onSelectDeckByIndex?.invoke(deckIndex)
-                return true
-            }
-        }
-
-        if (elementController.inlineEditingElementId != null) {
+        if (isTextInputActiveProvider() ||
+            elementController.textInputHasFocus ||
+            elementController.inlineEditingNodeId != null
+        ) {
             return false
         }
 
-        if (activeTab == StudioInspectorTab.Element &&
-            elementController.handleElementStageKeyEvent(
-                ev = event,
-                includeUndoShortcuts = false,
-                onEscapeHandled = { swallowNextEscapeKeyUp = true },
-            )
+        // An entered "interactive": "keyboard" specimen keeps every key except Esc.
+        val kb = keyboardController
+        if (kb != null && kb.isCaptured) {
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                kb.exitInteractive()
+                swallowNextEscapeKeyUp = true
+                return true
+            }
+            return false
+        }
+
+        if (event.type == KeyEventType.KeyDown &&
+            event.key == Key.Escape &&
+            cancelAnyActiveGesture()
+        ) {
+            swallowNextEscapeKeyUp = true
+            return true
+        }
+
+        if (event.type == KeyEventType.KeyDown && event.key == Key.Escape && themeSheetOpen) {
+            themeSheetOpen = false
+            swallowNextEscapeKeyUp = true
+            return true
+        }
+
+        if (event.type == KeyEventType.KeyDown &&
+            !event.isCtrlPressed &&
+            !event.isMetaPressed &&
+            !event.isAltPressed &&
+            !event.isShiftPressed &&
+            handleFunctionKey(event.key)
         ) {
             return true
         }
 
-        if (isAnyAuthoringToolOpen && event.type == KeyEventType.KeyDown && !event.isAltPressed) {
+        if (handleDeckSwitchChord(event)) return true
+
+        if (isElementPickingEnabled) {
+            if (event.type == KeyEventType.KeyDown &&
+                event.key == Key.Escape &&
+                elementController.selectedNodeIds.isNotEmpty()
+            ) {
+                elementController.selectNode(null)
+                swallowNextEscapeKeyUp = true
+                return true
+            }
+            if (activeTab == StudioInspectorTab.Design && elementController.handleKeyEvent(event)) {
+                return true
+            }
+        }
+
+        if (event.type == KeyEventType.KeyDown && !event.isAltPressed) {
             val primaryMod = event.isMetaPressed || event.isCtrlPressed
             if (primaryMod && event.key == Key.Z) {
-                if (event.isShiftPressed) redoInActiveContext() else undoInActiveContext()
+                if (event.isShiftPressed) redo() else undo()
                 return true
             }
             if (event.isCtrlPressed && !event.isMetaPressed && !event.isShiftPressed && event.key == Key.Y) {
-                redoInActiveContext()
+                redo()
                 return true
             }
         }
 
         return false
     }
+
+    private fun handleFunctionKey(key: Key): Boolean {
+        when (key) {
+            Key.F2 -> {
+                val toggle = onTogglePresenter ?: return false
+                toggle()
+                return true
+            }
+
+            Key.F3 -> {
+                val toggle = onToggleReviewInspect ?: return false
+                toggle()
+                return true
+            }
+
+            Key.F5 -> {
+                toggleStudioTimeline()
+                return true
+            }
+
+            Key.F6 -> {
+                val custom = onToggleDetachedTimeline
+                if (custom != null) {
+                    custom()
+                } else {
+                    timelineWindow?.let { tw ->
+                        val next = !tw.detachedWindowVisible
+                        if (next) tw.dockedInStoryWindow = false
+                        tw.detachedWindowVisible = next
+                    }
+                }
+                syncModeWithOpenTools()
+                return true
+            }
+
+            Key.F7 -> {
+                toggleDesignSystemEditor()
+                return true
+            }
+
+            Key.F8 -> {
+                toggleDeckLinter()
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun handleDeckSwitchChord(event: KeyEvent): Boolean {
+        val deckSwitcherMod = (event.isMetaPressed || event.isCtrlPressed) &&
+            event.isAltPressed &&
+            !event.isShiftPressed
+        if (event.type != KeyEventType.KeyDown || !deckSwitcherMod) return false
+        val deckIndex = when (event.key) {
+            Key.One -> 0
+            Key.Two -> 1
+            Key.Three -> 2
+            Key.Four -> 3
+            Key.Five -> 4
+            Key.Six -> 5
+            Key.Seven -> 6
+            Key.Eight -> 7
+            Key.Nine -> 8
+            else -> -1
+        }
+        val select = onSelectDeckByIndex
+        if (deckIndex < 0 || select == null) return false
+        select(deckIndex)
+        return true
+    }
+}
+
+/** Narrow-window clamp for the right inspector (pure for tests). */
+fun effectiveInspectorWidthFor(requestedWidthDp: Float, shellWidthDp: Float): Float {
+    val requested = requestedWidthDp.coerceIn(MIN_STUDIO_INSPECTOR_WIDTH_DP, MAX_STUDIO_INSPECTOR_WIDTH_DP)
+    return if (!shellWidthDp.isNaN() && shellWidthDp < NARROW_WINDOW_THRESHOLD_DP) {
+        minOf(requested, NARROW_WINDOW_INSPECTOR_WIDTH_DP)
+    } else {
+        requested
+    }
 }
 
 /**
- * Synchronizes sidecar folding, unified off-EDT disk polling + exit flush for both inspector
- * stores, shortcut delegation, and the most recently edited store domain for Undo/Redo on Lint.
+ * Synchronizes the active slide/beat into the element inspector, the specimen keyboard controller,
+ * sidecar folding, Present-mode bookkeeping, and bidirectional stage ⇄ timeline selection.
  */
 @Composable
-fun StudioWorkspaceSyncEffects(workspace: StudioWorkspaceController) {
+fun StudioWorkspaceSyncEffects(
+    workspace: StudioWorkspaceController,
+    activeSlideId: String?,
+    activeBeatIndex: Int,
+    animatic: Animatic? = null,
+) {
     val studioOpen = workspace.isStudioOpen
-    val activeTab = workspace.activeTab
-    val elementPicking = studioOpen && activeTab == StudioInspectorTab.Element
 
-    SideEffect {
-        workspace.elementController.editorActive = elementPicking
-        workspace.elementController.elementPickingEnabled = elementPicking
-        workspace.elementController.onStageKeyHandler = { ev ->
-            workspace.handleStudioPreviewKey(ev)
+    LaunchedEffect(activeSlideId, activeBeatIndex) {
+        if (activeSlideId != null) {
+            workspace.elementController.selectLocation(activeSlideId, activeBeatIndex)
         }
-        workspace.elementController.onInlineEditOpened = {
-            if (workspace.isStudioOpen) {
-                workspace.activeTab = StudioInspectorTab.Element
-            }
-        }
-        workspace.timelineController.onTrackSelected = { trackId ->
-            if (trackId != null && workspace.isStudioOpen) {
-                workspace.activeTab = StudioInspectorTab.Motion
-            }
-        }
-    }
-
-    DisposableEffect(workspace) {
-        onDispose {
-            if (workspace.elementController.onStageKeyHandler != null) {
-                workspace.elementController.onStageKeyHandler = null
-            }
-            workspace.designSystemStore.flushPendingPersistence()
-            workspace.elementOverridesStore.flushPendingPersistence()
-        }
-    }
-
-    LaunchedEffect(workspace.designSystemStore, workspace.elementOverridesStore) {
-        while (true) {
-            kotlinx.coroutines.delay(300L)
-            workspace.designSystemStore.pollExternalChangesFromDisk()
-            workspace.elementOverridesStore.pollExternalChangesFromDisk()
-        }
+        workspace.keyboardController?.onActiveSlideChanged(activeSlideId)
     }
 
     LaunchedEffect(studioOpen) {
+        workspace.keyboardController?.isEditMode = studioOpen
         if (studioOpen) {
-            when {
-                workspace.designSidecarVisibleProvider() -> {
-                    workspace.setDesignSidecarVisible(false)
-                    workspace.activeTab = StudioInspectorTab.Theme
-                }
-                workspace.lintSidecarVisibleProvider() -> {
-                    workspace.setLintSidecarVisible(false)
-                    workspace.activeTab = StudioInspectorTab.Lint
-                }
+            workspace.syncModeWithOpenTools()
+            if (workspace.designSidecarVisibleProvider()) {
+                workspace.setDesignSidecarVisible(false)
+                workspace.themeSheetOpen = true
+            }
+            if (workspace.lintSidecarVisibleProvider()) {
+                workspace.setLintSidecarVisible(false)
+                workspace.issuesDockOpen = true
             }
         } else {
-            workspace.elementController.cancelInlineEdit(restoreStageFocus = false)
+            workspace.elementController.cancelInlineTextEdit()
+            workspace.elementController.cancelStageDragPreview()
         }
     }
 
-    val motionStructural = workspace.timelineOverridesStore.structuralRevision
-    val motionParam = workspace.timelineOverridesStore.parameterRevision
-    var seenMotion by remember { mutableIntStateOf(motionStructural + motionParam) }
-    LaunchedEffect(motionStructural, motionParam) {
-        val next = motionStructural + motionParam
-        if (next != seenMotion) {
-            seenMotion = next
-            workspace.lastEditedDomain = UndoDomain.Motion
-        }
-    }
-
-    val elementRev = workspace.elementOverridesStore.revision
-    var seenElement by remember { mutableIntStateOf(elementRev) }
-    LaunchedEffect(elementRev) {
-        if (elementRev != seenElement) {
-            seenElement = elementRev
-            workspace.lastEditedDomain = UndoDomain.Element
-        }
-    }
-
-    val designRev = workspace.designSystemStore.revision
-    var seenDesign by remember { mutableIntStateOf(designRev) }
-    LaunchedEffect(designRev) {
-        if (designRev != seenDesign) {
-            seenDesign = designRev
-            workspace.lastEditedDomain = UndoDomain.Theme
-        }
-    }
-}
-
-/**
- * Resizable right-hand Studio Inspector hosting segmented `Motion | Element | Theme | Lint` tabs.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun StudioUnifiedInspectorPane(
-    workspace: StudioWorkspaceController,
-    animatic: Animatic,
-    currentPreset: DeckThemePreset,
-    onSelectPreset: (DeckThemePreset) -> Unit,
-    baseThemeProvider: (DeckThemePreset) -> DeckTheme,
-    storyboardForPreset: (DeckThemePreset) -> Storyboard,
-    scope: CoroutineScope,
-    modifier: Modifier = Modifier,
-) {
-    val density = LocalDensity.current
-    val globalColors = JewelTheme.globalColors
-    val focusRingColor = rememberAccessibleFocusRingColor()
-    val splitterHover = remember { MutableInteractionSource() }
-    val isSplitterHovered by splitterHover.collectIsHoveredAsState()
-    val splitterColor = if (isSplitterHovered) globalColors.outlines.focused else globalColors.borders.normal
-
-    Tooltip(tooltip = { Text("Drag to resize Studio Inspector (double-click to reset)") }) {
-        Box(
-            modifier = Modifier
-                .width(5.dp)
-                .fillMaxHeight()
-                .background(splitterColor)
-                .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR)))
-                .combinedClickable(
-                    interactionSource = splitterHover,
-                    indication = null,
-                    onClick = {},
-                    onDoubleClick = {
-                        workspace.inspectorWidthDp = DEFAULT_STUDIO_INSPECTOR_WIDTH_DP
-                        workspace.onInspectorWidthPersisted?.invoke(DEFAULT_STUDIO_INSPECTOR_WIDTH_DP)
-                    },
-                )
-                .pointerInput(density) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = { workspace.onInspectorWidthPersisted?.invoke(workspace.inspectorWidthDp) },
-                        onDragCancel = { workspace.onInspectorWidthPersisted?.invoke(workspace.inspectorWidthDp) },
-                    ) { change, dragAmount ->
-                        change.consume()
-                        val deltaDp = with(density) { dragAmount.toDp().value }
-                        workspace.inspectorWidthDp = (workspace.inspectorWidthDp - deltaDp)
-                            .coerceIn(MIN_STUDIO_INSPECTOR_WIDTH_DP, MAX_STUDIO_INSPECTOR_WIDTH_DP)
-                    }
-                }
-                .testTag("ciacola-studio-inspector-splitter"),
-        )
-    }
-
-    val motionParamRev = workspace.timelineOverridesStore.parameterRevision
-    val motionStructRev = workspace.timelineOverridesStore.structuralRevision
-    val elemRev = workspace.elementOverridesStore.revision
-    val desRev = workspace.designSystemStore.revision
-
-    val hasMotionOverrides = workspace.timelineOverridesStore.data().hasOverrides
-    val hasElementOverrides = workspace.elementOverridesStore.data().hasOverrides
-    val hasThemeOverrides = workspace.designSystemStore.overridesFor(currentPreset).hasOverrides
-    val activeDeckTheme = remember(currentPreset, desRev, baseThemeProvider) {
-        workspace.designSystemStore.resolveTheme(currentPreset, baseThemeProvider(currentPreset))
-    }
-    val lintErrorCount = workspace.lintController.errorCount
-    val lintWarningCount = workspace.lintController.warningCount
-    val lintTotalCount = lintErrorCount + lintWarningCount
-
-    Column(
-        modifier = modifier
-            .width(workspace.inspectorWidthDp.dp)
-            .fillMaxHeight()
-            .background(globalColors.panelBackground)
-            .testTag("ciacola-studio-unified-inspector"),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .selectableGroup()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            for (tab in StudioInspectorTab.entries) {
-                val badgeText = when (tab) {
-                    StudioInspectorTab.Motion -> if (hasMotionOverrides) "${tab.label} ●" else tab.label
-                    StudioInspectorTab.Element -> if (hasElementOverrides) "${tab.label} ●" else tab.label
-                    StudioInspectorTab.Theme -> if (hasThemeOverrides) "${tab.label} ●" else tab.label
-                    StudioInspectorTab.Lint -> if (lintTotalCount > 0) "${tab.label} ($lintTotalCount)" else tab.label
-                }
-                val undoTargetLabel = when (tab) {
-                    StudioInspectorTab.Motion -> "Motion"
-                    StudioInspectorTab.Element -> "Element"
-                    StudioInspectorTab.Theme -> "Theme"
-                    StudioInspectorTab.Lint -> workspace.lastEditedDomain.name
-                }
-                StudioInspectorTabPill(
-                    label = badgeText,
-                    tooltip = "${tab.tooltip} • ⌘Z / ⇧⌘Z: Undo/Redo $undoTargetLabel",
-                    selected = workspace.activeTab == tab,
-                    hasAlert = tab == StudioInspectorTab.Lint && lintErrorCount > 0,
-                    hasWarning = tab == StudioInspectorTab.Lint && lintErrorCount == 0 && lintWarningCount > 0,
-                    focusRingColor = focusRingColor,
-                    testTag = "ciacola-studio-tab-${tab.name.lowercase()}",
-                    modifier = Modifier.weight(1f),
-                    onClick = { workspace.activeTab = tab },
-                )
-            }
-        }
-
-        Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
-
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            DeckThemeProvider(activeDeckTheme) {
-                when (workspace.activeTab) {
-                    StudioInspectorTab.Motion -> TimelineBlockInspector(
-                        controller = workspace.timelineController,
-                        modifier = Modifier.fillMaxSize(),
-                        fillWidth = true,
-                    )
-
-                    StudioInspectorTab.Element -> ElementEditorPanel(
-                        controller = workspace.elementController,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-
-                    StudioInspectorTab.Theme -> DesignSystemEditorPanel(
-                        store = workspace.designSystemStore,
-                        currentPreset = currentPreset,
-                        onSelectPreset = onSelectPreset,
-                        baseThemeProvider = baseThemeProvider,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-
-                    StudioInspectorTab.Lint -> DeckLintPanel(
-                        controller = workspace.lintController,
-                        animatic = animatic,
-                        storyboardProvider = { animatic.storyboard },
-                        presetsToCheck = DeckThemePreset.entries,
-                        storyboardForPreset = storyboardForPreset,
-                        timelineOverridesProvider = { workspace.timelineOverridesStore.data() },
-                        externalRevisionKey = motionStructRev + motionParamRev + elemRev + desRev,
-                        stageInspectionRegistry = workspace.stageInspectionRegistry,
-                        onApplyElementPatch = { patch -> workspace.applyElementPatch(patch) },
-                        onEditElement = { elementId, sceneIndex, beatIndex ->
-                            workspace.openElementInInspector(
-                                elementId = elementId,
-                                animatic = animatic,
-                                scope = scope,
-                                sceneIndex = sceneIndex,
-                                beatIndex = beatIndex,
-                            )
-                        },
-                        onOpenThemeEditor = {
-                            workspace.selectTabInStudio(StudioInspectorTab.Theme)
-                        },
-                        isActive = true,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun StudioInspectorTabPill(
-    label: String,
-    tooltip: String,
-    selected: Boolean,
-    hasAlert: Boolean,
-    hasWarning: Boolean,
-    focusRingColor: Color,
-    testTag: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val globalColors = JewelTheme.globalColors
-    val palette = JewelTheme.colorPalette
-    val isDark = JewelTheme.isDark
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(5.dp)
-
-    val alertColor = palette.redOrNull(if (isDark) 6 else 5) ?: globalColors.outlines.error
-    val warnColor = palette.yellowOrNull(if (isDark) 6 else 5) ?: globalColors.outlines.warning
-
-    val bg = when {
-        selected -> globalColors.outlines.focused.copy(alpha = 0.20f)
-        hasAlert -> alertColor.copy(alpha = 0.12f)
-        hasWarning -> warnColor.copy(alpha = 0.12f)
-        else -> Color.Transparent
-    }
-    val border = when {
-        selected -> globalColors.outlines.focused
-        hasAlert -> alertColor.copy(alpha = 0.65f)
-        hasWarning -> warnColor.copy(alpha = 0.65f)
-        else -> globalColors.borders.normal
-    }
-
-    Tooltip(tooltip = { Text(tooltip) }) {
-        Box(
-            modifier = modifier
-                .clip(shape)
-                .background(bg, shape)
-                .border(1.dp, border, shape)
-                .accessibleFocusRing(focused, focusRingColor, cornerRadius = 5.dp)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    role = Role.Tab,
-                    onClick = onClick,
-                )
-                .semantics {
-                    this.selected = selected
-                }
-                .padding(horizontal = 4.dp, vertical = 4.dp)
-                .testTag(testTag),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = label,
-                style = JewelTheme.typography.small.copy(
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                ),
-                color = globalColors.text.normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
+    StudioSelectionSyncEffect(
+        workspace = workspace,
+        activeSlideId = activeSlideId,
+        activeBeatIndex = activeBeatIndex,
+        animatic = animatic,
+    )
 }

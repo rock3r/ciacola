@@ -1,20 +1,25 @@
 package dev.sebastiano.ciacola.a11y
 
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -22,32 +27,30 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runComposeUiTest
-import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.ImageComposeScene
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.AdvanceDirection
+import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.ScenePreview
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.AnimatedMeshBackdrop
-import dev.sebastiano.ciacola.DeckMagicText
-import dev.sebastiano.ciacola.DeckTextRendererProvider
-import dev.sebastiano.ciacola.MagicTextV1Renderer
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
+import dev.sebastiano.ciacola.createLoadedTestDeckStore
+import dev.sebastiano.ciacola.decks.AllDocumentDecks
+import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
+import dev.sebastiano.ciacola.document.render.rememberDocumentStoryboard
 import dev.sebastiano.ciacola.effects.DeckWarpCodeCard
 import dev.sebastiano.ciacola.effects.animateBuildProgress
 import dev.sebastiano.ciacola.effects.animateStaggerGroup
 import dev.sebastiano.ciacola.effects.keynoteFadeMove
-import dev.sebastiano.ciacola.effects.keynoteFadeMoveTracked
 import dev.sebastiano.ciacola.effects.keynoteFromDarkness
 import dev.sebastiano.ciacola.effects.keynotePop
 import dev.sebastiano.ciacola.effects.keynoteWipe
-import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
+import dev.sebastiano.ciacola.indexFoundationTimelineSnapshot
 import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
 import dev.sebastiano.ciacola.theme.ReducedMotionMode
@@ -55,11 +58,6 @@ import dev.sebastiano.ciacola.theme.SystemReducedMotionDetector
 import dev.sebastiano.ciacola.theme.parseReducedMotionEnv
 import dev.sebastiano.ciacola.theme.queryOsReduceMotion
 import dev.sebastiano.ciacola.theme.resolveEffectiveReducedMotion
-import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
-import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
-import dev.sebastiano.ciacola.timeline.TimelineSpatialSpec
-import dev.sebastiano.ciacola.timeline.TrackOverride
-import dev.sebastiano.ciacola.timeline.indexDeckTimeline
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.test.Test
@@ -114,26 +112,14 @@ class ReducedMotionTest {
 
     @Test
     fun keynoteEffectsSuppressTranslationScaleAndStaggerCascadesUnderReducedMotion() = runComposeUiTest {
-        val overrides = DeckTimelineOverridesFile(
-            tracks = mapOf(
-                "tracked" to TrackOverride(
-                    trackId = "tracked",
-                    spatial = TimelineSpatialSpec(offsetXDp = 40f, offsetYDp = -30f),
-                ),
-            ),
-        )
         var density = 1f
         var fadeMoveBounds = Rect.Zero
-        var trackedBounds = Rect.Zero
         var darknessBounds = Rect.Zero
         var popBounds = Rect.Zero
 
         setContent {
             density = this.density.density
-            CompositionLocalProvider(
-                LocalReducedMotion provides true,
-                LocalTimelineOverrides provides overrides,
-            ) {
+            CompositionLocalProvider(LocalReducedMotion provides true) {
                 Box(Modifier.size(400.dp)) {
                     Box(
                         Modifier
@@ -141,13 +127,6 @@ class ReducedMotionTest {
                             .size(50.dp)
                             .keynoteFadeMove(progress = { 0.25f })
                             .onGloballyPositioned { fadeMoveBounds = it.boundsInRoot() },
-                    )
-                    Box(
-                        Modifier
-                            .offset(100.dp, 100.dp)
-                            .size(50.dp)
-                            .keynoteFadeMoveTracked(trackId = "tracked", progress = { 0.25f })
-                            .onGloballyPositioned { trackedBounds = it.boundsInRoot() },
                     )
                     Box(
                         Modifier
@@ -179,7 +158,6 @@ class ReducedMotionTest {
         val expectedSize = 50f * density
         for ((name, rect) in listOf(
             "keynoteFadeMove" to fadeMoveBounds,
-            "keynoteFadeMoveTracked" to trackedBounds,
             "keynoteFromDarkness" to darknessBounds,
             "keynotePop" to popBounds,
         )) {
@@ -200,7 +178,7 @@ class ReducedMotionTest {
                         .testTag("wipe-box")
                         .keynoteWipe(progress = { 0.5f }),
                 ) {
-                    androidx.compose.foundation.Canvas(Modifier.size(100.dp, 40.dp)) {
+                    Canvas(Modifier.size(100.dp, 40.dp)) {
                         drawRect(Color.Red)
                     }
                 }
@@ -209,7 +187,6 @@ class ReducedMotionTest {
         waitForIdle()
 
         val pixels = onNodeWithTag("wipe-box").captureToImage().toPixelMap()
-        // At progress=0.5f under reduced motion, the right half must NOT be clipped away.
         val leftPixel = pixels[pixels.width / 4, pixels.height / 2]
         val rightPixel = pixels[(pixels.width * 3) / 4, pixels.height / 2]
         assertTrue(leftPixel.red > 0.3f, "Expected left half visible, got $leftPixel")
@@ -246,13 +223,11 @@ class ReducedMotionTest {
         mainClock.advanceTimeByFrame()
         runOnIdle { visible = true }
 
-        // Mid-transition (~64 ms): stagger items must advance in lockstep (no cascade!).
         repeat(4) { mainClock.advanceTimeByFrame() }
         assertTrue(item0 > 0.1f && item0 < 1f, "Expected mid-fade progress, got $item0")
         assertEquals(item0, item1, 0.001f, "Stagger item 1 must match item 0 under reduced motion")
         assertEquals(item0, item2, 0.001f, "Stagger item 2 must match item 0 under reduced motion")
 
-        // Past REDUCED_MOTION_FADE_DURATION_MS (150 ms): both build and stagger must be settled at 1f!
         mainClock.advanceTimeBy(REDUCED_MOTION_FADE_DURATION_MS.toLong() + 32L)
         waitForIdle()
         assertEquals(1f, buildVal, 0.001f)
@@ -261,60 +236,66 @@ class ReducedMotionTest {
     }
 
     @Test
-    fun animatedMeshBackdropFreezesUnderReducedMotionAndWhenExplicitlyPaused() = runComposeUiTest {
-        mainClock.autoAdvance = false
+    fun foundationAmbientMeshFreezesUnderReducedMotionAndAnimatesWhenClockAdvancesInFullMotion() = runComposeUiTest {
         var reduced by mutableStateOf(true)
-        var paused by mutableStateOf(false)
+        var clockMs by mutableLongStateOf(0L)
+        val store = createLoadedTestDeckStore()
+        lateinit var animatic: Animatic
 
         setContent {
-            CompositionLocalProvider(
-                LocalReducedMotion provides reduced,
-                LocalAmbientLoopsPaused provides paused,
-            ) {
-                AnimatedMeshBackdrop(Modifier.size(160.dp, 90.dp).testTag("mesh"))
+            val session = remember {
+                RenderSession.forPresent(
+                    store = store,
+                    freeClockMillis = { clockMs },
+                )
+            }
+            val storyboard = rememberDocumentStoryboard(
+                session = session,
+                config = DocumentRenderConfig(
+                    themeName = "dark",
+                    specimens = AllDocumentDecks.foundation.specimens,
+                    reducedMotion = reduced,
+                ),
+            )
+            Box(Modifier.size(320.dp, 180.dp).testTag("mesh-stage")) {
+                animatic = rememberAnimatic(
+                    initialIndex = Storyboard.Index(2, 0),
+                    storyboard = { storyboard },
+                )
+                Easel(animatic)
             }
         }
-        mainClock.advanceTimeByFrame()
-        val reducedT0 = onNodeWithTag("mesh").captureToImage().toPixelMap()
-        mainClock.advanceTimeBy(1_500L)
-        val reducedT1 = onNodeWithTag("mesh").captureToImage().toPixelMap()
-        assertPixelsMatch(reducedT0, reducedT1, "Mesh must stay frozen under reduced motion")
+        waitForIdle()
 
-        // Full motion + explicit pause (WCAG 2.2.2) also freezes the loop.
+        val reducedT0 = onNodeWithTag("mesh-stage").captureToImage().toPixelMap()
+        runOnIdle { clockMs = 1_500L }
+        waitForIdle()
+        val reducedT1 = onNodeWithTag("mesh-stage").captureToImage().toPixelMap()
+        assertPixelsMatch(reducedT0, reducedT1, "Ambient mesh specimen must stay frozen under reduced motion")
+
         runOnIdle {
             reduced = false
-            paused = true
+            clockMs = 0L
         }
-        mainClock.advanceTimeByFrame()
-        val pausedT0 = onNodeWithTag("mesh").captureToImage().toPixelMap()
-        mainClock.advanceTimeBy(1_500L)
-        val pausedT1 = onNodeWithTag("mesh").captureToImage().toPixelMap()
-        assertPixelsMatch(pausedT0, pausedT1, "Mesh must stay frozen when paused in Full Motion mode")
-
-        // Unpausing in Full Motion resumes animation.
-        runOnIdle { paused = false }
-        mainClock.advanceTimeByFrame()
-        val liveT0 = onNodeWithTag("mesh").captureToImage().toPixelMap()
-        mainClock.advanceTimeBy(1_500L)
-        val liveT1 = onNodeWithTag("mesh").captureToImage().toPixelMap()
-        assertFalse(pixelsMatch(liveT0, liveT1), "Mesh must animate when unpaused in Full Motion mode")
+        waitForIdle()
+        val liveT0 = onNodeWithTag("mesh-stage").captureToImage().toPixelMap()
+        runOnIdle { clockMs = 1_500L }
+        waitForIdle()
+        val liveT1 = onNodeWithTag("mesh-stage").captureToImage().toPixelMap()
+        assertFalse(pixelsMatch(liveT0, liveT1), "Ambient mesh specimen must animate when clock advances in Full Motion")
     }
 
     @Test
-    fun magicTextWarpCodeAndFoundationDeckCrossfadeCleanlyUnderReducedMotion() = runComposeUiTest {
+    fun warpCodeAndFoundationDeckCrossfadeCleanlyUnderReducedMotion() = runComposeUiTest {
         var warpStep by mutableIntStateOf(0)
-        var prose by mutableStateOf(AnnotatedString("First beat"))
-        lateinit var animatic: dev.bnorm.storyboard.easel.Animatic
+        lateinit var animatic: Animatic
         lateinit var scope: CoroutineScope
-        val deck = createFoundationDeck(includeKeynoteEffectsLab = true, reducedMotion = true)
+        val deck = buildFoundationTestStoryboard(reducedMotion = true)
 
         setContent {
             scope = rememberCoroutineScope()
             CompositionLocalProvider(LocalReducedMotion provides true) {
                 Box(Modifier.size(960.dp, 540.dp)) {
-                    DeckTextRendererProvider(MagicTextV1Renderer) {
-                        DeckMagicText(updateTransition(prose))
-                    }
                     DeckWarpCodeCard(
                         codeStates = listOf("val a = 1", "val a = 2\nval b = 3"),
                         stateTransition = updateTransition(warpStep),
@@ -326,15 +307,10 @@ class ReducedMotionTest {
         }
         waitForIdle()
 
-        runOnIdle {
-            prose = AnnotatedString("Second beat")
-            warpStep = 1
-        }
+        runOnIdle { warpStep = 1 }
         mainClock.advanceTimeBy(REDUCED_MOTION_FADE_DURATION_MS.toLong() + 100L)
         waitForIdle()
-        onNodeWithText("Second beat").assertExists()
 
-        // Navigate across Slide 1 -> Slide 2 (SharedMove) under reduced motion.
         repeat(3) {
             runOnIdle { scope.launch { animatic.advance(AdvanceDirection.Forward) } }
             mainClock.advanceTimeBy(400)
@@ -345,20 +321,15 @@ class ReducedMotionTest {
 
     @OptIn(ExperimentalComposeUiApi::class)
     @Test
-    fun offscreenSceneAndTimelineMeasurementObserveReducedMotionFromDeckDecorator() {
+    fun offscreenSceneAndAnalyticalTimelineObserveReducedMotion() {
         var observedReduced = false
-        val probeDecorator = dev.bnorm.storyboard.ContentDecorator { content ->
+        val probeDecorator = ContentDecorator { content ->
             observedReduced = LocalReducedMotion.current
             content()
         }
-        val reducedDeck = createFoundationDeck(
-            includeKeynoteEffectsLab = true,
+        val reducedDeck = buildFoundationTestStoryboard(
             stageDecorator = probeDecorator,
             reducedMotion = true,
-        )
-        val fullDeck = createFoundationDeck(
-            includeKeynoteEffectsLab = true,
-            reducedMotion = false,
         )
 
         val scene = ImageComposeScene(
@@ -374,19 +345,19 @@ class ReducedMotionTest {
         } finally {
             scene.close()
         }
-        assertTrue(observedReduced, "Offscreen ImageComposeScene must observe LocalReducedMotion == true from deckDecorator")
+        assertTrue(observedReduced, "Offscreen ImageComposeScene must observe LocalReducedMotion == true")
 
-        val fullSnapshot = indexDeckTimeline(fullDeck)
-        val reducedSnapshot = indexDeckTimeline(reducedDeck)
+        val fullSnapshot = indexFoundationTimelineSnapshot(reducedMotion = false)
+        val reducedSnapshot = indexFoundationTimelineSnapshot(reducedMotion = true)
         assertTrue(
             reducedSnapshot.totalDurationMs < fullSnapshot.totalDurationMs,
-            "Offscreen timeline measurement must use shortened reduced-motion fades (${reducedSnapshot.totalDurationMs}ms vs ${fullSnapshot.totalDurationMs}ms)",
+            "Analytical timeline planning must shorten reduced-motion segments (${reducedSnapshot.totalDurationMs}ms vs ${fullSnapshot.totalDurationMs}ms)",
         )
     }
 
     private fun pixelsMatch(
-        a: androidx.compose.ui.graphics.PixelMap,
-        b: androidx.compose.ui.graphics.PixelMap,
+        a: PixelMap,
+        b: PixelMap,
     ): Boolean {
         if (a.width != b.width || a.height != b.height) return false
         for (y in 0 until a.height step 4) {
@@ -405,8 +376,8 @@ class ReducedMotionTest {
     }
 
     private fun assertPixelsMatch(
-        a: androidx.compose.ui.graphics.PixelMap,
-        b: androidx.compose.ui.graphics.PixelMap,
+        a: PixelMap,
+        b: PixelMap,
         message: String,
     ) {
         assertTrue(pixelsMatch(a, b), message)

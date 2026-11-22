@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -14,11 +16,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
-import kotlin.io.path.isExecutable
 import kotlin.io.path.readText
 import kotlin.io.path.writeBytes
 import kotlin.io.path.writeText
-import dev.sebastiano.ciacola.timeline.AgentBakeDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -30,8 +30,6 @@ import org.jetbrains.skia.Paint
 import org.jetbrains.skia.PaintMode
 import org.jetbrains.skia.Rect as SkiaRect
 import org.jetbrains.skia.Surface
-
-const val ReviewCommentHitForBake = "TIMELINE OVERRIDES BAKE"
 
 enum class ConversationIdSource {
     None,
@@ -60,6 +58,9 @@ class ReviewCommentStore(
     val workspaceRoot: Path = Path.of("").toAbsolutePath(),
     private val envProvider: (String) -> String? = System::getenv,
     private val systemPropertyProvider: (String) -> String? = System::getProperty,
+    var defaultDeckId: String? = null,
+    var defaultDeckFilePath: String? = null,
+    private val clipboardWriter: (String) -> Unit = ::writeTextToSystemClipboard,
 ) {
     private val json = Json {
         prettyPrint = true
@@ -133,9 +134,21 @@ class ReviewCommentStore(
 
     fun effectiveConversationId(): String = resolveConversationId().id
 
+    /**
+     * Resolves the `agentapi` binary to execute.
+     *
+     * Security hardening: ignores arbitrary binary paths from on-disk `review-config.json` (only
+     * the literal `"agentapi"` command name is accepted from workspace config); custom binary paths
+     * are accepted only from trusted JVM system properties or environment variables.
+     */
     fun effectiveAgentApiBin(): String {
-        val fromConfig = config.agentApiBin.trim()
-        if (fromConfig.isNotEmpty()) return fromConfig
+        val fromProp = sequenceOf(
+            systemPropertyProvider("ciacola.agentapi.bin"),
+            systemPropertyProvider("agentapi.bin"),
+        ).mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+            .firstOrNull()
+        if (fromProp != null) return fromProp
+
         val fromEnv = sequenceOf(
             envProvider("CIACOLA_AGENTAPI_BIN"),
             envProvider("AGENTAPI_BIN"),
@@ -143,18 +156,10 @@ class ReviewCommentStore(
             .firstOrNull()
         if (fromEnv != null) return fromEnv
 
-        val defaultJetskiBin = Path.of(
-            System.getProperty("user.home", ""),
-            ".gemini",
-            "jetski",
-            "bin",
-            "agentapi",
-        )
-        return if (defaultJetskiBin.exists() && defaultJetskiBin.isExecutable()) {
-            defaultJetskiBin.toAbsolutePath().toString()
-        } else {
-            "agentapi"
-        }
+        val fromConfig = config.agentApiBin.trim()
+        if (fromConfig == "agentapi") return fromConfig
+
+        return "agentapi"
     }
 
     @Synchronized
@@ -231,6 +236,9 @@ class ReviewCommentStore(
             status = initialStatus,
             screenshotPath = savedScreenshotPath,
             deliveryError = null,
+            deckId = comment.deckId ?: defaultDeckId,
+            deckFilePath = comment.deckFilePath ?: defaultDeckFilePath,
+            nodeId = comment.nodeId ?: comment.target.nodeId,
         )
         val snapshot = synchronized(this) {
             val next = comments.toList() + prepared
@@ -407,56 +415,59 @@ class ReviewCommentStore(
         updated.filter { it.id in ids }
     }
 
-    private val cachedBakeDispatcher = AgentBakeDispatcher { summary ->
-        withContext(Dispatchers.IO) {
-            val convId = loadConfig().conversationId.trim().ifEmpty { effectiveConversationId() }.trim()
-            if (convId.isBlank()) {
-                return@withContext Result.failure(
-                    IllegalStateException("No Conversation ID — set in Review (F4)")
-                )
-            }
-            val bin = effectiveAgentApiBin()
-            runCatching {
-                val pb = ProcessBuilder(
-                    bin,
-                    "send-message",
-                    "--title=Ciacola Timeline Bake",
-                    convId,
-                    summary,
-                )
-                pb.environment().remove("ANTIGRAVITY_SOURCE_METADATA")
-                pb.directory(workspaceRoot.toFile())
-                val proc = pb.start()
-                val finished = proc.waitFor(15, TimeUnit.SECONDS)
-                if (!finished) {
-                    proc.destroyForcibly()
-                    error("Timed out invoking agentapi after 15s")
-                }
-                val stderr = proc.errorStream.bufferedReader().readText().trim()
-                val stdout = proc.inputStream.bufferedReader().readText().trim()
-                if (proc.exitValue() != 0) {
-                    error("agentapi exited with ${proc.exitValue()}: ${stderr.ifBlank { stdout }}")
-                }
-            }
-        }
+    fun copyPromptToClipboard(items: List<SlideReviewComment>): String {
+        val message = formatAgentMessage(items)
+        clipboardWriter(message)
+        return message
     }
-
-    /**
-     * Returns an [AgentBakeDispatcher] backed by this store's configured Conversation ID and
-     * `agentapi` binary, keeping `:deck-timeline` decoupled from `:deck-review`.
-     */
-    fun asBakeDispatcher(): AgentBakeDispatcher = cachedBakeDispatcher
 
     fun formatAgentMessage(items: List<SlideReviewComment>): String {
         val absWorkspace = workspaceRoot.toAbsolutePath()
         val absComments = commentsFile.toAbsolutePath()
         val isolatedGradleHome = absWorkspace.resolve(".gradle-agent-home")
-        val reloadCommand = if (isolatedGradleHome.exists()) {
-            "./gradlew --gradle-user-home \"$isolatedGradleHome\" " +
-                "\"-Dkotlin.daemon.options=runFilesPath=$isolatedGradleHome/kotlin-daemon\" " +
-                config.gradleTaskHint
+        fun isExistingFile(pathText: String): Boolean {
+            val candidate = runCatching { Path.of(pathText) }.getOrNull() ?: return false
+            val resolved = if (candidate.isAbsolute) candidate else absWorkspace.resolve(candidate)
+            return Files.isRegularFile(resolved.normalize())
+        }
+        val resolvedDeckIds = items.mapNotNull { it.deckId?.trim()?.takeIf(String::isNotEmpty) }.distinct()
+        val primaryDeckId = resolvedDeckIds.firstOrNull()
+            ?: defaultDeckId?.trim()?.takeIf(String::isNotEmpty)
+            ?: "<deckId>"
+        val primaryDeckFile = (
+            items.firstNotNullOfOrNull { it.deckFilePath?.trim()?.takeIf(String::isNotEmpty) }
+                ?: defaultDeckFilePath?.trim()?.takeIf(String::isNotEmpty)
+            )?.takeIf(::isExistingFile)
+        val distinctTargets = items.map { c ->
+            val itemDeckId = c.deckId?.trim()?.takeIf(String::isNotEmpty)
+                ?: defaultDeckId?.trim()?.takeIf(String::isNotEmpty)
+                ?: "<deckId>"
+            val itemDeckFile = (
+                c.deckFilePath?.trim()?.takeIf(String::isNotEmpty)
+                    ?: defaultDeckFilePath?.trim()?.takeIf(String::isNotEmpty)
+                )?.takeIf(::isExistingFile)
+            val itemEditPath = itemDeckFile ?: "deck/src/desktopMain/resources/decks/$itemDeckId.deck.json"
+            val itemLintArg = itemDeckFile ?: itemDeckId
+            itemEditPath to itemLintArg
+        }.distinct()
+        val editDeckPaths = if (distinctTargets.isNotEmpty()) {
+            distinctTargets.map { it.first }.distinct()
         } else {
-            "./gradlew ${config.gradleTaskHint}"
+            listOf(primaryDeckFile ?: "deck/src/desktopMain/resources/decks/$primaryDeckId.deck.json")
+        }
+        val lintDeckArgs = if (distinctTargets.isNotEmpty()) {
+            distinctTargets.map { it.second }.distinct()
+        } else {
+            listOf(primaryDeckFile ?: primaryDeckId)
+        }
+        val gradlePrefix = if (isolatedGradleHome.exists()) {
+            "./gradlew --gradle-user-home \"$isolatedGradleHome\" " +
+                "\"-Dkotlin.daemon.options=runFilesPath=$isolatedGradleHome/kotlin-daemon\""
+        } else {
+            "./gradlew"
+        }
+        val lintCommand = lintDeckArgs.joinToString(" && ") { arg ->
+            "$gradlePrefix :deck:lintDeck -Pciacola.deck=${shellQuote(arg)}"
         }
 
         return buildString {
@@ -466,12 +477,36 @@ class ReviewCommentStore(
             )
             appendLine()
             for (c in items) {
+                val itemDeckId = c.deckId?.trim()?.takeIf(String::isNotEmpty)
+                    ?: defaultDeckId?.trim()?.takeIf(String::isNotEmpty)
+                val itemDeckFile = (
+                    c.deckFilePath?.trim()?.takeIf(String::isNotEmpty)
+                        ?: defaultDeckFilePath?.trim()?.takeIf(String::isNotEmpty)
+                    )?.takeIf(::isExistingFile)
+                val itemNodeId = c.nodeId?.trim()?.takeIf(String::isNotEmpty)
+                    ?: c.target.nodeId?.trim()?.takeIf(String::isNotEmpty)
+
                 appendLine("- Comment ID: `${c.id}`")
+                if (itemDeckId != null) {
+                    appendLine("  Deck ID: `$itemDeckId`")
+                }
+                if (itemDeckFile != null) {
+                    appendLine("  Deck file: `$itemDeckFile`")
+                }
                 appendLine(
-                    "  Slide: Scene ${c.sceneIndex + 1}/${c.sceneCount} (sceneIndex=${c.sceneIndex})" +
-                        (if (c.sceneTitle.isNotBlank()) " \"${c.sceneTitle}\"" else "") +
-                        ", Frame ${c.frameIndex + 1}/${c.frameCount} (frameIndex=${c.frameIndex})" +
-                        if (c.sceneHeader.isNotBlank()) " · Header: \"${c.sceneHeader}\"" else ""
+                    buildString {
+                        append("  Slide: Slide ${c.sceneIndex + 1}/${c.sceneCount}")
+                        if (!c.slideId.isNullOrBlank()) {
+                            append(" (slideId=${c.slideId})")
+                        }
+                        if (c.sceneTitle.isNotBlank()) {
+                            append(" \"${c.sceneTitle}\"")
+                        }
+                        append(", Beat ${c.frameIndex + 1}/${c.frameCount} (beatIndex=${c.frameIndex})")
+                        if (c.sceneHeader.isNotBlank()) {
+                            append(" · Header: \"${c.sceneHeader}\"")
+                        }
+                    }
                 )
                 appendLine("  Theme preset: `${c.themePreset}`")
                 appendLine(
@@ -480,7 +515,10 @@ class ReviewCommentStore(
                             " · Bounds: [${b.left.toInt()}, ${b.top.toInt()} -> ${b.right.toInt()}, ${b.bottom.toInt()}]"
                         } ?: "")
                 )
-                appendLine("  Target element: [${c.target.kind}] ${c.target.label}")
+                appendLine(
+                    "  Target element: [${c.target.kind}] ${c.target.label}" +
+                        if (itemNodeId != null) " (nodeId=$itemNodeId)" else ""
+                )
                 if (c.target.clickedToken.isNotBlank()) {
                     appendLine("  Clicked word/token: \"${c.target.clickedToken}\"")
                 }
@@ -494,8 +532,19 @@ class ReviewCommentStore(
                 appendLine()
             }
             appendLine("Please:")
-            appendLine("1. Apply the requested Kotlin changes in `$absWorkspace`.")
-            appendLine("2. Trigger Compose Hot Reload on the live viewer via `$reloadCommand`.")
+            if (editDeckPaths.size <= 1) {
+                appendLine(
+                    "1. Edit `${editDeckPaths.single()}` directly in `$absWorkspace` " +
+                        "(Ciacola's `DeckFileSync` auto-reloads changes live)."
+                )
+            } else {
+                appendLine(
+                    "1. Edit each target deck file (${editDeckPaths.joinToString(", ") { "`$it`" }}) directly in `$absWorkspace` " +
+                        "(Ciacola's `DeckFileSync` auto-reloads changes live)."
+                )
+            }
+            val deckNoun = if (lintDeckArgs.size <= 1) "deck" else "decks"
+            appendLine("2. Validate the updated $deckNoun via `$lintCommand`.")
             appendLine(
                 "3. Update those comment IDs in `$absComments` to `\"status\": \"applied\"` " +
                     "with a concise `\"resolution\"` note so the live viewer pins turn green automatically."
@@ -525,6 +574,17 @@ class ReviewCommentStore(
         val tmp = target.resolveSibling("${target.fileName}.tmp")
         tmp.writeText(content)
         Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING)
+    }
+
+    private fun shellQuote(value: String): String {
+        if (value.isNotEmpty() && SAFE_SHELL_ARG_REGEX.matches(value)) {
+            return value
+        }
+        return "'" + value.replace("'", "'\"'\"'") + "'"
+    }
+
+    private companion object {
+        private val SAFE_SHELL_ARG_REGEX = Regex("^[A-Za-z0-9_./:@%+=,-]+$")
     }
 }
 
@@ -601,3 +661,9 @@ fun encodeAnnotatedStagePng(
 
 private fun SkiaRect.withRadii(radius: Float): org.jetbrains.skia.RRect =
     org.jetbrains.skia.RRect.makeLTRB(left, top, right, bottom, radius)
+
+internal fun writeTextToSystemClipboard(text: String) {
+    runCatching {
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+    }
+}

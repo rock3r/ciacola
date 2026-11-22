@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,6 +62,13 @@ import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.component.VerticallyScrollableContainer
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.typography
+
+/** Plain-language instruction for leaving a review comment (Review mode needs no modifier). */
+internal fun reviewCommentHint(reviewModeActive: Boolean): String = if (reviewModeActive) {
+    "Click any element to comment."
+} else {
+    "Switch to Review mode (F3), then click any element to comment."
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -236,7 +245,7 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Slide Review & Hot-Reload Feedback",
+                    text = "Slide Review Feedback",
                     style = JewelTheme.typography.h2TextStyle,
                     color = globalColors.text.normal,
                     modifier = Modifier.weight(1f),
@@ -257,7 +266,10 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                     }
                 }
             }
-            InfoText("Hold Ctrl + Click (or Ctrl + Drag a marquee) on any slide element in the Story window, or press F3 for persistent Inspect Mode.")
+            InfoText(
+                reviewCommentHint(windowController.stageCoordinator.inspectModeEnabled),
+                modifier = Modifier.testTag("ciacola-review-comment-hint"),
+            )
 
             if (effectiveConvId.isBlank() && (queuedCount > 0 || windowController.highlightAgentConfigBanner)) {
                 Box(
@@ -276,7 +288,14 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
             }
 
             if (store.comments.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val queuedItems = store.comments.filter {
+                    it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+                }
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Tooltip(tooltip = { Text("Dispatch all queued and failed comments to target agent") }) {
                         DefaultButton(
                             enabled = queuedCount > 0 && effectiveConvId.isNotBlank(),
@@ -291,6 +310,19 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                             Text("Send Queued ($queuedCount)")
                         }
                     }
+                    CopyPromptForAgentButton(
+                        enabled = store.comments.isNotEmpty(),
+                        testTag = "ciacola-review-copy-all-prompt",
+                        tooltipText = if (queuedItems.isNotEmpty()) {
+                            "Copy prompt for all queued/failed comments to clipboard"
+                        } else {
+                            "Copy prompt for all comments to clipboard"
+                        },
+                        onCopy = {
+                            val targetItems = queuedItems.ifEmpty { store.comments.toList() }
+                            store.copyPromptToClipboard(targetItems)
+                        },
+                    )
                     Tooltip(tooltip = { Text("Remove all applied comments from the review feed") }) {
                         OutlinedButton(
                             enabled = hasApplied,
@@ -349,11 +381,11 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                 }
             }
 
-            GroupHeader("Slide comments (${store.comments.size}):")
+            GroupHeader("Slide comments (${store.comments.size})")
 
             if (store.comments.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    InfoText("No review comments yet. Ctrl+Click any element on the slide stage.")
+                    InfoText("No review comments yet. ${reviewCommentHint(windowController.stageCoordinator.inspectModeEnabled)}")
                 }
             } else {
                 val listState = rememberLazyListState()
@@ -399,6 +431,9 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 onConfigureAgent = {
                                     windowController.openForAgentConfiguration()
                                 },
+                                onCopyPrompt = {
+                                    store.copyPromptToClipboard(listOf(item))
+                                },
                                 onResolve = {
                                     store.deleteComment(item.id)
                                 },
@@ -422,6 +457,7 @@ private fun ReviewCommentRowCard(
     onMarkApplied: () -> Unit,
     onRetry: () -> Unit,
     onConfigureAgent: () -> Unit,
+    onCopyPrompt: () -> Unit,
     onResolve: () -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
@@ -443,12 +479,12 @@ private fun ReviewCommentRowCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val scenePart = if (item.sceneTitle.isNotBlank()) {
-                "Scene ${item.sceneIndex + 1} (${item.sceneTitle})"
+                "Slide ${item.sceneIndex + 1} (${item.sceneTitle})"
             } else {
-                "Scene ${item.sceneIndex + 1}"
+                "Slide ${item.sceneIndex + 1}"
             }
             Text(
-                text = "#$indexNumber · $scenePart, Frame ${item.frameIndex + 1} (${item.target.kind})",
+                text = "#$indexNumber · $scenePart · Build ${item.frameIndex + 1} (${item.target.kind})",
                 style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                 color = globalColors.text.normal,
                 maxLines = 1,
@@ -546,68 +582,72 @@ private fun ReviewCommentRowCard(
                 }
             }
         } else {
-            Row(
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (item.status != ReviewCommentStatus.Applied) {
-                        Tooltip(tooltip = { Text("Mark this comment as applied") }) {
+                CopyPromptForAgentButton(
+                    testTag = "ciacola-review-copy-prompt-${item.id}",
+                    tooltipText = "Copy formatted agent prompt for this comment to clipboard",
+                    onCopy = onCopyPrompt,
+                )
+                if (item.status != ReviewCommentStatus.Applied) {
+                    Tooltip(tooltip = { Text("Mark this comment as applied") }) {
+                        OutlinedButton(
+                            onClick = onMarkApplied,
+                            modifier = Modifier.testTag("ciacola-review-mark-applied-${item.id}"),
+                        ) {
+                            Text("Mark Applied", style = JewelTheme.typography.small)
+                        }
+                    }
+                    if (agentConfigured) {
+                        val isQueued = item.status == ReviewCommentStatus.Queued
+                        val label = if (isQueued) "Send Now" else "Retry Send"
+                        val tip = if (isQueued) {
+                            "Send this queued comment to agent"
+                        } else {
+                            "Retry dispatching this comment to agent"
+                        }
+                        Tooltip(tooltip = { Text(tip) }) {
                             OutlinedButton(
-                                onClick = onMarkApplied,
-                                modifier = Modifier.testTag("ciacola-review-mark-applied-${item.id}"),
+                                onClick = onRetry,
+                                modifier = Modifier.testTag("ciacola-review-retry-${item.id}"),
                             ) {
-                                Text("Mark Applied", style = JewelTheme.typography.small)
+                                Text(label, style = JewelTheme.typography.small)
                             }
                         }
-                        if (agentConfigured) {
-                            val isQueued = item.status == ReviewCommentStatus.Queued
-                            val label = if (isQueued) "Send Now" else "Retry Send"
-                            val tip = if (isQueued) {
-                                "Send this queued comment to agent"
-                            } else {
-                                "Retry dispatching this comment to agent"
-                            }
-                            Tooltip(tooltip = { Text(tip) }) {
-                                OutlinedButton(
-                                    onClick = onRetry,
-                                    modifier = Modifier.testTag("ciacola-review-retry-${item.id}"),
-                                ) {
-                                    Text(label, style = JewelTheme.typography.small)
-                                }
-                            }
-                        } else {
-                            Tooltip(tooltip = { Text("Configure Target Agent Conversation ID") }) {
-                                OutlinedButton(onClick = onConfigureAgent) {
-                                    Text("Set Agent…", style = JewelTheme.typography.small)
-                                }
+                    } else {
+                        Tooltip(tooltip = { Text("Configure Target Agent Conversation ID") }) {
+                            OutlinedButton(onClick = onConfigureAgent) {
+                                Text("Set Agent…", style = JewelTheme.typography.small)
                             }
                         }
                     }
-                    Tooltip(
-                        tooltip = {
-                            Text(
-                                if (item.status == ReviewCommentStatus.Applied) {
-                                    "Resolve and remove this comment"
-                                } else {
-                                    "Discard this unapplied comment (confirmation required)"
-                                },
-                            )
-                        },
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                if (item.status == ReviewCommentStatus.Applied) {
-                                    onResolve()
-                                } else {
-                                    confirmDiscard = true
-                                }
+                }
+                Tooltip(
+                    tooltip = {
+                        Text(
+                            if (item.status == ReviewCommentStatus.Applied) {
+                                "Resolve and remove this comment"
+                            } else {
+                                "Discard this unapplied comment (confirmation required)"
                             },
-                            modifier = Modifier.testTag("ciacola-review-resolve-${item.id}"),
-                        ) {
-                            Text("Resolve", style = JewelTheme.typography.small)
-                        }
+                        )
+                    },
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (item.status == ReviewCommentStatus.Applied) {
+                                onResolve()
+                            } else {
+                                confirmDiscard = true
+                            }
+                        },
+                        modifier = Modifier.testTag("ciacola-review-resolve-${item.id}"),
+                    ) {
+                        Text("Resolve", style = JewelTheme.typography.small)
                     }
                 }
             }

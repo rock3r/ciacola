@@ -19,6 +19,7 @@ import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.plus
 import java.awt.Dimension
 import kotlin.math.roundToInt
+import kotlin.time.Duration
 
 private val StoryWindowMinimumSize = Dimension(640, 420)
 
@@ -43,13 +44,28 @@ fun ApplicationScope.DesktopEasel(
     windows: List<EaselWindow> = listOf(
         rememberAssistantWindow(animatic)
     ),
+    onCloseRequest: () -> Unit = ::exitApplication,
+    overviewStoryboard: Storyboard? = null,
+    pdfExportStoryboardProvider: (() -> Storyboard)? = null,
+    videoExportStoryboardProvider: (() -> Storyboard)? = null,
+    holdDurationForState: ((Storyboard.Index) -> Duration)? = null,
 ) {
     // One coordinator/exporter pair for the app's lifetime: the storyboard is rebuilt on every
     // override or theme change, and a new coordinator would drop a running export's status and
     // re-enable the menu.
     val exportCoordinator = remember { ExportCoordinator() }
     val pdfExporter = remember(exportCoordinator) { StoryboardPdfExporter(exportCoordinator) }
-    val videoExporter = remember(exportCoordinator) { StoryboardVideoExporter(exportCoordinator) }
+    val latestHoldDuration by rememberUpdatedState(holdDurationForState)
+    val videoExporter = remember(exportCoordinator, holdDurationForState != null) {
+        StoryboardVideoExporter(
+            coordinator = exportCoordinator,
+            holdDurationForState = if (holdDurationForState != null) {
+                { idx -> latestHoldDuration?.invoke(idx) ?: kotlin.time.Duration.ZERO }
+            } else {
+                null
+            },
+        )
+    }
 
     val storyWindowState = rememberWindowState(fileName = "Story", defaultSize = DefaultStoryWindowSize)
     var storyWindow by remember { mutableStateOf<ComposeWindow?>(null) }
@@ -59,7 +75,14 @@ fun ApplicationScope.DesktopEasel(
     fun FrameWindowScope.Toolbar() {
         MenuBar {
             DesktopMenu(animatic.storyboard, storyWindowState, storyWindow, overviewVisibility)
-            ExportMenu(exportCoordinator, pdfExporter, videoExporter, animatic.storyboard)
+            ExportMenu(
+                coordinator = exportCoordinator,
+                pdfExporter = pdfExporter,
+                videoExporter = videoExporter,
+                storyboard = animatic.storyboard,
+                pdfStoryboardProvider = pdfExportStoryboardProvider,
+                videoStoryboardProvider = videoExportStoryboardProvider,
+            )
             for (window in windows) {
                 key(window.name) {
                     Menu(window.name) {
@@ -78,7 +101,7 @@ fun ApplicationScope.DesktopEasel(
     }
 
     Window(
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = onCloseRequest,
         state = storyWindowState,
         title = "${animatic.storyboard.title} - Story",
     ) {
@@ -100,7 +123,11 @@ fun ApplicationScope.DesktopEasel(
             LocalOverviewOpen provides overviewVisibility.isVisible,
         ) {
             decorator.decorate {
-                EaselOverview(animatic, visibility = overviewVisibility) {
+                EaselOverview(
+                    animatic = animatic,
+                    visibility = overviewVisibility,
+                    previewStoryboard = overviewStoryboard,
+                ) {
                     EaselOverlay(
                         overlay = {
                             // Only display overlay navigation when *not* fullscreen.

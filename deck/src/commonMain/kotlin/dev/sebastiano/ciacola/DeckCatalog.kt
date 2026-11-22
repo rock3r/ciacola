@@ -1,39 +1,83 @@
 package dev.sebastiano.ciacola
 
-import dev.bnorm.storyboard.Storyboard
-import dev.sebastiano.ciacola.authoring.DeckHostParams
+import androidx.compose.runtime.Immutable
+import dev.sebastiano.ciacola.document.DeckSpecimenRegistry
 
 /**
- * Catalog entry describing a selectable deck in Studio and Show Mode.
+ * Catalog entry pairing a `<deckId>.deck.json` document with its static [DeckSpecimenRegistry].
  */
+@Immutable
 data class DeckEntry(
     val id: String,
     val title: String,
-    val create: (DeckHostParams) -> Storyboard,
-)
+    val resourcePath: String = "decks/$id.deck.json",
+    val specimens: DeckSpecimenRegistry = DeckSpecimenRegistry.Empty,
+    val externalFilePath: String? = null,
+) {
+    /** Classpath directory holding image/SVG assets referenced by this deck. */
+    val assetsResourceDir: String
+        get() = "decks/$id.assets"
+
+    val isExternalFile: Boolean
+        get() = !externalFilePath.isNullOrBlank()
+
+    companion object
+}
+
+internal expect val platformDeckEntries: List<DeckEntry>
+
+internal expect fun platformDiscoverDeckEntries(decksDirPath: String?, forceRefresh: Boolean = false): List<DeckEntry>
 
 /**
- * Built-in catalog of Ciacola decks available to the Studio toolbar and `Deck` menu switcher.
+ * Dynamic catalog of Ciacola document decks available to Studio, Show Mode, and `⌘⌥1..9`.
  */
 object DeckCatalog {
     const val FOUNDATION_ID: String = "foundation"
+    const val SHADERS_QUICKIE_ID: String = "shaders-quickie-2025"
+    const val JEWEL_TALK_ID: String = "jewel-talk-2024"
+    const val NOT_JUST_PLAIN_TEXT_ID: String = "not-just-plain-text-2024"
 
-    val foundation: DeckEntry = DeckEntry(
-        id = FOUNDATION_ID,
-        title = "Foundation Deck",
-        create = { host -> createFoundationDeck(host = host, includeKeynoteEffectsLab = true) },
-    )
+    val entries: List<DeckEntry>
+        get() = platformDeckEntries
 
-    val entries: List<DeckEntry> = listOf(
-        foundation,
-    )
+    fun discoverEntries(decksDirPath: String? = null, forceRefresh: Boolean = false): List<DeckEntry> =
+        platformDiscoverDeckEntries(decksDirPath, forceRefresh = forceRefresh)
+
+    val foundation: DeckEntry
+        get() = byId(FOUNDATION_ID)
+
+    val shadersQuickie2025: DeckEntry
+        get() = byId(SHADERS_QUICKIE_ID)
+
+    val jewelTalk2024: DeckEntry
+        get() = byId(JEWEL_TALK_ID)
+
+    val notJustPlainText2024: DeckEntry
+        get() = byId(NOT_JUST_PLAIN_TEXT_ID)
 
     val defaultEntry: DeckEntry
-        get() = foundation
+        get() = entries.first()
 
     fun byId(id: String?, catalog: List<DeckEntry> = entries): DeckEntry =
-        catalog.firstOrNull { it.id == id } ?: catalog.firstOrNull() ?: defaultEntry
+        byIdOrNull(id, catalog) ?: catalog.firstOrNull() ?: DeckEntry(
+            id = FOUNDATION_ID,
+            title = "Ciacola Foundation",
+        )
 
-    fun byIdOrNull(id: String?, catalog: List<DeckEntry> = entries): DeckEntry? =
-        catalog.firstOrNull { it.id == id }
+    fun byIdOrNull(id: String?, catalog: List<DeckEntry> = entries): DeckEntry? {
+        if (id == null) return null
+        return catalog.firstOrNull { it.id == id }
+            ?: catalog.firstOrNull { matchesFileStem(it, id) }
+    }
+
+    private fun matchesFileStem(entry: DeckEntry, query: String): Boolean {
+        val extPath = entry.externalFilePath?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val fileName = extPath.substringAfterLast('/').substringAfterLast('\\')
+        val stem = if (fileName.endsWith(".deck.json")) {
+            fileName.removeSuffix(".deck.json")
+        } else {
+            fileName.substringBeforeLast('.', fileName)
+        }
+        return stem == query
+    }
 }

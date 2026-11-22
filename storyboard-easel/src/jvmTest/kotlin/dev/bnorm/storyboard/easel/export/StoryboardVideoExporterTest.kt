@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Frame
 import dev.bnorm.storyboard.SceneFormat
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.LocalExportEmittedFrameIndex
+import dev.bnorm.storyboard.easel.LocalExportFps
 import java.io.IOException
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
@@ -32,6 +34,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
@@ -345,6 +349,284 @@ class StoryboardVideoExporterTest {
             assertFalse(sink.finished)
             assertNull(exporter.status)
             assertFalse(exporter.isExporting)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun emittedFrameCounterAdvancesDeterministicallyAcrossSettleFramesAndIsNullDuringMeasurement() = runTest {
+        val dir = Files.createTempDirectory("video-export-emitted-counter")
+        try {
+            val fps = 60
+            val measurementObservedIndices = mutableListOf<Long?>()
+            val measurementObservedFps = mutableListOf<Int?>()
+            var inMeasurement = true
+
+            val counterDeck = Storyboard.build(
+                title = "EmittedFrameCounterDeck",
+                format = SceneFormat(IntSize(16, 16), Density(1f)),
+            ) {
+                scene(frames = listOf(0, 1)) {
+                    val emittedIndex = LocalExportEmittedFrameIndex.current
+                    val exportFps = LocalExportFps.current
+                    if (inMeasurement) {
+                        measurementObservedIndices += emittedIndex
+                        measurementObservedFps += exportFps
+                    }
+                    val offsetX by transition.animateDp(
+                        transitionSpec = { tween(durationMillis = 100, easing = LinearEasing) },
+                        label = "counterOffset",
+                    ) { frame ->
+                        when (frame) {
+                            is Frame.Value -> if (frame.value == 0) 0.dp else 8.dp
+                            else -> 0.dp
+                        }
+                    }
+                    val encodedIdx = (emittedIndex ?: 0L).toInt()
+                    val encodedFps = exportFps ?: 0
+                    val encodedColor = Color(
+                        red = (encodedIdx and 0xFF) / 255f,
+                        green = ((encodedIdx ushr 8) and 0xFF) / 255f,
+                        blue = (encodedFps and 0xFF) / 255f,
+                        alpha = 1f,
+                    )
+                    Box(Modifier.fillMaxSize().background(encodedColor)) {
+                        Box(Modifier.offset(x = offsetX).size(2.dp))
+                    }
+                }
+                scene(frames = listOf(0)) {
+                    val emittedIndex = LocalExportEmittedFrameIndex.current
+                    val exportFps = LocalExportFps.current
+                    if (inMeasurement) {
+                        measurementObservedIndices += emittedIndex
+                        measurementObservedFps += exportFps
+                    }
+                    val encodedIdx = (emittedIndex ?: 0L).toInt()
+                    val encodedFps = exportFps ?: 0
+                    val encodedColor = Color(
+                        red = (encodedIdx and 0xFF) / 255f,
+                        green = ((encodedIdx ushr 8) and 0xFF) / 255f,
+                        blue = (encodedFps and 0xFF) / 255f,
+                        alpha = 1f,
+                    )
+                    Box(Modifier.fillMaxSize().background(encodedColor))
+                }
+            }
+
+            val decodedIndices = mutableListOf<Long>()
+            val decodedFps = mutableListOf<Int>()
+            val pixelSink = object : VideoFrameSink {
+                var finished = false
+                override suspend fun writeFrame(rgbaBytes: ByteArray) {
+                    val r = rgbaBytes[0].toInt() and 0xFF
+                    val g = rgbaBytes[1].toInt() and 0xFF
+                    val b = rgbaBytes[2].toInt() and 0xFF
+                    decodedIndices += ((g shl 8) or r).toLong()
+                    decodedFps += b
+                }
+                override suspend fun finish() { finished = true }
+                override fun abort() {}
+            }
+
+            val exporter = StoryboardVideoExporter(
+                fps = fps,
+                beatHoldMillis = 100L, // 6 frames per beat
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> pixelSink },
+                holdDurationForState = { index ->
+                    if (index == Storyboard.Index(0, 1)) Duration.ZERO else 50.milliseconds // 3, 1, 3 hold frames
+                },
+            )
+
+            // 1) Measurement pass must leave LocalExportEmittedFrameIndex & LocalExportFps null.
+            val estimated = exporter.estimateTotalFrames(counterDeck)
+            assertTrue(measurementObservedIndices.isNotEmpty(), "Expected measurement renders")
+            assertTrue(
+                measurementObservedIndices.all { it == null },
+                "Measurement pass must not set LocalExportEmittedFrameIndex, saw $measurementObservedIndices",
+            )
+            assertTrue(
+                measurementObservedFps.all { it == null },
+                "Measurement pass must not set LocalExportFps, saw $measurementObservedFps",
+            )
+
+            // 2) Full export: every emitted frame must observe strictly sequential 0, 1, ..., N-1
+            // despite initial settle and scrubSettling discarded frames between beats and scenes.
+            inMeasurement = false
+            exporter.exportAsMp4(counterDeck, dir.resolve("counter.mp4"))
+
+            assertTrue(pixelSink.finished)
+            assertEquals(estimated, decodedIndices.size, "Frame estimate must match emitted frame count")
+            assertEquals(
+                (0L until decodedIndices.size.toLong()).toList(),
+                decodedIndices,
+                "Emitted frame counter must increment strictly 0..N-1 with zero gaps from settle frames",
+            )
+            assertTrue(decodedFps.all { it == fps }, "Every emitted frame must observe LocalExportFps == $fps")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun zeroDurationHoldCallbackEmitsExactlyOneFramePerBeat() = runTest {
+        val dir = Files.createTempDirectory("video-export-zero-hold")
+        try {
+            val staticDeck = Storyboard.build(
+                title = "StaticAutoAdvanceDeck",
+                format = SceneFormat(IntSize(16, 16), Density(1f)),
+            ) {
+                scene(frames = listOf(0, 1)) {
+                    Box(Modifier.fillMaxSize().background(Color.Red))
+                }
+                scene(frames = listOf(0)) {
+                    Box(Modifier.fillMaxSize().background(Color.Blue))
+                }
+            }
+
+            // All beats Duration.ZERO (autoAdvanceMs = 0) -> exactly 1 frame per beat.
+            val allZeroSink = RecordingVideoSink()
+            val allZeroExporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 400L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> allZeroSink },
+                holdDurationForState = { Duration.ZERO },
+            )
+            val allZeroEstimate = allZeroExporter.estimateTotalFrames(staticDeck)
+            allZeroExporter.exportAsMp4(staticDeck, dir.resolve("zero.mp4"))
+
+            assertEquals(3, allZeroEstimate, "3 beats at Duration.ZERO must estimate 3 frames")
+            assertEquals(3, allZeroSink.frameHashes.size, "3 beats at Duration.ZERO must emit exactly 3 frames")
+
+            // Mixed per-beat holds: beat 0 = 0ms (1f), beat 1 = 100ms (6f @ 60fps), beat 2 = 0ms (1f).
+            val mixedSink = RecordingVideoSink()
+            val mixedExporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 400L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> mixedSink },
+                holdDurationForState = { index ->
+                    when (index) {
+                        Storyboard.Index(0, 0) -> Duration.ZERO
+                        Storyboard.Index(0, 1) -> 100.milliseconds
+                        else -> Duration.ZERO
+                    }
+                },
+            )
+            val mixedEstimate = mixedExporter.estimateTotalFrames(staticDeck)
+            mixedExporter.exportAsMp4(staticDeck, dir.resolve("mixed.mp4"))
+
+            assertEquals(8, mixedEstimate, "Mixed holds (1 + 6 + 1) must estimate 8 frames")
+            assertEquals(8, mixedSink.frameHashes.size, "Mixed holds (1 + 6 + 1) must emit 8 frames")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun offGridHoldRoundsWithCallbackAndTruncatesWithoutCallback() = runTest {
+        val dir = Files.createTempDirectory("video-export-off-grid-hold")
+        try {
+            val twoBeatStaticDeck = Storyboard.build(
+                title = "OffGridHoldDeck",
+                format = SceneFormat(IntSize(16, 16), Density(1f)),
+            ) {
+                scene(frames = listOf(0, 1)) {
+                    Box(Modifier.fillMaxSize().background(Color.DarkGray))
+                }
+            }
+
+            // 45ms at 60fps = 2.7 frames:
+            // - legacy (callback absent): truncates to 2 frames/beat -> 4 total frames
+            // - callback supplied: rounds to 3 frames/beat -> 6 total frames
+            val legacy45Sink = RecordingVideoSink()
+            val legacy45Exporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 45L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> legacy45Sink },
+            )
+            assertEquals(4, legacy45Exporter.estimateTotalFrames(twoBeatStaticDeck))
+            legacy45Exporter.exportAsMp4(twoBeatStaticDeck, dir.resolve("legacy45.mp4"))
+            assertEquals(4, legacy45Sink.frameHashes.size, "Legacy absent callback must truncate 45ms@60fps to 2 frames/beat")
+
+            val rounded45Sink = RecordingVideoSink()
+            val rounded45Exporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 45L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> rounded45Sink },
+                holdDurationForState = { 45.milliseconds },
+            )
+            assertEquals(6, rounded45Exporter.estimateTotalFrames(twoBeatStaticDeck))
+            rounded45Exporter.exportAsMp4(twoBeatStaticDeck, dir.resolve("rounded45.mp4"))
+            assertEquals(6, rounded45Sink.frameHashes.size, "Callback path must round 45ms@60fps to 3 frames/beat")
+
+            // 25ms at 60fps = 1.5 frames:
+            // - legacy (callback absent): truncates to 1 frame/beat -> 2 total frames
+            // - callback supplied: rounds half-up to 2 frames/beat -> 4 total frames
+            val legacy25Sink = RecordingVideoSink()
+            val legacy25Exporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 25L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> legacy25Sink },
+            )
+            assertEquals(2, legacy25Exporter.estimateTotalFrames(twoBeatStaticDeck))
+            legacy25Exporter.exportAsMp4(twoBeatStaticDeck, dir.resolve("legacy25.mp4"))
+            assertEquals(2, legacy25Sink.frameHashes.size, "Legacy absent callback must truncate 25ms@60fps to 1 frame/beat")
+
+            val rounded25Sink = RecordingVideoSink()
+            val rounded25Exporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 25L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> rounded25Sink },
+                holdDurationForState = { 25.milliseconds },
+            )
+            assertEquals(4, rounded25Exporter.estimateTotalFrames(twoBeatStaticDeck))
+            rounded25Exporter.exportAsMp4(twoBeatStaticDeck, dir.resolve("rounded25.mp4"))
+            assertEquals(4, rounded25Sink.frameHashes.size, "Callback path must round 25ms@60fps to 2 frames/beat")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun frameEstimateMatchesEmittedCountForAnimatedDeckWithConstantAndPerBeatHolds() = runTest {
+        val dir = Files.createTempDirectory("video-export-estimate-match")
+        try {
+            // 250ms transition at 60fps = exact 15 transition frames.
+            // Constant 200ms hold = 12 frames/beat -> 12 + 15 + 12 = 39 frames.
+            val legacySink = RecordingVideoSink()
+            val legacyExporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 200L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> legacySink },
+            )
+            val legacyEstimate = legacyExporter.estimateTotalFrames(animatedDeck)
+            legacyExporter.exportAsMp4(animatedDeck, dir.resolve("animated-legacy.mp4"))
+            assertEquals(39, legacyEstimate)
+            assertEquals(legacyEstimate, legacySink.frameHashes.size)
+
+            // Per-beat callback: Beat 0 = Duration.ZERO (1 frame), Beat 1 = 45ms (rounded 3 frames) -> 1 + 15 + 3 = 19 frames.
+            val callbackSink = RecordingVideoSink()
+            val callbackExporter = StoryboardVideoExporter(
+                fps = 60,
+                beatHoldMillis = 200L,
+                ffmpegChecker = { true },
+                sinkFactory = { _, _, _, _ -> callbackSink },
+                holdDurationForState = { index ->
+                    if (index.frameIndex == 0) Duration.ZERO else 45.milliseconds
+                },
+            )
+            val callbackEstimate = callbackExporter.estimateTotalFrames(animatedDeck)
+            callbackExporter.exportAsMp4(animatedDeck, dir.resolve("animated-callback.mp4"))
+            assertEquals(19, callbackEstimate)
+            assertEquals(callbackEstimate, callbackSink.frameHashes.size)
         } finally {
             dir.deleteRecursively()
         }

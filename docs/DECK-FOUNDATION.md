@@ -1,363 +1,163 @@
 # Deck foundation
 
-This repository starts from Storyboard and adds the talk-specific `:deck` module. The scene copy is
-deliberately labelled **PROVISIONAL**: it proves the foundation and is not a proposed talk narrative
-or a generic slide editor.
+This repository starts from Storyboard and adds the document-driven `:deck` presentation studio and
+runtime. Foundation scene copy is deliberately labelled **PROVISIONAL**: it exercises every core
+primitive alongside the three full Keynote talk replications.
 
 ## Architecture
 
 ### Module DAG
 
-`:deck` is organized as an acyclic multi-module Gradle DAG (enforced by `:ciacolaStaticCheck`, wired into `check`):
+`:deck` is organized as an acyclic 7-module Gradle DAG (enforced by `:ciacolaStaticCheck`, wired into `check`):
 
 | Module | Role | Direct `:deck*` dependencies |
 |---|---|---|
-| `:deck-core` | `DeckTheme`, `SlidePalette`, `DeckDesign`, `DesignSystemOverrides`, `StageElementContracts`, `StageInteraction`, `ReducedMotion`, `SpeakerNotes`, review/timeline runtime contracts, `AgentBakeDispatcher`, Jewel theme/button helpers | — |
-| `:deck-effects` | `authoring/` slide DSL (`ciacolaDeck`), `DeckTextRenderer`, `DeckSkslShader`, `ElementConnector`, `AnimatedMeshBackdrop`, Keynote effects kit, `DeckWarpCodeCard`, Skia `trimMultiContourPath` | `:deck-core` |
+| `:deck-core` | `DeckDocument` schema & validation, `CanonicalJson`, `DeckDocumentStore` (explicit `EditTransaction` + unified undo/redo), crash-safe `DeckFileSync` (atomic file exchange + journal + quarantine), `StudioSessionStore`, pure analytical `SegmentPlanner` & `CrossSlideGeometry`, `DeckClock` & `RenderSession`, `DeckSpecimenRegistry`, `FontTableInspector` & `DeckFontResolver`, `DeckTheme`, `StageInspectionRegistry`, `SpeakerNotes`, review runtime contracts, Jewel theme/button helpers | — |
+| `:deck-effects` | `DocumentStoryboardHost`, `DocumentNodeRenderer`, `DocumentMotionEvaluator`, `MagicText v2` (`dev.sebastiano.ciacola.text.v2`) bound behind `DeckTextRenderer`, 3-tier `BuildEffects` (`Layer`, `Path`, `Content` SkSL) + 15 Apple `KeynoteCurves` + all 9 slide transitions (`SlideTransitions.kt`), `WarpCodeAdapter` & `DeckWarpCodeCard`, `DeckSkslShader`, `ElementConnector`, `AnimatedMeshBackdrop`, `MagnifierLoupeStage`, Skia `trimMultiContourPath` | `:deck-core` |
 | `:deck-presenter` | `PresenterWindow`, `PresenterController`, dashboard, top bar, stage curtains & quick jump | `:deck-core` |
 | `:deck-review` | `SlideReviewWindow`, `ReviewStageCoordinator`, `ReviewCommentStore`, anchored popups & feed cards | `:deck-core` |
-| `:deck-timeline` | `TimelineWindow`, `TimelineStudioController`, `scrubStepPolicy`, offscreen indexer, track canvas, loop sub-comp, inspector | `:deck-core` |
-| `:deck-inspector` | Full-height Design System Inspector, container-first Direct Element & Drag/Snap Editor, shader uniform sliders, and Deck Linter | `:deck-core`, `:deck-effects` |
-| `:deck` | Composition root (`Main.kt`, `DeckCatalog.kt`, `FoundationDeck.kt`, `HotReloadStoryboard.kt`, `studio/`) and Spectre E2E suites | all `:deck-*` modules |
+| `:deck-timeline` | `DocumentTimelineWindow`, `DocumentTimelineStudioPanel`, `DocumentTimelineController`, `DocumentTimelinePlannerCache`, `scrubStepPolicy`, virtualized analytical track rows, stagger & fragment phase sculpting | `:deck-core` |
+| `:deck-inspector` | `DocumentElementInspectorUi`, `DocumentStageDirectEditOverlay` (drag/snap + inline text range provenance), `DocumentThemeInspectorUi`, `DocumentSyncBannerUi` (conflict/recovery/close-hold), and time-sliced `DocumentDeckLintController` (`F8`) | `:deck-core`, `:deck-effects` |
+| `:deck` | Composition root (`Main.kt`, `DeckCatalog.kt`, `AllDocumentDecks`, `DeckSource`, `StudioWorkspace.desktop.kt`), 39 live `@Composable` / SkSL specimens across 4 tracked `<deckId>.deck.json` decks, `:deck:formatDecks` & `:deck:verifyDecksCanonical`, and Spectre E2E suites | all `:deck-*` modules |
 
-`createFoundationDeck()` is the composition root. Storyboard owns scene/state ordering, forward and
-backward navigation, scene transitions, shared-transition scopes, and the fixed 1920×1080 render
-space. `DeckDesign` owns the palette, type roles, spacing conventions, and `SceneFormat`. Five scenes
-with fourteen base states form the executable spike (`Main.kt` passes
-`includeKeynoteEffectsLab = true`; `createFoundationDeck()` alone builds the first four):
+### Document-first model (`<deckId>.deck.json` + `deckSpecimens`)
 
-| Scene | States | Evidence |
-|---|---:|---|
-| `Beats` | 3 | deterministic state order and explanatory-prose MagicText |
-| `SharedMove` | 2 | a Storyboard-provided `sharedBounds` Magic-Move-style transition |
-| `AmbientLoop` | 1 | an infinite Compose animation that does not mutate scene state, plus the adapted mesh visual |
-| `KotlinCode` | 3 | syntax-highlighted `AnnotatedString` values animated by MagicText |
-| `KeynoteEffectsLab` | 5 | every Keynote build effect, `DeckWarpCodeCard` morphs, and the `MagnifierLoupeStage` |
+Every deck is authored as a canonical tracked `<deckId>.deck.json` file paired with a static
+`DeckSpecimenRegistry` (`deckSpecimens { ... }`) for live `@Composable` and SkSL specimens. There are
+no sidecar override JSON files, no bake/snippet generators, and no Kotlin slide DSL:
+`<deckId>.deck.json` is the single source of truth for slides, beats, speaker notes, themes,
+palettes, fonts, node trees, builds, transitions, and loop periods. `.storyboard/` holds only local
+ephemeral window/session preferences (`session.json` via `StudioSessionStore`) and slide review
+comments (`deck-review`).
 
-Timeline `+ Beat` overrides add virtual beats on top of these base states.
+Four canonical document decks ship in `DeckCatalog` (`264` slides, `516` beats, `39` live specimens):
 
-`DeckTextRenderer` is the only deck-to-text-engine dependency. Its implementation is installed once
-by the storyboard decorator. Scenes call `DeckMagicText`; they neither select nor know an engine.
-The only supplied implementation is `MagicTextV1Renderer`.
+| Deck ID | Slides | Beats | Specimens | Summary |
+|---|---:|---:|---:|---|
+| `foundation` | 5 | 14 | 1 | Executable spike: `Beats` (`MagicText v2` word morphs), `SharedMove` (cross-slide `magicMove`), `AmbientLoop` (`foundation.ambientMesh`), `Highlighted Code` (`WarpCodeAdapter`), and `KeynoteEffectsLab` (builds, `lineDraw`, `loupe`) |
+| `shaders-quickie-2025` | 45 | 86 | 19 | Full replication of *Shaders Quickie* with live interactive SkSL teaching shaders, step graphs, UV visualizers, and `zoom` fly-past-camera transitions |
+| `jewel-talk-2024` | 73 | 122 | 6 | Full replication of *Jewel Talk* with live interactive Jewel Swing vs Compose theme showcases, Swing Bridge demos, and custom component specimens |
+| `not-just-plain-text-2024` | 141 | 294 | 13 | Full replication of *Not Just Plain Text* with `MagicText v2` character/word/line morphs, `keyboard` builds, `trace`/`sparkle`/`shimmer` SkSL content effects, and live rich-text/Markdown specimens |
 
-Run the desktop deck (or launch with Compose Hot Reload on JetBrains Runtime 25) with:
+### Source resolution, file sync, and isolated `RenderSession`s
+
+- **`DeckSource.File` vs `DeckSource.Resource`:** When `-Dciacola.decks.dir` points to a writable
+  directory containing `<deckId>.deck.json` (`:deck:run` configures
+  `-Dciacola.decks.dir=${project.file("src/desktopMain/resources/decks").absolutePath}` by default),
+  `Main.kt` opens the file via `DeckFileSync` (advisory lock, native atomic file exchange
+  `renamex_np(RENAME_SWAP)` / `renameat2(RENAME_EXCHANGE)`, write-ahead journal, 10-minute dual-clock
+  quarantine retention, external-edit hot reload, conflict banner, and close-hold guard). Otherwise it
+  opens `DeckSource.Resource` from the classpath in read-only mode.
+- **Canonical formatting gates:** `:deck:formatDecks` formats tracked `*.deck.json` files through
+  `CanonicalJson.print` (80-column inline packing, 2-space indent, trailing LF); `:deck:verifyDecksCanonical`
+  (wired into `:deck:check`) verifies byte-for-byte canonical formatting and zero validation errors.
+- **Six isolated `RenderSession`s:** `Main.kt` mounts independent `RenderSession` instances so clocks,
+  retained specimen state, and `sceneZIndex` never cross-contaminate:
+  1. **Live Stage** (`RenderSession.forPresent` — driven by `freeClockMs` in Show Mode or
+     `timelineController.playheadMs` while Studio is open)
+  2. **Presenter Current & Next Previews** (`RenderSession.forStill`)
+  3. **Overview Grid (`Esc`)** (`RenderSession.forStill`)
+  4. **Deck Linter (`F8`)** (dedicated offscreen `RenderSession.forStill` inside `DocumentDeckLintEngine`)
+  5. **PDF Export** (fresh `RenderSession.forStill` per export)
+  6. **Video Export** (fresh `RenderSession.forVideo(fps = 60)` per export, wired with
+     `holdDurationForState` for `autoAdvanceMs` holds)
+
+Run the desktop deck or verification gates on JetBrains Runtime 25 with:
 
 ```shell
 ./gradlew :deck:run
-./gradlew :deck:hotRunDesktopAsync   # background launch; apply edits with `./gradlew :deck:reload`
-CIACOLA_THEME=light ./gradlew :deck:hotRunDesktopAsync
-CIACOLA_REDUCE_MOTION=true ./gradlew :deck:hotRunDesktopAsync
-CIACOLA_TIMELINE_OPEN=true ./gradlew :deck:hotRunDesktopAsync   # opens with the timeline docked
-./gradlew :deck:spectreTest          # real-window Spectre 0.9.0 E2E suites on JBR 25 (focus-free)
+./gradlew :deck:run -Pciacola.deck=shaders-quickie-2025
+./gradlew :deck:formatDecks
+./gradlew :deck:verifyDecksCanonical
+./gradlew :deck:spectreTest --offline -Dapple.awt.UIElement=true
 ```
-
-The first launch opens a 16:9 1280×720 Story window. Secondary windows (Timeline, Review,
-Presenter, Theme) only write `.storyboard/<window>.json` once they have been opened, and minimized
-window state is normalized on save/load so relaunching never starts hidden in the Dock.
 
 ### Shortcuts
 
 | Key | Action |
 |---|---|
-| `→` `↓` `PgDn` `Space` `Enter` | Next beat |
+| `→` `↓` `PgDn` `Space` `Enter` | Next beat (respecting `"interactive": "keyboard"` specimen capture) |
 | `←` `↑` `PgUp` `Backspace` | Previous beat |
 | `B` / `W` | Toggle blackout / whiteout curtain in Show Mode (`Esc`, `B`/`W`, click, or advancing clears it) |
 | `⌘G` | Jump to slide (`1..N`) |
-| `⌘⌥1`..`⌘⌥9` | Switch active catalog deck (`Foundation Deck` by default) |
-| `Esc` | Dismiss active popup/curtain, pop selection context, exit sub-comp / docked Studio, or toggle Overview |
+| `⌘⌥1`..`⌘⌥4` | Switch active catalog deck (`foundation`, `shaders-quickie-2025`, `jewel-talk-2024`, `not-just-plain-text-2024`) |
+| `Esc` | Exit interactive specimen capture, cancel active gesture transaction, dismiss popup/curtain, close docked Studio, or toggle Overview |
 | `⌥⌘P` | Toggle fullscreen |
 | `F2` | Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
 | `F3` / hold `Ctrl` | Review Inspect mode; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
 | `F4` | Review window |
 | `F5` | Studio (`Motion \| Element \| Theme \| Lint`) docked in the Story window |
 | `F6` | Studio in a detached window |
-| `F7` | Focus `Theme` Design System tab in Studio (or toggle Theme sidecar window) |
+| `F7` | Focus `Theme` tab in Studio (or toggle Theme sidecar window) |
 | `F8` | Focus `Lint` tab in Studio (or toggle Deck Linter sidecar window) |
-| `⌘Z` / `⇧⌘Z` | Context-aware Undo / Redo for the active Studio editor (`Motion`, `Element`, or `Theme`) |
+| `⌘Z` / `⇧⌘Z` | Unified Undo / Redo on `DeckDocumentStore` across Motion, Element, and Theme (yields to focused text inputs) |
 
-## Authoring DSL and deck catalog (`dev.sebastiano.ciacola.authoring`)
+## Rendering, MagicText v2, motion planning, and Studio authoring
 
-Talk decks are authored in Kotlin with `ciacolaDeck` in `:deck-effects` while keeping arbitrary live
-`@Composable` specimens first-class and zero-reflection:
-
-```kotlin
-fun createTalkDeck(host: DeckHostParams): Storyboard = ciacolaDeck(
-    id = "shader-lab",
-    title = "Shader Lab",
-    host = host,
-) {
-    slide(
-        key = "uv-gradient",
-        title = "Color evolution to UV",
-        beats = 4,
-        palette = SlidePalette(canvas = Color(0xFF4D3D3F), ink = Color(0xFFF6F2F2)),
-        notes = notes { beat(0, "Introduce normalized UV coordinates.") },
-    ) {
-        val step = rememberBeatTransition()
-        DeckWarpCodeCard(
-            codeStates = uvSnippets,
-            stateTransition = step,
-            language = Agsl,
-            elementId = "lab:s1:code",
-            highlightedLines = { b -> spotlightLines[b] },
-            fit = CodeFit.ShrinkToWidth(min = 0.85f),
-        )
-        DeckSkslShader(id = "lab:s1:shader", sksl = ColorEvolutionSksl, modifier = Modifier.size(260.dp)) {
-            float("uStage", animateByBeat { it.toFloat() }.value)
-            uniformFloat("radius", default = 0.35f, range = 0.05f..0.8f)
-        }
-        Specimen(id = "live-demo") { AnyInteractiveComposable() }
-    }
-}
-```
-
-- **`DeckHostParams` & `deckRootDecorator`:** bundles theme, `DeckTextRenderer`, `ReducedMotion`, and
-  Studio override providers; applies `globalFontScale` once at the stage root via
-  `LocalDensity.fontScale` so every `.sp` token, literal, `DeckMagicText`, and `DeckWarpCodeCard`
-  scales uniformly without double-multiplying tokens.
-- **`SlideScope<T>` & `SlideLayers`:** delegates `SceneScope<VirtualizedFrame<T>>` with `beat`,
-  `beats`, `value`, `byBeat(...)`, `rememberBeatTransition()`, `animateByBeat { ... }`, and
-  `Specimen(id) { ... }` (`Modifier.stageInteractive`). `SlideLayers(palette)` paints `palette.canvas`
-  full-bleed, provides `LocalEffectiveBackgroundColor`, crossfades incoming backgrounds over held
-  outgoing canvases, and dissolves foreground content over `[0, 0.45]` / `[0.35, 1.0]` with a single
-  tween across every `EnterExitState` segment.
-- **Shaders, AGSL & live connectors:** `DeckSkslShader` caches Skia `RuntimeEffect` instances, drives
-  `time()` deterministically from `rememberDeckLoopMillis`, renders compile-error overlays inline, and
-  exposes `uniformFloat(...)` specs as interactive sliders in the `Element` tab (`ElementPatch.uniforms`).
-  `ElementConnector` draws arrows, curves, and tree edges between live `StageInspectionRegistry`
-  bounds (following Studio drag previews automatically).
-- **Deck catalog (`DeckCatalog`):** registers `Foundation Deck` by default and supports live switching
-  across any `List<DeckEntry>` via the Studio toolbar dropdown, macOS `Deck` menu (`⌘⌥1..9`), or
-  `-Dciacola.deck=<id>`, isolating per-deck overrides under `.storyboard/decks/<deckId>/` while keeping
-  Foundation in `.storyboard/`.
-
-## Theme system, Keynote effects kit, timeline studio, and hot reload
-
-- **Runtime baseline:** `:deck` targets JetBrains Runtime 25 (`JVM_25`) on Compose Multiplatform
-  `1.13.0-beta02` and Jewel Standalone `0.42.0-263.7307.200`.
-- **`DeckTheme` (`dev.sebastiano.ciacola.theme`):** `LocalDeckTheme` supplies `@Immutable` tokens for
-  `DeckColors` (including a single `DeckCodePalette` shared by `MagicText` `CodeStyle` and
-  `DeckWarpCodeCard` TextMate scopes), `DeckTypography` (bundled `Inter` and `JetBrains Mono` cached
-  once via `rememberBundledDeckTheme` so `FontFamily` and `TextStyle` references never churn across
-  recomposition), `DeckStyles` (code cards, dashed callouts, leader arrows, strikeouts, stamps,
-  detour badges, and loupe geometry), and `DeckMotion` (300–380 ms Keynote curves, 55 ms stagger
-  step, and spring pop parameters). Two presets ship out of the box (`StageDark` and `KeynoteLight`,
-  toggleable live from the `Theme` menu), alongside **Reduced Motion** (`System` macOS `reduceMotion`
-  detection, `Reduced`, `Full`, and `Pause Ambient Loops`, exposed via `LocalReducedMotion` and
-  `LocalAmbientLoopsPaused`).
-- **Presenter View & Live Stage Aids (`dev.sebastiano.ciacola.presenter`, Jewel standalone):**
-  `F2` opens `PresenterWindow` with per-slide and per-beat `DeckSpeakerNotes` (`⌘-` / `⌘=` zoom),
-  live 16:9 Current and clickable Next previews (`SceneMode.Preview` so Story retains ownership of
-  `renderFrameClock` and `freezeCapture`), wall clock + elapsed talk timer (`T` / `R`) + target
-  duration pace pill, AWT `GraphicsDevice` display routing (`Present on…` / `Swap Displays`),
-  pre-show authoring hazard check (`Enter Clean Show Mode`), Show Mode `B` / `W` curtains, and
-  `⌘G` Quick Slide Jump.
-- **Selectable PDF & Deterministic MP4 Export (`dev.bnorm.storyboard.easel.export`):**
-  `ExportCoordinator` serializes exports with a cancellable `ExportProgressPopup` (`Esc` / `Cancel`).
-  `StoryboardPdfExporter` pairs full-fidelity slide rasters with an invisible `RenderingMode.NEITHER`
-  Unicode text layer extracted from Compose semantics in reading order; `StoryboardVideoExporter`
-  pre-flights `ffmpeg`, steps a reused offscreen `ImageComposeScene` deterministically at 60 fps
-  (`400 ms` beat holds + animated transitions), and streams RGBA frames off-EDT to `libx264` MP4.
-- **Deterministic state switching (`DeterministicStateHost`):** `Easel`, `sharedMoveScene`, and
-  `DeckWarpCodeCard` mount `setOf(currentState, targetState)` through
-  `Transition.DeterministicStateHost` (`key(contentKey) { AnimatedVisibility(...) }`) instead of
-  `AnimatedContent`, eliminating internal `currentlyVisible` queue drift during random-access
-  `Animatic.seekToSegment` scrubbing while preserving `SharedTransitionScope` / `AnimatedVisibilityScope`
-  contracts.
-- **Reusable Keynote effects (`dev.sebastiano.ciacola.effects`):**
-  - Zero-relayout `graphicsLayer` / clip build modifiers (`keynoteDissolve`, `keynoteFadeMove`,
-    `keynoteFromDarkness`, `keynotePop`, `keynoteWipe`, `keynoteSpotlight`) driven by
-    `Transition.animateBuildProgress` and direction-symmetric `Transition.animateStaggerGroup`
-    (forward cascade `0..N-1`, backward reverse cascade `N-1..0`, with layout space reserved so
-    centered stacks never jump).
-  - Multi-contour Skia `PathMeasure` `LineDraw` decorations on `DecorationLayout`: `AnimatedLine`
-    and `AnimatedCubicLine` (with tangent `ArrowHead`), `AnimatedCalloutOutline` (dashed rounded
-    focus boxes), and `AnimatedStrikeout`.
-  - Stage components: `DottedLeaderRow`, `KeynoteStamp`, `DetourSign`, `DeckWarpCodeCard`, and
-    `MagnifierLoupeStage` (live `GraphicsLayer` zoomed iris loupe with animated dotted connectors).
-- **After Effects Timeline Studio (`dev.sebastiano.ciacola.timeline`, Jewel standalone):**
-  - Toggleable docked in the Story window (`F5` or top-right `Timeline` HUD button) or detached as
-    a separate window (`F6`).
-  - Offscreen `indexDeckTimeline` harvests every slide's `Build`, `StaggerGroup` + staircase
-    `StaggerItem` rows, `MagicText` diffs, `WarpCode` morphs, `LineDraw` strokes, cross-slide
-    `deckSharedBounds` span bars, and `rememberDeckLoopMillis` Loop Sub-Compositions onto a single
-    contiguous timeline with diagonal-hatched cross-slide transition overlap zones and full-height
-    vertical dotted Event Keyframe lines.
-  - Zero-latency hybrid overrides (`.storyboard/timeline-overrides.json`): `+ Beat` / `- Beat`
-    virtualizes event keyframes in `0 ms` without waiting for an agent turn; dragging block edges or
-    bodies updates `delayMs`, `durationMs`, and `enterBeat`; the right-hand Inspector provides
-    numeric steppers, an interactive 2D Cubic-Bezier curve editor + Spring presets, spatial slide
-    offsets, live quadratic-Bezier `arcBend` trajectories rendered on stage via
-    `MotionArcStageOverlay`, Loop Sub-Composition harmonic wave scrubbing (`Sub-Comp ▸` /
-    `← Master Deck`), and optional `Bake to Kotlin` agent dispatch.
-  - **One playback engine.** `Animatic.advance` (arrow keys), timeline `Play`, and scrubbing all
-    drive the same `SeekableTransitionState` by seeking: a segment is first composed at play time
-    0 for a few settle frames (Compose delays any transition child created at a non-zero play time
-    by that play time, so nested content would otherwise lag), then its fraction is advanced frame
-    by frame. Presenting therefore renders exactly the frames a scrub renders. A newer navigation
-    supersedes an in-flight one, so rapid arrow presses skip ahead instead of queueing. Frames are
-    counted on the clock of the window that renders the animatic (`Easel` registers it), because
-    callers such as the timeline controller live in the application composition, whose clock ticks
-    independently. While a segment settles, `Easel` presents a pixel snapshot of the last frame
-    (a recorded layer would still show its children's live, half-set-up content).
-  - **Effective durations.** A segment lasts as long as something on stage actually changes: the
-    longest running animation whose start and end values differ. Plain `Transition` totals also
-    count the full `tween` of every unchanged animation, which used to leave up to 900 ms of dead
-    time after a click (for example before a slide transition). Animations whose keyframes return
-    to their start value are treated as static.
-  - **Path-independent no-rebuild scrubbing.** `Animatic.snapToResting` settles transitions in place
-    with one full rest frame inside `withPresentedFrameFrozen` (routing mid-seek third-state snaps
-    cleanly so child `Transition` targets never invert, without bumping `scrubEpoch` or resetting live
-    `@Composable` specimen state), paired with `Transition.stableSegment()` across `Easel`,
-    `MagicText`, `DeckWarpCodeCard`, and scene state reads, plus `Animatic.presentedIndex` for
-    start-of-hold Studio picking. Both `TimelineStudioController` and `ScrubPathIndependenceTest`
-    share the pure `scrubStepPolicy(...)` function, and a duration tripwire logs any >1-frame mismatch
-    between `activeSegmentDurationNanos` and indexed spans without silent auto-rebuilds.
-  - **Measured timing.** The timeline is laid out from the effective durations measured by playing
-    the whole deck with the real engine in an offscreen `ImageComposeScene` (resting on each beat
-    like a presenter), plus a 400 ms click hold per resting beat; time `t` on the ruler is the frame
-    playback shows at `t`. Offscreen scenes set `LocalTimelineOffscreen`, so live studio state
-    (selection, loop clock) never leaks into them.
-  - **After Effects navigation.** Timeline: wheel scrolls rows, `Shift`+wheel scrolls time,
-    `Alt`/`Ctrl`+wheel zooms at the cursor, `=`/`-` zoom around the playhead, `;` toggles fit and
-    frame level, `Space`+drag or middle-drag pans (a `Space` tap toggles playback), scrollbars on
-    both axes (`Modifier.scrollable2D`). Preview (while the timeline is open): wheel zooms at the
-    cursor, `Space`/middle-drag pans, `.`/`,` zoom, `/` fits. Ctrl-click review keeps working on a
-    zoomed preview.
-  - **Selection both ways.** Elements register with `Modifier.timelineTarget(trackId…)`. Selecting a
-    timeline row or block outlines the element(s) it animates on the slide; with the timeline open,
-    a plain click on a slide element selects its most specific track and scrolls its row into view
-    (disabled while review Inspect mode or a pending review selection is active).
-- **Unified Studio Inspector (`dev.sebastiano.ciacola.studio` + `:deck-inspector`):**
-  When Timeline Studio is docked (`F5`) or detached (`F6`), `StudioUnifiedInspectorPane` occupies a
-  full-height resizable right column (`388.dp` default, `320..520.dp` persisted) beside the stage and
-  timeline, hosting four segmented tabs (`Motion | Element | Theme | Lint`) and folding standalone
-  `F7`/`F8` sidecar windows into tabs automatically. Decks receive `DeckHostParams` inside
-  `deckRootDecorator`, ensuring live Stage, Presenter previews, Overview thumbnails, offscreen
-  Timeline indexing, PDF/MP4 export, and offscreen Lint sweeps all share one source of truth:
-  - **Live Design System Editor (`dev.sebastiano.ciacola.inspector.design`, `F7`):** `DesignSystemStore`
-    persists independent `StageDark` and `KeynoteLight` token overrides to `design-system.json`
-    with 64-step gesture-coalesced Undo/Redo, a compact single-row 36 dp toolbar + 4-tab bar, Kotlin
-    snippet export (`Copy Kotlin`), live WCAG 2.1 contrast badges + 1-click `Fix AA`, root
-    `LocalDensity.fontScale` Global Font Scale, surface/effect geometry, and motion tokens.
-  - **Direct Element, Drag/Snap & Inline Stage Editor (`dev.sebastiano.ciacola.inspector.element` + `:deck-effects`):**
-    `ElementOverridesStore` persists per-element patches (`element-overrides.json`) with 64-step
-    Undo/Redo and Kotlin export, including float shader uniforms (`ElementPatch.uniforms`).
-    `DeckSurfaceCard` and `EditableBox` publish `LocalStageParentElementId` for Figma-style
-    container-first selection (`StageSelectionModel`: click selects container, double-click drills in
-    or opens inline text edit, `Esc` pops context). Press-dragging (>3 screen px) writes placement-phase
-    deltas to `StageDragPreview` (zero slide recompositions during drag, 1 undo entry on release) with
-    6 screen px viewport-scaled snap guides (`Alt` disables, `Shift` axis-locks). `stagePicking` and
-    `StageDirectEditLayer` run on `PointerEventPass.Final` and skip consumed events so live
-    `Specimen` controls never hijack tracks.
-  - **Live Slide & Full-Deck Linter (`dev.sebastiano.ciacola.inspector.lint`, `F8`):** `DeckLintController`
-    combines `StageInspectionRegistry` snapshots with Compose `SemanticsOwner` text layout inspection
-    and rendered Skia pixel sampling (reusing a single UI-thread `ImageComposeScene` with `yield()`
-    between beats across both `StageDark` and `KeynoteLight`). Checks `TEXT_CLIPPED_OR_OVERFLOW`,
-    `STAGE_OUT_OF_BOUNDS`, `SAFE_AREA_BLEED`, `LOW_CONTRAST` (dark-card and spotlight-dimming aware),
-    `TINY_STAGE_TEXT`, and `TEXT_OVERLAP`, offering click-to-jump navigation, stage diagnostic callouts,
-    and 1-click `ElementPatch` quick-fixes (`Fix Contrast`, `Shrink Font -2sp`, `Bump to 16sp`,
-    `Edit Element…`).
-- **Static Architecture Gate (`:ciacolaStaticCheck`):** Wired into `check`, enforcing the acyclic
-  7-module `:deck*` dependency DAG, reverse-import bans, main source file size caps (`<= 1,100` lines),
-  structured concurrency (`GlobalScope` / raw `Thread(...)` ban), and repository hygiene checks.
-- **Hot-reload state retention:** `Main.kt` drives the desktop app through
-  `rememberHotReloadStoryboard` (`AfterHotReloadEffect`, with Compose Hot Reload instrumenting
-  window UI compositions automatically), while `rememberAnimatic` and `AnimaticPersistenceEffect`
-  retain and scene-clamp `(sceneIndex, frameIndex)` across `Storyboard` rebuilds without
-  overwriting `.storyboard/animatic.json`.
-- **Interactive Ctrl-click slide review (`dev.sebastiano.ciacola.review`, Jewel standalone):**
-  Holding `Ctrl` (or toggling `F3` Inspect Mode) highlights slide targets in `1920×1080` stage
-  space; `Ctrl+Click` or `Ctrl+Drag` captures a clean annotated `GraphicsLayer` PNG
-  (`.storyboard/review-captures/`), opens an anchored Jewel `PopupContainer` (`IntUiTheme` +
-  `TextArea`), persists `.storyboard/review-comments.json`, and dispatches feedback via
-  `agentapi send-message` so edits hot-reload in place via `:deck:reload`. Each comment is shown
-  as a numbered stage pin; its status (queued, applying, applied, failed) is tracked in the Review
-  window.
+- **Pure analytical `SegmentPlanner` & `DeckClock` (`:deck-core`):** Every intra-slide beat and
+  cross-slide transition is planned purely from `DeckDocument` + `DeckSpecimenRegistry` without
+  offscreen frame-stepping (`DocumentTimelinePlannerCache` invalidates only the edited slide and its
+  adjacent transitions, planning 300-slide decks in single-digit milliseconds). `rememberDocIntraCarrier`
+  and `rememberDocCrossCarrier` drive exact `segmentMs` durations across forward play, backward
+  mirroring, mid-flight reversals, and random-access scrubbing.
+- **`MagicText v2` (`dev.sebastiano.ciacola.text.v2` behind `DeckTextRenderer`):** Single-`DrawScope`
+  text engine with zero per-token composables or layout nodes, backed by pure `MagicTextDiff` in
+  `:storyboard-text`. Enforces Two-Condition Admission (load-time OpenType `cmap`/`GSUB`/`fvar`
+  inspection + opacity-normalized `<= 2/255` pixel equivalence with 1 px outer-ring ink guard and
+  3-round region coarsening), Skia `BlendMode.PLUS` additive cross-fades, `TrueAscent` Direct
+  Handover size morphs over a power-of-8 3-level mipmap pyramid, seeded `keyboard` typewriter builds,
+  monochrome `NotoEmoji` `SpanStyle` routing, and a single merged semantics node (`text` +
+  `getTextLayoutResult`) for selectable PDF export and linting. See
+  [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the full design and empirical measurements.
+- **3-tier `BuildEffects` & 9 Slide Transitions (`dev.sebastiano.ciacola.effects.v2`):** Supports 52
+  Keynote build effects across `Layer` (`appear`, `dissolve`, `fadeMove`, `moveIn`, `wipe`, `iris`,
+  `zoom`, `pop`, `blur`, `fromDarkness`, `jiggle`), `Path` (`lineDraw` multi-contour trimming with
+  tangent arrowheads), and `Content` (SkSL `trace`, `sparkle`, `shimmer`), 15 Apple `KeynoteCurves`
+  presets, and 9 slide transitions (`none`, `dissolve`, `push`, `slide`, `reveal`, `wipe`, `iris`,
+  `fadeThroughColor`, and cross-slide `magicMove` rendered in the Root Transition Overlay inside
+  `Easel`'s fixed-stage and freeze boundary, including single-instance `movableContentOf` specimen
+  continuity).
+- **Unified Studio (`Motion | Element | Theme | Lint`):**
+  - **Motion (`DocumentTimelineStudioPanel`):** Master time ruler scrubbing, slide minimap, beat &
+    transition stagger/phase sculpting, intra-text fragment ticks, draggable/resizable track bars,
+    `+ Beat` / `- Beat`, and loop period sliders — all transactional on `DeckDocumentStore`.
+  - **Element (`DocumentElementInspectorUi` + `DocumentStageDirectEditOverlay`):** Stage picking
+    (yielding cleanly to interactive specimens while supporting `Alt+Click` container selection),
+    placement-only drag preview snapping to `0.5` stage units on release, beat-aware RFC 7386 merge
+    patches (`Beat 0` base vs `Beat k > 0` `change` builds), inline text editing with UTF-16
+    edit-range fragment provenance (`FragmentProvenance`), and declared specimen parameter controls.
+  - **Theme (`DocumentThemeInspectorUi`):** Live theme color tokens, typography role editors, motion
+    defaults, slide palettes, and cross-deck theme copying.
+  - **Lint (`DocumentDeckLintController`):** Time-sliced cancellable single-slide and full-deck
+    audits checking schema/asset/font issues, text clipping/overflow, out-of-bounds/safe-area bleed,
+    WCAG contrast, tiny stage text, and overlapping text across dark and light themes.
 
 ## Source orientation and attribution
 
-The foundation was prepared against these exact revisions:
-
-- Storyboard, `499cda890a7591c8fc56044726531f6f38a82e35` (the implementation checkout later retained
-  full upstream history). Its `Storyboard.build`, `StoryboardBuilder.scene`, `SceneScope.transition`,
-  `SceneFormat`, `DesktopEasel`, `rememberSharedContentState`, and `Modifier.sharedBounds`
-  declarations are used directly. The source locations are respectively
-  `storyboard/.../Storyboard.kt`, `StoryboardBuilder.kt`, `SceneScope.kt`, `SceneFormat.kt`,
-  `storyboard-easel/.../DesktopEasel.kt`, and `storyboard-easel/.../interop.kt`.
-- Storyboard Text at the same revision. `MagicText.kt`, `SharedText.kt`, and `Words.kt` are the
-  upstream declarations characterized and hardened here; `highlight/Highlighting.kt`,
-  `highlight/Kotlin.kt`, and `highlight/CodeStyle.kt` supply Kotlin syntax highlighting.
-- Brian Norman's Magic Move deck, branch `dcnyc25`, revision
-  `f153f7cb0f4142c3d11bf282e1589a94b04eb523`. The orientation references were
-  `dcnyc25/story/.../samples/MagicText.kt` (`SharedTransitionLayout`, `AnimatedContent`,
-  `sharedElement`/`sharedBounds`) and `samples/MagicDiff.kt` (match/add/delete separation). No deck
-  source was copied.
-- ChromaDecks, revision `e1758512bf0591532bbfab74f4f276455120b8e6`. The adapted technique is
-  the normalized 2D colored grid rendered as indexed `Vertices(VertexMode.Triangles)` via
-  `Canvas.drawVertices`, studied in
-  `composeApp/src/desktopMain/kotlin/com/sinasamaki/chromadecks/_001_MeshGradients/MeshGradient.kt`
-  and its animated point orchestration in `_001_MeshGradients/slides/TitleSlide.kt`.
-
-Storyboard is Apache-2.0 and its `LICENSE.txt` remains at repository root. Neither ChromaDecks nor
-the referenced Magic Move deck exposed a license file at the studied revisions. Consequently their
-source and assets were not copied: `AnimatedMeshBackdrop.kt` is a small original implementation of
-the general indexed-vertex-grid technique, with different data structures, interpolation, colors,
-and animation. This document preserves source credit without asserting a redistribution right.
-
-## MagicText hardening
-
-The tests characterize default and supplied tokenization; insertion, deletion, and movement;
-style-only cross-fades; repeats; explicit line breaks; transition direction and interruption;
-empty/replaced text; a 2,000-token mostly unchanged input; annotation spans; combining marks,
-emoji sequences, mixed LTR/RTL text, and non-Latin scripts.
-
-Changes made from those tests:
-
-- default tokenization no longer divides surrogate pairs or common extended emoji sequences and
-  keeps combining marks with their base word;
-- unchanged whitespace receives stable correspondence keys instead of becoming a new shared bound
-  every time;
-- transition settlement is now a `SideEffect`, not a state mutation hidden inside `remember`;
-- plans are pure (`MagicTextPlanner.plan(from, to)`): the source keeps canonical keys and
-  `findShared` no longer mutates the source plan, so a scrub that arrives at a segment from any
-  direction gets the exact same shared-bounds plan and keys. `MagicTextInternal` mounts only the
-  `from`/`to` token sets (`SeekSafeTokenHost`) instead of an internal `AnimatedContent`, whose queue
-  drifts under seeking;
-- the old large-run TODO is resolved as an explicit v1 invariant: adjacent items cannot be merged
-  without changing their independently moving geometry. Paragraph batching belongs after the v2
-  layout boundary, not inside v1.
-
-The remaining TODOs in `SharedText.kt` concern performance strategy inside repeated-token matching:
-priority-queue selection, avoiding repeated grouping, and limiting/ordering the small Cartesian
-search. They are deliberately retained because current deterministic behavior is covered, the large
-mostly-unchanged fixture passes, and changing the heuristic without benchmark evidence could alter
-repeat disambiguation. They are optimization work, not known correctness defects.
-
-See [MAGIC-TEXT-V2-SEAM.md](MAGIC-TEXT-V2-SEAM.md) for the future boundary and fixtures.
+- Storyboard, `499cda890a7591c8fc56044726531f6f38a82e35` (Apache-2.0; `LICENSE.txt` and `NOTICE`
+  preserved at repository root). Upstream `MagicText.kt`, `SharedText.kt`, and `Words.kt` in
+  `:storyboard-text`, `StoryboardPdfExporter` and `StoryboardVideoExporter` in `:storyboard-easel`,
+  and `:storyboard-warp` remain intact; additive hooks support `sceneZIndex` and per-state video hold
+  durations (`holdDurationForState`).
+- Brian Norman's Magic Move deck (`dcnyc25`, `f153f7cb0f4142c3d11bf282e1589a94b04eb523`) and
+  ChromaDecks (`e1758512bf0591532bbfab74f4f276455120b8e6`) served as orientation references only;
+  no source or assets were copied (`AnimatedMeshBackdrop.kt` is an original indexed-vertex-grid
+  implementation).
+- Bundled open-source fonts under `deck/src/desktopMain/resources/fonts/` (`Inter`, `JetBrains Mono`,
+  `Hanken Grotesk`, `Plus Jakarta Sans`, `Roboto`, `Montserrat`, `Fredoka`, `Assistant`,
+  `Nanum Pen Script`, `Noto Emoji`) carry their full OFL-1.1 / Apache-2.0 license texts under
+  `licenses/fonts/` and attribution in `NOTICE`.
 
 ## Verification record
 
-- `:storyboard-text:jvmTest`, `:storyboard-easel:jvmTest`, and `:storyboard-warp:jvmTest`: passed,
-  including `MagicText*Test`, `StopwordPruningTest` (stopword/punctuation pruning with common
-  prefix/suffix exemption), `StableSegmentTest`, `AnimaticHotReloadPersistenceTest`,
-  `DiffListsBlankLineTest`, and `AgslParserTest`.
-- `:ciacolaStaticCheck`, `:deck-core:desktopTest`, `:deck-timeline:desktopTest`,
-  `:deck-inspector:desktopTest`, and `:deck:desktopTest`: passed across all suites, including
-  `MagicMoveScrubRegressionTest` (multi-beat scrub probe matrix + flat luminance + warp/shader backward scrub),
-  `SpecimenStateSurvivalTest`, `ScrubPathIndependenceTest` (with `sameSlideDrag` paths),
-  `WarpCardMorphTest`, `FoundationHandOffTest`, `GlobalFontScaleTest`, `DeckSlideBuilderTest`,
-  `DeckSkslShaderTest`,
-  `KeynoteComponentsLayoutTest`, `ElementConnectorTest`, `StageSelectionModelTest`,
-  `StageDragSnapTest`, `InlineEditorClampTest`, `StagePickingConsumptionTest`,
-  `ShaderUniformSliderTest`, `LintOverlayStalenessTest`, `LintBoundsTest`,
-  `PrimaryButtonContrastTest`, `TimelineBeatMarkersTest`, `DeckSwitcherTest`,
-  `LoopSubCompBeatPreservationTest`, `NextBeatElementPickingTest`, and `StudioLayoutTest`.
-- `:deck:spectreTest`: passed across real-window Spectre 0.9.0 E2E suites on JBR 25
-  (`CiacolaStudioSpectreTest`, `EditorOverhaulSpectreTest`, `HumanRealisticInteractionSpectreTest`,
+- `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passes `:ciacolaStaticCheck`,
+  `:deck:verifyDecksCanonical` across all 4 canonical `.deck.json` decks, all `:storyboard*` JVM/Wasm
+  checks, and all `:deck*` desktop test suites (including `FoundationDocumentMigrationTest`
+  and `LegacyAuthoringRemovalTest`).
+- `:deck:spectreTest`: passes all real-window Spectre E2E suites on JetBrains Runtime 25 (`QaStudio`,
+  `CiacolaStudioSpectreTest`, `EditorOverhaulSpectreTest`, `HumanRealisticInteractionSpectreTest`,
   `InlineEditorSpaceKeySpectreTest`, `ShowModeNavigationFocusSpectreTest`,
-  `StageFocusRestoreSpectreTest`, and `QaDeckFixesSpectreTest`).
-- `check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest`: passed, including
-  `:ciacolaStaticCheck`, all JVM/desktop suites, Wasm compilation, and API checks.
-- Source audit: no MagicText v2 implementation, custom text-shaping engine, or per-scene text-engine
-  toggle exists (`DeckTextRenderer` remains the sole prose-engine seam).
+  `StageFocusRestoreSpectreTest`, `CloseStudioCleanupSpectreTest`, `QaHarnessSmokeSpectreTest`, and
+  `QaDeckFixesSpectreTest`).
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: passes all KPF converter unit and fixture
+  tests.

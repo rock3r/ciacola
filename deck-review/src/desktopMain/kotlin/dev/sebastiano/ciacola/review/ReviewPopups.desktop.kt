@@ -19,10 +19,12 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -91,6 +93,9 @@ internal fun AnchoredCommentComposerPopup(
     noteState: TextFieldState = rememberTextFieldState(),
     draftRestored: Boolean = false,
     restoredFromTarget: ReviewTargetHit? = null,
+    deckId: String? = null,
+    deckFilePath: String? = null,
+    slideId: String? = null,
     onClearDraft: () -> Unit = {},
     onDismiss: (fromEscapeKey: Boolean) -> Unit,
     onSubmit: (SlideReviewComment, Boolean, ByteArray) -> Unit,
@@ -150,6 +155,27 @@ internal fun AnchoredCommentComposerPopup(
         initialFocusDone = true
     }
 
+    fun buildCommentDraft(noteText: String): SlideReviewComment = SlideReviewComment(
+        id = generateReviewCommentId(),
+        sceneIndex = pending.sceneIndex,
+        frameIndex = pending.frameIndex,
+        sceneCount = pending.sceneCount,
+        frameCount = pending.frameCount,
+        sceneTitle = pending.sceneTitle,
+        sceneHeader = pending.sceneHeader,
+        themePreset = themePresetName,
+        stageX = pending.stageX,
+        stageY = pending.stageY,
+        selectionBounds = pending.selectionBounds,
+        target = pending.target,
+        note = noteText,
+        createdAt = Instant.now().toString(),
+        deckId = deckId ?: store.defaultDeckId,
+        deckFilePath = deckFilePath ?: store.defaultDeckFilePath,
+        slideId = slideId,
+        nodeId = pending.target.nodeId,
+    )
+
     fun submit(dispatchImmediate: Boolean) {
         val trimmed = noteState.text.toString().trim()
         if (trimmed.isEmpty()) {
@@ -167,35 +193,25 @@ internal fun AnchoredCommentComposerPopup(
         submitting = true
         validationError = null
 
-        if (enteredConv.isNotEmpty() && enteredConv != store.config.conversationId) {
-            store.saveConfig(store.config.copy(conversationId = enteredConv))
-        }
+        // Whatever happens (encode failure, I/O), never leave Queue / Send disabled for good.
+        try {
+            if (enteredConv.isNotEmpty() && enteredConv != store.config.conversationId) {
+                store.saveConfig(store.config.copy(conversationId = enteredConv))
+            }
 
-        val comment = SlideReviewComment(
-            id = generateReviewCommentId(),
-            sceneIndex = pending.sceneIndex,
-            frameIndex = pending.frameIndex,
-            sceneCount = pending.sceneCount,
-            frameCount = pending.frameCount,
-            sceneTitle = pending.sceneTitle,
-            sceneHeader = pending.sceneHeader,
-            themePreset = themePresetName,
-            stageX = pending.stageX,
-            stageY = pending.stageY,
-            selectionBounds = pending.selectionBounds,
-            target = pending.target,
-            note = trimmed,
-            createdAt = Instant.now().toString(),
-        )
-        val pngBytes = encodeAnnotatedStagePng(
-            stageBitmap = pending.capturedBitmap,
-            stageWidth = pending.stageFormatSize.width.toFloat(),
-            stageHeight = pending.stageFormatSize.height.toFloat(),
-            stageX = pending.stageX,
-            stageY = pending.stageY,
-            highlightRect = pending.selectionBounds,
-        )
-        onSubmit(comment, dispatchImmediate, pngBytes)
+            val comment = buildCommentDraft(trimmed)
+            val pngBytes = encodeAnnotatedStagePng(
+                stageBitmap = pending.capturedBitmap,
+                stageWidth = pending.stageFormatSize.width.toFloat(),
+                stageHeight = pending.stageFormatSize.height.toFloat(),
+                stageX = pending.stageX,
+                stageY = pending.stageY,
+                highlightRect = pending.selectionBounds,
+            )
+            onSubmit(comment, dispatchImmediate, pngBytes)
+        } finally {
+            submitting = false
+        }
     }
 
     fun handleComposerKeyEvent(ev: KeyEvent): Boolean {
@@ -252,8 +268,6 @@ internal fun AnchoredCommentComposerPopup(
                     frameNumber = pending.frameIndex + 1,
                     sceneTitle = pending.sceneTitle,
                     targetKind = pending.target.kind,
-                    stageX = pending.stageX.toInt(),
-                    stageY = pending.stageY.toInt(),
                     accentColor = statusPalette.inspectAccent,
                     onClose = { onDismiss(false) },
                 )
@@ -308,7 +322,7 @@ internal fun AnchoredCommentComposerPopup(
                     outline = if (validationError != null && noteState.text.isBlank()) Outline.Error else Outline.None,
                     placeholder = {
                         Text(
-                            text = "Describe what to change (⌘↵ sends & hot-reloads)…",
+                            text = "Describe what to change (⌘↵ sends)…",
                             style = JewelTheme.typography.regular,
                         )
                     },
@@ -360,16 +374,24 @@ internal fun AnchoredCommentComposerPopup(
 
                 Divider(Orientation.Horizontal, Modifier.fillMaxWidth())
 
+                val hasNote = noteState.text.isNotBlank()
+                // One action row: copy the agent prompt on the left, Queue / Send on the right
+                // (the header's close button and Esc cancel the comment).
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("ciacola-review-composer-actions"),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = { onDismiss(false) }) {
-                        Text("Cancel")
-                    }
+                    CopyPromptForAgentButton(
+                        enabled = hasNote && !submitting,
+                        testTag = "ciacola-review-composer-copy-prompt",
+                        label = "Copy prompt",
+                        onCopy = {
+                            val draft = buildCommentDraft(noteState.text.toString().trim())
+                            store.copyPromptToClipboard(listOf(draft))
+                        },
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val hasNote = noteState.text.isNotBlank()
                         OutlinedButton(
                             enabled = hasNote && !submitting,
                             onClick = { submit(dispatchImmediate = false) },
@@ -397,8 +419,6 @@ private fun ComposerPopupHeader(
     frameNumber: Int,
     sceneTitle: String,
     targetKind: String,
-    stageX: Int,
-    stageY: Int,
     accentColor: androidx.compose.ui.graphics.Color,
     onClose: () -> Unit,
 ) {
@@ -413,9 +433,9 @@ private fun ComposerPopupHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val slideLabel = if (sceneTitle.isNotBlank()) {
-                "Scene $sceneNumber ($sceneTitle) · Frame $frameNumber"
+                "Slide $sceneNumber ($sceneTitle) · Build $frameNumber"
             } else {
-                "Scene $sceneNumber · Frame $frameNumber"
+                "Slide $sceneNumber · Build $frameNumber"
             }
             Text(
                 text = slideLabel,
@@ -425,7 +445,7 @@ private fun ComposerPopupHeader(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "$targetKind ($stageX, $stageY)",
+                text = targetKind,
                 style = JewelTheme.typography.small,
                 color = JewelTheme.globalColors.text.info,
                 maxLines = 1,
@@ -483,6 +503,7 @@ internal fun AnchoredSelectedPinPopup(
     onMarkApplied: () -> Unit = {},
     onRetry: () -> Unit,
     onConfigureAgent: () -> Unit = {},
+    onCopyPrompt: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val gapPx = with(density) { 12.dp.toPx() }
@@ -735,8 +756,57 @@ internal fun AnchoredSelectedPinPopup(
                             }
                         }
                     }
+                    if (onCopyPrompt != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            CopyPromptForAgentButton(
+                                testTag = "ciacola-review-pin-copy-prompt",
+                                onCopy = onCopyPrompt,
+                            )
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun CopyPromptForAgentButton(
+    onCopy: () -> Unit,
+    testTag: String,
+    enabled: Boolean = true,
+    tooltipText: String = "Copy formatted agent prompt to clipboard",
+    modifier: Modifier = Modifier,
+    label: String = "Copy Prompt for Agent",
+) {
+    var copiedNonce by remember { mutableIntStateOf(0) }
+    var copied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copiedNonce) {
+        if (copiedNonce > 0) {
+            copied = true
+            delay(2_000)
+            copied = false
+        }
+    }
+
+    Tooltip(tooltip = { Text(tooltipText) }) {
+        OutlinedButton(
+            enabled = enabled,
+            onClick = {
+                onCopy()
+                copiedNonce++
+            },
+            modifier = modifier.testTag(testTag),
+        ) {
+            Text(
+                text = if (copied) "Copied" else label,
+                style = JewelTheme.typography.small,
+            )
         }
     }
 }

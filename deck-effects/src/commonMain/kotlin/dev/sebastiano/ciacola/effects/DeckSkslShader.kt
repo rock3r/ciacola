@@ -7,10 +7,8 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import dev.sebastiano.ciacola.inspector.DeckElementOverridesFile
+import dev.sebastiano.ciacola.document.LocalDeckClock
 import dev.sebastiano.ciacola.inspector.StageShaderUniformSpec
-import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
-import dev.sebastiano.ciacola.timeline.rememberDeckLoopMillis
 import kotlin.math.PI
 
 /**
@@ -37,7 +35,6 @@ sealed interface DeckShaderUniformValue {
 @Stable
 class DeckShaderUniformScope internal constructor(
     private val elementId: String,
-    internal var overrides: DeckElementOverridesFile,
 ) {
     private val liveValues = mutableStateMapOf<String, DeckShaderUniformValue>()
     private val specsByName = LinkedHashMap<String, StageShaderUniformSpec>()
@@ -76,18 +73,13 @@ class DeckShaderUniformScope internal constructor(
 
     /**
      * Declares an inspector-tunable SkSL `float` uniform named [name] clamped to [range].
-     *
-     * Reads any live override from `LocalElementOverrides` (`ElementPatch.uniforms[name]`),
-     * records a [StageShaderUniformSpec] on the shader's `StageNodeSnapshot`, binds the resolved
-     * value, and returns it so slide telemetry can stay in sync.
      */
     fun uniformFloat(
         name: String,
         default: Float,
         range: ClosedFloatingPointRange<Float> = 0f..1f,
     ): Float {
-        val raw = overrides.patchFor(elementId)?.uniforms?.get(name) ?: default
-        val resolved = raw.coerceIn(range.start, range.endInclusive)
+        val resolved = default.coerceIn(range.start, range.endInclusive)
         specsByName[name] = StageShaderUniformSpec(
             name = name,
             default = default,
@@ -99,10 +91,7 @@ class DeckShaderUniformScope internal constructor(
     }
 
     /**
-     * Binds deterministic, scrubbable loop time driven by [rememberDeckLoopMillis] to [name].
-     *
-     * When [scaleRadians] is `true`, emits `[0, 2π)` over the effective loop period so periodic
-     * shaders loop seamlessly; otherwise emits elapsed seconds (`loopMs / 1000f`).
+     * Binds deterministic loop time to [name] from [elapsedMillis] (or the enclosing [LocalDeckClock]).
      */
     @Composable
     fun time(
@@ -116,18 +105,13 @@ class DeckShaderUniformScope internal constructor(
             "Counter-Drift cos(ωt)",
         ),
         scaleRadians: Boolean = true,
+        elapsedMillis: Long? = null,
     ): Float {
         val safePeriod = periodMillis.coerceAtLeast(1L)
-        val clock = LocalDeckLoopClock.current
-        val effectivePeriod = clock.effectivePeriodMillis(loopId, safePeriod).coerceAtLeast(1L)
-        val loopMs = rememberDeckLoopMillis(
-            loopId = loopId,
-            label = label,
-            periodMillis = safePeriod,
-            harmonicChannels = harmonicChannels,
-        )
+        val rawMs = elapsedMillis ?: LocalDeckClock.current?.effMs?.toLong() ?: 0L
+        val loopMs = ((rawMs % safePeriod) + safePeriod) % safePeriod
         val value = if (scaleRadians) {
-            ((loopMs.toDouble() / effectivePeriod.toDouble()) * (2.0 * PI)).toFloat()
+            ((loopMs.toDouble() / safePeriod.toDouble()) * (2.0 * PI)).toFloat()
         } else {
             loopMs.toFloat() / 1_000f
         }
@@ -138,7 +122,7 @@ class DeckShaderUniformScope internal constructor(
 
 /**
  * First-class SkSL fragment shader primitive (`half4 main(float2 fragCoord)`) with cached
- * compilation, deterministic loop-clock time, inspector-tunable float uniforms, drag-preview
+ * compilation, deterministic loop time, inspector-tunable float uniforms, drag-preview
  * offset support, and an inline red diagnostic overlay on invalid SkSL.
  */
 @Composable

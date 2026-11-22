@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -27,6 +29,18 @@ import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.typography
+
+/**
+ * `true` while the Studio App Bar owns navigation, review mode, and the timeline toggle. The
+ * floating stage HUD then retires: it only reappears to surface agent dispatch status (queued,
+ * applying, applied comments), never the inspect pill or the timeline toggle.
+ */
+val LocalReviewHudOwnedByAppBar = compositionLocalOf { false }
+
+private val isMacOs: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
+
+/** Platform-correct modifier name for click-to-comment (`⌃` on macOS, `Ctrl` elsewhere). */
+internal val reviewClickModifierLabel: String = if (isMacOs) "⌃-Click" else "Ctrl+Click"
 
 /**
  * Compact, flat Int UI status bar anchored in the top-right corner of the Story window.
@@ -47,6 +61,11 @@ internal fun BoxScope.ReviewHudToolbar(
     onOpenReviewPanel: () -> Unit,
     onFlushQueued: () -> Unit,
 ) {
+    val appBarOwned = LocalReviewHudOwnedByAppBar.current
+    if (appBarOwned && queuedCount == 0 && applyingCount == 0 && appliedCount == 0) {
+        SideEffect { onHudBoundsChanged(Rect.Zero) }
+        return
+    }
     val globalColors = JewelTheme.globalColors
     val statusPalette = rememberReviewStatusPalette()
     val borderColor = if (inspectActive) statusPalette.inspectAccent else globalColors.borders.normal
@@ -68,30 +87,32 @@ internal fun BoxScope.ReviewHudToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Tooltip(tooltip = { Text("Toggle Inspect Mode (F3) — or hold Ctrl and click any slide element") }) {
-            Row(
-                modifier = Modifier
-                    .clickable(onClick = onToggleInspectMode)
-                    .padding(horizontal = 2.dp, vertical = 2.dp)
-                    .testTag("ciacola-hud-toggle-inspect"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Icon(
-                    key = AllIconsKeys.General.InspectionsEye,
-                    contentDescription = "Inspect slide elements",
-                    modifier = Modifier.size(14.dp),
-                )
-                val label = if (inspectPinned) "Inspecting (F3)" else "Ctrl+Click stage to comment"
-                Text(
-                    text = label,
-                    style = JewelTheme.typography.small,
-                    color = if (inspectActive) {
-                        statusPalette.inspectAccent
-                    } else {
-                        globalColors.text.info
-                    },
-                )
+        if (!appBarOwned) {
+            Tooltip(tooltip = { Text("Toggle Inspect Mode (F3) — or $reviewClickModifierLabel any slide element") }) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClick = onToggleInspectMode)
+                        .padding(horizontal = 2.dp, vertical = 2.dp)
+                        .testTag("ciacola-hud-toggle-inspect"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(
+                        key = AllIconsKeys.General.InspectionsEye,
+                        contentDescription = "Inspect slide elements",
+                        modifier = Modifier.size(14.dp),
+                    )
+                    val label = if (inspectPinned) "Inspecting (F3)" else "$reviewClickModifierLabel stage to comment"
+                    Text(
+                        text = label,
+                        style = JewelTheme.typography.small,
+                        color = if (inspectActive) {
+                            statusPalette.inspectAccent
+                        } else {
+                            globalColors.text.info
+                        },
+                    )
+                }
             }
         }
 
@@ -119,8 +140,8 @@ internal fun BoxScope.ReviewHudToolbar(
             }
         }
 
-        if (onToggleTimeline != null) {
-            Tooltip(tooltip = { Text("Toggle After Effects Timeline Studio (F5)") }) {
+        if (onToggleTimeline != null && !appBarOwned) {
+            Tooltip(tooltip = { Text("Toggle Timeline (F5)") }) {
                 Row(
                     modifier = Modifier
                         .clickable(onClick = onToggleTimeline)

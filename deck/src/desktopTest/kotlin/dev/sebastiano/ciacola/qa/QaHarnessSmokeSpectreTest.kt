@@ -51,7 +51,7 @@ class QaHarnessSmokeSpectreTest {
                 )
                 with(studio) {
                     val canvas = openTimeline()
-                    val snap = controller.snapshot
+                    val snap = controller.snapshot.snapshot
                     assertTrue(snap.totalDurationMs > 1_000, "Timeline indexed FoundationDeck")
 
                     // 1. Window-only SkiaLayer screenshot.
@@ -148,15 +148,15 @@ class QaHarnessSmokeSpectreTest {
             with(studio) {
                 assertEquals(DeckThemePreset.KeynoteLight, preset)
                 val detachedWin = openDetachedTimeline()
-                assertTrue(controller.detachedWindowVisible)
-                assertTrue(!controller.dockedInStoryWindow)
+                assertTrue(timelineWindow.detachedWindowVisible)
+                assertTrue(!timelineWindow.dockedInStoryWindow)
 
                 val storyImg = screenshot(window)
                 val detachedImg = screenshot(detachedWin)
                 assertTrue(storyImg.width > 800 && detachedImg.width > 800)
 
                 closeDetachedTimeline()
-                assertTrue(!controller.detachedWindowVisible)
+                assertTrue(!timelineWindow.detachedWindowVisible)
             }
         }
 }

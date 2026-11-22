@@ -10,9 +10,9 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
-import dev.sebastiano.ciacola.timeline.DeckTimelineOverridesFile
-import dev.sebastiano.ciacola.timeline.SceneBeatOverride
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
+import dev.sebastiano.ciacola.document.DeckStructureEdits
+import dev.sebastiano.ciacola.loadFoundationTestDocument
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Rectangle
 import kotlin.test.Test
@@ -40,16 +40,10 @@ class PresenterNotesAndControllerTest {
     }
 
     @Test
-    fun foundationDeckPopulatesProvisionalSpeakerNotesAcrossAllScenesAndResolvesVirtualBeats() {
-        val overrides = DeckTimelineOverridesFile(
-            sceneBeats = mapOf(
-                0 to SceneBeatOverride(sceneIndex = 0, injectedAfterBeats = listOf(1)),
-            ),
-        )
-        val storyboard = createFoundationDeck(
-            includeKeynoteEffectsLab = true,
-            timelineOverrides = overrides,
-        )
+    fun foundationDeckPopulatesProvisionalSpeakerNotesAcrossAllScenesAndSupportsBeatInsertion() {
+        val doc = loadFoundationTestDocument()
+        val withInsertedBeat = DeckStructureEdits.insertBeat(doc, slideId = "beats", atBeat = 2)
+        val storyboard = buildFoundationTestStoryboard(document = withInsertedBeat)
         val notes = StoryboardSpeakerNotesRegistry.forStoryboard(storyboard)
         assertNotNull(notes, "Expected FoundationDeck to register speaker notes")
         assertEquals(5, notes.scenes.size)
@@ -60,16 +54,12 @@ class PresenterNotesAndControllerTest {
             assertTrue(sceneNotes.hasAnyNotes, "Expected non-empty notes for scene $sceneIdx")
         }
 
-        // Scene 0 has 3 base beats + 1 injected hold beat after base beat 1 -> virtual beat 2 is a hold on base beat 1.
-        val virtualHold = notes.resolve(storyboard, Storyboard.Index(0, 2))
-        assertTrue(virtualHold.isVirtualHoldBeat, "Virtual beat 2 should be marked as a hold beat")
-        assertEquals(1, virtualHold.baseBeatIndex)
-        assertEquals("Beats", virtualHold.sceneTitle)
-        assertEquals(
-            notes.resolve(storyboard, Storyboard.Index(0, 1)).beatNote,
-            virtualHold.beatNote,
-            "Virtual hold beat must inherit its base beat's cue",
-        )
+        assertEquals(4, storyboard.scenes[0].frames.size)
+        val beat1Resolved = notes.resolve(storyboard, Storyboard.Index(0, 1))
+        assertEquals("Beats", beat1Resolved.sceneTitle)
+        assertTrue(beat1Resolved.hasNotes)
+        val beat3Resolved = notes.resolve(storyboard, Storyboard.Index(0, 3))
+        assertTrue(beat3Resolved.hasNotes, "Original beat 2 shifted to beat 3 must preserve its speaker notes")
     }
 
     @Test
@@ -94,7 +84,6 @@ class PresenterNotesAndControllerTest {
         assertEquals(35, timer.targetDurationMinutes)
         assertEquals(PaceStatus.OnPace, timer.paceStatus(elapsedSeconds = 0, flatBeatIndex = 0, totalBeats = 10))
 
-        // Start timer and advance 65 seconds.
         timer.togglePlayPause()
         assertEquals(TimerRunState.Running, timer.runState)
         nowMs += 65_000L
@@ -102,43 +91,36 @@ class PresenterNotesAndControllerTest {
         assertEquals("01:05", PresenterTimerState.formatMmSs(65L))
         assertEquals("33:55 left", PresenterTimerState.formatRemaining(65L, 35))
 
-        // Pause for 100s — elapsed must freeze at 65s.
         timer.togglePlayPause()
         assertEquals(TimerRunState.Paused, timer.runState)
         nowMs += 100_000L
         assertEquals(65L, timer.elapsedSeconds())
 
-        // Resume and advance 5s -> 70s.
         timer.togglePlayPause()
         assertEquals(TimerRunState.Running, timer.runState)
         nowMs += 5_000L
         assertEquals(70L, timer.elapsedSeconds())
 
-        // Tight pace: 80% through target time while still on beat 1/10.
         assertEquals(
             PaceStatus.Tight,
             timer.paceStatus(elapsedSeconds = 28 * 60L, flatBeatIndex = 1, totalBeats = 10),
         )
 
-        // Over pace: past target duration.
         assertEquals(
             PaceStatus.Over,
             timer.paceStatus(elapsedSeconds = 36 * 60L + 12L, flatBeatIndex = 5, totalBeats = 10),
         )
         assertEquals("+01:12 over", PresenterTimerState.formatRemaining(36 * 60L + 12L, 35))
 
-        // Target adjustment clamps cleanly to 5..180.
         repeat(10) { timer.adjustTargetMinutes(-5) }
         assertEquals(PresenterTimerState.MIN_TARGET_MINUTES, timer.targetDurationMinutes)
         repeat(40) { timer.adjustTargetMinutes(+5) }
         assertEquals(PresenterTimerState.MAX_TARGET_MINUTES, timer.targetDurationMinutes)
 
-        // Reset while running resets elapsed to 0 and keeps running.
         timer.reset()
         assertEquals(TimerRunState.Running, timer.runState)
         assertEquals(0L, timer.elapsedSeconds())
 
-        // Pause then reset returns to Stopped.
         timer.togglePlayPause()
         timer.reset()
         assertEquals(TimerRunState.Stopped, timer.runState)
@@ -213,7 +195,7 @@ class PresenterNotesAndControllerTest {
             }
         }
 
-        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        val deck = buildFoundationTestStoryboard()
         lateinit var controller: PresenterController
         setContent {
             val animatic = rememberAnimatic(storyboard = { deck })

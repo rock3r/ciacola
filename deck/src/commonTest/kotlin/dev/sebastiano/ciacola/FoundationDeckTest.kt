@@ -3,7 +3,6 @@ package dev.sebastiano.ciacola
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.unit.IntSize
 import dev.sebastiano.ciacola.theme.DeckThemes
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,29 +11,24 @@ import kotlin.test.assertTrue
 
 class FoundationDeckTest {
     @Test
-    fun deckUsesFixedTalkFormatAndRepresentativeSceneStates() {
-        val deck = createFoundationDeck()
-
-        assertEquals("Ciacola", deck.title)
-        assertEquals(IntSize(1920, 1080), deck.format.size)
-        assertEquals(listOf(3, 2, 1, 3), deck.scenes.map { it.frames.size })
-        assertEquals(deck.indices, deck.indices.sorted())
+    fun catalogRegistersAllFourCanonicalDocumentDecks() {
+        assertEquals("foundation", DeckCatalog.FOUNDATION_ID)
+        assertEquals("shaders-quickie-2025", DeckCatalog.SHADERS_QUICKIE_ID)
+        assertEquals("jewel-talk-2024", DeckCatalog.JEWEL_TALK_ID)
+        assertEquals("not-just-plain-text-2024", DeckCatalog.NOT_JUST_PLAIN_TEXT_ID)
+        assertEquals(DeckCatalog.FOUNDATION_ID, DeckCatalog.defaultEntry.id)
+        assertEquals("decks/foundation.deck.json", DeckCatalog.foundation.resourcePath)
+        assertEquals("decks/foundation.assets", DeckCatalog.foundation.assetsResourceDir)
     }
 
     @Test
-    fun everyFoundationProofIsOwnedByAnExplicitScene() {
-        assertEquals(
-            FoundationProof.entries.toSet(),
-            FoundationSceneSpec.entries.flatMapTo(mutableSetOf()) { it.proves },
-        )
-    }
-
-    @Test
-    fun designSystemHasDistinctAndConsistentTextRoles() {
-        assertTrue(DeckDesign.title.fontSize > DeckDesign.heading.fontSize)
-        assertTrue(DeckDesign.heading.fontSize > DeckDesign.body.fontSize)
-        assertEquals(DeckDesign.code.fontSize, DeckDesign.codeEmphasis.fontSize)
-        assertNotEquals(DeckDesign.background, DeckDesign.accent)
+    fun designSystemThemesHaveDistinctAndConsistentTextAndColorRoles() {
+        for (theme in listOf(DeckThemes.stageDark(), DeckThemes.keynoteLight())) {
+            assertTrue(theme.typography.title.fontSize > theme.typography.heading.fontSize)
+            assertTrue(theme.typography.heading.fontSize > theme.typography.body.fontSize)
+            assertEquals(theme.typography.code.fontSize, theme.typography.codeEmphasis.fontSize)
+            assertNotEquals(theme.colors.background, theme.colors.accent)
+        }
     }
 
     @Test

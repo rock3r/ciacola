@@ -1,30 +1,10 @@
 package dev.sebastiano.ciacola
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemes
-import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
-import dev.sebastiano.ciacola.theme.LocalDeckTheme
-import dev.sebastiano.ciacola.theme.LocalReducedMotion
-import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
-import dev.sebastiano.ciacola.timeline.rememberDeckLoopMillis
-import dev.sebastiano.ciacola.timeline.timelineTarget
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.VertexMode
-import androidx.compose.ui.graphics.Vertices
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.drawscope.scale
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -105,66 +85,4 @@ fun planMesh(points: List<List<Pair<Offset, Color>>>): MeshPlan {
         }
     }
     return MeshPlan(positions, colors, indices)
-}
-
-@Composable
-fun AnimatedMeshBackdrop(
-    modifier: Modifier = Modifier,
-    loopId: String = "foundation-mesh-loop",
-    periodMillis: Long = 6_000L,
-    paused: Boolean = LocalAmbientLoopsPaused.current,
-) {
-    val reducedMotion = LocalReducedMotion.current
-    val isPaused = paused || LocalAmbientLoopsPaused.current
-    var frozenAuthoredElapsed by remember { mutableLongStateOf(0L) }
-
-    // The mesh choreography is authored over a 6 s cycle; scale the loop clock's position within
-    // the (possibly overridden) period onto it so period overrides stay seamless at the wrap.
-    val theme = LocalDeckTheme.current
-    var liveComputedElapsed: Long? = null
-    val authoredElapsed = when {
-        reducedMotion -> 0L
-        isPaused -> frozenAuthoredElapsed
-        else -> {
-            val elapsed = rememberDeckLoopMillis(
-                loopId = loopId,
-                label = "Ambient Vertex Mesh",
-                periodMillis = periodMillis,
-            )
-            val effectivePeriod = LocalDeckLoopClock.current.effectivePeriodMillis(loopId, periodMillis)
-            (elapsed.toDouble() / effectivePeriod.toDouble() * 6_000.0).toLong().also {
-                liveComputedElapsed = it
-            }
-        }
-    }
-    if (liveComputedElapsed != null) {
-        val captured = liveComputedElapsed
-        SideEffect {
-            frozenAuthoredElapsed = captured
-        }
-    }
-    val mesh = planMesh(animatedMeshPoints(MeshLoopState(sceneState = 0), authoredElapsed, theme))
-    val paint = Paint()
-
-    androidx.compose.foundation.layout.Box(
-        modifier.timelineTarget("loop:$loopId").drawBehind {
-            drawIntoCanvas { canvas ->
-                scale(size.width, size.height, Offset.Zero) {
-                    canvas.drawVertices(
-                        Vertices(
-                            vertexMode = VertexMode.Triangles,
-                            positions = mesh.positions,
-                            textureCoordinates = mesh.positions,
-                            colors = mesh.colors,
-                            indices = mesh.indices,
-                        ),
-                        // drawVertices combines vertex colors with Paint; Dst retains the vertex
-                        // color field instead of covering it with Paint's default solid color.
-                        BlendMode.Dst,
-                        paint,
-                    )
-                }
-            }
-        }
-    )
 }

@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.exists
@@ -87,6 +87,39 @@ class SlideReviewSystemTest {
         )
         assertEquals("Region", regionHit.kind)
         assertTrue(regionHit.textSnippet.contains("reversible"))
+
+        // Region spanning multiple distinct nodeIds must emit nodeId = null instead of picking one arbitrarily.
+        val n1 = RegisteredTargetSnapshot(
+            id = "n1",
+            kind = "Text",
+            label = "Title",
+            textSnippet = "Title",
+            isContainer = false,
+            stageBounds = Rect(100f, 100f, 400f, 200f),
+            nodeId = "s1:title",
+        )
+        val n2 = RegisteredTargetSnapshot(
+            id = "n2",
+            kind = "Shape",
+            label = "Card",
+            textSnippet = "",
+            isContainer = false,
+            stageBounds = Rect(100f, 240f, 400f, 400f),
+            nodeId = "s1:card",
+        )
+        val multiNodeRegionHit = resolveBestReviewHit(
+            stagePoint = Offset(250f, 250f),
+            dragRect = Rect(80f, 80f, 420f, 420f),
+            registeredTargets = listOf(n1, n2),
+        )
+        assertEquals(null, multiNodeRegionHit.nodeId)
+
+        val singleNodeRegionHit = resolveBestReviewHit(
+            stagePoint = Offset(200f, 150f),
+            dragRect = Rect(80f, 80f, 350f, 180f),
+            registeredTargets = listOf(n1, n2),
+        )
+        assertEquals("s1:title", singleNodeRegionHit.nodeId)
     }
 
     @Test
@@ -104,18 +137,20 @@ class SlideReviewSystemTest {
             )
             Files.setPosixFilePermissions(fakeAgentApi, PosixFilePermissions.fromString("rwxr-xr-x"))
 
-            val store = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
+            val store = ReviewCommentStore(
+                storyboardDir = storyboardDir,
+                workspaceRoot = tempRoot,
+                envProvider = { key -> if (key == "CIACOLA_AGENTAPI_BIN") fakeAgentApi.toAbsolutePath().toString() else System.getenv(key) },
+            )
             store.saveConfig(
                 ReviewConfig(
                     conversationId = "conv-test-42",
-                    agentApiBin = fakeAgentApi.toAbsolutePath().toString(),
                 )
             )
 
             setContent {
                 val stageCoordinator = rememberReviewStageCoordinator()
-                val deck = createFoundationDeck(
-                    includeKeynoteEffectsLab = true,
+                val deck = buildFoundationTestStoryboard(
                     stageDecorator = stageCoordinator.stageDecorator,
                 )
                 val animatic = rememberAnimatic(storyboard = { deck })
@@ -191,8 +226,7 @@ class SlideReviewSystemTest {
 
         setContent {
             val stageCoordinator = rememberReviewStageCoordinator()
-            val deck = createFoundationDeck(
-                includeKeynoteEffectsLab = true,
+            val deck = buildFoundationTestStoryboard(
                 stageDecorator = stageCoordinator.stageDecorator,
             )
             val animatic = rememberAnimatic(storyboard = { deck })

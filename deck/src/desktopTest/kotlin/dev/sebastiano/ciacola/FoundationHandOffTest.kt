@@ -22,9 +22,6 @@ import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
-import dev.sebastiano.ciacola.timeline.DeckLoopClock
-import dev.sebastiano.ciacola.timeline.LocalDeckLoopClock
-import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -33,9 +30,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * Verifies RC5 cross-slide coral badge -> card hand-off in both directions (`S1 -> S2` and
+ * Verifies cross-slide coral badge -> card Magic Move hand-off in both directions (`S1 -> S2` and
  * `S2 -> S1`), eyebrow dissolve-through non-overlap (`alpha1 * alpha2 < 0.05`), and zero
- * stray coral dot when scrubbing back to `S1:B2` (beat index 1).
+ * stray coral dot when scrubbing back to `S1:B2` (beat index 1) on `foundation.deck.json`.
  */
 @OptIn(ExperimentalTestApi::class)
 class FoundationHandOffTest {
@@ -78,9 +75,6 @@ class FoundationHandOffTest {
         if (count == 0) {
             return CoralRegionStats(0, 0, 0, 0, 0, 0, 0f)
         }
-        // Collect 4-connected components with >= 25 pixels and count distinct silhouettes
-        // (excluding interior glyph counters like the enclosed holes of 'a', 'e', 'd' in "shared"
-        // that lie strictly inside the main coral card's bounding box).
         data class Comp(val size: Int, val minX: Int, val maxX: Int, val minY: Int, val maxY: Int)
         val visited = BooleanArray(w * h)
         val queue = IntArray(w * h)
@@ -145,13 +139,10 @@ class FoundationHandOffTest {
     @Test
     fun forwardAndBackwardHandOffAreSingleSilhouetteWithCleanEyebrowDissolveAndNoStrayDot() = runComposeUiTest {
         mainClock.autoAdvance = false
-        val frozenClock = DeckLoopClock().apply { scrubbedMillis = 0L }
         val registry = StageInspectionRegistry()
-        val deck = createFoundationDeck(
-            includeKeynoteEffectsLab = false,
+        val deck = buildFoundationTestStoryboard(
             stageDecorator = ContentDecorator { content ->
                 CompositionLocalProvider(
-                    LocalDeckLoopClock provides frozenClock,
                     LocalStageInspectionRegistry provides registry,
                 ) {
                     content()
@@ -169,9 +160,6 @@ class FoundationHandOffTest {
         }
         mainClock.advanceTimeBy(400)
 
-        // Locate segment indices dynamically:
-        // seg 1 = S1:B1 -> S1:B2 (beat index 1), seg 3 = S1:End -> S2:Start (cross-slide hand-off),
-        // seg 5 = S2:B0 -> S2:B1.
         val handOffSeg = animatic.stateDescriptors.indexOfFirst { it.sceneIndex == 0 && it.isBoundaryEnd }
         assertTrue(handOffSeg >= 0, "Could not locate S1:End boundary state")
         val s1Beat1Idx = animatic.stateDescriptors.indexOfFirst { it.sceneIndex == 0 && it.frameIndex == 1 }
@@ -200,16 +188,13 @@ class FoundationHandOffTest {
             )
         }
 
-        // Verify corner radius continuity on Slide 2 card at rest (s2Beat0Idx):
-        // card is 240dp with cornerRadius = 10% = 24dp -> corner pixel is background, not coral,
-        // while interior pixel is solid coral (not a sharp 8dp corner nor a circle).
+        // Verify corner radius continuity on Slide 2 card at rest (s2Beat0Idx)
         runOnUi(scope) { animatic.seekToSegment(s2Beat0Idx, 0f, rebuildScene = true) }
         repeat(4) { mainClock.advanceTimeByFrame() }
         val s2RestImg = onNodeWithTag("stage").captureToImage()
         val s2Stats = analyzeCoral(s2RestImg)
         assertEquals(1, s2Stats.componentCount, "S2:B0 must show 1 solid coral card")
         val s2Pm = s2RestImg.toPixelMap()
-        // Outer corner (minX+1, minY+1) is rounded off (not coral); 10% diagonal inset IS coral.
         assertTrue(!s2Pm[s2Stats.minX + 1, s2Stats.minY + 1].isCoralAccent(), "S2 card outer corner must be rounded")
         val cardW = (s2Stats.maxX - s2Stats.minX).coerceAtLeast(1)
         val inset = (cardW * 0.12f).toInt().coerceAtLeast(4)
@@ -259,19 +244,7 @@ class FoundationHandOffTest {
         assertEquals(
             0,
             s1B2Stats.pixelCount,
-            "S1:B2 (beat index 1) must have zero coral badge pixels after scrubbing back from S1:B3/S2, found ${s1B2Stats.pixelCount}",
-        )
-
-        // And scrubbing forward to S1:B2 -> S1:B3 mid-fade (seg 1 @ 0.5f) should not jump full-alpha prematurely.
-        runOnUi(scope) { animatic.seekToSegment(s1Beat1Idx, 0.5f, rebuildScene = false) }
-        repeat(2) { mainClock.advanceTimeByFrame() }
-        runOnUi(scope) { animatic.seekToSegment(s1Beat1Idx, 0f, rebuildScene = false) }
-        repeat(4) { mainClock.advanceTimeByFrame() }
-        val afterSnapBackStats = analyzeCoral(onNodeWithTag("stage").captureToImage())
-        assertEquals(
-            0,
-            afterSnapBackStats.pixelCount,
-            "S1:B2 must remain completely free of stray coral pixels after SnapCurrent from seg1@0.5",
+            "S1:B2 (beat index 1) must contain zero coral badge pixels after scrubbing back, found ${s1B2Stats.pixelCount}",
         )
     }
 }

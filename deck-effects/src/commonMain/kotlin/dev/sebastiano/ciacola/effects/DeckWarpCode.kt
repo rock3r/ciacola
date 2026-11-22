@@ -64,9 +64,7 @@ import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.stableSegment
-import dev.sebastiano.ciacola.inspector.LocalActiveBeatIndex
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
-import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageDragPreview
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.LocalStageParentElementId
@@ -79,11 +77,6 @@ import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.ciacola.theme.LocalReducedMotion
 import dev.sebastiano.ciacola.theme.REDUCED_MOTION_FADE_DURATION_MS
-import dev.sebastiano.ciacola.timeline.HarvestedTrackRecord
-import dev.sebastiano.ciacola.timeline.LocalActiveSceneTimeline
-import dev.sebastiano.ciacola.timeline.LocalTimelineHarvestCollector
-import dev.sebastiano.ciacola.timeline.LocalTimelineOverrides
-import dev.sebastiano.ciacola.timeline.TrackCategory
 import dev.sebastiano.ciacola.timeline.timelineTarget
 import kotlin.math.roundToInt
 
@@ -116,53 +109,14 @@ fun DeckWarpCodeCard(
     val theme = LocalDeckTheme.current
     val cardStyle = theme.styles.codeCard
     val palette = theme.colors.code
-    val patch = elementId?.let { LocalElementOverrides.current.patchFor(it) }
-    val (codeTextStyle, _) = resolveOverriddenTextStyle(
-        baseStyle = textStyle,
-        resolvedColor = textStyle.color,
-        patch = patch,
-    )
-    val effectiveFill = patch?.fillColorArgb?.let(::Color) ?: palette.background
-    val effectiveBorderColor = patch?.borderColorArgb?.let(::Color) ?: theme.colors.border
-    val effectiveBorderWidth = (patch?.borderWidthDp ?: cardStyle.borderWidth.value).coerceAtLeast(0f).dp
-    val effectiveCornerRadius = (patch?.cornerRadiusDp ?: cardStyle.cornerRadius.value).coerceAtLeast(0f).dp
-    val effectivePadding = (patch?.paddingDp ?: cardStyle.padding.value).coerceAtLeast(0f).dp
-    val baseOffsetXDp = patch?.offsetXDp ?: 0f
-    val baseOffsetYDp = patch?.offsetYDp ?: 0f
-    val sceneCtx = LocalActiveSceneTimeline.current
-    val collector = LocalTimelineHarvestCollector.current
-    val warpTrackId = trackId ?: elementId ?: if (sceneCtx != null) "s${sceneCtx.sceneIndex}:warp-code" else "warp-code"
-    val warpOverride = LocalTimelineOverrides.current.tracks[warpTrackId]
-    val tokenDurationMs = (warpOverride?.durationMs ?: theme.motion.warpTokenDurationMs).coerceAtLeast(40)
-
-    val activeBeat = LocalActiveBeatIndex.current
-    SideEffect {
-        if (sceneCtx != null && codeStates.size > 1 && collector != null) {
-            val overrideBeat = warpOverride?.enterBeat
-            val triggerBeat = when {
-                overrideBeat != null -> overrideBeat
-                sceneCtx.totalBeats <= 1 -> 0
-                stateTransition.targetState > 0 -> {
-                    val recorded = collector.records.values.count { it.trackId == warpTrackId }
-                    if (recorded < codeStates.size - 1) activeBeat else null
-                }
-                else -> null
-            }
-            if (triggerBeat != null) {
-                collector.record(
-                    HarvestedTrackRecord(
-                        trackId = warpTrackId,
-                        label = "Warp Code Morph",
-                        category = TrackCategory.WarpCode,
-                        sceneIndex = sceneCtx.sceneIndex,
-                        triggerBeat = triggerBeat,
-                        durationMs = tokenDurationMs,
-                        delayMs = warpOverride?.delayMs ?: 0,
-                    )
-                )
-            }
-        }
-    }
+    val codeTextStyle = textStyle
+    val effectiveFill = palette.background
+    val effectiveBorderColor = theme.colors.border
+    val effectiveBorderWidth = cardStyle.borderWidth.coerceAtLeast(0.dp)
+    val effectiveCornerRadius = cardStyle.cornerRadius.coerceAtLeast(0.dp)
+    val effectivePadding = cardStyle.padding.coerceAtLeast(0.dp)
+    val warpTrackId = trackId ?: elementId ?: "warp-code"
+    val tokenDurationMs = theme.motion.warpTokenDurationMs.coerceAtLeast(40)
 
     val diffList: List<DiffContents> = remember(codeStates, language) {
         val blocks = if (codeStates.size == 1) {
@@ -206,7 +160,7 @@ fun DeckWarpCodeCard(
 
     // Stagger Deletions -> Movement (+ Card Size Morph) -> Additions with overlap between delete
     // tail and insert head so the card never flashes empty mid-morph.
-    val startDelayMs = (warpOverride?.delayMs ?: 0).coerceAtLeast(0)
+    val startDelayMs = 0
     val deleteDurationMs = (tokenDurationMs * 0.48f).roundToInt().coerceAtLeast(40)
     val moveDelayMs = startDelayMs + if (hasVisibleDeletes) (tokenDurationMs * 0.15f).roundToInt() else 0
     val moveDurationMs = (tokenDurationMs * 0.70f).roundToInt().coerceAtLeast(60)
@@ -231,7 +185,6 @@ fun DeckWarpCodeCard(
     val registry = LocalStageInspectionRegistry.current
     val dragPreview = LocalStageDragPreview.current
     val parentElementId = LocalStageParentElementId.current
-    val beatIndex = LocalActiveBeatIndex.current
     val rootHolder = LocalStageRootCoordinates.current
     val shouldInspect = elementId != null && registry != null && !LocalOverviewOpen.current
     val ownerToken = remember { Any() }
@@ -264,8 +217,8 @@ fun DeckWarpCodeCard(
                     elementId = elementId,
                     kind = "WarpCodeCard",
                     label = currentCodeSnippet.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "WarpCodeCard" },
-                    sceneIndex = sceneCtx?.sceneIndex ?: 0,
-                    beatIndex = beatIndex,
+                    sceneIndex = 0,
+                    beatIndex = 0,
                     stageBounds = bounds,
                     resolvedText = currentCodeSnippet,
                     hasVisualOverflow = overflowNow,
@@ -283,16 +236,16 @@ fun DeckWarpCodeCard(
         }
     }
 
-    val offsetMod = if (baseOffsetXDp != 0f || baseOffsetYDp != 0f || dragPreview != null) {
+    val offsetMod = if (dragPreview != null) {
         Modifier.offset {
-            val previewDelta = if (dragPreview != null && elementId != null) {
+            val previewDelta = if (elementId != null) {
                 dragPreview.offsetFor(elementId)
             } else {
                 DpOffset.Zero
             }
             IntOffset(
-                x = (baseOffsetXDp.dp + previewDelta.x).roundToPx(),
-                y = (baseOffsetYDp.dp + previewDelta.y).roundToPx(),
+                x = previewDelta.x.roundToPx(),
+                y = previewDelta.y.roundToPx(),
             )
         }
     } else {

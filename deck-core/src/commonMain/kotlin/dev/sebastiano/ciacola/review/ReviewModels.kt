@@ -45,6 +45,7 @@ data class ReviewTargetHit(
     val textSnippet: String = "",
     val clickedToken: String = "",
     val bounds: StageRectDto? = null,
+    val nodeId: String? = null,
 )
 
 @Serializable
@@ -67,6 +68,10 @@ data class SlideReviewComment(
     val screenshotPath: String? = null,
     val deliveryError: String? = null,
     val createdAt: String,
+    val deckId: String? = null,
+    val deckFilePath: String? = null,
+    val slideId: String? = null,
+    val nodeId: String? = null,
 )
 
 @Serializable
@@ -83,6 +88,7 @@ data class RegisteredTargetSnapshot(
     val textSnippet: String,
     val isContainer: Boolean,
     val stageBounds: Rect,
+    val nodeId: String? = null,
 )
 
 private const val MIN_REGION_DRAG_PX = 48f
@@ -161,11 +167,20 @@ fun resolveBestReviewHit(
         } else {
             "Selected region (${norm.width.toInt()}×${norm.height.toInt()})"
         }
+        val matchedNodeIds = matchingRegistered.mapNotNull { it.nodeId?.takeIf(String::isNotBlank) }.distinct()
+        val semanticNodeIds = matchingSemantics.mapNotNull { it.nodeId?.takeIf(String::isNotBlank) }.distinct()
+        val resolvedRegionNodeId = when {
+            matchedNodeIds.size == 1 -> matchedNodeIds.single()
+            matchedNodeIds.size > 1 -> null
+            semanticNodeIds.size == 1 -> semanticNodeIds.single()
+            else -> null
+        }
         return ReviewTargetHit(
             kind = "Region",
             label = regionLabel,
             textSnippet = combinedSnippets,
             bounds = StageRectDto.fromRect(norm),
+            nodeId = resolvedRegionNodeId,
         )
     }
 
@@ -179,6 +194,10 @@ fun resolveBestReviewHit(
         .filter { it.isContainer && it.kind != "Frame" }
         .minByOrNull { it.stageBounds.width * it.stageBounds.height }
     val chosenRegistered = bestLeafRegistered ?: bestContainerRegistered
+    val enclosingNodeId = containingRegistered
+        .filter { it.nodeId != null }
+        .minByOrNull { it.stageBounds.width * it.stageBounds.height }
+        ?.nodeId
 
     val bestSemantics = semanticsHits
         .filter { hit ->
@@ -203,6 +222,7 @@ fun resolveBestReviewHit(
             textSnippet = fullSnippet,
             clickedToken = token,
             bounds = StageRectDto.fromRect(chosenRegistered.stageBounds),
+            nodeId = chosenRegistered.nodeId ?: enclosingNodeId ?: bestSemantics.nodeId,
         )
     }
 
@@ -212,18 +232,20 @@ fun resolveBestReviewHit(
             label = chosenRegistered.label,
             textSnippet = chosenRegistered.textSnippet.take(MAX_SNIPPET_CHARS),
             bounds = StageRectDto.fromRect(chosenRegistered.stageBounds),
+            nodeId = chosenRegistered.nodeId ?: enclosingNodeId,
         )
     }
 
     if (bestSemantics != null) {
         return bestSemantics.copy(
             textSnippet = bestSemantics.textSnippet.take(MAX_SNIPPET_CHARS),
+            nodeId = bestSemantics.nodeId ?: enclosingNodeId,
         )
     }
 
     return ReviewTargetHit(
         kind = "Stage",
-        label = "Canvas (${stagePoint.x.toInt()}, ${stagePoint.y.toInt()})",
+        label = "Slide background",
         bounds = StageRectDto(
             left = (stagePoint.x - 24f).coerceAtLeast(0f),
             top = (stagePoint.y - 24f).coerceAtLeast(0f),

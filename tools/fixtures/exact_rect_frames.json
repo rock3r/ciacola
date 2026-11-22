@@ -1,0 +1,842 @@
+[
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s14",
+    "nodeId": "path-16",
+    "w": 231,
+    "h": 231
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s16",
+    "nodeId": "path-3",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s17",
+    "nodeId": "path-3",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s18",
+    "nodeId": "path-4",
+    "w": 256.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s19",
+    "nodeId": "path-4",
+    "w": 256.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s22",
+    "nodeId": "path-3",
+    "w": 275.27,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s23",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s24",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s25",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s26",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s27",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s28",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s29",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s30",
+    "nodeId": "path-3",
+    "w": 274.59,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s32",
+    "nodeId": "path-2",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s33",
+    "nodeId": "path-5",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s34",
+    "nodeId": "path-3",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s35",
+    "nodeId": "path-3",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s36",
+    "nodeId": "path-4",
+    "w": 231.48,
+    "h": 57.4
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s72",
+    "nodeId": "path-1",
+    "w": 610.38,
+    "h": 100
+  },
+  {
+    "deck": "jewel-talk-2024",
+    "slide": "s73",
+    "nodeId": "path-1",
+    "w": 469.44,
+    "h": 64.13
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s017",
+    "nodeId": "path-1",
+    "w": 605.79,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s080",
+    "nodeId": "path-2",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s080",
+    "nodeId": "path-4",
+    "w": 483.49,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s081",
+    "nodeId": "path-2",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s083",
+    "nodeId": "path-1",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s083",
+    "nodeId": "path-3",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s083",
+    "nodeId": "path-5",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s083",
+    "nodeId": "path-7",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s084",
+    "nodeId": "path-1",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s084",
+    "nodeId": "path-3",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s084",
+    "nodeId": "path-5",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s084",
+    "nodeId": "path-7",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s087",
+    "nodeId": "path-1",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s089",
+    "nodeId": "path-1",
+    "w": 438.53,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s089",
+    "nodeId": "path-2",
+    "w": 422.16,
+    "h": 427.1
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s089",
+    "nodeId": "path-9",
+    "w": 522.87,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s089",
+    "nodeId": "path-12",
+    "w": 422.16,
+    "h": 427.1
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s089",
+    "nodeId": "path-14",
+    "w": 593.35,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-1",
+    "w": 438.53,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-3",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-7",
+    "w": 522.87,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-9",
+    "w": 593.35,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-11",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-16",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-18",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-20",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-22",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-24",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s092",
+    "nodeId": "path-26",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-3",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-6",
+    "w": 522.87,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-8",
+    "w": 593.35,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-10",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-15",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-17",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-19",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-21",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-23",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s093",
+    "nodeId": "path-25",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s094",
+    "nodeId": "path-1",
+    "w": 438.53,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s094",
+    "nodeId": "path-3",
+    "w": 438.53,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s094",
+    "nodeId": "path-5",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s094",
+    "nodeId": "path-9",
+    "w": 522.87,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s094",
+    "nodeId": "path-11",
+    "w": 593.35,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s094",
+    "nodeId": "path-13",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-1",
+    "w": 438.53,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-3",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-5",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-7",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-9",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-11",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-13",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-18",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-21",
+    "w": 522.87,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-23",
+    "w": 593.35,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s095",
+    "nodeId": "path-25",
+    "w": 336.99,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s100",
+    "nodeId": "path-2",
+    "w": 485.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s100",
+    "nodeId": "path-4",
+    "w": 485.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s101",
+    "nodeId": "path-1",
+    "w": 438.53,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s101",
+    "nodeId": "path-3",
+    "w": 288.65,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s101",
+    "nodeId": "path-4",
+    "w": 422.16,
+    "h": 427.1
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s102",
+    "nodeId": "path-2",
+    "w": 485.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s102",
+    "nodeId": "path-9",
+    "w": 485.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s118",
+    "nodeId": "path-1",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s118",
+    "nodeId": "path-3",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s119",
+    "nodeId": "path-1",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s119",
+    "nodeId": "path-3",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s120",
+    "nodeId": "path-1",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s120",
+    "nodeId": "path-3",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s121",
+    "nodeId": "path-1",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "not-just-plain-text-2024",
+    "slide": "s121",
+    "nodeId": "path-3",
+    "w": 542.21,
+    "h": 100
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s14",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s15",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s16",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s17",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s18",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s19",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s20",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s21",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s22",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 159.12
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s23",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 292.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s26",
+    "nodeId": "path-1",
+    "w": 902.45,
+    "h": 292.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s27",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 332.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s28",
+    "nodeId": "path-1",
+    "w": 1310.46,
+    "h": 462
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s29",
+    "nodeId": "path-1",
+    "w": 1310.46,
+    "h": 462
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s30",
+    "nodeId": "path-1",
+    "w": 1310.46,
+    "h": 462
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s31",
+    "nodeId": "path-1",
+    "w": 1221.45,
+    "h": 454.89
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s32",
+    "nodeId": "path-1",
+    "w": 1281.07,
+    "h": 588.69
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s34",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 292.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s35",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s36",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s37",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s38",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s39",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s40",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s41",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 452.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s42",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 572.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s43",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 572.95
+  },
+  {
+    "deck": "shaders-quickie-2025",
+    "slide": "s44",
+    "nodeId": "path-1",
+    "w": 1112.58,
+    "h": 612.95
+  }
+]

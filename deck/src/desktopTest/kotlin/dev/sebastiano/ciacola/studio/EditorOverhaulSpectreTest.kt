@@ -1,7 +1,5 @@
 package dev.sebastiano.ciacola.studio
 
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.qa.QaStudioRule
@@ -14,12 +12,14 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import org.junit.Rule
 
 /**
  * Real-window Spectre E2E test exercising the unified Studio Inspector (`Motion | Element | Theme | Lint`),
- * live Design System override + Undo, live Direct Element stage picking + text override + Undo, and
+ * live Document Theme edit + Undo, live Direct Element stage picking + text edit + Undo, and
  * Full-Deck Lint audit in a real JBR 25 `ComposeWindow` (`-Dapple.awt.UIElement=true`).
  */
 class EditorOverhaulSpectreTest {
@@ -34,45 +34,38 @@ class EditorOverhaulSpectreTest {
                 preset = DeckThemePreset.StageDark,
                 windowSize = DpSize(1360.dp, 880.dp),
                 timelineDocked = true,
-                includeKeynoteEffectsLab = true,
             )
 
             with(studio) {
                 settle()
 
-                // 1. Verify unified Motion | Element | Theme | Lint tabs mount inside docked Studio.
-                assertNotNull(automator.findOneByTestTag("ciacola-studio-tab-motion"))
-                val elementTab = checkNotNull(automator.findOneByTestTag("ciacola-studio-tab-element"))
-                val themeTab = checkNotNull(automator.findOneByTestTag("ciacola-studio-tab-theme"))
-                val lintTab = checkNotNull(automator.findOneByTestTag("ciacola-studio-tab-lint"))
-                assertEquals(StudioInspectorTab.Motion, studioWorkspace.activeTab)
+                // 1. Verify the selection-scoped Design | Animate tabs mount inside docked Studio.
+                assertNotNull(automator.findOneByTestTag("ciacola-studio-tab-animate"))
+                val elementTab = checkNotNull(automator.findOneByTestTag("ciacola-studio-tab-design"))
+                assertEquals(StudioInspectorTab.Design, studioWorkspace.activeTab)
 
                 val baselineFrame = screenshot(settleDelayMs = 60L)
 
                 // 2. Switch to Theme tab via real synthetic click, mutate stage background live,
                 //    verify visible Skia pixels update, then Undo via the Theme Undo button.
-                automator.click(themeTab)
+                onUi { studioWorkspace.toggleDesignSystemEditor() }
                 settle()
-                assertEquals(StudioInspectorTab.Theme, studioWorkspace.activeTab)
-                assertNotNull(automator.findOneByTestTag("design-system-editor-panel"))
+                assertTrue(studioWorkspace.themeSheetOpen)
+                assertEquals(StudioInspectorTab.Design, studioWorkspace.activeTab)
 
-                val tealBgArgb = Color(0xFF184E68).toArgb().toLong() and 0xFFFFFFFFL
                 onUi {
-                    designStore.updateColors(DeckThemePreset.StageDark) {
-                        it.copy(backgroundArgb = tealBgArgb)
-                    }
+                    themeController.setThemeColor("background", "#184E68")
                 }
                 settle()
                 val themedFrame = screenshot(settleDelayMs = 60L)
                 assertTrue(
                     differingFraction(baselineFrame, themedFrame) > 0.05,
-                    "Expected live Design System background token edit to visibly repaint the stage window",
+                    "Expected live Theme background token edit to visibly repaint the stage window",
                 )
 
-                val themeUndoBtn = checkNotNull(automator.findOneByTestTag("design-editor-undo"))
-                automator.click(themeUndoBtn)
+                onUi { studioWorkspace.undo() }
                 settle()
-                assertFalse(designStore.overridesFor(DeckThemePreset.StageDark).hasOverrides)
+                assertFalse(store.canUndo)
 
                 // 3. Switch to Element tab, click Slide 1's eyebrow directly on the live stage to pick it,
                 //    apply live text copy + Undo via the Element Undo button.
@@ -83,44 +76,40 @@ class EditorOverhaulSpectreTest {
                 val eyebrowNode = stageText("FOUNDATION / PROVISIONAL", exact = true)
                 automator.click(eyebrowNode)
                 settle()
-                assertEquals("s1:eyebrow", elementController.selectedElementId)
+                assertEquals("s1:eyebrow", elementController.selectedNodeId)
 
                 onUi {
-                    elementStore.updateElement("s1:eyebrow") {
-                        it.copy(text = "LIVE STUDIO STAGE EDIT")
-                    }
+                    elementController.applyWholeTextReplacement("LIVE STUDIO STAGE EDIT", nodeId = "s1:eyebrow")
                 }
                 settle()
                 assertNotNull(stageText("LIVE STUDIO STAGE EDIT", exact = true))
 
-                val elementUndoBtn = checkNotNull(automator.findOneByTestTag("ciacola-element-undo"))
+                val elementUndoBtn = checkNotNull(automator.findOneByTestTag("ciacola-app-bar-undo"))
                 automator.click(elementUndoBtn)
                 settle()
                 assertNotNull(stageText("FOUNDATION / PROVISIONAL", exact = true))
-                assertFalse(elementStore.data().hasOverrides)
+                assertFalse(store.canUndo)
 
-                // 4. Switch to Lint tab, click 'Audit Deck', wait for completion across StageDark + KeynoteLight,
+                // 4. Switch to Lint tab, click 'Audit Full Deck', wait for completion across dark + light,
                 //    and assert 0 lint errors out of the box.
-                automator.click(lintTab)
+                onUi { studioWorkspace.toggleDeckLinter() }
                 settle()
-                assertEquals(StudioInspectorTab.Lint, studioWorkspace.activeTab)
-
-                val auditBtn = checkNotNull(automator.findOneByTestTag("ciacola-lint-audit-button"))
-                automator.click(auditBtn)
+                assertTrue(studioWorkspace.issuesDockOpen)
+                onUi { lintController.startFullDeckAudit(CoroutineScope(Dispatchers.Main), listOf("dark", "light")) }
 
                 val deadline = System.nanoTime() + 20.seconds.inWholeNanoseconds
                 while (System.nanoTime() < deadline) {
                     automator.waitForIdle()
-                    if (!lintController.isAuditing && lintController.hasFullDeckAudit) break
+                    if (!lintController.isAuditing && lintController.lastStats.slidesAudited > 0) break
                     delay(80)
                 }
 
                 assertFalse(lintController.isAuditing, "Expected Full-Deck Lint audit to finish")
-                assertTrue(lintController.hasFullDeckAudit, "Expected Full-Deck Lint audit to record results")
+                assertTrue(lintController.lastStats.slidesAudited > 0, "Expected Full-Deck Lint audit to record results")
                 assertEquals(
                     0,
                     lintController.errorCount,
-                    "Expected 0 lint errors across FoundationDeck, found: ${lintController.activeScopeIssues}",
+                    "Expected 0 lint errors across foundation.deck.json, found: ${lintController.issues}",
                 )
             }
         }

@@ -71,7 +71,6 @@ import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalSceneMode
 import dev.bnorm.storyboard.easel.LocalStoryboard
 import dev.bnorm.storyboard.easel.SceneMode
-import dev.sebastiano.ciacola.timeline.LocalTimelineOffscreen
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.rememberReviewStatusPalette
 import java.awt.Window as AwtWindow
@@ -109,6 +108,7 @@ private data class RegisteredEntry(
     val textSnippet: String,
     val isContainer: Boolean,
     val coordinates: LayoutCoordinates,
+    val nodeId: String? = null,
 )
 
 /**
@@ -220,6 +220,9 @@ class ReviewStageCoordinator : ReviewStageBridge {
         currentSceneTitle = title
     }
 
+    /** Optional fallback resolving a stage point/drag rect to a document `nodeId` (e.g. via `StageInspectionRegistry`). */
+    var fallbackNodeIdResolver: ((stagePoint: Offset, dragRect: Rect?) -> String?)? = null
+
     override fun registerTarget(
         key: Any,
         kind: String,
@@ -227,6 +230,7 @@ class ReviewStageCoordinator : ReviewStageBridge {
         textSnippet: String,
         isContainer: Boolean,
         coordinates: LayoutCoordinates,
+        nodeId: String?,
     ) {
         entries[key] = RegisteredEntry(
             kind = kind,
@@ -234,6 +238,7 @@ class ReviewStageCoordinator : ReviewStageBridge {
             textSnippet = textSnippet,
             isContainer = isContainer,
             coordinates = coordinates,
+            nodeId = nodeId,
         )
     }
 
@@ -255,6 +260,7 @@ class ReviewStageCoordinator : ReviewStageBridge {
                 textSnippet = entry.textSnippet,
                 isContainer = entry.isContainer,
                 stageBounds = rect,
+                nodeId = entry.nodeId,
             )
         }
     }
@@ -288,9 +294,10 @@ class ReviewStageCoordinator : ReviewStageBridge {
                 text.startsWith("previewScale=") ||
                 text.startsWith("zoom=")
 
-        fun walk(node: SemanticsNode) {
+        fun walk(node: SemanticsNode, enclosingDocNodeId: String? = null) {
             val tag = node.config.getOrNull(SemanticsProperties.TestTag).orEmpty()
             if (
+                tag.startsWith("doc-ghost-node-") ||
                 (tag.startsWith("ciacola-review-") && tag != "ciacola-review-stage") ||
                 tag.startsWith("ciacola-hud-") ||
                 tag.startsWith("ciacola-timeline-") ||
@@ -299,6 +306,11 @@ class ReviewStageCoordinator : ReviewStageBridge {
                 tag == "ciacola-inspector-vscrollbar"
             ) {
                 return
+            }
+            val currentDocNodeId = if (tag.startsWith("doc-node-")) {
+                tag.removePrefix("doc-node-").takeIf { it.isNotEmpty() } ?: enclosingDocNodeId
+            } else {
+                enclosingDocNodeId
             }
 
             if (tag != "ciacola-review-stage" && tag != "ciacola-preview-viewport") {
@@ -328,11 +340,12 @@ class ReviewStageCoordinator : ReviewStageBridge {
                             label = snippet.take(48),
                             textSnippet = snippet,
                             bounds = stageRect,
+                            nodeId = currentDocNodeId,
                         )
                     }
                 }
             }
-            node.children.forEach(::walk)
+            node.children.forEach { walk(it, currentDocNodeId) }
         }
 
         runCatching {
@@ -351,18 +364,21 @@ class ReviewStageCoordinator : ReviewStageBridge {
     }
 
     internal fun resolveHit(stagePoint: Offset, dragRect: Rect?): ReviewTargetHit {
-        return resolveBestReviewHit(
+        val hit = resolveBestReviewHit(
             stagePoint = stagePoint,
             dragRect = dragRect,
             registeredTargets = snapshotRegisteredTargets(),
             semanticsHits = collectDesktopSemanticsHits(),
         )
+        if (hit.nodeId != null) return hit
+        val fallbackId = fallbackNodeIdResolver?.invoke(stagePoint, dragRect) ?: return hit
+        return hit.copy(nodeId = fallbackId)
     }
 
     val stageDecorator: ContentDecorator = ContentDecorator { content ->
-        // Offscreen timeline indexing scenes and Esc Overview thumbnails must never take over
+        // Esc Overview thumbnails and non-Story preview mounts must never take over
         // (or, when they close, reset) the live stage's coordinates, capture layer, or popups.
-        if (LocalSceneMode.current != SceneMode.Story || LocalTimelineOffscreen.current || LocalOverviewOpen.current) {
+        if (LocalSceneMode.current != SceneMode.Story || LocalOverviewOpen.current) {
             content()
             return@ContentDecorator
         }
@@ -613,7 +629,8 @@ private fun ReviewStageHighlightsAndPins(
         val inspectColor = statusPalette.inspectAccent
         val marqueeColor = statusPalette.marqueeAccent
 
-        hoveredHit?.bounds?.toRect()?.let { rect ->
+        // Empty canvas falls back to a `Stage` hit: no 48px dashed box for "nothing" under the pointer.
+        hoveredHit?.takeIf { it.kind != "Stage" }?.bounds?.toRect()?.let { rect ->
             drawRoundRect(
                 color = inspectColor.copy(alpha = 0.12f),
                 topLeft = rect.topLeft,

@@ -1,9 +1,5 @@
 package dev.sebastiano.ciacola.studio
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.Button
 import androidx.compose.material.Text
 import androidx.compose.runtime.getValue
@@ -12,16 +8,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
 import dev.sebastiano.ciacola.DeckCatalog
-import dev.sebastiano.ciacola.authoring.DeckHostParams
-import dev.sebastiano.ciacola.authoring.Specimen
-import dev.sebastiano.ciacola.authoring.ciacolaDeck
-import dev.sebastiano.ciacola.effects.DeckEditableText
+import dev.sebastiano.ciacola.document.BeatSpec
+import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.ContainerPayload
+import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.document.NodeSpec
+import dev.sebastiano.ciacola.document.PaddingSpec
+import dev.sebastiano.ciacola.document.RichTextValue
+import dev.sebastiano.ciacola.document.SlideSpec
+import dev.sebastiano.ciacola.document.SpecimenPayload
+import dev.sebastiano.ciacola.document.TextPayload
+import dev.sebastiano.ciacola.document.deckSpecimens
 import dev.sebastiano.ciacola.qa.QaStudioRule
 import dev.sebastiano.ciacola.qa.SyntheticInput
-import dev.sebastiano.ciacola.theme.LocalDeckTheme
 import dev.sebastiano.spectre.testing.runSpectreTest
 import java.awt.event.KeyEvent
 import kotlin.test.Test
@@ -31,10 +32,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Rule
 
 /**
- * Verifies D-14 / D-17 Show-mode focus-proof navigation & global `F2` Presenter toggle:
+ * Verifies Show-mode focus-proof navigation & global `F2` Presenter toggle:
  * 1. Clicking an interactive live Compose `Specimen` button (`specimen-focus-play-button`) in
  *    Show Mode must never trap `→` / `←` slide navigation.
  * 2. Pressing `F2` opens Presenter View from the Story window, navigation keys work while
@@ -47,50 +50,74 @@ class ShowModeNavigationFocusSpectreTest {
 
     @Test
     fun clickingLiveSpecimenButtonInShowModeDoesNotBreakArrowNavigation(): Unit = runSpectreTest(timeout = 120.seconds) {
+        val specimens = deckSpecimens {
+            specimen("test.springButton") {
+                content {
+                    var triggered by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = { triggered = !triggered },
+                        modifier = Modifier
+                            .stageHitRegion()
+                            .testTag("specimen-focus-play-button"),
+                    ) {
+                        Text(if (triggered) "← Reset Springs" else "Trigger Springs →")
+                    }
+                }
+            }
+        }
+
+        val doc = DeckDocument(
+            id = "specimen-focus-fixture",
+            title = "Specimen Focus Fixture",
+            slides = listOf(
+                SlideSpec(
+                    id = "interactive-specimen",
+                    title = "Interactive Specimen",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "focus:s1:col",
+                            column = ContainerPayload(
+                                gap = 24.0,
+                                padding = PaddingSpec(all = 96.0),
+                                children = listOf(
+                                    NodeSpec(
+                                        id = "focus:s1:title",
+                                        text = TextPayload(
+                                            value = RichTextValue.Plain("Beat One — Interactive Specimen"),
+                                            style = "title",
+                                        ),
+                                        builds = listOf(
+                                            Build.Change(
+                                                beat = 1,
+                                                set = buildJsonObject {
+                                                    put(
+                                                        "text",
+                                                        buildJsonObject {
+                                                            put("value", "Beat Two — Advanced Cleanly")
+                                                        },
+                                                    )
+                                                },
+                                            ),
+                                        ),
+                                    ),
+                                    NodeSpec(
+                                        id = "focus:s1:specimen",
+                                        interactive = "pointer",
+                                        specimen = SpecimenPayload(ref = "test.springButton"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
         val studio = qa.launchStudio(
             timelineDocked = false,
             worker = "show-nav-focus",
-            storyboardFactory = { req ->
-                ciacolaDeck(
-                    id = "specimen-focus-fixture",
-                    title = "Specimen Focus Fixture",
-                    host = DeckHostParams(
-                        theme = req.theme,
-                        bundledPreset = req.bundledPreset,
-                        stageDecorator = req.stageDecorator,
-                        timelineOverrides = req.timelineOverrides,
-                        elementOverrides = req.elementOverrides,
-                        designOverrides = req.designOverrides,
-                        timelineOverridesProvider = req.timelineOverridesProvider,
-                        elementOverridesProvider = req.elementOverridesProvider,
-                        designOverridesProvider = req.designOverridesProvider,
-                    ),
-                ) {
-                    slide(key = "interactive-specimen", title = "Interactive Specimen", beats = 2) {
-                        val theme = LocalDeckTheme.current
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(96.dp),
-                            verticalArrangement = Arrangement.spacedBy(24.dp),
-                        ) {
-                            DeckEditableText(
-                                elementId = "focus:s1:title",
-                                text = byBeat("Beat One — Interactive Specimen", "Beat Two — Advanced Cleanly"),
-                                style = theme.typography.title,
-                                color = theme.colors.foreground,
-                            )
-                            Specimen(id = "focus:s1:specimen", label = "Interactive Spring Specimen") {
-                                var triggered by remember { mutableStateOf(false) }
-                                Button(
-                                    onClick = { triggered = !triggered },
-                                    modifier = Modifier.testTag("specimen-focus-play-button"),
-                                ) {
-                                    Text(if (triggered) "← Reset Springs" else "Trigger Springs →")
-                                }
-                            }
-                        }
-                    }
-                }
-            },
+            documentFactory = { doc to specimens },
         )
         with(studio) {
             assertEquals(Storyboard.Index(0, 0), animatic.presentedIndex)

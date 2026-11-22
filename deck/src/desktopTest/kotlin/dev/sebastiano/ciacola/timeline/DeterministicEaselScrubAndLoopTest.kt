@@ -2,23 +2,38 @@ package dev.sebastiano.ciacola.timeline
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
+import dev.sebastiano.ciacola.createLoadedTestDeckStore
+import dev.sebastiano.ciacola.decks.AllDocumentDecks
+import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
+import dev.sebastiano.ciacola.document.render.rememberDocumentStoryboard
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
@@ -48,11 +63,11 @@ class DeterministicEaselScrubAndLoopTest {
     }
 
     @Test
-    fun animaticSeekToSegmentScrubsCrossSlideOverlapAndSharedBoundsForwardAndBackwardDeterministically() =
+    fun animaticSeekToSegmentScrubsCrossSlideOverlapAndSharedCardForwardAndBackwardDeterministically() =
         runComposeUiTest {
             lateinit var animatic: Animatic
             lateinit var uiScope: CoroutineScope
-            val deck = createFoundationDeck()
+            val deck = buildFoundationTestStoryboard()
 
             setContent {
                 uiScope = rememberCoroutineScope()
@@ -65,16 +80,17 @@ class DeterministicEaselScrubAndLoopTest {
             waitForIdle()
             assertTrue(animatic.stateDescriptors.isNotEmpty(), "Expected populated stateDescriptors")
 
-            // 1. Cross-slide boundary segment (Scene 0 Frame.End -> Scene 1 Frame.Start):
-            // Both scenes overlap deterministically during (0f, 1f) and settle cleanly at 1f!
             val scene0EndIdx = animatic.stateDescriptors.first {
                 it.sceneIndex == 0 && it.isBoundaryEnd
             }.stateIndex
 
-            scrubTo(uiScope, animatic, scene0EndIdx, 0.45f)
+            // Early in cross-slide MagicMove (0.10f), outgoing eyebrow is visible; late (0.90f), incoming eyebrow is visible.
+            scrubTo(uiScope, animatic, scene0EndIdx, 0.10f)
             assertEquals(scene0EndIdx, animatic.activeFromStateIndex)
-            assertEquals(0.45f, animatic.activeFraction, absoluteTolerance = 0.02f)
+            assertEquals(0.10f, animatic.activeFraction, absoluteTolerance = 0.02f)
             onNodeWithText("FOUNDATION / PROVISIONAL").assertIsDisplayed()
+
+            scrubTo(uiScope, animatic, scene0EndIdx, 0.90f)
             onNodeWithText("SHARED ELEMENT / PROVISIONAL").assertIsDisplayed()
 
             // Settling to Scene 1 Frame 0 unmounts Scene 0 cleanly without residual nodes.
@@ -84,47 +100,76 @@ class DeterministicEaselScrubAndLoopTest {
             scrubTo(uiScope, animatic, scene1Frame0Idx, 0f)
             assertEquals(0, onAllNodesWithText("FOUNDATION / PROVISIONAL").fetchSemanticsNodes().size)
 
-            // 2. Scrub sharedBounds segment forward to 25%, forward to 75%, then BACKWARD to 25%!
+            // Scrub S2:B0 -> B1 shared-card segment forward to 25%, forward to 75%, then BACKWARD to 25%!
             scrubTo(uiScope, animatic, scene1Frame0Idx, 0.25f)
-            val boundsAt25Forward: Rect = onAllNodesWithText("shared").fetchSemanticsNodes().last().boundsInRoot
+            val boundsAt25Forward: Rect = onNodeWithTag("doc-node-foundation-shared-card").fetchSemanticsNode().boundsInRoot
 
             scrubTo(uiScope, animatic, scene1Frame0Idx, 0.75f)
-            val boundsAt75: Rect = onAllNodesWithText("shared").fetchSemanticsNodes().last().boundsInRoot
-            assertNotEquals(boundsAt25Forward.left, boundsAt75.left, "Shared element should move between 25% and 75%")
+            val boundsAt75: Rect = onNodeWithTag("doc-node-foundation-shared-card").fetchSemanticsNode().boundsInRoot
+            assertNotEquals(boundsAt25Forward.left, boundsAt75.left, "Shared card should move/expand between 25% and 75%")
 
-            // Scrub BACKWARD to 25% without settling — must match 25% forward with zero AnimatedContent drift!
+            // Scrub BACKWARD to 25% without settling — must match 25% forward!
             scrubTo(uiScope, animatic, scene1Frame0Idx, 0.25f)
-            val boundsAt25Backward: Rect = onAllNodesWithText("shared").fetchSemanticsNodes().last().boundsInRoot
+            val boundsAt25Backward: Rect = onNodeWithTag("doc-node-foundation-shared-card").fetchSemanticsNode().boundsInRoot
             assertEquals(boundsAt25Forward.left, boundsAt25Backward.left, absoluteTolerance = 2f)
         }
 
     @Test
-    fun deckLoopClockScrubsAmbientMeshDeterministicallyWhenInSubComposition() = runComposeUiTest {
-        val loopClock = DeckLoopClock().apply {
-            enterSubComp("foundation-mesh-loop")
-            scrubbedMillis = 0L
-        }
-        var observedAtZero = -1L
-        var observedAtQuarter = -1L
+    fun renderSessionScrubsAmbientMeshDeterministicallyViaMasterPlayheadMillis() = runComposeUiTest {
+        var playheadMs by mutableLongStateOf(0L)
+        val store = createLoadedTestDeckStore()
 
         setContent {
-            CompositionLocalProvider(LocalDeckLoopClock provides loopClock) {
-                val elapsed = rememberDeckLoopMillis(
-                    loopId = "foundation-mesh-loop",
-                    label = "Ambient Mesh",
-                    periodMillis = 6_000L,
+            val session = remember {
+                RenderSession.forPresent(
+                    store = store,
+                    freeClockMillis = { 999L },
+                    masterPlayheadMillis = { playheadMs },
                 )
-                if (loopClock.scrubbedMillis == 0L) observedAtZero = elapsed
-                if (loopClock.scrubbedMillis == 1_500L) observedAtQuarter = elapsed
+            }
+            val sb = rememberDocumentStoryboard(
+                session = session,
+                config = DocumentRenderConfig(
+                    themeName = "dark",
+                    specimens = AllDocumentDecks.foundation.specimens,
+                ),
+            )
+            Box(Modifier.size(320.dp, 180.dp).testTag("mesh-scrub")) {
+                Easel(
+                    rememberAnimatic(
+                        initialIndex = Storyboard.Index(2, 0),
+                        storyboard = { sb },
+                    ),
+                )
             }
         }
-
         waitForIdle()
-        assertEquals(0L, observedAtZero)
-        assertTrue(loopClock.registeredLoops.containsKey("foundation-mesh-loop"))
+        val atZero = onNodeWithTag("mesh-scrub").captureToImage().toPixelMap()
 
-        loopClock.scrubbedMillis = 1_500L
+        runOnIdle { playheadMs = 1_500L }
         waitForIdle()
-        assertEquals(1_500L, observedAtQuarter)
+        val atQuarter = onNodeWithTag("mesh-scrub").captureToImage().toPixelMap()
+
+        runOnIdle { playheadMs = 0L }
+        waitForIdle()
+        val backToZero = onNodeWithTag("mesh-scrub").captureToImage().toPixelMap()
+
+        var diffZeroQuarter = 0
+        var diffZeroReturn = 0
+        for (y in 0 until atZero.height step 4) {
+            for (x in 0 until atZero.width step 4) {
+                val c0 = atZero[x, y]
+                val cq = atQuarter[x, y]
+                val cr = backToZero[x, y]
+                if (abs(c0.red - cq.red) > 0.02f || abs(c0.green - cq.green) > 0.02f || abs(c0.blue - cq.blue) > 0.02f) {
+                    diffZeroQuarter++
+                }
+                if (abs(c0.red - cr.red) > 0.01f || abs(c0.green - cr.green) > 0.01f || abs(c0.blue - cr.blue) > 0.01f) {
+                    diffZeroReturn++
+                }
+            }
+        }
+        assertTrue(diffZeroQuarter > 10, "Scrubbing masterPlayheadMillis 0 -> 1500ms must move ambient mesh")
+        assertEquals(0, diffZeroReturn, "Scrubbing masterPlayheadMillis back to 0ms must reproduce exact frame")
     }
 }

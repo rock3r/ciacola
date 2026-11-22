@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toPixelMap
@@ -16,9 +16,6 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
-import dev.sebastiano.ciacola.inspector.DeckElementOverridesFile
-import dev.sebastiano.ciacola.inspector.ElementPatch
-import dev.sebastiano.ciacola.inspector.LocalElementOverrides
 import dev.sebastiano.ciacola.inspector.LocalStageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.theme.DeckThemeProvider
@@ -69,15 +66,15 @@ class DeckSkslShaderTest {
     }
 
     @Test
-    fun uniformFloatOverrideUpdatesPixelsAndRecordsStageNodeSnapshot() = runComposeUiTest {
-        var overrides by mutableStateOf(DeckElementOverridesFile())
+    fun uniformFloatUpdatesPixelsAndRecordsStageNodeSnapshot() = runComposeUiTest {
+        var redParam by mutableFloatStateOf(0.15f)
         val registry = StageInspectionRegistry()
         var lastResolvedRed = -1f
 
         setContent {
+            val activeRed = redParam
             DeckThemeProvider(DeckThemes.stageDark()) {
                 CompositionLocalProvider(
-                    LocalElementOverrides provides overrides,
                     LocalStageInspectionRegistry provides registry,
                 ) {
                     Box(Modifier.size(160.dp, 160.dp)) {
@@ -87,7 +84,7 @@ class DeckSkslShaderTest {
                             label = "Tunable Red Shader",
                             modifier = Modifier.size(160.dp, 160.dp).testTag("tunable-shader"),
                         ) {
-                            lastResolvedRed = uniformFloat("redLevel", default = 0.15f, range = 0f..1f)
+                            lastResolvedRed = uniformFloat("redLevel", default = activeRed, range = 0f..1f)
                         }
                     }
                 }
@@ -109,14 +106,7 @@ class DeckSkslShaderTest {
         val beforeCenterRed = beforePixels[beforePixels.width / 2, beforePixels.height / 2].red
 
         runOnIdle {
-            overrides = DeckElementOverridesFile(
-                elements = mapOf(
-                    "test:shader" to ElementPatch(
-                        elementId = "test:shader",
-                        uniforms = mapOf("redLevel" to 0.92f),
-                    ),
-                ),
-            )
+            redParam = 0.92f
         }
         waitForIdle()
 
@@ -125,7 +115,7 @@ class DeckSkslShaderTest {
         val afterCenterRed = afterPixels[afterPixels.width / 2, afterPixels.height / 2].red
         assertTrue(
             beforeCenterRed < 0.35f && afterCenterRed > 0.75f,
-            "Expected uniformFloat override to change rendered red channel ($beforeCenterRed -> $afterCenterRed)",
+            "Expected uniformFloat update to change rendered red channel ($beforeCenterRed -> $afterCenterRed)",
         )
     }
 

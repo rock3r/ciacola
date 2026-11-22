@@ -1,53 +1,59 @@
 package dev.sebastiano.ciacola.qa
 
+import dev.sebastiano.ciacola.studio.StudioInspectorTab
+import dev.sebastiano.ciacola.studio.StudioMode
 import dev.sebastiano.spectre.testing.runSpectreTest
+import java.awt.event.KeyEvent
 import kotlin.test.Test
-import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 import org.junit.Rule
 
-/** Closing the studio must leave a clean presenting stage: no authoring overlays, no frozen loops. */
+/** Entering Present mode must leave a clean presenting stage with zero authoring overlays. */
 class CloseStudioCleanupSpectreTest {
 
     @get:Rule
     val qa = QaStudioRule()
 
     @Test
-    fun closingTheTimelineHidesSelectionAndExitsTheLoopSubComp(): Unit = runSpectreTest(timeout = 120.seconds) {
+    fun closingTheTimelineHidesDirectEditOverlayAndRestoresOnReopen(): Unit = runSpectreTest(timeout = 120.seconds) {
         val studio = qa.launchStudio(worker = "fix-stage")
         with(studio) {
             openTimeline()
-            restOnBeat(sceneIndex = 1, frameIndex = 0)
-            automator.click(automator.waitForNode(tag = "ciacola-track-row-shared:foundation-shared-card", timeout = 5.seconds))
-            val overlay = { automator.findOneByTestTag("ciacola-stage-selection-overlay")?.contentDescription.orEmpty() }
-            automator.waitUntil(description = "card highlighted while authoring", timeout = 5.seconds) {
-                overlay().startsWith("selected=shared:foundation-shared-card")
-            }
-
-            // Enter the loop sub-comp, then close the studio from the HUD.
-            automator.click(automator.waitForNode(tag = "ciacola-timeline-open-loop", timeout = 5.seconds))
-            automator.waitForNode(tag = "ciacola-timeline-exit-subcomp", timeout = 5.seconds)
+            restOnBeat(sceneIndex = 0, frameIndex = 0)
+            val designTab = automator.waitForNode(tag = "ciacola-studio-tab-design", timeout = 5.seconds)
+            automator.click(designTab)
             settle()
-            automator.click(automator.waitForNode(tag = "ciacola-hud-toggle-timeline", timeout = 5.seconds))
-            automator.waitUntil(description = "studio closed", timeout = 5.seconds) { !controller.authoringActive }
+            assertTrue(studioWorkspace.isElementPickingEnabled)
+            automator.waitForNode(tag = "ciacola-doc-stage-direct-edit", timeout = 5.seconds)
+
+            // Select a node on stage while authoring, then switch to Present mode from the App Bar.
+            onUi { elementController.selectNode("s1:eyebrow") }
+            settle()
+            automator.click(automator.waitForNode(tag = "ciacola-app-bar-mode-present", timeout = 5.seconds))
+            automator.waitUntil(description = "studio closed in Present mode", timeout = 5.seconds) {
+                studioWorkspace.mode == StudioMode.Present && !timelineWindow.authoringActive
+            }
             settle()
 
-            automator.waitUntil(description = "no selection highlight while presenting (overlay: ${overlay()})", timeout = 5.seconds) {
-                overlay() == "selected=none highlighted=0"
-            }
-            assertNull(loopClock.activeSubCompLoopId, "Closing the studio leaves the loop sub-comp")
-            assertTrue(loopClock.isPlaying, "Ambient loops free-run again")
-            assertNull(loopClock.scrubbedMillis)
+            assertFalse(studioWorkspace.isElementPickingEnabled)
+            assertNull(
+                automator.findOneByTestTag("ciacola-doc-stage-direct-edit"),
+                "Present mode must unmount direct-edit overlay",
+            )
+            assertNull(
+                automator.findOneByTestTag("ciacola-studio-app-bar"),
+                "Present mode must hide Studio App Bar",
+            )
 
-            // Re-opening the studio brings the selection back.
-            automator.click(automator.waitForNode(tag = "ciacola-hud-toggle-timeline", timeout = 5.seconds))
-            automator.waitForNode(tag = "ciacola-timeline-canvas", timeout = 5.seconds)
-            automator.waitUntil(description = "selection restored when authoring again", timeout = 5.seconds) {
-                overlay().startsWith("selected=shared:foundation-shared-card")
-            }
-            assertEquals("shared:foundation-shared-card", controller.selectedTrackId)
+            // Pressing Esc returns to Edit mode, restoring the Design tab & direct-edit overlay.
+            automator.pressKey(KeyEvent.VK_ESCAPE)
+            automator.waitForNode(tag = "ciacola-studio-app-bar", timeout = 5.seconds)
+            settle()
+            assertTrue(studioWorkspace.activeTab == StudioInspectorTab.Design)
+            automator.waitForNode(tag = "ciacola-doc-stage-direct-edit", timeout = 5.seconds)
         }
     }
 }

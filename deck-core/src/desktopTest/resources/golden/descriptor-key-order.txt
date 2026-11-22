@@ -1,0 +1,37 @@
+DeckDocument: format, id, title, stage, themes, defaultTheme, fonts, palettes, loopPeriodsMs, slides
+StageSize: width, height
+DeckThemeSpec: preset, colors, typography, motion
+ThemeMotionDefaults: durationMs, curve, transition
+TextStyleOverride: font, size, weight, italic, color, lineHeight, tracking, align
+SlidePaletteSpec: canvas, ink, mutedInk, accent, surface, border
+SlideSpec: id, title, skipped, palette, background, beats, nodes, transition
+BeatSpec: notes, phases, stagger, autoAdvanceMs
+FrameSpec: x, y, w, h
+Vec2: x, y
+GradientStop: at, color
+GradientSpec: type, angle, center, radius, stops
+ImageFillSpec: src, fit, tint
+StrokeSpec: color, width, dash, cap, join
+SurfaceSpec: fill, stroke, cornerRadius, padding
+TextRun: text, font, size, weight, italic, color, tracking, underline, strike, baselineShift, background
+TextMorphSpec: by, pruneStopwords, phases, stagger
+TextPayload: value, style, font, size, weight, italic, color, lineHeight, tracking, align, surface, morph
+CodePayload: value, language, highlightLines, fit, surface
+LineHeads: start, end
+ShapePayload: geometry, fill, stroke, cornerRadius, heads
+ImagePayload: src, fit, tint
+ConnectorPayload: from, to, fromAnchor, toAnchor, style, stroke, heads, gap
+SpecimenTrackOverride: beat, delayMs, durationMs, curve
+SpecimenPayload: ref, params, tracks
+ContainerPayload: children, gap, padding, alignItems, justify, surface, clip
+LoupePayload: children, target, zoom, diameter, align, lensFill
+NodeSpec: id, frame, align, weight, offset, opacity, rotation, scale, origin, interactive, text, code, shape, image, connector, specimen, stack, row, column, loupe, builds
+Timing: delayMs, durationMs, curve
+Phases: exit, move, enter
+Stagger: ms, order, reverse, manual
+SpringParams: damping, stiffness
+Build.Enter: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
+Build.Exit: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
+Build.Emphasis: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
+Build.Change: beat, id, set, path, morph, after, delayMs, durationMs, curve
+TransitionSpec: type, direction, color, center, delayMs, durationMs, curve, phases, stagger, text

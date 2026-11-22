@@ -10,7 +10,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.dp
+import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 
 /** Which timeline studio surface owns a canvas viewport measurement. */
@@ -27,7 +31,7 @@ internal const val TIMELINE_RIGHT_PAD_DP = 48f
 
 /** Frame-level zoom for the `;` toggle: one 60 fps frame spans ~12 dp. */
 const val FRAME_LEVEL_DP_PER_MS = 0.72f
-const val MIN_DP_PER_MS = 0.01f
+const val MIN_DP_PER_MS = 0.0005f
 const val MAX_DP_PER_MS = 3f
 const val DEFAULT_LAYER_COLUMN_WIDTH_DP = 236f
 const val MIN_LAYER_COLUMN_WIDTH_DP = 180f
@@ -180,7 +184,7 @@ class TimelineViewportState {
         setScrollDp(px / d, surface)
     }
 
-    /** Zooms by [factor] keeping the time under [anchorX] fixed (AE Alt+wheel behaviour). */
+    /** Zooms by [factor] keeping the time under [anchorX] fixed (Alt+wheel). */
     fun zoomBy(factor: Float, anchorX: Float, surface: TimelineSurface? = activeSurface) {
         setZoomDpPerMs(dpPerMs * factor, anchorX, surface)
     }
@@ -207,6 +211,37 @@ class TimelineViewportState {
         isFitLocked = true
     }
 
+    /**
+     * Zooms and horizontally frames the time interval `[startMs, endMs]` (with optional padding
+     * fraction on either side) so a single slide or beat's tracks span ~75-85% of the canvas width
+     * even inside 136-slide / 177s presentations.
+     */
+    fun zoomToRange(
+        startMs: Int,
+        endMs: Int,
+        paddingFraction: Float = 0.08f,
+        minSpanMs: Int = 1_000,
+        surface: TimelineSurface? = activeSurface,
+    ) {
+        val s = surface ?: activeSurface
+        val safeStart = startMs.coerceAtLeast(0)
+        val safeEnd = endMs.coerceAtLeast(safeStart)
+        val rawSpan = (safeEnd - safeStart).coerceAtLeast(minSpanMs)
+        val padMs = (rawSpan * paddingFraction.coerceIn(0f, 0.4f))
+        val paddedSpanMs = (rawSpan + padMs * 2f).coerceAtLeast(minSpanMs.toFloat())
+        val viewW = viewportWidthDp(s)
+        val usableDp = if (viewW > 0f) {
+            (viewW - TIMELINE_LEFT_PAD_DP * 2 - TIMELINE_RIGHT_PAD_DP).coerceAtLeast(80f)
+        } else {
+            480f
+        }
+        val targetDpPerMs = (usableDp / paddedSpanMs).coerceIn(minZoomDpPerMs(s), MAX_DP_PER_MS)
+        dpPerMs = targetDpPerMs
+        isFitLocked = false
+        val targetScrollDp = (safeStart - padMs).coerceAtLeast(0f) * dpPerMs
+        setScrollDp(targetScrollDp, s)
+    }
+
     /** Re-applies fit zoom on window resize or duration changes while in sticky fit mode. */
     fun applyStickyFitIfNeeded(surface: TimelineSurface? = activeSurface) {
         val s = surface ?: activeSurface
@@ -222,7 +257,7 @@ class TimelineViewportState {
         return abs(dpPerMs - fit) / fit < 0.08f
     }
 
-    /** `;` in After Effects: toggle between the whole composition and frame-level detail. */
+    /** `;` toggles between the whole composition and frame-level detail. */
     fun toggleFitAndFrames(anchorTimeMs: Float, surface: TimelineSurface? = activeSurface) {
         val s = surface ?: activeSurface
         if (isNearFit(s)) {
@@ -250,9 +285,53 @@ class TimelineViewportState {
             scrollHorizontallyBy(x - (widthPx - margin), s)
         }
     }
+
+    /**
+     * Brings `[startMs, endMs]` into the horizontal viewport, preferring the start edge when the
+     * range is wider than the viewport. Never changes zoom.
+     */
+    fun ensureRangeVisible(
+        startMs: Float,
+        endMs: Float,
+        marginPx: Float = 32f * density,
+        surface: TimelineSurface? = activeSurface,
+    ) {
+        val s = surface ?: activeSurface
+        val widthPx = viewportWidthPx(s)
+        if (widthPx <= 0f) return
+        val margin = marginPx.coerceAtMost(widthPx * 0.25f)
+        val x0 = xForTime(startMs, s)
+        val x1 = xForTime(endMs.coerceAtLeast(startMs), s)
+        when {
+            x1 - x0 > widthPx - margin * 2 || x0 < margin -> scrollHorizontallyBy(x0 - margin, s)
+            x1 > widthPx - margin -> scrollHorizontallyBy(x1 - (widthPx - margin), s)
+        }
+    }
+
+    /** Snapshot of zoom + horizontal scroll so a scope can restore exactly where the user left it. */
+    fun captureZoom(surface: TimelineSurface? = activeSurface): TimelineZoomMemento =
+        TimelineZoomMemento(dpPerMs = dpPerMs, scrollDp = scrollDp(surface), fitLocked = isFitLocked)
+
+    fun restoreZoom(memento: TimelineZoomMemento, surface: TimelineSurface? = activeSurface) {
+        val s = surface ?: activeSurface
+        if (memento.fitLocked) {
+            zoomToFit(s)
+            return
+        }
+        dpPerMs = memento.dpPerMs.coerceIn(minZoomDpPerMs(s), MAX_DP_PER_MS)
+        isFitLocked = false
+        setScrollDp(memento.scrollDp, s)
+    }
 }
 
-/** Zoom/pan of the slide preview (After Effects composition viewer behaviour). */
+/** Saved zoom level and horizontal scroll for one timeline scope (`Slide` or `All`). */
+data class TimelineZoomMemento(
+    val dpPerMs: Float,
+    val scrollDp: Float,
+    val fitLocked: Boolean,
+)
+
+/** Zoom/pan of the slide preview (pro compositing viewer behaviour). */
 @Stable
 class StagePreviewViewportState {
     var scale by mutableFloatStateOf(1f)
@@ -284,4 +363,95 @@ class StagePreviewViewportState {
         const val MIN_PREVIEW_SCALE = 0.25f
         const val MAX_PREVIEW_SCALE = 8f
     }
+}
+
+private val MASTER_RULER_TICK_STEPS_MS = intArrayOf(
+    50,
+    100,
+    250,
+    500,
+    1_000,
+    2_000,
+    5_000,
+    10_000,
+    15_000,
+    30_000,
+    60_000,
+    120_000,
+    300_000,
+    600_000,
+)
+
+/**
+ * Picks the smallest readable major ruler tick interval (in milliseconds) whose horizontal spacing
+ * is at least [minSpacingDp] at [dpPerMs], adapting cleanly from frame-level zoom (`50ms`) out to
+ * 136-slide / 15+ minute master decks (`10s`, `15s`, `30s`, `60s`, `120s`, `300s`, `600s`).
+ */
+internal fun chooseMasterRulerTickStepMs(
+    dpPerMs: Float,
+    minSpacingDp: Float = 84f,
+): Int {
+    val safeDpPerMs = dpPerMs.coerceAtLeast(MIN_DP_PER_MS)
+    for (step in MASTER_RULER_TICK_STEPS_MS) {
+        if (step * safeDpPerMs >= minSpacingDp) return step
+    }
+    return MASTER_RULER_TICK_STEPS_MS.last()
+}
+
+internal fun chooseMasterRulerMinorStepMs(majorStepMs: Int): Int = when (majorStepMs) {
+    600_000 -> 120_000
+    300_000 -> 60_000
+    120_000 -> 30_000
+    60_000 -> 15_000
+    30_000 -> 10_000
+    15_000 -> 5_000
+    else -> (majorStepMs / 5).coerceAtLeast(1)
+}
+
+/** Master ruler tick label; delegates to the single shared [formatTimelineRulerLabel]. */
+fun formatMasterTimelineTick(ms: Int, stepMs: Int, maxVisibleMs: Int = ms): String =
+    formatTimelineRulerLabel(ms, stepMs, maxVisibleMs)
+
+/**
+ * Maps an x-coordinate on the bird's-eye slide minimap strip to the target 0-based slide index.
+ */
+internal fun minimapSlideIndexForX(
+    xPx: Float,
+    widthPx: Float,
+    slides: List<SlideSectionBar>,
+    totalDurationMs: Int,
+): Int {
+    if (slides.isEmpty() || widthPx <= 0f) return 0
+    val frac = (xPx / widthPx).coerceIn(0f, 1f)
+    if (totalDurationMs <= 0) {
+        return (frac * slides.size).toInt().coerceIn(0, slides.lastIndex)
+    }
+    val targetMs = frac * totalDurationMs
+    val idx = slides.indexOfFirst { targetMs < it.endMs }
+    return if (idx >= 0) idx else slides.lastIndex
+}
+
+internal val SLIDE_MINIMAP_HEIGHT = 20.dp
+internal const val SLIDE_MINIMAP_THRESHOLD = 20
+internal const val LAYER_HEADER_OVERSCAN_ROWS = 4
+
+/**
+ * Computes the inclusive row index window `[first..last]` to compose for the virtualized left
+ * track-header column, including [overscanRows] rows above and below the visible scroll window.
+ */
+internal fun computeVisibleTrackRowRange(
+    totalRows: Int,
+    scrollYPx: Float,
+    viewportHeightPx: Float,
+    rowHeightPx: Float,
+    overscanRows: Int = LAYER_HEADER_OVERSCAN_ROWS,
+): IntRange {
+    if (totalRows <= 0 || rowHeightPx <= 0f) return IntRange.EMPTY
+    val safeScrollY = scrollYPx.coerceAtLeast(0f)
+    val effectiveViewportPx = if (viewportHeightPx > 0f) viewportHeightPx else rowHeightPx * 12f
+    val firstVisible = floor(safeScrollY / rowHeightPx).toInt()
+    val lastVisible = ceil((safeScrollY + effectiveViewportPx) / rowHeightPx).toInt()
+    val start = (firstVisible - overscanRows).coerceIn(0, totalRows - 1)
+    val end = (lastVisible + overscanRows).coerceIn(start, totalRows - 1)
+    return start..end
 }

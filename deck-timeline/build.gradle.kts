@@ -13,5 +13,9 @@ kotlin {
             api(project(":storyboard-easel"))
             implementation(compose.material)
         }
+        getByName("desktopTest").dependencies {
+            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+            implementation(compose.uiTest)
+        }
     }
 }

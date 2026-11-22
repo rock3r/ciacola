@@ -2,7 +2,6 @@ package dev.sebastiano.ciacola.presenter
 
 import androidx.compose.runtime.Immutable
 import dev.bnorm.storyboard.Storyboard
-import dev.sebastiano.ciacola.timeline.VirtualizedFrame
 
 /**
  * Speaker notes attached to a single Storyboard scene, supporting both a slide-level summary
@@ -47,12 +46,7 @@ data class DeckSpeakerNotes(
         scenes[sceneIndex]?.title?.takeIf { it.isNotBlank() } ?: "Slide ${sceneIndex + 1}"
 
     fun resolve(storyboard: Storyboard, index: Storyboard.Index): ResolvedSpeakerNotes {
-        val scene = storyboard.scenes.getOrNull(index.sceneIndex)
-        val rawFrame = scene?.frames?.getOrNull(index.frameIndex)
-        val virtualized = rawFrame as? VirtualizedFrame<*>
-        val baseBeatIndex = virtualized?.baseBeatIndex ?: index.frameIndex
-        val isVirtualHold = virtualized?.isInjected == true
-
+        val baseBeatIndex = index.frameIndex.coerceAtLeast(0)
         val sceneNotes = scenes[index.sceneIndex]
         val title = sceneNotes?.title?.takeIf { it.isNotBlank() } ?: "Slide ${index.sceneIndex + 1}"
         val beatNote = sceneNotes?.beatNotes?.get(baseBeatIndex)?.takeIf { it.isNotBlank() }
@@ -63,7 +57,7 @@ data class DeckSpeakerNotes(
             sceneTitle = title,
             beatIndex = index.frameIndex,
             baseBeatIndex = baseBeatIndex,
-            isVirtualHoldBeat = isVirtualHold,
+            isVirtualHoldBeat = false,
             slideNotes = slideNotes,
             beatNote = beatNote,
         )

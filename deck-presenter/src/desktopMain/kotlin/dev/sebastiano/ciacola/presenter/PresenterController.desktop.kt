@@ -21,6 +21,7 @@ import androidx.compose.ui.window.WindowPlacement
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
+import dev.sebastiano.ciacola.document.DeckDocument
 import java.awt.EventQueue
 import java.awt.GraphicsDevice
 import java.awt.GraphicsEnvironment
@@ -64,16 +65,25 @@ enum class TimerRunState {
 data class ReadinessStatus(
     val studioOpen: Boolean,
     val inspectOpen: Boolean,
-    val hasUnbakedOverrides: Boolean,
     val openAuthoringTools: List<String> = emptyList(),
-    val unbakedDomains: List<String> = emptyList(),
 ) {
     val hasAnyHazard: Boolean
-        get() = studioOpen || inspectOpen || openAuthoringTools.isNotEmpty() || hasUnbakedOverrides
+        get() = studioOpen || inspectOpen || openAuthoringTools.isNotEmpty()
 
     val hasClosableAuthoringTools: Boolean
         get() = studioOpen || inspectOpen || openAuthoringTools.isNotEmpty()
 }
+
+/** Document address of one beat's speaker notes (`slides[slideId].beats[beatIndex].notes`). */
+data class SpeakerNoteTarget(
+    val slideId: String,
+    val beatIndex: Int,
+    /**
+     * `DeckDocument.id` the target belongs to. A non-empty id must match `doc.id` exactly before a
+     * draft is written; an empty id (synthetic/legacy targets) skips the deck-id check.
+     */
+    val deckId: String = "",
+)
 
 /** Connected physical/logical display metadata from AWT [GraphicsEnvironment]. */
 data class DisplayScreenInfo(
@@ -321,12 +331,20 @@ class PresenterController(
     },
     internal var isStudioOpenProvider: () -> Boolean = { false },
     internal var isInspectOpenProvider: () -> Boolean = { false },
-    internal var hasUnbakedOverridesProvider: () -> Boolean = { false },
     internal var openAuthoringToolsProvider: () -> List<String> = { emptyList() },
-    internal var unbakedDomainsProvider: () -> List<String> = { emptyList() },
     internal var onEnterCleanShowModeAction: () -> Unit = {},
     internal var isExternalTextInputActiveProvider: () -> Boolean = { false },
     internal var onRestoreStageFocus: () -> Unit = {},
+    internal var previewStoryboardProvider: (() -> Storyboard)? = null,
+    internal var nextPreviewStoryboardProvider: (() -> Storyboard)? = null,
+    internal var documentProvider: (() -> DeckDocument?)? = null,
+    /**
+     * Persists an inline speaker-notes edit into `beats[beatIndex].notes` of slide `slideId`
+     * (`null` clears the note). When `null`, notes are read-only in Presenter View.
+     */
+    internal var onSaveSpeakerNote: ((slideId: String, beatIndex: Int, note: String?) -> Unit)? = null,
+    /** `true` while notes editing is temporarily unavailable (e.g. a deck switch/quit is in flight). */
+    internal var notesEditingBlockedProvider: () -> Boolean = { false },
     private val displayRouter: DisplayRoutingAdapter = AwtDisplayRouter(),
     timerClockMillis: () -> Long = System::currentTimeMillis,
     private val wallClockProvider: () -> String = { LocalTime.now().format(WALL_CLOCK_FORMATTER) },
@@ -351,6 +369,30 @@ class PresenterController(
     var isOverviewOpen: Boolean by mutableStateOf(false)
         internal set
 
+    /** `true` while the speaker is typing notes inline (navigation shortcuts are suspended). */
+    var isEditingNotes: Boolean by mutableStateOf(false)
+        private set
+
+    /** `(slideId, beatIndex)` captured when inline notes editing started. */
+    var editingNoteTarget: SpeakerNoteTarget? by mutableStateOf(null)
+        private set
+
+    /** Incremented per [beginEditingNotes] so reopening the same target starts a fresh editor session. */
+    var editingSessionId: Long by mutableLongStateOf(0L)
+        private set
+
+    /** Normalized stored note captured by [beginEditingNotes]; drafts equal to it are not written. */
+    private var editingNoteInitial: String? = null
+
+    /** Fallback draft for non-UI callers; the live editor registers [activeDraftProvider] instead. */
+    private var editingNoteDraft: String = ""
+
+    /**
+     * Reads the live editor text synchronously (registered by the notes editor while composed), so
+     * auto-commit on navigation never lags a frame behind the latest keystroke.
+     */
+    internal var activeDraftProvider: (() -> String)? = null
+
     val isExternalTextInputActive: Boolean
         get() = isExternalTextInputActiveProvider()
 
@@ -358,8 +400,6 @@ class PresenterController(
         private set
 
     internal var swallowNextEscapeKeyUp: Boolean by mutableStateOf(false)
-
-    var unbakedNoticeDismissed: Boolean by mutableStateOf(false)
 
     private var advanceJob: Job? = null
 
@@ -379,11 +419,14 @@ class PresenterController(
         get() = animatic.storyboard.scenes.getOrNull(currentSceneIndex)?.frames?.size?.coerceAtLeast(1) ?: 1
 
     val isTransitioning: Boolean
-        get() = animatic.currentIndex != animatic.targetIndex ||
-            (animatic.activeFraction > 0.001f && animatic.activeFromStateIndex != animatic.activeToStateIndex)
+        get() {
+            val inFlightFraction = animatic.activeFraction in 0.001f..0.999f &&
+                animatic.activeFromStateIndex != animatic.activeToStateIndex
+            return animatic.currentIndex != animatic.targetIndex || inFlightFraction
+        }
 
     val transitionProgress: Float
-        get() = if (animatic.currentIndex != animatic.targetIndex || animatic.activeFromStateIndex != animatic.activeToStateIndex) {
+        get() = if (isTransitioning) {
             animatic.activeFraction.coerceIn(0f, 1f)
         } else {
             1f
@@ -402,6 +445,42 @@ class PresenterController(
             return if (pos >= 0) indices.getOrNull(pos + 1) else null
         }
 
+    /**
+     * Effective next step for the Presenter "Next" preview card: skips transient
+     * `autoAdvanceMs == 0` bridge beats (and duplicate landing beat 0 immediately after a
+     * `0 ms` bridge beat) so the Next card always shows the next visually distinct speaker step.
+     */
+    val nextPreviewIndex: Storyboard.Index?
+        get() {
+            val indices = animatic.storyboard.indices
+            val pos = indices.binarySearch(currentIndex)
+            if (pos < 0 || pos + 1 >= indices.size) return null
+
+            val nonSkipped = documentProvider?.invoke()?.slides?.filterNot { it.skipped }
+                ?: return indices[pos + 1]
+
+            fun beatAutoAdvanceMs(idx: Storyboard.Index): Int? =
+                nonSkipped.getOrNull(idx.sceneIndex)?.beats?.getOrNull(idx.frameIndex)?.autoAdvanceMs
+
+            var candidatePos = pos + 1
+            // If currently parked directly on a 0ms bridge beat, the immediate next slide's beat 0
+            // visually mirrors the bridge; advance past it if another beat/slide follows.
+            if (beatAutoAdvanceMs(currentIndex) == 0 &&
+                candidatePos + 1 < indices.size &&
+                indices[candidatePos].sceneIndex != currentIndex.sceneIndex &&
+                indices[candidatePos].frameIndex == 0
+            ) {
+                candidatePos += 1
+            }
+
+            // Skip over any 0ms auto-advance bridge beats along the forward path to show the true
+            // resting beat/slide the presenter will land on after advancing.
+            while (candidatePos + 1 < indices.size && beatAutoAdvanceMs(indices[candidatePos]) == 0) {
+                candidatePos += 1
+            }
+            return indices[candidatePos]
+        }
+
     val flatBeatIndex: Int
         get() = animatic.storyboard.indices.binarySearch(currentIndex).coerceAtLeast(0)
 
@@ -414,24 +493,135 @@ class PresenterController(
     fun resolvedCurrentNotes(): ResolvedSpeakerNotes =
         currentSpeakerNotes().resolve(animatic.storyboard, currentIndex)
 
+    fun currentSlideTitle(): String =
+        humanizePresenterSlideTitle(resolvedCurrentNotes().sceneTitle, currentSceneIndex)
+
     fun nextStepLabel(): String {
-        val next = nextIndex ?: return "End of Deck"
+        val next = nextPreviewIndex ?: return "End of Deck"
         return if (next.sceneIndex == currentSceneIndex) {
-            "Next Beat (${next.frameIndex + 1} / $currentBeatCount)"
+            "Next build (${next.frameIndex + 1} of $currentBeatCount)"
         } else {
-            val title = currentSpeakerNotes().sceneTitle(next.sceneIndex)
-            "Next Slide: $title"
+            val rawTitle = currentSpeakerNotes().sceneTitle(next.sceneIndex)
+            val cleanTitle = humanizePresenterSlideTitle(rawTitle, next.sceneIndex)
+            val num = next.sceneIndex + 1
+            if (cleanTitle.equals("Slide $num", ignoreCase = true) || cleanTitle.isBlank()) {
+                "Next Slide (#$num)"
+            } else {
+                "Next Slide (#$num) · $cleanTitle"
+            }
         }
     }
 
     fun wallClockText(): String = wallClockProvider()
 
+    /** The `(slideId, beatIndex)` the current slide/beat's notes live at in the document. */
+    fun currentNoteTarget(): SpeakerNoteTarget? {
+        val doc = documentProvider?.invoke() ?: return null
+        val slide = doc.slides.filterNot { it.skipped }.getOrNull(currentSceneIndex) ?: return null
+        if (slide.beats.isEmpty()) return null
+        return SpeakerNoteTarget(
+            slideId = slide.id,
+            beatIndex = currentBeatIndex.coerceIn(0, slide.beats.lastIndex),
+            deckId = doc.id,
+        )
+    }
+
+    /** `true` when inline notes editing is available for the current slide. */
+    val canEditNotes: Boolean
+        get() = onSaveSpeakerNote != null && !notesEditingBlockedProvider() && currentNoteTarget() != null
+
+    /** `true` when this deck's notes can never be edited here (as opposed to temporarily blocked). */
+    val isNotesReadOnly: Boolean
+        get() = onSaveSpeakerNote == null
+
+    /** The raw note stored at [target] (empty when unset). */
+    fun storedNote(target: SpeakerNoteTarget?): String {
+        val t = target ?: return ""
+        val doc = documentProvider?.invoke() ?: return ""
+        return doc.slides.firstOrNull { it.id == t.slideId }?.beats?.getOrNull(t.beatIndex)?.notes.orEmpty()
+    }
+
+    /** Starts inline editing of the current slide/beat's notes. Returns `false` when unavailable. */
+    fun beginEditingNotes(): Boolean {
+        if (onSaveSpeakerNote == null || notesEditingBlockedProvider()) return false
+        val target = currentNoteTarget() ?: return false
+        val stored = storedNote(target)
+        editingNoteInitial = stored.normalizedNote()
+        editingNoteDraft = stored
+        editingNoteTarget = target
+        editingSessionId++
+        isEditingNotes = true
+        return true
+    }
+
+    /** Updates the draft for callers without a live editor (the editor's text wins when composed). */
+    fun updateEditingNoteDraft(text: String) {
+        editingNoteDraft = text
+    }
+
+    private fun currentEditingDraft(): String = activeDraftProvider?.invoke() ?: editingNoteDraft
+
+    private fun clearEditingState() {
+        isEditingNotes = false
+        editingNoteTarget = null
+        activeDraftProvider = null
+        editingNoteInitial = null
+        editingNoteDraft = ""
+    }
+
+    /** Discards the inline notes draft (explicit `Esc` / `Cancel`). */
+    fun cancelEditingNotes() {
+        clearEditingState()
+    }
+
+    /**
+     * Closes an open inline editor, writing the draft back to the note it was opened on when it
+     * changed and that note still exists in the same deck. Unchanged drafts add no history entry,
+     * and a draft is never written into a different deck or a slide/build that disappeared.
+     * Returns `true` when an open editor was closed.
+     */
+    fun commitEditingNotesIfDirty(): Boolean {
+        if (!isEditingNotes) return false
+        val target = editingNoteTarget
+        val draft = currentEditingDraft()
+        val initial = editingNoteInitial
+        val save = onSaveSpeakerNote
+        clearEditingState()
+        if (target == null || save == null) return true
+        val doc = documentProvider?.invoke() ?: return true
+        if (target.deckId.isNotEmpty() && doc.id != target.deckId) return true
+        val beatExists = doc.slides.firstOrNull { it.id == target.slideId }?.beats?.getOrNull(target.beatIndex) != null
+        if (!beatExists) return true
+        val normalized = draft.normalizedNote()
+        if (normalized != initial) save(target.slideId, target.beatIndex, normalized)
+        return true
+    }
+
+    /**
+     * Closes the inline editor when the presented slide/build moved away from the note being edited
+     * (Story-window navigation, deck switch), auto-committing a changed draft to the note it was
+     * opened on (see [commitEditingNotesIfDirty]). Returns `true` when the editor was closed.
+     */
+    fun commitOrCancelEditingNotesIfTargetMoved(): Boolean {
+        if (!isEditingNotes) return false
+        if (currentNoteTarget() == editingNoteTarget) return false
+        return commitEditingNotesIfDirty()
+    }
+
+    /** Saves [text] (blank clears the note) to the target captured by [beginEditingNotes]. */
+    fun commitEditingNotes(text: String): Boolean {
+        val target = editingNoteTarget
+        val save = onSaveSpeakerNote
+        clearEditingState()
+        if (target == null || save == null) return false
+        save(target.slideId, target.beatIndex, text.normalizedNote())
+        return true
+    }
+
     fun readinessStatus(): ReadinessStatus = ReadinessStatus(
         studioOpen = isStudioOpenProvider(),
         inspectOpen = isInspectOpenProvider(),
-        hasUnbakedOverrides = hasUnbakedOverridesProvider(),
         openAuthoringTools = openAuthoringToolsProvider(),
-        unbakedDomains = unbakedDomainsProvider(),
     )
 
     fun enterCleanShowMode() {
@@ -459,6 +649,7 @@ class PresenterController(
         displayRouter.swapAudienceAndPresenter()
 
     fun step(scope: CoroutineScope, direction: AdvanceDirection) {
+        if (isEditingNotes) commitEditingNotesIfDirty()
         if (curtain != StageCurtain.None) {
             curtain = StageCurtain.None
         }
@@ -474,6 +665,7 @@ class PresenterController(
         if (targetScene !in 0 until slideCount) return false
         val targetIdx = Storyboard.Index(targetScene, 0)
         if (targetIdx !in animatic.storyboard.indices) return false
+        if (isEditingNotes) commitEditingNotesIfDirty()
         val host = jumpDialogHost
         curtain = StageCurtain.None
         jumpDialogHost = null
@@ -600,6 +792,8 @@ class PresenterController(
      * focused child buttons receive them.
      */
     fun handlePresenterPreviewKeyEvent(event: KeyEvent): Boolean {
+        // While typing notes, every key (Space, arrows, B, W, Esc, ⌘G…) belongs to the notes field.
+        if (isEditingNotes) return false
         if (event.key == Key.Escape) {
             if (jumpDialogOpen) {
                 if (event.type == KeyEventType.KeyDown) {
@@ -646,7 +840,7 @@ class PresenterController(
      * deck navigation.
      */
     fun handlePresenterBubbleKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean {
-        if (event.type != KeyEventType.KeyDown || jumpDialogOpen) return false
+        if (event.type != KeyEventType.KeyDown || jumpDialogOpen || isEditingNotes) return false
 
         val noModifiers = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed
         if (!noModifiers) return false
@@ -711,5 +905,28 @@ class PresenterController(
         const val NOTES_FONT_STEP_SP = 2f
 
         private val WALL_CLOCK_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+        private val RAW_SPECIMEN_KEY_REGEX = Regex("^[a-z][a-z0-9_-]*\\.([A-Za-z][A-Za-z0-9_]*)$")
+
+        /** Strips redundant `Slide N · ` prefixes and humanizes raw `prefix.camelCase` specimen keys. */
+        fun humanizePresenterSlideTitle(rawTitle: String, sceneIndex: Int): String {
+            val trimmed = rawTitle.trim()
+            val oneBased = sceneIndex + 1
+            if (trimmed.isEmpty()) return "Slide $oneBased"
+            val prefixRegex = Regex("^Slide\\s+0?$oneBased\\s*(?:[·:\\-–—]+\\s*)?", RegexOption.IGNORE_CASE)
+            val stripped = trimmed.replace(prefixRegex, "").trim()
+            if (stripped.isEmpty()) return "Slide $oneBased"
+            val match = RAW_SPECIMEN_KEY_REGEX.matchEntire(stripped)
+            if (match != null) {
+                val spaced = match.groupValues[1]
+                    .replace(Regex("([a-z])([A-Z])"), "$1 $2")
+                    .replace(Regex("([A-Za-z])([0-9])"), "$1 $2")
+                    .replace('_', ' ')
+                    .trim()
+                return spaced.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
+            return stripped
+        }
     }
 }
+
+private fun String.normalizedNote(): String? = trimEnd().takeIf { it.isNotBlank() }

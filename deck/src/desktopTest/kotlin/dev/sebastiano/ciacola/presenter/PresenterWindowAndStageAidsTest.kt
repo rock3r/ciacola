@@ -30,9 +30,8 @@ import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.createFoundationDeck
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import dev.sebastiano.ciacola.theme.DeckThemePreset
-import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Rectangle
 import kotlin.test.Test
@@ -53,12 +52,9 @@ class PresenterWindowAndStageAidsTest {
         lateinit var animatic: Animatic
 
         setContent {
-            val theme = remember(preset) { DeckThemes.forPreset(preset) }
             val deck = remember(preset) {
-                createFoundationDeck(
-                    theme = theme,
-                    bundledPreset = preset,
-                    includeKeynoteEffectsLab = true,
+                buildFoundationTestStoryboard(
+                    themeName = if (preset == DeckThemePreset.KeynoteLight) "light" else "dark",
                 )
             }
             animatic = rememberAnimatic(storyboard = { deck })
@@ -113,7 +109,6 @@ class PresenterWindowAndStageAidsTest {
     fun presenterDashboardRendersMinimumSizeReadinessBannerDisplayRoutingAndNavigation() = runComposeUiTest {
         var studioOpen by mutableStateOf(true)
         var inspectOpen by mutableStateOf(true)
-        var unbaked by mutableStateOf(true)
         val fakeScreens = listOf(
             DisplayScreenInfo("d1", "Display 1 (1920×1080 · Primary)", Rectangle(0, 0, 1920, 1080), true),
             DisplayScreenInfo("d2", "Display 2 (2560×1440)", Rectangle(1920, 0, 2560, 1440), false),
@@ -133,7 +128,7 @@ class PresenterWindowAndStageAidsTest {
             }
         }
 
-        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        val deck = buildFoundationTestStoryboard()
         lateinit var animatic: Animatic
         lateinit var controller: PresenterController
 
@@ -144,7 +139,6 @@ class PresenterWindowAndStageAidsTest {
                     initialAnimatic = animatic,
                     isStudioOpenProvider = { studioOpen },
                     isInspectOpenProvider = { inspectOpen },
-                    hasUnbakedOverridesProvider = { unbaked },
                     onEnterCleanShowModeAction = {
                         studioOpen = false
                         inspectOpen = false
@@ -162,7 +156,7 @@ class PresenterWindowAndStageAidsTest {
         }
 
         waitForIdle()
-        onNodeWithTag("ciacola-presenter-slide-beat").assertTextContains("Slide 1 / 5 · Beat 1 / 3")
+        onNodeWithTag("ciacola-presenter-slide-beat").assertTextContains("Slide 1 of 5 · Build 1 of 3")
         onNodeWithTag("ciacola-presenter-scene-title").assertTextContains("Beats", substring = true)
         onNodeWithTag("ciacola-presenter-stage-status").assertTextContains("Ready")
         onNodeWithTag("ciacola-presenter-wall-clock").assertTextContains("14:30")
@@ -172,16 +166,12 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-next-preview").assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-notes-content").assertIsDisplayed()
 
-        // Readiness banner is visible with Enter Clean Show Mode.
+        // Readiness banner is visible with Enter Clean Show Mode and disappears once Studio/Inspect are closed.
         onNodeWithTag("ciacola-presenter-readiness-banner").assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-clean-show-button").performClick()
         waitForIdle()
         assertFalse(studioOpen, "Enter Clean Show Mode must close Studio")
         assertFalse(inspectOpen, "Enter Clean Show Mode must disable Inspect")
-
-        // Unbaked overrides warning remains dismissible once Studio/Inspect are closed.
-        onNodeWithTag("ciacola-presenter-dismiss-readiness").performClick()
-        waitForIdle()
         onNodeWithTag("ciacola-presenter-readiness-banner").assertDoesNotExist()
 
         // Font size shortcuts & buttons.
@@ -238,7 +228,7 @@ class PresenterWindowAndStageAidsTest {
         mainClock.advanceTimeBy(1_000)
         waitForIdle()
         assertEquals(Storyboard.Index(0, 1), animatic.currentIndex)
-        onNodeWithTag("ciacola-presenter-slide-beat").assertTextContains("Slide 1 / 5 · Beat 2 / 3")
+        onNodeWithTag("ciacola-presenter-slide-beat").assertTextContains("Slide 1 of 5 · Build 2 of 3")
     }
 
     @Test
@@ -269,7 +259,7 @@ class PresenterWindowAndStageAidsTest {
     fun blackoutWhiteoutEscClearingWithoutOpeningOverviewAndQuickSlideJump() = runComposeUiTest {
         var studioOpen by mutableStateOf(false)
         var inspectOpen by mutableStateOf(false)
-        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        val deck = buildFoundationTestStoryboard()
         lateinit var animatic: Animatic
         lateinit var presenterWindow: PresenterWindow
         lateinit var overviewVisibility: dev.bnorm.storyboard.easel.overview.OverviewVisibility
@@ -390,7 +380,7 @@ class PresenterWindowAndStageAidsTest {
 
     @Test
     fun spaceOnFocusedPresenterControlActivatesControlWithoutAdvancingDeck() = runComposeUiTest {
-        val deck = createFoundationDeck(includeKeynoteEffectsLab = true)
+        val deck = buildFoundationTestStoryboard()
         lateinit var animatic: Animatic
         lateinit var controller: PresenterController
 

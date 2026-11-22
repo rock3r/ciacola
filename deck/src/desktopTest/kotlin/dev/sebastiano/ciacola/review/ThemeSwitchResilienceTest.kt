@@ -21,14 +21,13 @@ import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.EaselWindow
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
-import dev.sebastiano.ciacola.StoryboardPresetRegistry
-import dev.sebastiano.ciacola.createFoundationDeck
-import dev.sebastiano.ciacola.rememberThemeSwitcherWindow
+import dev.sebastiano.ciacola.buildFoundationTestStoryboard
+import dev.sebastiano.ciacola.createLoadedTestDeckStore
+import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
+import dev.sebastiano.ciacola.inspector.design.rememberDocumentThemeInspectorWindow
 import dev.sebastiano.ciacola.theme.DeckThemePreset
-import dev.sebastiano.ciacola.theme.DeckThemes
 import java.nio.file.Files
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -46,12 +45,9 @@ class ThemeSwitchResilienceTest {
 
         setContent {
             coordinator = rememberReviewStageCoordinator()
-            val theme = remember(preset) { DeckThemes.forPreset(preset) }
             val deck = remember(preset, coordinator) {
-                createFoundationDeck(
-                    theme = theme,
-                    bundledPreset = preset,
-                    includeKeynoteEffectsLab = true,
+                buildFoundationTestStoryboard(
+                    themeName = if (preset == DeckThemePreset.KeynoteLight) "light" else "dark",
                     stageDecorator = coordinator.stageDecorator,
                 )
             }
@@ -86,7 +82,6 @@ class ThemeSwitchResilienceTest {
         onNodeWithTag("ciacola-review-note-input").performTextInput("Keep warm coral contrast in light mode")
         waitForIdle()
 
-        // Switch theme while composer is open with unsaved text.
         runOnIdle { preset = DeckThemePreset.KeynoteLight }
         waitForIdle()
         mainClock.advanceTimeBy(250)
@@ -101,37 +96,18 @@ class ThemeSwitchResilienceTest {
     }
 
     @Test
-    fun storyboardPresetRegistryLocksChromeToRenderedStoryboardAndThemeWindowSurvivesSwitch() = runComposeUiTest {
-        val registry = StoryboardPresetRegistry()
-        val darkSb = createFoundationDeck(
-            theme = DeckThemes.forPreset(DeckThemePreset.StageDark),
-            bundledPreset = DeckThemePreset.StageDark,
-        ).also { registry.record(it, DeckThemePreset.StageDark) }
-        val lightSb = createFoundationDeck(
-            theme = DeckThemes.forPreset(DeckThemePreset.KeynoteLight),
-            bundledPreset = DeckThemePreset.KeynoteLight,
-        ).also { registry.record(it, DeckThemePreset.KeynoteLight) }
-
-        // While the window is still rendering darkSb, even if outer state flipped to KeynoteLight,
-        // Jewel chrome stays locked to StageDark until lightSb arrives on the same frame.
-        assertEquals(
-            DeckThemePreset.StageDark,
-            registry.presetFor(darkSb, fallback = DeckThemePreset.KeynoteLight),
-        )
-        assertEquals(
-            DeckThemePreset.KeynoteLight,
-            registry.presetFor(lightSb, fallback = DeckThemePreset.KeynoteLight),
-        )
-
-        var preset by mutableStateOf(DeckThemePreset.StageDark)
+    fun documentThemeInspectorWindowSurvivesActiveThemeSwitches() = runComposeUiTest {
+        val docStore = createLoadedTestDeckStore()
+        lateinit var controller: DocumentThemeInspectorController
         lateinit var themeWin: EaselWindow
         setContent {
-            themeWin = rememberThemeSwitcherWindow(
-                currentPreset = preset,
-                onSelectPreset = { preset = it },
+            controller = remember { DocumentThemeInspectorController(store = docStore) }
+            themeWin = rememberDocumentThemeInspectorWindow(
+                controller = controller,
+                isDarkProvider = { controller.activeThemeName != "light" },
             )
             if (themeWin.visible) {
-                Box(Modifier.size(360.dp, 240.dp)) {
+                Box(Modifier.size(440.dp, 560.dp)) {
                     themeWin.Content()
                 }
             }
@@ -141,10 +117,10 @@ class ThemeSwitchResilienceTest {
         runOnIdle { initialWin.visible = true }
         waitForIdle()
 
-        runOnIdle { preset = DeckThemePreset.KeynoteLight }
+        runOnIdle { controller.selectTheme("light") }
         waitForIdle()
 
-        assertSame(initialWin, themeWin, "Theme Inspector window instance must be retained across preset switches")
-        assertTrue(themeWin.visible, "Theme Inspector window must stay open when switching presets")
+        assertSame(initialWin, themeWin, "DocumentThemeInspectorWindow instance must be retained across theme switches")
+        assertTrue(themeWin.visible, "DocumentThemeInspectorWindow must stay open when switching themes")
     }
 }
