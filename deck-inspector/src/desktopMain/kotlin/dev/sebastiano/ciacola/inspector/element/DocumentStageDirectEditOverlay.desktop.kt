@@ -296,6 +296,7 @@ fun DocumentStageDirectEditOverlay(
 
                     down.consume()
                     var dragging = false
+                    var dragChecked = false
                     var rawStageDx = 0f
                     var rawStageDy = 0f
                     var snappedStageDx = 0.0
@@ -318,14 +319,24 @@ fun DocumentStageDirectEditOverlay(
                                 val curScale = latestSafeScale
                                 rawStageDx += delta.x / curScale
                                 rawStageDy += delta.y / curScale
-                                if (!dragging && hypot(rawStageDx * curScale, rawStageDy * curScale) > slop) {
-                                    dragging = true
-                                    if (hitNode.id !in controller.selectedNodeIds) controller.selectNode(hitNode.id, additive = shift)
-                                    controller.beginMultiDrag(hitNode.id)
-                                    movingSet = controller.dragPreviewNodeIds
-                                    dragStartBounds = StageArrangeMath.unionBounds(
-                                        latestResolvedNodes.filter { it.id in movingSet }.mapNotNull { nodeStageRect(it, curScale) },
-                                    )
+                                if (!dragChecked && hypot(rawStageDx * curScale, rawStageDy * curScale) > slop) {
+                                    dragChecked = true
+                                    val candidateMoving = if (hitNode.id in controller.selectedNodeIds && controller.selectedNodeIds.size > 1) {
+                                        controller.selectedNodeIds
+                                    } else {
+                                        setOf(hitNode.id)
+                                    }
+                                    if (candidateMoving.any { !DocumentElementArrangeOps.isFlowChild(controller, it) }) {
+                                        if (hitNode.id !in controller.selectedNodeIds) controller.selectNode(hitNode.id, additive = shift)
+                                        controller.beginMultiDrag(hitNode.id)
+                                        movingSet = controller.dragPreviewNodeIds
+                                        if (movingSet.isNotEmpty()) {
+                                            dragging = true
+                                            dragStartBounds = StageArrangeMath.unionBounds(
+                                                latestResolvedNodes.filter { it.id in movingSet }.mapNotNull { nodeStageRect(it, curScale) },
+                                            )
+                                        }
+                                    }
                                 }
                                 if (dragging) {
                                     change.consume()

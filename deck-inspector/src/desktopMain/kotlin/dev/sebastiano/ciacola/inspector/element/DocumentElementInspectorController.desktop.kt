@@ -256,6 +256,7 @@ class DocumentElementInspectorController(
         resizePreviewFrame = null
         resizeStartFrame = null
         resizeParentOrigin = Offset.Zero
+        resizeIsFlowChild = false
         gestureStartDocument = null
         val tx = activeTx
         if (tx != null && tx.isActive) {
@@ -342,12 +343,14 @@ class DocumentElementInspectorController(
         val beat = activeBeat
         val allBuilds = editAllBuilds && beat > 0
         return applyMutation(label, useActiveGesture) { doc ->
+            val slide = doc.slides.firstOrNull { it.id == slideId }
             patches.entries.fold(doc) { acc, (id, patch) ->
+                val anchorBeats = slide?.let { JsonMergePatch.referencedNodeAnchorBeats(it, id) }.orEmpty()
                 DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { node ->
                     when {
                         !isPatchCompatible(node, patch.keys) -> node
-                        allBuilds -> JsonMergePatch.applyToAllBeats(node, patch)
-                        else -> JsonMergePatch.applyEditAtBeat(node, beat, patch)
+                        allBuilds -> JsonMergePatch.applyToAllBeats(node, patch, anchorBeats)
+                        else -> JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
                     }
                 }
             }
@@ -370,9 +373,11 @@ class DocumentElementInspectorController(
         if (ids.isEmpty()) return false
         val slideId = activeSlide()?.id ?: return false
         return applyMutation(label, useActiveGesture = false) { doc ->
+            val slide = doc.slides.firstOrNull { it.id == slideId }
             ids.fold(doc) { acc, id ->
+                val anchorBeats = slide?.let { JsonMergePatch.referencedNodeAnchorBeats(it, id) }.orEmpty()
                 DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { node ->
-                    if (isPatchCompatible(node, patch.keys)) JsonMergePatch.applyToAllBeats(node, patch) else node
+                    if (isPatchCompatible(node, patch.keys)) JsonMergePatch.applyToAllBeats(node, patch, anchorBeats) else node
                 }
             }
         }
@@ -391,12 +396,14 @@ class DocumentElementInspectorController(
         // `All builds` resets the property everywhere (base + every build), like every other edit.
         val allBuilds = editAllBuilds && beat > 0
         return applyMutation(label, useActiveGesture = false) { doc ->
+            val slide = doc.slides.firstOrNull { it.id == slideId }
             ids.fold(doc) { acc, id ->
+                val anchorBeats = slide?.let { JsonMergePatch.referencedNodeAnchorBeats(it, id) }.orEmpty()
                 DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { node ->
                     when {
                         !isPatchCompatible(node, keyPath.take(1)) -> node
-                        allBuilds -> JsonMergePatch.applyToAllBeats(node, JsonMergePatch.nestedPatch(keyPath, JsonNull))
-                        else -> JsonMergePatch.resetAtBeat(node, beat, keyPath)
+                        allBuilds -> JsonMergePatch.applyToAllBeats(node, JsonMergePatch.nestedPatch(keyPath, JsonNull), anchorBeats)
+                        else -> JsonMergePatch.resetAtBeat(node, beat, keyPath, anchorBeats)
                     }
                 }
             }
@@ -704,7 +711,13 @@ class DocumentElementInspectorController(
         if (!allBeats) return applyPatchesToNodes("Edit specimen.$paramName", ids.associateWith { patch }, useActiveGesture)
         val slideId = activeSlide()?.id ?: return false
         return applyMutation("Apply specimen.$paramName to all beats", useActiveGesture = false) { doc ->
-            ids.fold(doc) { acc, id -> DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) { JsonMergePatch.applyToAllBeats(it, patch) } }
+            val slide = doc.slides.firstOrNull { it.id == slideId }
+            ids.fold(doc) { acc, id ->
+                val anchorBeats = slide?.let { JsonMergePatch.referencedNodeAnchorBeats(it, id) }.orEmpty()
+                DocumentThemeResolver.updateNodeInSlide(acc, slideId, id) {
+                    JsonMergePatch.applyToAllBeats(it, patch, anchorBeats)
+                }
+            }
         }
     }
 
@@ -736,14 +749,19 @@ class DocumentElementInspectorController(
      * node; grabbing an unselected node moves just that node.
      */
     fun beginMultiDrag(grabbedNodeId: String) {
-        val moving = if (grabbedNodeId in selectedNodeIds && selectedNodeIds.size > 1) {
+        val rawMoving = if (grabbedNodeId in selectedNodeIds && selectedNodeIds.size > 1) {
             // Only nodes present on the current build travel with the drag.
             LinkedHashSet(DocumentElementArrangeOps.presentTargetIds(this).ifEmpty { listOf(grabbedNodeId) })
         } else {
             setOf(grabbedNodeId)
         }
+        val moving = rawMoving.filterTo(LinkedHashSet()) { !DocumentElementArrangeOps.isFlowChild(this, it) }
+        if (moving.isEmpty()) {
+            cancelStageDragPreview()
+            return
+        }
         dragPreviewNodeIds = moving
-        dragPreviewNodeId = grabbedNodeId
+        dragPreviewNodeId = if (grabbedNodeId in moving) grabbedNodeId else moving.first()
         dragPreviewDeltaX = 0.0
         dragPreviewDeltaY = 0.0
     }
@@ -792,6 +810,9 @@ class DocumentElementInspectorController(
     /** Direct parent content-box stage origin for the node being resized (`Offset.Zero` for top-level nodes). */
     private var resizeParentOrigin: Offset = Offset.Zero
 
+    /** Whether the node being resized is a direct child of a `row` or `column` flow container. */
+    private var resizeIsFlowChild: Boolean = false
+
     /** Begins an interactive 8-handle resize transaction (`store.begin`/`update`/`commit`, 1 undo step). */
     fun beginResizeGesture(nodeId: String, initialFrame: FrameSpec): Boolean {
         if (store.isReadOnly) return false
@@ -801,20 +822,22 @@ class DocumentElementInspectorController(
         resizePreviewFrame = initialFrame
         resizeStartFrame = initialFrame
         resizeParentOrigin = DocumentElementArrangeOps.parentContentStageOrigin(this, nodeId)
+        resizeIsFlowChild = DocumentElementArrangeOps.isFlowChild(this, nodeId)
         return true
     }
 
     /** Updates the active resize transaction snapped to `0.5` stage units so stage content reflows live. */
     fun updateResizeGesture(nodeId: String, nextFrame: FrameSpec): Boolean {
+        val isFlow = resizeIsFlowChild
+        val start = resizeStartFrame
         val snapped = FrameSpec(
-            x = nextFrame.x?.let(::snapHalfUnit),
-            y = nextFrame.y?.let(::snapHalfUnit),
+            x = if (isFlow) start?.x else nextFrame.x?.let(::snapHalfUnit),
+            y = if (isFlow) start?.y else nextFrame.y?.let(::snapHalfUnit),
             w = nextFrame.w?.let { snapHalfUnit(it).coerceAtLeast(16.0) },
             h = nextFrame.h?.let { snapHalfUnit(it).coerceAtLeast(16.0) },
         )
         resizePreviewNodeId = nodeId
         resizePreviewFrame = snapped
-        val start = resizeStartFrame
         val parentOrigin = resizeParentOrigin
         val slideId = activeSlide()?.id
         if (editAllBuilds && activeBeat > 0 && start != null && slideId != null) {
@@ -825,8 +848,8 @@ class DocumentElementInspectorController(
             val sw = start.w ?: 0.0
             val sh = start.h ?: 0.0
             val delta = DocumentElementArrangeOps.FrameDelta(
-                dx = (snapped.x ?: sx) - sx,
-                dy = (snapped.y ?: sy) - sy,
+                dx = if (isFlow) 0.0 else (snapped.x ?: sx) - sx,
+                dy = if (isFlow) 0.0 else (snapped.y ?: sy) - sy,
                 dw = (snapped.w ?: sw) - sw,
                 dh = (snapped.h ?: sh) - sh,
             )
@@ -846,8 +869,8 @@ class DocumentElementInspectorController(
             }
         }
         return setFrame(
-            x = snapped.x?.let { it - parentOrigin.x },
-            y = snapped.y?.let { it - parentOrigin.y },
+            x = if (isFlow) null else snapped.x?.let { it - parentOrigin.x },
+            y = if (isFlow) null else snapped.y?.let { it - parentOrigin.y },
             w = snapped.w,
             h = snapped.h,
             useActiveGesture = true,
@@ -860,6 +883,7 @@ class DocumentElementInspectorController(
         resizePreviewFrame = null
         resizeStartFrame = null
         resizeParentOrigin = Offset.Zero
+        resizeIsFlowChild = false
         commitGesture()
     }
 
@@ -868,6 +892,7 @@ class DocumentElementInspectorController(
         resizePreviewFrame = null
         resizeStartFrame = null
         resizeParentOrigin = Offset.Zero
+        resizeIsFlowChild = false
         cancelGesture()
     }
 

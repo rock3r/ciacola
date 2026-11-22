@@ -217,11 +217,14 @@ internal fun GridPropertyField(
     property: GridProperty,
     targets: List<EditTarget>,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tooltipOverride: String? = null,
 ) {
     val editor = remember(property.tag, controller) { GridPropertyEditor(controller, property, targets) }
     editor.targets = targets
     editor.property = property
-    val canReset = controller.activeBeat > 0 || property.resetAtBase
+    val effectiveEnabled = enabled && !controller.store.isReadOnly
+    val canReset = effectiveEnabled && (controller.activeBeat > 0 || property.resetAtBase)
     NumericPropertyField(
         label = property.label,
         value = editor.sharedValue(),
@@ -238,8 +241,8 @@ internal fun GridPropertyField(
         modified = canReset && editor.isModified(),
         onReset = if (canReset) editor::reset else null,
         onFocusChanged = { controller.textInputHasFocus = it },
-        tooltip = property.tooltip,
-        enabled = !controller.store.isReadOnly,
+        tooltip = tooltipOverride ?: property.tooltip,
+        enabled = effectiveEnabled,
     )
 }
 
@@ -272,14 +275,16 @@ internal fun DocumentLayoutSection(
     if (targets.isEmpty()) return
     // Uniform vs non-uniform is decided across the WHOLE selection, not just the primary node.
     val nonUniform = targets.any { it.resolved.scale is ScaleValue.NonUniform }
+    val anyPositionable = targets.any { !DocumentElementArrangeOps.isFlowChild(controller, it.id) }
+    val flowPositionTooltip = if (anyPositionable) null else "Position is controlled by the parent row or column"
     FlatCollapsibleSection(
         title = "Layout",
         testTag = "ciacola-doc-inspector-frame-section",
         headerTrailing = { ApplyScopeToggle(controller) },
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GridPropertyField(controller, LayoutXProperty, targets, Modifier.weight(1f))
-            GridPropertyField(controller, LayoutYProperty, targets, Modifier.weight(1f))
+            GridPropertyField(controller, LayoutXProperty, targets, Modifier.weight(1f), enabled = anyPositionable, tooltipOverride = flowPositionTooltip)
+            GridPropertyField(controller, LayoutYProperty, targets, Modifier.weight(1f), enabled = anyPositionable, tooltipOverride = flowPositionTooltip)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GridPropertyField(controller, LayoutWProperty, targets, Modifier.weight(1f))
@@ -295,7 +300,12 @@ internal fun DocumentLayoutSection(
         }
         OpacityRow(controller, targets)
         OriginAndScaleRow(controller, targets, nonUniform)
-        AlignDistributeToolbar(controller, positionedCount = targets.count { controller.nodeStageBounds(it.id) != null })
+        AlignDistributeToolbar(
+            controller,
+            positionedCount = targets.count {
+                !DocumentElementArrangeOps.isFlowChild(controller, it.id) && controller.nodeStageBounds(it.id) != null
+            },
+        )
     }
 }
 

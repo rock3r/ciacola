@@ -735,6 +735,7 @@ object DeckStructureEdits {
     ): Pair<DeckDocument, List<ManualDelayRemapNotice>> {
         val notices = mutableListOf<ManualDelayRemapNotice>()
         val updated = updateSlide(document, slideId) { slide ->
+            val anchorBeats = JsonMergePatch.referencedNodeAnchorBeats(slide, nodeId)
             slide.copy(
                 nodes = slide.nodes.map { root ->
                     rewriteNodeTree(root) { node ->
@@ -747,7 +748,7 @@ object DeckStructureEdits {
                             listOf("text", "value"),
                             RichTextValueEdits.encodeJson(newValue),
                         )
-                        val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch)
+                        val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
                         remapTextNodeManualDelays(
                             node = textPatched,
                             beat = beat,
@@ -776,6 +777,7 @@ object DeckStructureEdits {
     ): Pair<DeckDocument, List<ManualDelayRemapNotice>> {
         val notices = mutableListOf<ManualDelayRemapNotice>()
         val updated = updateSlide(document, slideId) { slide ->
+            val anchorBeats = JsonMergePatch.referencedNodeAnchorBeats(slide, nodeId)
             slide.copy(
                 nodes = slide.nodes.map { root ->
                     rewriteNodeTree(root) { node ->
@@ -788,7 +790,7 @@ object DeckStructureEdits {
                             listOf("text", "value"),
                             RichTextValueEdits.encodeJson(newValue),
                         )
-                        val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch)
+                        val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch, anchorBeats)
                         remapTextNodeManualDelays(
                             node = textPatched,
                             beat = beat,

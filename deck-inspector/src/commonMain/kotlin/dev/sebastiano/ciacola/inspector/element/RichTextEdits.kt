@@ -50,8 +50,9 @@ internal fun withTextOnAllBuilds(
     // [styleSource] is the base value BEFORE any plain-text rewrite, so its runs survive.
     val value = richValueWithText(styleSource ?: node.text?.value, text)
     val patch = JsonMergePatch.nestedPatch(listOf("text", "value"), RichTextValueEdits.encodeJson(value))
+    val anchorBeats = JsonMergePatch.referencedNodeAnchorBeats(slide, nodeId)
     return DocumentThemeResolver.updateNodeInSlide(doc, slideId, nodeId) { n ->
-        JsonMergePatch.applyToAllBeats(pruneOverriddenTextManualDelays(n), patch)
+        JsonMergePatch.applyToAllBeats(pruneOverriddenTextManualDelays(n), patch, anchorBeats)
     }
 }
 

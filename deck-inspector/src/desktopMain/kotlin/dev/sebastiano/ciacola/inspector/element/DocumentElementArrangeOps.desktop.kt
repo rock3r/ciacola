@@ -123,6 +123,24 @@ internal object DocumentElementArrangeOps {
         return Offset(ox.toFloat(), oy.toFloat())
     }
 
+    /** Whether [chain]'s target node is a direct child of a `row` or `column` flow container. */
+    private fun isFlowChild(chain: List<NodeSpec>): Boolean {
+        if (chain.size <= 1) return false
+        val parent = chain[chain.lastIndex - 1]
+        return parent.row != null || parent.column != null
+    }
+
+    /** Whether [nodeId] on [slide] is a direct child of a `row` or `column` flow container. */
+    fun isFlowChild(slide: SlideSpec?, nodeId: String): Boolean {
+        if (slide == null) return false
+        val chain = findAncestorChain(slide.nodes, nodeId) ?: return false
+        return isFlowChild(chain)
+    }
+
+    /** Whether [nodeId] on the active slide is a direct child of a `row` or `column` flow container. */
+    fun isFlowChild(controller: DocumentElementInspectorController, nodeId: String): Boolean =
+        isFlowChild(controller.activeSlide(), nodeId)
+
     /** Filters out nodes that already have an ancestor in [ids] so parent transforms are not applied twice. */
     fun topMostIds(slide: SlideSpec?, ids: Set<String>): Set<String> {
         if (slide == null || ids.size <= 1) return ids
@@ -185,8 +203,9 @@ internal object DocumentElementArrangeOps {
         val hasExplicitFrame = frame != null && (frame.x != null || frame.y != null || frame.w != null || frame.h != null)
         if (!hasExplicitFrame && inspected == null) return null
         val parentOrigin = parentContentStageOrigin(chain, controller.activeBeat, stageBoundsProvider)
-        val frameX = frame?.x
-        val frameY = frame?.y
+        val flowChild = isFlowChild(chain)
+        val frameX = if (flowChild) null else frame?.x
+        val frameY = if (flowChild) null else frame?.y
         val stageX = if (frameX != null) parentOrigin.x + frameX else inspected?.left?.toDouble() ?: parentOrigin.x.toDouble()
         val stageY = if (frameY != null) parentOrigin.y + frameY else inspected?.top?.toDouble() ?: parentOrigin.y.toDouble()
         val w = frame?.w ?: inspected?.width?.toDouble() ?: DEFAULT_W
@@ -214,18 +233,21 @@ internal object DocumentElementArrangeOps {
         nodeId: String,
         stageX: Double? = null,
         stageY: Double? = null,
-    ): JsonObject = stagePositionPatches(
-        controller = controller,
-        stageXById = stageX?.let { mapOf(nodeId to it) }.orEmpty(),
-        stageYById = stageY?.let { mapOf(nodeId to it) }.orEmpty(),
-    )[nodeId] ?: buildJsonObject {
-        put(
-            "frame",
-            buildJsonObject {
-                stageX?.let { put("x", snapHalfUnit(it)) }
-                stageY?.let { put("y", snapHalfUnit(it)) }
-            },
-        )
+    ): JsonObject {
+        if (isFlowChild(controller, nodeId)) return buildJsonObject {}
+        return stagePositionPatches(
+            controller = controller,
+            stageXById = stageX?.let { mapOf(nodeId to it) }.orEmpty(),
+            stageYById = stageY?.let { mapOf(nodeId to it) }.orEmpty(),
+        )[nodeId] ?: buildJsonObject {
+            put(
+                "frame",
+                buildJsonObject {
+                    stageX?.let { put("x", snapHalfUnit(it)) }
+                    stageY?.let { put("y", snapHalfUnit(it)) }
+                },
+            )
+        }
     }
 
     /**
@@ -256,6 +278,7 @@ internal object DocumentElementArrangeOps {
 
         for (id in orderedIds) {
             val chain = chains[id]
+            if (chain != null && isFlowChild(chain)) continue
             val resolved = resolvedById[id]
             val preParentOrigin = resolved?.parentOrigin ?: chain?.let {
                 parentContentStageOrigin(it, controller.activeBeat, controller.stageBoundsProvider)
@@ -314,6 +337,7 @@ internal object DocumentElementArrangeOps {
         )
         val candidates = deltas.entries.mapNotNull { (id, delta) ->
             val chain = findAncestorChain(slide.nodes, id) ?: return@mapNotNull null
+            if (isFlowChild(chain)) return@mapNotNull null
             val resolved = resolveArrangeNode(controller, id) ?: return@mapNotNull null
             MoveCandidate(id, delta, chain, resolved)
         }.sortedBy { it.chain.size }
@@ -471,6 +495,7 @@ internal object DocumentElementArrangeOps {
     private fun selectedBounds(controller: DocumentElementInspectorController): Map<String, Rect> {
         val out = LinkedHashMap<String, Rect>()
         for (id in presentTargetIds(controller)) {
+            if (isFlowChild(controller, id)) continue
             nodeStageBounds(controller, id)?.let { out[id] = it }
         }
         return out
@@ -508,10 +533,12 @@ internal object DocumentElementArrangeOps {
         val baseDocument = controller.activeGestureStartDocument() ?: controller.store.document
         val slide = controller.slideIn(baseDocument) ?: return false
         val chains = frames.keys.associateWith { findAncestorChain(slide.nodes, it) }
+        val flowChildren = frames.keys.filterTo(HashSet()) { id -> chains[id]?.let(::isFlowChild) == true }
         val preParentOrigins = frames.keys.associateWith { id ->
             chains[id]?.let { parentContentStageOrigin(it, controller.activeBeat, controller.stageBoundsProvider) } ?: Offset.Zero
         }
         val stageShifts = frames.mapNotNull { (id, f) ->
+            if (id in flowChildren) return@mapNotNull null
             val start = startRects[id] ?: return@mapNotNull null
             id to Offset(((f.x ?: start.left.toDouble()) - start.left).toFloat(), ((f.y ?: start.top.toDouble()) - start.top).toFloat())
         }.toMap()
@@ -528,9 +555,10 @@ internal object DocumentElementArrangeOps {
                     val preParentOrigin = preParentOrigins[id] ?: Offset.Zero
                     val ancShift = ancestorShifts[id] ?: Offset.Zero
                     val startLocal = start.translate(-preParentOrigin.x, -preParentOrigin.y)
+                    val isFlow = id in flowChildren
                     val delta = FrameDelta(
-                        dx = (f.x ?: 0.0) - start.left - ancShift.x,
-                        dy = (f.y ?: 0.0) - start.top - ancShift.y,
+                        dx = if (isFlow) 0.0 else (f.x ?: 0.0) - start.left - ancShift.x,
+                        dy = if (isFlow) 0.0 else (f.y ?: 0.0) - start.top - ancShift.y,
                         dw = (f.w ?: 0.0) - start.width,
                         dh = (f.h ?: 0.0) - start.height,
                     )
@@ -545,12 +573,15 @@ internal object DocumentElementArrangeOps {
             val ancShift = ancestorShifts[id] ?: Offset.Zero
             val postParentX = preParentOrigin.x + ancShift.x
             val postParentY = preParentOrigin.y + ancShift.y
+            val isFlow = id in flowChildren
             buildJsonObject {
                 put(
                     "frame",
                     buildJsonObject {
-                        put("x", snapHalfUnit((f.x ?: 0.0) - postParentX))
-                        put("y", snapHalfUnit((f.y ?: 0.0) - postParentY))
+                        if (!isFlow) {
+                            put("x", snapHalfUnit((f.x ?: 0.0) - postParentX))
+                            put("y", snapHalfUnit((f.y ?: 0.0) - postParentY))
+                        }
                         put("w", f.w ?: DEFAULT_W)
                         put("h", f.h ?: DEFAULT_H)
                     },
@@ -588,8 +619,10 @@ internal object DocumentElementInspectorKeys {
         if (ev.isMetaPressed || ev.isCtrlPressed) return false
         if (controller.textInputHasFocus || controller.inlineEditingNodeId != null) return false
         if (controller.selectedNodeIds.isEmpty() || controller.store.isReadOnly) return false
-        // Nothing selected is on this build: leave the arrows to slide navigation.
-        if (DocumentElementArrangeOps.presentTargetIds(controller).isEmpty()) return false
+        // Nothing positionable is selected on this build: leave the arrows to slide navigation.
+        if (DocumentElementArrangeOps.presentTargetIds(controller).none { !DocumentElementArrangeOps.isFlowChild(controller, it) }) {
+            return false
+        }
         if (ev.type != KeyEventType.KeyDown) return ev.type == KeyEventType.KeyUp
         val step = StageArrangeMath.nudgeStep(isAltPressed = ev.isAltPressed, isShiftPressed = ev.isShiftPressed)
         val (dx, dy) = when (ev.key) {

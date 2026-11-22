@@ -143,6 +143,7 @@ internal fun lintFixPatch(issue: DocumentLintIssue, document: DeckDocument): Jso
     val node = JsonMergePatch.resolveNodeAtBeat(base, issue.beatIndex)
     return when (issue.code) {
         "STAGE_OUT_OF_BOUNDS", "SAFE_AREA_BLEED" -> {
+            if (DocumentElementArrangeOps.isFlowChild(slide, nodeId)) return null
             val margin = if (issue.code == "SAFE_AREA_BLEED") SAFE_AREA_MARGIN_PX.toDouble() + 1.0 else 0.0
             val f = node.frame ?: return null
             val w = f.w ?: issue.stageBounds.width.toDouble()

@@ -355,15 +355,42 @@ object JsonMergePatch {
         node.builds.none { it is Build.Enter }
 
     /**
+     * Returns the beat indices on [slide] where any build sequences after [nodeId] via
+     * `after = "<nodeId>"` (referencing [nodeId]'s last build on that beat).
+     */
+    fun referencedNodeAnchorBeats(slide: SlideSpec, nodeId: String): Set<Int> {
+        val beats = HashSet<Int>()
+        fun visit(nodes: List<NodeSpec>) {
+            for (n in nodes) {
+                for (b in n.builds) {
+                    if (b.after == nodeId) beats += b.beat
+                }
+                visit(n.children)
+            }
+        }
+        visit(slide.nodes)
+        return beats
+    }
+
+    private fun shouldKeepEmptyChangeBuild(build: Build.Change, preservedAnchorBeats: Set<Int>): Boolean =
+        build.id != null || build.path != null || build.morph != null || build.beat in preservedAnchorBeats
+
+    /**
      * Applies an edit [patch] to [node] while parked on [beat]:
      * - Beat 0: applies [patch] to the base node via RFC 7386 Merge Patch and reconciles any
      *   existing beat-0 `change` builds by stripping the patched keys so [resolveNodeAtBeat]
-     *   reflects the edit immediately (pruning empty anonymous beat-0 changes).
+     *   reflects the edit immediately (pruning empty anonymous beat-0 changes unless [beat] is in
+     *   [preservedAnchorBeats]).
      * - Beat `b > 0`: merges [patch] into the **last** `change` build of [node] on beat `b`, or
      *   inserts a new `Build.Change(beat = b, set = patch)` before the first `change` build on a
      *   later beat so chronological override order is preserved.
      */
-    fun applyEditAtBeat(node: NodeSpec, beat: Int, patch: JsonObject): NodeSpec {
+    fun applyEditAtBeat(
+        node: NodeSpec,
+        beat: Int,
+        patch: JsonObject,
+        preservedAnchorBeats: Set<Int> = emptySet(),
+    ): NodeSpec {
         require(beat >= 0) { "Beat index must be >= 0, got $beat" }
         if (beat == 0) {
             val baseJson = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
@@ -374,7 +401,7 @@ object JsonMergePatch {
                     build
                 } else {
                     val stripped = stripKeysFromSet(build.set, patch)
-                    if (stripped.isEmpty() && build.id == null && build.path == null && build.morph == null) {
+                    if (stripped.isEmpty() && !shouldKeepEmptyChangeBuild(build, preservedAnchorBeats)) {
                         null
                     } else {
                         build.copy(set = stripped)
@@ -403,9 +430,14 @@ object JsonMergePatch {
     /**
      * Applies [patch] across all beats (*Apply to all beats*):
      * mutates the base node AND removes all patched keys from every `change` build's `set` so the
-     * value holds on every beat. Empty `change` builds with no `id`/`path`/`morph` are pruned.
+     * value holds on every beat. Empty `change` builds with no `id`/`path`/`morph` are pruned
+     * unless their beat is in [preservedAnchorBeats] (referenced via `after = "<nodeId>"`).
      */
-    fun applyToAllBeats(node: NodeSpec, patch: JsonObject): NodeSpec {
+    fun applyToAllBeats(
+        node: NodeSpec,
+        patch: JsonObject,
+        preservedAnchorBeats: Set<Int> = emptySet(),
+    ): NodeSpec {
         val baseJson = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
         val mergedBase = apply(baseJson, patch).jsonObject
         val patchedBase = strictJson.decodeFromJsonElement(NodeSpec.serializer(), mergedBase)
@@ -414,7 +446,7 @@ object JsonMergePatch {
                 build
             } else {
                 val stripped = stripKeysFromSet(build.set, patch)
-                if (stripped.isEmpty() && build.id == null && build.path == null && build.morph == null) {
+                if (stripped.isEmpty() && !shouldKeepEmptyChangeBuild(build, preservedAnchorBeats)) {
                     null
                 } else {
                     build.copy(set = stripped)
@@ -430,10 +462,15 @@ object JsonMergePatch {
      * - Beat `b > 0`: writes explicit `null` at [keyPath] in that beat's last `change` build's
      *   `set` (creating one if needed).
      */
-    fun resetAtBeat(node: NodeSpec, beat: Int, keyPath: List<String>): NodeSpec {
+    fun resetAtBeat(
+        node: NodeSpec,
+        beat: Int,
+        keyPath: List<String>,
+        preservedAnchorBeats: Set<Int> = emptySet(),
+    ): NodeSpec {
         require(keyPath.isNotEmpty()) { "keyPath must not be empty." }
         val nullPatch = nestedPatch(keyPath, JsonNull)
-        return applyEditAtBeat(node, beat, nullPatch)
+        return applyEditAtBeat(node, beat, nullPatch, preservedAnchorBeats)
     }
 
     /** Builds a nested [JsonObject] setting [keyPath] to [leafValue]. */

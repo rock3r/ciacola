@@ -175,8 +175,11 @@ class DocumentDeckLintController(
         val nodeId = issue.nodeId ?: return false
         val patch = lintFixPatch(issue, store.document) ?: return false
         val ok = store.edit("Fix: ${lintFixDescription(issue) ?: issue.code}") { doc ->
+            val anchorBeats = doc.slides.firstOrNull { it.id == issue.slideId }
+                ?.let { JsonMergePatch.referencedNodeAnchorBeats(it, nodeId) }
+                .orEmpty()
             DocumentThemeResolver.updateNodeInSlide(doc, issue.slideId, nodeId) { node ->
-                JsonMergePatch.applyEditAtBeat(node, issue.beatIndex, patch)
+                JsonMergePatch.applyEditAtBeat(node, issue.beatIndex, patch, anchorBeats)
             }
         }
         if (ok) issues = issues.filterNot { it.id == issue.id }

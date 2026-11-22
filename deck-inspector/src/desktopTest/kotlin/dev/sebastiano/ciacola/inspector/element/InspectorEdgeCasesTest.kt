@@ -862,6 +862,195 @@ class InspectorEdgeCasesTest {
         assertEquals(160.0, JsonMergePatch.resolveNodeAtBeat(afterAligned, 2).frame?.y)
     }
 
+    @Test
+    fun flowChildrenIgnoreIneffectiveFramePositionEditsWhileAllowingSizeEdits() {
+        val rowItem = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "row-item",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(w = 140.0, h = 60.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Flow Item"),
+            ),
+        )
+        val colItem = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "col-item",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(w = 180.0, h = 50.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Col Item"),
+            ),
+        )
+        val row = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-row",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 200.0, w = 500.0, h = 100.0),
+            row = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(rowItem)),
+        )
+        val col = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "parent-col",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 400.0, w = 400.0, h = 200.0),
+            column = dev.sebastiano.ciacola.document.ContainerPayload(children = listOf(colItem)),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "flow-child-positioning",
+            title = "Flow Child Positioning",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(row, col),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.stageBoundsProvider = { id ->
+            when (id) {
+                "parent-row" -> Rect(100f, 200f, 600f, 300f)
+                "row-item" -> Rect(240f, 220f, 380f, 280f)
+                "parent-col" -> Rect(100f, 400f, 500f, 600f)
+                "col-item" -> Rect(120f, 460f, 300f, 510f)
+                else -> null
+            }
+        }
+        c.selectLocation("s1", 0)
+        c.selectNode("row-item")
+
+        // Stage bounds come from flow layout, and position operations are disabled / no-ops.
+        assertEquals(240f, c.nodeStageBounds("row-item")?.left)
+        assertFalse(c.nudgeSelectedNodes(10.0, 0.0), "Nudge must not write unused frame.x on flow child")
+        assertFalse(c.handleKeyEvent(keyDown(Key.DirectionRight)), "Arrows on flow child must not be swallowed")
+        assertFalse(c.alignSelectedNodes(NodeAlignment.Left), "Align must ignore flow child")
+        c.beginMultiDrag("row-item")
+        assertTrue(c.dragPreviewNodeIds.isEmpty(), "Dragging a lone flow child must not start a fake preview")
+        assertFalse(c.commitMultiDrag(25.0, 15.0))
+        val xEditor = GridPropertyEditor(c, LayoutXProperty, c.editTargets())
+        xEditor.commit(300.0)
+        xEditor.step(5.0)
+        assertNull(findNode(store, "row-item").frame?.x)
+        assertNull(findNode(store, "row-item").frame?.y)
+        assertFalse(store.canUndo, "Ineffective flow-child position edits must not create undo entries")
+
+        // Lint out-of-bounds auto-fix also declines flow children rather than writing unused coordinates.
+        val oobIssue = dev.sebastiano.ciacola.inspector.lint.DocumentLintIssue(
+            id = "flow-oob",
+            code = "STAGE_OUT_OF_BOUNDS",
+            severity = dev.sebastiano.ciacola.inspector.lint.LintSeverity.Error,
+            source = dev.sebastiano.ciacola.inspector.lint.DocumentLintSource.Layout,
+            slideIndex = 0,
+            slideId = "s1",
+            beatIndex = 0,
+            nodeId = "row-item",
+            title = "Out of bounds",
+            detail = "Extends past stage",
+            stageBounds = Rect(1850f, 220f, 1990f, 280f),
+        )
+        assertNull(dev.sebastiano.ciacola.inspector.lint.lintFixPatch(oobIssue, store.document))
+
+        // Resizing a flow child updates w/h (rendered by DocumentNodeItem) without writing x/y.
+        assertTrue(c.beginResizeGesture("row-item", dev.sebastiano.ciacola.document.FrameSpec(x = 240.0, y = 220.0, w = 140.0, h = 60.0)))
+        assertTrue(c.updateResizeGesture("row-item", dev.sebastiano.ciacola.document.FrameSpec(x = 220.0, y = 210.0, w = 160.0, h = 70.0)))
+        c.commitResizeGesture()
+        val resizedFlow = findNode(store, "row-item").frame!!
+        assertNull(resizedFlow.x, "Resizing a flow child must not write unused frame.x")
+        assertNull(resizedFlow.y, "Resizing a flow child must not write unused frame.y")
+        assertEquals(160.0, resizedFlow.w)
+        assertEquals(70.0, resizedFlow.h)
+
+        // Selecting parent-row + row-item moves the row cleanly without writing coordinates onto row-item.
+        c.selectNodes(setOf("parent-row", "row-item"), primaryId = "parent-row")
+        assertTrue(c.nudgeSelectedNodes(15.0, 0.0))
+        assertEquals(115.0, findNode(store, "parent-row").frame?.x)
+        assertNull(findNode(store, "row-item").frame?.x)
+    }
+
+    @Test
+    fun allBuildsEditPreservesReferencedAnonymousChangeBuildAsTimingAnchor() {
+        val nodeA = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "node-a",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 100.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("First"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    durationMs = 500,
+                    set = buildJsonObject { put("opacity", 0.5) },
+                ),
+            ),
+        )
+        val nodeB = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "node-b",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 400.0, y = 100.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Second"),
+            ),
+            builds = listOf(
+                Build.Enter(
+                    beat = 1,
+                    effect = "fade",
+                    after = "node-a",
+                    durationMs = 300,
+                ),
+            ),
+        )
+        val unreferencedC = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "node-c",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 700.0, y = 100.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Unreferenced"),
+            ),
+            builds = listOf(
+                Build.Change(
+                    beat = 1,
+                    durationMs = 500,
+                    set = buildJsonObject { put("opacity", 0.5) },
+                ),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "timing-anchor-preservation",
+            title = "Timing Anchor Preservation",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec(), dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(nodeA, nodeB, unreferencedC),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 1)
+        c.editAllBuilds = true
+        c.selectNodes(setOf("node-a", "node-c"), primaryId = "node-a")
+
+        // Applying opacity to all builds empties both beat-1 Change sets: node-a's build is referenced
+        // by node-b's `after = "node-a"` so it stays as a timing anchor, while unreferenced node-c prunes cleanly.
+        assertTrue(c.applyPatchAtCurrentBeat("Edit opacity", buildJsonObject { put("opacity", 0.8) }))
+        val updatedA = findNode(store, "node-a")
+        val updatedC = findNode(store, "node-c")
+        assertEquals(0.8, JsonMergePatch.resolveNodeAtBeat(updatedA, 0).opacity)
+        assertEquals(0.8, JsonMergePatch.resolveNodeAtBeat(updatedA, 1).opacity)
+        assertEquals(1, updatedA.builds.size, "Referenced anonymous beat-1 change must be preserved as timing anchor")
+        assertTrue((updatedA.builds.single() as Build.Change).set.isEmpty())
+        assertTrue(updatedC.builds.isEmpty(), "Unreferenced empty anonymous change build is still pruned")
+
+        val plan = dev.sebastiano.ciacola.document.SegmentPlanner.planSegment(
+            document = store.document,
+            slideId = "s1",
+            beat = 1,
+        )
+        val trackB = plan.tracks.first { it.nodeId == "node-b" }
+        assertEquals(500, trackB.startMs, "node-b must still start after node-a's 500ms beat-1 build")
+        val issues = dev.sebastiano.ciacola.document.DeckDocumentCodec.validate(store.document)
+        assertTrue(issues.none { it.code.startsWith("AFTER_") }, "No dangling after-reference lint warnings: $issues")
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,
