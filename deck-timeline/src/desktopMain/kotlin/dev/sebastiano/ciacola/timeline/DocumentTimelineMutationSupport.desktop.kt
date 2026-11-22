@@ -507,43 +507,14 @@ internal object DocumentTimelineMutationSupport {
     }
 
     fun dependencyEndMsForSequencedBuild(
-        doc: DeckDocument,
         snapshot: DocumentTimelineSnapshot,
         ref: DocumentTimelineTrackRef.SlideBuildTrack,
     ): Int {
-        val node = findNodeOnSlide(doc, ref.slideId, ref.nodeId) ?: return 0
-        val build = node.builds.getOrNull(ref.buildIndex) ?: return 0
-        val beatPlan = snapshot.slideBeatPlans[ref.slideId]?.getOrNull(ref.beatIndex) ?: return 0
-
-        var prevEnd = 0
-        for (i in 0 until ref.buildIndex) {
-            if (node.builds[i].beat == ref.beatIndex) {
-                val priorTrack = beatPlan.tracks.firstOrNull { it.nodeId == ref.nodeId && it.buildIndex == i }
-                if (priorTrack != null) {
-                    prevEnd = maxOf(prevEnd, priorTrack.endMs)
-                }
-            }
-        }
-
-        val afterRef = build.after
-        val afterEnd = if (afterRef != null) {
-            val hashIdx = afterRef.indexOf('#')
-            val targetTrack = if (hashIdx >= 0) {
-                val targetNodeId = afterRef.substring(0, hashIdx)
-                val targetBuildId = afterRef.substring(hashIdx + 1)
-                beatPlan.tracks.firstOrNull { it.nodeId == targetNodeId && it.buildId == targetBuildId }
-            } else {
-                beatPlan.tracks.lastOrNull { it.nodeId == afterRef }
-            }
-            val validTarget = targetTrack?.takeUnless {
-                it.nodeId == ref.nodeId && (it.buildIndex?.let { idx -> idx >= ref.buildIndex } == true)
-            }
-            validTarget?.endMs ?: 0
-        } else {
-            0
-        }
-
-        return maxOf(prevEnd, afterEnd)
+        val beatPlan = snapshot.slideBeatPlans[ref.slideId]?.getOrNull(ref.beatIndex)
+        val planned = beatPlan?.tracks?.firstOrNull {
+            it.nodeId == ref.nodeId && it.buildIndex == ref.buildIndex
+        } ?: ref.trackPlan
+        return planned.dependencyEndMs
     }
 
     fun transitionTrackBaseDelay(

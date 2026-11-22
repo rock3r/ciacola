@@ -72,6 +72,10 @@ data class TrackPlan(
      * curve override, so effect evaluators MUST keep their built-in Keynote curve(s).
      */
     val useEffectDefaultCurve: Boolean = false,
+    /** `true` when this track was scheduled relative to a participating same-node or `after` dependency. */
+    val isSequenced: Boolean = false,
+    /** End time (ms) of the controlling dependency when [isSequenced] is `true`, or `0` otherwise. */
+    val dependencyEndMs: Int = 0,
 ) {
     val durationMs: Int get() = (endMs - startMs).coerceAtLeast(0)
 

@@ -472,6 +472,87 @@ class DocumentTimelineAndStaggerTest {
         assertEquals(550, updatedRef.trackPlan.startMs, "Re-planned start must match the dragged 550ms position")
     }
 
+    @Test
+    fun draggingBeatZeroEnterPrecededByInactiveBeatZeroChangePreservesPhaseDelaySubtraction() {
+        val doc = DeckDocument(
+            id = "beat0-inactive-change",
+            title = "Beat 0 Inactive Change",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(id = "s0", beats = listOf(BeatSpec())),
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(
+                        BeatSpec(
+                            phases = Phases(enter = Timing(delayMs = 100, durationMs = 300)),
+                        ),
+                    ),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "card-a",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 200.0, h = 100.0),
+                            text = TextPayload(RichTextValue.Plain("Intro")),
+                            builds = listOf(
+                                Build.Change(
+                                    id = "prep",
+                                    beat = 0,
+                                    durationMs = 200,
+                                    set = buildJsonObject { put("opacity", 0.9) },
+                                ),
+                                Build.Enter(id = "in1", beat = 0, effect = "fade", durationMs = 300),
+                                Build.Enter(id = "in2", beat = 0, effect = "fade", durationMs = 200),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "card-b",
+                            frame = FrameSpec(x = 400.0, y = 100.0, w = 200.0, h = 100.0),
+                            text = TextPayload(RichTextValue.Plain("Other")),
+                            builds = listOf(
+                                Build.Enter(id = "in-b", beat = 0, effect = "fade", after = "card-a#prep", durationMs = 250),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = dev.sebastiano.ciacola.document.DeckLoadState.Loaded)
+        val controller = DocumentTimelineController(store = store)
+
+        val tracks = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .filter { it.slideId == "s1" && it.beatIndex == 0 }
+        val in1Ref = tracks.single { it.nodeId == "card-a" && it.buildId == "in1" }
+        val in2Ref = tracks.single { it.nodeId == "card-a" && it.buildId == "in2" }
+        val inBRef = tracks.single { it.nodeId == "card-b" && it.buildId == "in-b" }
+
+        assertTrue(in1Ref.isUnsequenced, "Inactive beat-0 Change must not classify first beat-0 Enter as sequenced")
+        assertFalse(in2Ref.isUnsequenced, "Second beat-0 Enter must still be sequenced after in1")
+        assertTrue(inBRef.isUnsequenced, "Beat-0 Enter referencing inactive beat-0 Change is scheduled unsequenced")
+        assertEquals(100, in1Ref.trackPlan.startMs, "Initial start includes 100ms enter phase delay")
+
+        // Drag card-a#in1 to 400ms -> writes beats[0].stagger.manual["card-a"] = 300ms (leaving build.delayMs null)
+        // so planned start lands at exactly 400ms instead of 500ms.
+        assertTrue(controller.beginGesture("Move beat-0 enter"))
+        assertTrue(controller.dragTrackBarStart(in1Ref, 400, useActiveGesture = true))
+        controller.commitActiveGesture()
+
+        assertEquals(300, store.document.slides[1].beats[0].stagger?.manual?.get("card-a"))
+        assertNull(store.document.slides[1].nodes.first { it.id == "card-a" }.builds[1].delayMs)
+        val updatedIn1 = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.slideId == "s1" && it.nodeId == "card-a" && it.buildId == "in1" }
+        assertEquals(400, updatedIn1.trackPlan.startMs, "Re-planned start must match the dragged 400ms position")
+
+        // Second Enter on beat 0 remains sequenced after in1 (endMs = 700ms); dragging it to 850ms sets delayMs = 150ms.
+        val updatedIn2 = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.slideId == "s1" && it.nodeId == "card-a" && it.buildId == "in2" }
+        assertEquals(700, updatedIn2.trackPlan.startMs)
+        assertTrue(controller.dragTrackBarStart(updatedIn2, 850, useActiveGesture = false))
+        assertEquals(150, store.document.slides[1].nodes.first { it.id == "card-a" }.builds[2].delayMs)
+    }
+
     private fun collectAllSemanticTexts(root: SemanticsNode): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {

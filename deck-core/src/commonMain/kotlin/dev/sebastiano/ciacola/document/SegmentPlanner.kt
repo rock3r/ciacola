@@ -77,13 +77,6 @@ object SegmentPlanner {
             return SegmentPlan.Empty
         }
 
-        // Compute rank per participating unsequenced node (exit uses before-beat geometry,
-        // move/enter uses after-beat geometry; ties within 8 units share a rank).
-        val unsequencedNodeRank = computeNodeRanks(
-            tasks = tasks,
-            stagger = beatSpec.stagger,
-        )
-
         // Resolve `after` pointers to task indices, ignoring invalid/cross-beat/self/later references.
         val afterTargetByTask = IntArray(tasks.size) { -1 }
         for (task in tasks) {
@@ -106,6 +99,14 @@ object SegmentPlanner {
         // Topological sort (Kahn's algorithm, ties broken by document order `task.index`).
         val orderedTaskIndices = stableTopologicalOrder(tasks, afterTargetByTask)
 
+        // Compute rank per participating unsequenced node (exit uses before-beat geometry,
+        // move/enter uses after-beat geometry; ties within 8 units share a rank).
+        val unsequencedNodeRank = computeNodeRanks(
+            tasks = tasks,
+            afterTargetByTask = afterTargetByTask,
+            stagger = beatSpec.stagger,
+        )
+
         val resolvedTracks = arrayOfNulls<TrackPlan>(tasks.size)
         for (tIdx in orderedTaskIndices) {
             val task = tasks[tIdx]
@@ -115,13 +116,13 @@ object SegmentPlanner {
             val afterEnd = if (afterIdx >= 0) resolvedTracks[afterIdx]?.endMs else null
 
             val isSequenced = prevEnd != null || afterEnd != null
+            val dependencyEndMs = if (isSequenced) maxOf(prevEnd ?: 0, afterEnd ?: 0) else 0
             val buildDelay = build.delayMs ?: 0
 
             val startMs = if (reducedMotion) {
                 0
             } else if (isSequenced) {
-                val depEnd = maxOf(prevEnd ?: 0, afterEnd ?: 0)
-                depEnd + buildDelay
+                dependencyEndMs + buildDelay
             } else {
                 val phaseDelay = phaseTiming(beatSpec.phases, task.phase)?.delayMs ?: 0
                 val stagger = beatSpec.stagger
@@ -141,6 +142,8 @@ object SegmentPlanner {
                 themeMotion = themeMotion,
                 reducedMotion = reducedMotion,
                 effects = effects,
+                isSequenced = isSequenced,
+                dependencyEndMs = dependencyEndMs,
             )
         }
 
@@ -419,13 +422,15 @@ object SegmentPlanner {
         themeMotion: ThemeMotionDefaults?,
         reducedMotion: Boolean,
         effects: BuildEffectRegistry,
+        isSequenced: Boolean,
+        dependencyEndMs: Int,
     ): TrackPlan {
         val node = task.nodeEntry.node
         val build = task.build
         val phaseTiming = phaseTiming(beatPhases, task.phase)
 
         if (reducedMotion) {
-            return buildReducedMotionTrack(task, startMs, node, build)
+            return buildReducedMotionTrack(task, startMs, node, build, isSequenced, dependencyEndMs)
         }
 
         return when (build) {
@@ -479,6 +484,8 @@ object SegmentPlanner {
                         kind = kind,
                         buildIndex = task.buildIndex,
                         useEffectDefaultCurve = useEffectDefaultCurve,
+                        isSequenced = isSequenced,
+                        dependencyEndMs = dependencyEndMs,
                     )
                 } else {
                     val resolvedNode = JsonMergePatch.resolveNodeAtBeat(
@@ -506,6 +513,8 @@ object SegmentPlanner {
                         kind = kind,
                         buildIndex = task.buildIndex,
                         useEffectDefaultCurve = useEffectDefaultCurve,
+                        isSequenced = isSequenced,
+                        dependencyEndMs = dependencyEndMs,
                     )
                 }
             }
@@ -534,6 +543,8 @@ object SegmentPlanner {
                         kind = TrackKind.Change,
                         buildIndex = task.buildIndex,
                         warpSchedule = ws,
+                        isSequenced = isSequenced,
+                        dependencyEndMs = dependencyEndMs,
                     )
                 }
 
@@ -561,6 +572,8 @@ object SegmentPlanner {
                         pieces = schedule,
                         kind = TrackKind.Change,
                         buildIndex = task.buildIndex,
+                        isSequenced = isSequenced,
+                        dependencyEndMs = dependencyEndMs,
                     )
                 }
 
@@ -573,6 +586,8 @@ object SegmentPlanner {
                     pieces = null,
                     kind = TrackKind.Change,
                     buildIndex = task.buildIndex,
+                    isSequenced = isSequenced,
+                    dependencyEndMs = dependencyEndMs,
                 )
             }
         }
@@ -583,6 +598,8 @@ object SegmentPlanner {
         startMs: Int,
         node: NodeSpec,
         build: Build,
+        isSequenced: Boolean,
+        dependencyEndMs: Int,
     ): TrackPlan {
         val kind = when (build) {
             is Build.Enter -> TrackKind.Enter
@@ -605,6 +622,8 @@ object SegmentPlanner {
                 kind = kind,
                 buildIndex = task.buildIndex,
                 warpSchedule = ws,
+                isSequenced = isSequenced,
+                dependencyEndMs = dependencyEndMs,
             )
         }
         val dur = if (isZeroAppear) 0 else REDUCED_MOTION_FADE_DURATION_MS
@@ -617,6 +636,8 @@ object SegmentPlanner {
             pieces = null,
             kind = kind,
             buildIndex = task.buildIndex,
+            isSequenced = isSequenced,
+            dependencyEndMs = dependencyEndMs,
         )
     }
 
@@ -815,12 +836,13 @@ object SegmentPlanner {
 
     private fun computeNodeRanks(
         tasks: List<BuildTask>,
+        afterTargetByTask: IntArray,
         stagger: Stagger?,
     ): Map<String, Int> {
         // First unsequenced task per node supplies that node's sort key.
         val items = LinkedHashMap<String, DocumentSortKey>()
         for (task in tasks) {
-            if (task.prevSameNodeTask == null && task.build.after == null) {
+            if (task.prevSameNodeTask == null && afterTargetByTask[task.index] < 0) {
                 items.putIfAbsent(task.nodeEntry.node.id, task.sortKey)
             }
         }

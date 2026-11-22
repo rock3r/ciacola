@@ -521,7 +521,7 @@ class DocumentTimelinePlannerCache {
                         val build = node?.builds?.getOrNull(buildIndex)
                         val isTextMorph = node?.text != null && build is Build.Change && trackPlan.pieces != null
                         val isTextDelivery = node?.text != null && build !is Build.Change && trackPlan.pieces != null
-                        val isUnsequenced = isUnsequencedBuild(node, buildIndex, beatIdx)
+                        val isUnsequenced = !trackPlan.isSequenced
                         val category = classifyTrackCategory(trackPlan, node, isTextMorph, isTextDelivery)
                         val trackId = "doc:${slide.id}:b$beatIdx:${trackPlan.nodeId}:$buildIndex"
                         val blockId = "$trackId#0"
@@ -826,16 +826,6 @@ class DocumentTimelinePlannerCache {
             }
         }
         return out
-    }
-
-    private fun isUnsequencedBuild(node: NodeSpec?, buildIndex: Int, beatIdx: Int): Boolean {
-        if (node == null) return true
-        val build = node.builds.getOrNull(buildIndex) ?: return true
-        if (build.after != null) return false
-        for (i in 0 until buildIndex) {
-            if (node.builds[i].beat == beatIdx) return false
-        }
-        return true
     }
 
     private fun classifyTrackCategory(

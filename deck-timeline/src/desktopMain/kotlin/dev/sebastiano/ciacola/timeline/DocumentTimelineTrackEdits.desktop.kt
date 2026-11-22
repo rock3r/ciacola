@@ -36,7 +36,7 @@ internal object DocumentTimelineTrackEdits {
                     useActiveGesture = useActiveGesture,
                 )
             } else {
-                val depEndMs = DocumentTimelineMutationSupport.dependencyEndMsForSequencedBuild(doc, c.snapshot, ref)
+                val depEndMs = DocumentTimelineMutationSupport.dependencyEndMsForSequencedBuild(c.snapshot, ref)
                 c.updateBuildTiming(
                     slideId = ref.slideId,
                     nodeId = ref.nodeId,
