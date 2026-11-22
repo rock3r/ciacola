@@ -625,21 +625,56 @@ object DeckStructureEdits {
         val remainingSameBeat = targetNode.builds.withIndex().filter { (idx, b) ->
             idx != buildIndex && b.beat == deleted.beat
         }
+        val precedingSameBeat = targetNode.builds.withIndex().lastOrNull { (idx, b) ->
+            idx < buildIndex && b.beat == deleted.beat
+        }
         val wasLastOnBeat = targetNode.builds.indexOfLast { it.beat == deleted.beat } == buildIndex
+        val deletedExactRef = deleted.id?.let { "$nodeId#$it" }
+
+        fun hasOtherNodeExactDependent(nodes: List<NodeSpec>): Boolean = nodes.any { n ->
+            (n.id != nodeId && deletedExactRef != null && n.builds.any { it.beat == deleted.beat && it.after == deletedExactRef }) ||
+                hasOtherNodeExactDependent(n.children)
+        }
+
+        // If an external dependent must redirect to an anonymous predecessor that is not the last
+        // remaining build on the beat, assign a unique id to that predecessor so dependents do not
+        // fall through to a later build on the same node.
+        val needsSyntheticPredId = deleted.after == null &&
+            precedingSameBeat != null &&
+            precedingSameBeat.value.id == null &&
+            !wasLastOnBeat &&
+            hasOtherNodeExactDependent(slide.nodes)
+        val assignedPredId: String? = if (needsSyntheticPredId) {
+            val usedIds = targetNode.builds.mapNotNull { it.id }.toSet()
+            generateSequence(1) { it + 1 }.map { "b$it" }.first { it !in usedIds }
+        } else {
+            null
+        }
+
         val replacementAfter: String? = when {
             deleted.after != null -> deleted.after
-            wasLastOnBeat && remainingSameBeat.isNotEmpty() -> {
-                val prev = remainingSameBeat.last().value
-                prev.id?.let { "$nodeId#$it" } ?: nodeId
+            precedingSameBeat != null -> {
+                val predId = precedingSameBeat.value.id ?: assignedPredId
+                when {
+                    predId != null -> "$nodeId#$predId"
+                    wasLastOnBeat -> nodeId
+                    else -> null
+                }
             }
             else -> null
         }
 
-        val deletedExactRef = deleted.id?.let { "$nodeId#$it" }
         val rewiringNodes = slide.nodes.map { node ->
             rewriteNodeTree(node) { n ->
                 val baseBuilds = if (n.id == nodeId) {
-                    n.builds.filterIndexed { idx, _ -> idx != buildIndex }
+                    n.builds.mapIndexedNotNull { idx, b ->
+                        when {
+                            idx == buildIndex -> null
+                            assignedPredId != null && precedingSameBeat != null && idx == precedingSameBeat.index ->
+                                b.withId(assignedPredId)
+                            else -> b
+                        }
+                    }
                 } else {
                     n.builds
                 }
@@ -650,7 +685,8 @@ object DeckStructureEdits {
                         val matchesExact = deletedExactRef != null && b.after == deletedExactRef
                         val matchesNodeLast = wasLastOnBeat && remainingSameBeat.isEmpty() && b.after == nodeId
                         if (matchesExact || matchesNodeLast) {
-                            b.withAfter(replacementAfter)
+                            val targetReplacement = if (n.id == nodeId && deleted.after == null) null else replacementAfter
+                            b.withAfter(targetReplacement)
                         } else {
                             b
                         }
@@ -902,5 +938,12 @@ object DeckStructureEdits {
         is Build.Exit -> copy(after = newAfter)
         is Build.Emphasis -> copy(after = newAfter)
         is Build.Change -> copy(after = newAfter)
+    }
+
+    private fun Build.withId(newId: String?): Build = when (this) {
+        is Build.Enter -> copy(id = newId)
+        is Build.Exit -> copy(id = newId)
+        is Build.Emphasis -> copy(id = newId)
+        is Build.Change -> copy(id = newId)
     }
 }

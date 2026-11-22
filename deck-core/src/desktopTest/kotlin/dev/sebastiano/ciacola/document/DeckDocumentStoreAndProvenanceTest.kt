@@ -896,4 +896,68 @@ class DeckDocumentStoreAndProvenanceTest {
         )
         assertEquals(setOf("beta#0", "-beta#0"), notices.mapTo(HashSet()) { it.oldAddress })
     }
+
+    @Test
+    fun deleteMiddleBuildRewiresExternalDependentsToImplicitSameNodePredecessor() {
+        fun makeDoc(firstId: String?): DeckDocument = DeckDocument(
+            format = 1,
+            id = "delete-middle-build",
+            title = "Delete Middle Build",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "a",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 200.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("A")),
+                            builds = listOf(
+                                Build.Enter(id = firstId, beat = 1, effect = "fade", durationMs = 300),
+                                Build.Change(
+                                    id = "middle",
+                                    beat = 1,
+                                    durationMs = 200,
+                                    set = buildJsonObject { put("opacity", 0.7) },
+                                ),
+                                Build.Emphasis(id = "last", beat = 1, effect = "pulse", after = "a#middle", durationMs = 250),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "b",
+                            frame = FrameSpec(x = 400.0, y = 100.0, w = 200.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("B")),
+                            builds = listOf(
+                                Build.Enter(id = "follow", beat = 1, effect = "fade", after = "a#middle", durationMs = 200),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        // 1. Named predecessor: deleting a#middle redirects b#follow -> a#first and clears redundant same-node after on a#last.
+        val afterNamed = DeckStructureEdits.deleteBuild(makeDoc(firstId = "first"), "s1", nodeId = "a", buildIndex = 1)
+        val nodeBNamed = afterNamed.slides.single().nodes.first { it.id == "b" }
+        val nodeANamed = afterNamed.slides.single().nodes.first { it.id == "a" }
+        assertEquals("a#first", nodeBNamed.builds.single().after)
+        assertNull(nodeANamed.builds.last().after, "Same-node later build sequences implicitly after a#first")
+        val planNamed = SegmentPlanner.planSegment(afterNamed, "s1", beat = 1)
+        assertEquals(300, planNamed.tracks.first { it.nodeId == "b" }.startMs, "B must follow a#first (300ms)")
+        assertTrue(DeckDocumentCodec.validate(afterNamed).none { it.code.startsWith("AFTER_") })
+
+        // 2. Anonymous predecessor with a later build still present: assigns synthetic id to predecessor so B
+        // follows the 300ms Enter rather than jumping forward to a#last (550ms).
+        val afterAnon = DeckStructureEdits.deleteBuild(makeDoc(firstId = null), "s1", nodeId = "a", buildIndex = 1)
+        val nodeAAnon = afterAnon.slides.single().nodes.first { it.id == "a" }
+        val nodeBAnon = afterAnon.slides.single().nodes.first { it.id == "b" }
+        val assignedId = nodeAAnon.builds.first().id
+        assertNotNull(assignedId, "Anonymous predecessor needs an id when followed by a later build")
+        assertEquals("a#$assignedId", nodeBAnon.builds.single().after)
+        val planAnon = SegmentPlanner.planSegment(afterAnon, "s1", beat = 1)
+        assertEquals(300, planAnon.tracks.first { it.nodeId == "b" }.startMs, "B must follow the 300ms anonymous Enter, not a#last")
+        assertTrue(DeckDocumentCodec.validate(afterAnon).none { it.code.startsWith("AFTER_") })
+    }
 }
