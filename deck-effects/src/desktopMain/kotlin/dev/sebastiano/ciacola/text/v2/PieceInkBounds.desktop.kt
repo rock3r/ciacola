@@ -487,11 +487,6 @@ internal object PieceInkBounds {
         return refined.toFloat()
     }
 
-    internal class SubpixelOverrideResolution(
-        val overrides: FloatArray?,
-        val unresolvedSample: String? = null,
-    )
-
     /**
      * When Condition 2 finds a small number of failing pieces whose glyphs already match
      * `wholeLayout` within `0.03 px` (zero real shaping/kerning discrepancy), SkParagraph's
@@ -514,8 +509,8 @@ internal object PieceInkBounds {
         tolerance: Int,
         density: Density,
         layoutDirection: LayoutDirection,
-    ): SubpixelOverrideResolution {
-        if (normPieces.isEmpty() || diffPoints.isEmpty()) return SubpixelOverrideResolution(null)
+    ): FloatArray? {
+        if (normPieces.isEmpty() || diffPoints.isEmpty()) return null
         val failingIndices = LinkedHashSet<Int>()
         for ((dx, dy) in diffPoints) {
             for (i in normPieces.indices) {
@@ -525,11 +520,10 @@ internal object PieceInkBounds {
                 }
             }
         }
-        if (failingIndices.isEmpty() || failingIndices.size > 64) return SubpixelOverrideResolution(null)
+        if (failingIndices.isEmpty() || failingIndices.size > 64) return null
 
         val overrides = FloatArray(normPieces.size) { Float.NaN }
         var anyResolved = false
-        var unresolvedSample: String? = null
         val deltas = floatArrayOf(
             0.00015f, -0.00015f,
             0.0003f, -0.0003f,
@@ -545,12 +539,7 @@ internal object PieceInkBounds {
         try {
             for (idx in failingIndices) {
                 val p = normPieces[idx]
-                if (!hasMatchingGlyphPositions(p, wholeLayout)) {
-                    if (unresolvedSample == null) {
-                        unresolvedSample = describePiecePositions(idx, p, wholeLayout, "posMismatch")
-                    }
-                    continue
-                }
+                if (!hasMatchingGlyphPositions(p, wholeLayout)) continue
 
                 val b = p.boundingBox
                 val x0 = (floor(b.left.toDouble()).toInt() + pad - 4).coerceIn(0, bmpW - 1)
@@ -593,7 +582,7 @@ internal object PieceInkBounds {
                     val composeCanvas = surface.canvas.asComposeCanvas()
                     val cropSize = androidx.compose.ui.geometry.Size(cw.toFloat(), ch.toFloat())
 
-                    fun evalCrop(candidateOx: Float): Triple<Int, Int, Int> {
+                    fun evalCrop(candidateOx: Float): Int {
                         surface.canvas.clear(0)
                         drawScope.draw(density, layoutDirection, composeCanvas, cropSize) {
                             for ((nbIdx, nb) in neighbors) {
@@ -610,10 +599,10 @@ internal object PieceInkBounds {
                                 drawText(p.layout)
                             }
                         }
-                        if (!bmp.allocPixels(info) || !surface.readPixels(bmp, 0, 0)) return Triple(255, -1, -1)
-                        val cropRgba = bmp.readPixels(info, cw * 4, 0, 0) ?: return Triple(255, -1, -1)
-                        if (cropRgba.size != cw * ch * 4) return Triple(255, -1, -1)
-                        return maxCropChannelDeltaWithPos(
+                        if (!bmp.allocPixels(info) || !surface.readPixels(bmp, 0, 0)) return 255
+                        val cropRgba = bmp.readPixels(info, cw * 4, 0, 0) ?: return 255
+                        if (cropRgba.size != cw * ch * 4) return 255
+                        return maxCropChannelDelta(
                             whole = wholePixels,
                             wholeW = bmpW,
                             x0 = x0,
@@ -627,9 +616,7 @@ internal object PieceInkBounds {
                         )
                     }
 
-                    val (zeroDelta, zeroPx, zeroPy) = evalCrop(p.originX)
-                    var minLocalDelta = zeroDelta
-                    var bestDelta = 0f
+                    val zeroDelta = evalCrop(p.originX)
                     var resolvedThis = false
 
                     if (zeroDelta <= tolerance) {
@@ -652,7 +639,7 @@ internal object PieceInkBounds {
                         )
                         for (d in directed) {
                             val candOx = p.originX + d
-                            if (evalCrop(candOx).first <= tolerance) {
+                            if (evalCrop(candOx) <= tolerance) {
                                 overrides[idx] = candOx
                                 anyResolved = true
                                 resolvedThis = true
@@ -664,29 +651,12 @@ internal object PieceInkBounds {
                     if (!resolvedThis) {
                         for (delta in deltas) {
                             val candidateOx = p.originX + delta
-                            val (localDelta, _, _) = evalCrop(candidateOx)
-                            if (localDelta < minLocalDelta) {
-                                minLocalDelta = localDelta
-                                bestDelta = delta
-                            }
-                            if (localDelta <= tolerance) {
+                            if (evalCrop(candidateOx) <= tolerance) {
                                 overrides[idx] = candidateOx
                                 anyResolved = true
-                                resolvedThis = true
                                 break
                             }
                         }
-                    }
-
-                    if (!resolvedThis && unresolvedSample == null) {
-                        val maxPixX = if (zeroPx >= 0) x0 + zeroPx - pad else -1
-                        val maxPixY = if (zeroPy >= 0) y0 + zeroPy - pad else -1
-                        unresolvedSample = describePiecePositions(
-                            idx = idx,
-                            piece = p,
-                            wholeLayout = wholeLayout,
-                            tag = "d0=$zeroDelta,minD=$minLocalDelta@$bestDelta,pix=($maxPixX,$maxPixY)",
-                        )
                     }
                 } finally {
                     surface.close()
@@ -695,10 +665,7 @@ internal object PieceInkBounds {
         } finally {
             bmp.close()
         }
-        return SubpixelOverrideResolution(
-            overrides = if (anyResolved) overrides else null,
-            unresolvedSample = unresolvedSample,
-        )
+        return if (anyResolved) overrides else null
     }
 
     private fun hasMatchingGlyphPositions(piece: AdmittedPiece, wholeLayout: TextLayoutResult): Boolean {
@@ -714,26 +681,7 @@ internal object PieceInkBounds {
         return anyNonEmpty
     }
 
-    private fun describePiecePositions(
-        idx: Int,
-        piece: AdmittedPiece,
-        wholeLayout: TextLayoutResult,
-        tag: String,
-    ): String {
-        val chars = buildString {
-            val limit = min(piece.end, piece.start + 8)
-            for (ci in piece.start until limit) {
-                if (ci > piece.start) append(',')
-                val wb = wholeLayout.getBoundingBox(ci)
-                val pb = piece.layout.getBoundingBox(ci - piece.start)
-                val d = wb.left - (piece.originX + pb.left)
-                append("${wb.left}/${d}")
-            }
-        }
-        return "p$idx(l=${piece.line},ox=${piece.originX},oy=${piece.originY},$tag,g=[$chars])"
-    }
-
-    private fun maxCropChannelDeltaWithPos(
+    private fun maxCropChannelDelta(
         whole: ByteArray,
         wholeW: Int,
         x0: Int,
@@ -744,10 +692,8 @@ internal object PieceInkBounds {
         scanY0: Int,
         scanX1: Int,
         scanY1: Int,
-    ): Triple<Int, Int, Int> {
+    ): Int {
         var maxDelta = 0
-        var maxX = -1
-        var maxY = -1
         for (y in scanY0 until scanY1) {
             val wRow = (y0 + y) * wholeW * 4 + x0 * 4
             val cRow = y * cw * 4
@@ -759,14 +705,10 @@ internal object PieceInkBounds {
                 val d2 = abs((whole[wb + 2].toInt() and 0xFF) - (crop[cb + 2].toInt() and 0xFF))
                 val d3 = abs((whole[wb + 3].toInt() and 0xFF) - (crop[cb + 3].toInt() and 0xFF))
                 val pd = max(max(d0, d1), max(d2, d3))
-                if (pd > maxDelta) {
-                    maxDelta = pd
-                    maxX = x
-                    maxY = y
-                }
+                if (pd > maxDelta) maxDelta = pd
             }
         }
-        return Triple(maxDelta, maxX, maxY)
+        return maxDelta
     }
 
     /**

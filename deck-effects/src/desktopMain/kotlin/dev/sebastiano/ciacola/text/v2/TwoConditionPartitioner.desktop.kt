@@ -120,7 +120,6 @@ data class AdmittedPartition(
     val refusalReason: String? = null,
     val effectiveFeatureConfig: EffectiveFontFeatureConfig = EffectiveFontFeatureConfig.ShaperDefaults,
     val condition1ParagraphRefusalReason: String? = null,
-    val round0Diagnostic: String? = null,
 )
 
 /**
@@ -258,7 +257,6 @@ internal object TwoConditionPartitioner {
 
         var lastDelta = 0
         var lastOuterRing = false
-        var round0Diag: String? = null
 
         for (round in 0..MAX_CONDITION2_COARSENING_ROUNDS) {
             val currentGran = computeCandidateGranularity(candidates)
@@ -289,12 +287,8 @@ internal object TwoConditionPartitioner {
                     c1Refusal = c1Refusal,
                 )
             var comparison = compareBitmaps(wholePixels, piecesPixels, bmpW, bmpH, pad)
-            val preOverrideDelta = comparison.maxChannelDelta
-            val preOverrideDiffCount = comparison.diffPoints.size
-            var resolvedOverrideCount = 0
-            var unresolvedSample: String? = null
             if (!comparison.outerRingInkDetected && comparison.maxChannelDelta > CONDITION2_CHANNEL_TOLERANCE) {
-                val resolution = PieceInkBounds.resolveSubpixelBinEdgeOverrides(
+                val resolved = PieceInkBounds.resolveSubpixelBinEdgeOverrides(
                     normPieces = normPieces,
                     wholeLayout = normWholeLayout,
                     wholePixels = wholePixels,
@@ -306,10 +300,7 @@ internal object TwoConditionPartitioner {
                     density = density,
                     layoutDirection = layoutDirection,
                 )
-                unresolvedSample = resolution.unresolvedSample
-                val resolved = resolution.overrides
                 if (resolved != null) {
-                    resolvedOverrideCount = resolved.count { !it.isNaN() }
                     originXOverrides = resolved
                     normPieces = normPieces.mapIndexed { idx, p ->
                         val ov = resolved[idx]
@@ -325,12 +316,6 @@ internal object TwoConditionPartitioner {
                         )
                     comparison = compareBitmaps(wholePixels, retryPixels, bmpW, bmpH, pad)
                 }
-            }
-            if (round == 0 && (comparison.outerRingInkDetected || comparison.maxChannelDelta > CONDITION2_CHANNEL_TOLERANCE)) {
-                val sample = unresolvedSample ?: comparison.diffPoints.firstOrNull()?.let { (dx, dy) ->
-                    "retryPix=(${dx.toInt()},${dy.toInt()})"
-                }
-                round0Diag = "preDelta=$preOverrideDelta,postDelta=${comparison.maxChannelDelta},prePts=$preOverrideDiffCount,postPts=${comparison.diffPoints.size},resolved=$resolvedOverrideCount,sample=$sample"
             }
             lastDelta = comparison.maxChannelDelta
             lastOuterRing = comparison.outerRingInkDetected
@@ -363,7 +348,6 @@ internal object TwoConditionPartitioner {
                     outerRingInkDetected = false,
                     effectiveFeatureConfig = effectiveConfig,
                     condition1ParagraphRefusalReason = c1Refusal,
-                    round0Diagnostic = round0Diag,
                 )
             }
 
