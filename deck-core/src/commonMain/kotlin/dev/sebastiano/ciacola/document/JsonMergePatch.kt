@@ -372,8 +372,47 @@ object JsonMergePatch {
         return beats
     }
 
-    private fun shouldKeepEmptyChangeBuild(build: Build.Change, preservedAnchorBeats: Set<Int>): Boolean =
-        build.id != null || build.path != null || build.morph != null || build.beat in preservedAnchorBeats
+    private fun shouldKeepEmptyChangeBuild(
+        build: Build.Change,
+        preservedAnchorBeats: Set<Int>,
+        hasParticipatingSameBeatSuccessor: Boolean,
+    ): Boolean = build.id != null ||
+        build.path != null ||
+        build.morph != null ||
+        build.beat in preservedAnchorBeats ||
+        (build.beat > 0 && hasParticipatingSameBeatSuccessor)
+
+    private fun stripAndPruneChangeBuilds(
+        builds: List<Build>,
+        patch: JsonObject,
+        onlyBeat: Int?,
+        preservedAnchorBeats: Set<Int>,
+    ): List<Build> {
+        val keptReversed = ArrayList<Build>(builds.size)
+        val beatsWithSurvivingSuccessor = HashSet<Int>()
+        for (i in builds.lastIndex downTo 0) {
+            val build = builds[i]
+            val candidate: Build? = if (build !is Build.Change || (onlyBeat != null && build.beat != onlyBeat)) {
+                build
+            } else {
+                val stripped = stripKeysFromSet(build.set, patch)
+                val keep = stripped.isNotEmpty() || shouldKeepEmptyChangeBuild(
+                    build = build,
+                    preservedAnchorBeats = preservedAnchorBeats,
+                    hasParticipatingSameBeatSuccessor = build.beat in beatsWithSurvivingSuccessor,
+                )
+                if (keep) build.copy(set = stripped) else null
+            }
+            if (candidate != null) {
+                keptReversed += candidate
+                if (candidate.beat > 0) {
+                    beatsWithSurvivingSuccessor += candidate.beat
+                }
+            }
+        }
+        keptReversed.reverse()
+        return keptReversed
+    }
 
     /**
      * Applies an edit [patch] to [node] while parked on [beat]:
@@ -396,18 +435,12 @@ object JsonMergePatch {
             val baseJson = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
             val merged = apply(baseJson, patch).jsonObject
             val patchedBase = strictJson.decodeFromJsonElement(NodeSpec.serializer(), merged)
-            val reconciledBuilds = patchedBase.builds.mapNotNull { build ->
-                if (build !is Build.Change || build.beat != 0) {
-                    build
-                } else {
-                    val stripped = stripKeysFromSet(build.set, patch)
-                    if (stripped.isEmpty() && !shouldKeepEmptyChangeBuild(build, preservedAnchorBeats)) {
-                        null
-                    } else {
-                        build.copy(set = stripped)
-                    }
-                }
-            }
+            val reconciledBuilds = stripAndPruneChangeBuilds(
+                builds = patchedBase.builds,
+                patch = patch,
+                onlyBeat = 0,
+                preservedAnchorBeats = preservedAnchorBeats,
+            )
             return patchedBase.copy(builds = reconciledBuilds)
         }
         val lastChangeIdx = node.builds.indexOfLast { it is Build.Change && it.beat == beat }
@@ -431,7 +464,8 @@ object JsonMergePatch {
      * Applies [patch] across all beats (*Apply to all beats*):
      * mutates the base node AND removes all patched keys from every `change` build's `set` so the
      * value holds on every beat. Empty `change` builds with no `id`/`path`/`morph` are pruned
-     * unless their beat is in [preservedAnchorBeats] (referenced via `after = "<nodeId>"`).
+     * unless their beat is in [preservedAnchorBeats] (referenced via `after = "<nodeId>"`) or
+     * they precede a surviving participating build on the same node and beat (`beat > 0`).
      */
     fun applyToAllBeats(
         node: NodeSpec,
@@ -441,18 +475,12 @@ object JsonMergePatch {
         val baseJson = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
         val mergedBase = apply(baseJson, patch).jsonObject
         val patchedBase = strictJson.decodeFromJsonElement(NodeSpec.serializer(), mergedBase)
-        val cleanedBuilds = patchedBase.builds.mapNotNull { build ->
-            if (build !is Build.Change) {
-                build
-            } else {
-                val stripped = stripKeysFromSet(build.set, patch)
-                if (stripped.isEmpty() && !shouldKeepEmptyChangeBuild(build, preservedAnchorBeats)) {
-                    null
-                } else {
-                    build.copy(set = stripped)
-                }
-            }
-        }
+        val cleanedBuilds = stripAndPruneChangeBuilds(
+            builds = patchedBase.builds,
+            patch = patch,
+            onlyBeat = null,
+            preservedAnchorBeats = preservedAnchorBeats,
+        )
         return patchedBase.copy(builds = cleanedBuilds)
     }
 

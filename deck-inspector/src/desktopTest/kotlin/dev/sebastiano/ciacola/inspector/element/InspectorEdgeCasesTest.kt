@@ -1051,6 +1051,73 @@ class InspectorEdgeCasesTest {
         assertTrue(issues.none { it.code.startsWith("AFTER_") }, "No dangling after-reference lint warnings: $issues")
     }
 
+    @Test
+    fun applyToAllBuildsPreservesImplicitSameNodeTimingAnchorsAndPrunesTrailingEmptyChains() {
+        val chainedWithSuccessor = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "node-chained",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 100.0, y = 100.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Chained"),
+            ),
+            builds = listOf(
+                Build.Change(beat = 1, durationMs = 200, set = buildJsonObject { put("opacity", 0.4) }),
+                Build.Change(beat = 1, durationMs = 300, set = buildJsonObject { put("opacity", 0.6) }),
+                Build.Emphasis(beat = 1, effect = "pulse", durationMs = 250),
+            ),
+        )
+        val trailingEmptyChain = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "node-trailing",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 400.0, y = 100.0, w = 200.0, h = 80.0),
+            text = dev.sebastiano.ciacola.document.TextPayload(
+                value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Trailing"),
+            ),
+            builds = listOf(
+                Build.Change(beat = 1, durationMs = 200, set = buildJsonObject { put("opacity", 0.4) }),
+                Build.Change(beat = 1, durationMs = 300, set = buildJsonObject { put("opacity", 0.6) }),
+                Build.Emphasis(beat = 2, effect = "pulse", durationMs = 250),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            format = 1,
+            id = "implicit-same-node-anchor",
+            title = "Implicit Same-Node Anchor",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to dev.sebastiano.ciacola.document.DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                        dev.sebastiano.ciacola.document.BeatSpec(),
+                    ),
+                    nodes = listOf(chainedWithSuccessor, trailingEmptyChain),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val c = DocumentElementInspectorController(store)
+        c.selectLocation("s1", 1)
+        c.editAllBuilds = true
+        c.selectNodes(setOf("node-chained", "node-trailing"), primaryId = "node-chained")
+
+        assertTrue(c.applyPatchAtCurrentBeat("Edit opacity", buildJsonObject { put("opacity", 0.9) }))
+
+        val updatedChained = findNode(store, "node-chained")
+        val updatedTrailing = findNode(store, "node-trailing")
+        assertEquals(3, updatedChained.builds.size, "Both beat-1 empty changes before Emphasis must survive as timing anchors")
+        assertEquals(1, updatedTrailing.builds.size, "Beat-1 empty changes with only a beat-2 successor must both prune")
+        assertEquals(2, updatedTrailing.builds.single().beat)
+
+        val plan = dev.sebastiano.ciacola.document.SegmentPlanner.planSegment(
+            document = store.document,
+            slideId = "s1",
+            beat = 1,
+        )
+        val pulseTrack = plan.tracks.first { it.nodeId == "node-chained" && it.kind == dev.sebastiano.ciacola.document.TrackKind.Emphasis }
+        assertEquals(500, pulseTrack.startMs, "Pulse must remain sequenced after the 200ms + 300ms beat-1 changes")
+    }
+
     private fun findNode(store: DeckDocumentStore, id: String) =
         dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver.findNode(
             store.document.slides.first().nodes,
