@@ -102,7 +102,7 @@ class DiffListsBlankLineTest {
         assertTrue(sparseDiffs[2].rows[0].isNotEmpty())
         assertTrue(sparseDiffs[2].rows[1].isNotEmpty())
 
-        // Standard TextMate Kotlin parser also preserves exact row counts with blank lines.
+        // Built-in ANTLR Kotlin parser also preserves exact row counts with blank lines.
         val kotlinDiffs = buildDiffList(
             codeBlocks = listOf(BasicCode(step0), BasicCode(step1), BasicCode(step2)),
             language = Kotlin,

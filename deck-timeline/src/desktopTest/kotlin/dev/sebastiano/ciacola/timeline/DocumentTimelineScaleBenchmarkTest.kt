@@ -222,6 +222,15 @@ class DocumentTimelineScaleBenchmarkTest {
         val targetSlideId = store.document.slides[targetIdx].id
         val prevSlideId = store.document.slides[targetIdx - 1].id
         val nextSlideId = store.document.slides[targetIdx + 1].id
+        // Warm up JIT/caches before measuring steady-state 1-property edit latency.
+        repeat(5) { iter ->
+            controller.updateBeatStagger(
+                slideId = targetSlideId,
+                beatIndex = 1,
+                ms = 35 + iter * 5,
+            )
+        }
+
         val editDurationsMs = mutableListOf<Double>()
 
         repeat(50) { iter ->

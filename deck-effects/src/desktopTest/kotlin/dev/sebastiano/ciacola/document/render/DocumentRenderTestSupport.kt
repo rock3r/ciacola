@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
@@ -25,6 +26,7 @@ import dev.sebastiano.ciacola.document.RenderPurpose
 import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.StageSize
 import java.io.File
+import javax.swing.SwingUtilities
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.test.assertEquals
@@ -205,7 +207,10 @@ internal class DocumentStageHarness(
         RenderPurpose.Still -> RenderSession.forStill(initialDocument)
         RenderPurpose.Video -> RenderSession.forVideo(initialDocument)
     }
-    var config: DocumentRenderConfig by mutableStateOf(initialConfig)
+    private var _config: DocumentRenderConfig by mutableStateOf(initialConfig)
+    var config: DocumentRenderConfig
+        get() = onUiThread { _config }
+        set(value) = onUiThread { _config = value }
 
     private var _storyboard: Storyboard? = null
     private var _animatic: Animatic? = null
@@ -220,20 +225,44 @@ internal class DocumentStageHarness(
 
     private var clockNanos: Long = 0L
 
-    val scene: ImageComposeScene = ImageComposeScene(
-        width = width,
-        height = height,
-        density = Density(initialConfig.baseDensity, initialConfig.fontScale),
-        coroutineContext = Dispatchers.Unconfined,
-    ) {
-        _scope = rememberCoroutineScope()
-        val sb = rememberDocumentStoryboard(session = session, config = config)
-        _storyboard = sb
-        val a = rememberAnimatic(initialIndex = initialIndex, storyboard = { sb })
-        _animatic = a
-        Box(Modifier.fillMaxSize()) {
-            Easel(a, mode = sceneMode)
-            extraOverlayContent?.invoke(sb, a)
+    /**
+     * Compose Desktop's internal `RectManager` schedules debounced `RectList.defragment()` callbacks
+     * on Skiko's `MainUIDispatcher` (the AWT Event Dispatch Thread). Serializing all offscreen
+     * `ImageComposeScene` lifecycle calls onto the EDT avoids concurrent `RectList` / `SlotTable`
+     * races when tests run off-EDT.
+     */
+    fun <T> onUiThread(block: () -> T): T {
+        if (SwingUtilities.isEventDispatchThread()) return block()
+        var result: T? = null
+        var failure: Throwable? = null
+        SwingUtilities.invokeAndWait {
+            try {
+                result = block()
+            } catch (t: Throwable) {
+                failure = t
+            }
+        }
+        failure?.let { throw it }
+        @Suppress("UNCHECKED_CAST")
+        return result as T
+    }
+
+    val scene: ImageComposeScene = onUiThread {
+        ImageComposeScene(
+            width = width,
+            height = height,
+            density = Density(initialConfig.baseDensity, initialConfig.fontScale),
+            coroutineContext = Dispatchers.Unconfined,
+        ) {
+            _scope = rememberCoroutineScope()
+            val sb = rememberDocumentStoryboard(session = session, config = _config)
+            _storyboard = sb
+            val a = rememberAnimatic(initialIndex = initialIndex, storyboard = { sb })
+            _animatic = a
+            Box(Modifier.fillMaxSize()) {
+                Easel(a, mode = sceneMode)
+                extraOverlayContent?.invoke(sb, a)
+            }
         }
     }
 
@@ -241,31 +270,31 @@ internal class DocumentStageHarness(
         settle(4)
     }
 
-    fun renderStep(stepNanos: Long = 10_000_000L): RenderedFrame {
+    fun renderStep(stepNanos: Long = 10_000_000L): RenderedFrame = onUiThread {
         clockNanos += stepNanos
         val img = scene.render(clockNanos)
         try {
-            return readSkiaImageFrame(img)
+            readSkiaImageFrame(img)
         } finally {
             img.close()
         }
     }
 
-    fun renderCurrent(): RenderedFrame {
+    fun renderCurrent(): RenderedFrame = onUiThread {
         val img = scene.render(clockNanos)
         try {
-            return readSkiaImageFrame(img)
+            readSkiaImageFrame(img)
         } finally {
             img.close()
         }
     }
 
-    fun settle(frames: Int = 4, stepNanos: Long = 10_000_000L): RenderedFrame {
+    fun settle(frames: Int = 4, stepNanos: Long = 10_000_000L): RenderedFrame = onUiThread {
         var last: RenderedFrame? = null
         repeat(frames.coerceAtLeast(1)) {
             last = renderStep(stepNanos)
         }
-        return checkNotNull(last)
+        checkNotNull(last)
     }
 
     /** Finds the Animatic state index of a resting beat `(sceneIndex, frameIndex)`. */
@@ -290,19 +319,19 @@ internal class DocumentStageHarness(
         }.stateIndex
 
     /** Jumps directly to resting [index] and settles. */
-    fun jumpAndSettle(index: Storyboard.Index, settleFrames: Int = 4): RenderedFrame {
+    fun jumpAndSettle(index: Storyboard.Index, settleFrames: Int = 4): RenderedFrame = onUiThread {
         val job = scope.launch { animatic.jumpTo(index) }
         drainJob(job)
-        return settle(settleFrames)
+        settle(settleFrames)
     }
 
     /** Seeks cold or warm to exact segment [fromStateIndex] at [fraction] (`0f..1f`) and renders. */
-    fun seekSegment(fromStateIndex: Int, fraction: Float, rebuildScene: Boolean = true): RenderedFrame {
+    fun seekSegment(fromStateIndex: Int, fraction: Float, rebuildScene: Boolean = true): RenderedFrame = onUiThread {
         val job = scope.launch {
             animatic.seekToSegment(fromStateIndex, fraction, rebuildScene = rebuildScene)
         }
         drainJob(job)
-        return renderStep(1_000_000L)
+        renderStep(1_000_000L)
     }
 
     /**
@@ -313,7 +342,7 @@ internal class DocumentStageHarness(
         fromStateIndex: Int,
         fraction: Float,
         rebuildScene: Boolean = true,
-    ): RenderedFrame {
+    ): RenderedFrame = onUiThread {
         val job = scope.launch {
             animatic.seekToSegment(fromStateIndex, fraction, rebuildScene = rebuildScene)
         }
@@ -323,7 +352,7 @@ internal class DocumentStageHarness(
             lastFrame = renderStep(10_000_000L)
         }
         assertTrue(job.isCompleted, "seekToSegment did not complete within 200 steps")
-        return lastFrame ?: renderStep(1_000_000L)
+        lastFrame ?: renderStep(1_000_000L)
     }
 
     /** Advances in [direction] until settled, returning observed non-zero effective durations (in ms) per segment traversed. */
@@ -331,7 +360,7 @@ internal class DocumentStageHarness(
         direction: AdvanceDirection,
         stepMs: Long = 10L,
         maxSteps: Int = 400,
-    ): List<Long> {
+    ): List<Long> = onUiThread {
         val seenDurationsNanos = LinkedHashMap<Pair<Int, Int>, Long>()
         val job = scope.launch { animatic.advance(direction) }
         var steps = 0
@@ -347,7 +376,7 @@ internal class DocumentStageHarness(
         }
         assertTrue(job.isCompleted, "advance($direction) did not finish within $maxSteps steps")
         settle(2)
-        return seenDurationsNanos.values.toList()
+        seenDurationsNanos.values.toList()
     }
 
     /**
@@ -359,7 +388,7 @@ internal class DocumentStageHarness(
         targetCanonicalFraction: Float,
         stepMs: Long = 10L,
         matchSegment: (fromState: Int, toState: Int) -> Boolean = { _, _ -> true },
-    ): Pair<RenderedFrame, Long> {
+    ): Pair<RenderedFrame, Long> = onUiThread {
         val job = scope.launch { animatic.advance(direction) }
         var bestFrame: RenderedFrame? = null
         var bestError = Float.MAX_VALUE
@@ -385,7 +414,7 @@ internal class DocumentStageHarness(
         }
         assertTrue(job.isCompleted, "advanceAndCaptureAt did not complete")
         settle(2)
-        return checkNotNull(bestFrame) { "Never entered matching active segment during advance($direction)" } to observedEffNanos
+        checkNotNull(bestFrame) { "Never entered matching active segment during advance($direction)" } to observedEffNanos
     }
 
     /**
@@ -397,7 +426,7 @@ internal class DocumentStageHarness(
         targetCanonicalFractions: List<Float>,
         stepMs: Long = 10L,
         matchSegment: (fromState: Int, toState: Int) -> Boolean = { _, _ -> true },
-    ): Pair<Map<Float, RenderedFrame>, Long> {
+    ): Pair<Map<Float, RenderedFrame>, Long> = onUiThread {
         val job = scope.launch { animatic.advance(direction) }
         val bestFrames = LinkedHashMap<Float, RenderedFrame>()
         val bestErrors = HashMap<Float, Float>()
@@ -428,7 +457,7 @@ internal class DocumentStageHarness(
         for (target in targetCanonicalFractions) {
             check(target in bestFrames) { "Never captured target fraction $target during advance($direction)" }
         }
-        return bestFrames to observedEffNanos
+        bestFrames to observedEffNanos
     }
 
     /**
@@ -441,7 +470,7 @@ internal class DocumentStageHarness(
         captureBackwardFractions: List<Float>,
         stepMs: Long = 10L,
         matchForwardSegment: (fromState: Int, toState: Int) -> Boolean,
-    ): Map<Float, RenderedFrame> {
+    ): Map<Float, RenderedFrame> = onUiThread {
         val fwdJob = scope.launch { animatic.advance(AdvanceDirection.Forward) }
         var guard = 0
         var reversed = false
@@ -485,10 +514,10 @@ internal class DocumentStageHarness(
         for (target in captureBackwardFractions) {
             check(target in bestFrames) { "Never captured reversed fraction $target" }
         }
-        return bestFrames
+        bestFrames
     }
 
-    fun drainJob(job: Job, maxSteps: Int = 200, stepNanos: Long = 10_000_000L) {
+    fun drainJob(job: Job, maxSteps: Int = 200, stepNanos: Long = 10_000_000L) = onUiThread {
         var steps = 0
         while (!job.isCompleted && steps++ < maxSteps) {
             renderStep(stepNanos)
@@ -496,7 +525,11 @@ internal class DocumentStageHarness(
         assertTrue(job.isCompleted, "Coroutine job did not complete within $maxSteps steps")
     }
 
-    override fun close() {
+    override fun close() = onUiThread {
+        Snapshot.sendApplyNotifications()
+        if (scene.hasInvalidations()) {
+            scene.render(clockNanos).close()
+        }
         scene.close()
     }
 }

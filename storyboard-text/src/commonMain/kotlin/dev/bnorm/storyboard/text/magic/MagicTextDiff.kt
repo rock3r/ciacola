@@ -697,7 +697,7 @@ object MagicTextDiff {
 
         // Compare merged effective SpanStyle on every boundary interval so differently split
         // identical spans compare equal.
-        val boundaries = sortedSetOf(0, len)
+        val boundaries = mutableSetOf(0, len)
         for (s in fromSpans) {
             boundaries += s.start.coerceIn(0, len)
             boundaries += s.end.coerceIn(0, len)
@@ -706,7 +706,7 @@ object MagicTextDiff {
             boundaries += s.start.coerceIn(0, len)
             boundaries += s.end.coerceIn(0, len)
         }
-        val pts = boundaries.toList()
+        val pts = boundaries.sorted()
         for (idx in 0 until pts.size - 1) {
             val a = pts[idx]
             val b = pts[idx + 1]

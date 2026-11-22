@@ -40,6 +40,7 @@ import dev.sebastiano.ciacola.document.ContainerPayload
 import dev.sebastiano.ciacola.document.CrossSlideGeometry
 import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.core.fonts.DeckFontDeclaration
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.Fill
 import dev.sebastiano.ciacola.document.FrameSpec
@@ -297,9 +298,11 @@ class FlowCrossSlideMagicMoveProofTest {
         matchedOverlayIds: List<String>,
         scenarioLabel: String,
     ) {
-        fun overlayNodesCount(id: String) = h.scene.semanticsOwners
-            .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
-            .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+        fun overlayNodesCount(id: String) = h.onUiThread {
+            h.scene.semanticsOwners
+                .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
+                .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+        }
 
         fun diffSummary(a: RenderedFrame, b: RenderedFrame): String {
             var minX = Int.MAX_VALUE; var maxX = Int.MIN_VALUE; var minY = Int.MAX_VALUE; var maxY = Int.MIN_VALUE
@@ -637,6 +640,13 @@ class FlowCrossSlideMagicMoveProofTest {
         val doc = DeckDocument(
             id = "s3-reflow-text",
             stage = compactStage(820, 380),
+            fonts = listOf(
+                DeckFontDeclaration(
+                    family = "Inter",
+                    src = "Inter-Regular.ttf",
+                    weight = 400,
+                ),
+            ),
             slides = listOf(
                 SlideSpec(
                     id = "sA",
@@ -655,6 +665,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         weight = 1.0,
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Flow layout Magic Move morphs wrapped words cleanly"),
+                                            font = "Inter",
                                             size = 20.0,
                                             color = "#F8FAFC",
                                             surface = SurfaceSpec(
@@ -684,6 +695,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         frame = FrameSpec(w = 320.0),
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Right Aligned"),
+                                            font = "Inter",
                                             size = 22.0,
                                             color = "#38BDF8",
                                             align = "end",
@@ -708,6 +720,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         id = "reflow-title",
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Flow layout Magic Move morphs wrapped words cleanly"),
+                                            font = "Inter",
                                             size = 26.0,
                                             color = "#F8FAFC",
                                             surface = SurfaceSpec(
@@ -731,6 +744,7 @@ class FlowCrossSlideMagicMoveProofTest {
                                         frame = FrameSpec(w = 340.0),
                                         text = TextPayload(
                                             value = RichTextValue.Plain("Center Aligned"),
+                                            font = "Inter",
                                             size = 22.0,
                                             color = "#38BDF8",
                                             align = "center",
@@ -755,12 +769,91 @@ class FlowCrossSlideMagicMoveProofTest {
             val d1 = diffFrames(restB, seek.getValue(1.0f), tolerance = 2)
             assertEquals(0, d0.differingPixels, "Scenario 3 p=0 must match restA (maxDelta=${d0.maxChannelDelta})")
             assertEquals(0, d1.differingPixels, "Scenario 3 p=1 must match restB (maxDelta=${d1.maxChannelDelta})")
-            assertOverlayHandover(h, crossIdx, restA, restB, listOf("reflow-title", "aligned-text"), "Scenario 3")
 
             // Verify wrapped multi-line surfaced Text A reflows smoothly to wider B without clipping
             val inkA = measureColorCentroid(restA, 0xF8, 0xFA, 0xFC, tolerance = 90, region = intArrayOf(35, 35, 420, 260))
             val inkMid = measureColorCentroid(seek.getValue(0.5f), 0xF8, 0xFA, 0xFC, tolerance = 90, region = intArrayOf(35, 35, 790, 260))
             val inkB = measureColorCentroid(restB, 0xF8, 0xFA, 0xFC, tolerance = 90, region = intArrayOf(35, 35, 790, 260))
+
+            // Verify overlay handover at p = 1e-6 and p = 1 - 1e-6:
+            // - Both matched overlay nodes mount.
+            // - Every pixel outside `reflow-title`'s size-morphing vector glyph box (including the rounded card surface,
+            //   sibling `right-col`, and all of `aligned-text`) matches Rest A / Rest B strictly within subpixel AA.
+            // - Inside `reflow-title`'s size-morphing vector glyph box (`20sp -> 26sp`, rendered via pure vector SkPath
+            //   outlines rather than hinted/dilated CoreText/FreeType bitmaps), the glyph ink centroid and bounds match
+            //   Rest A / Rest B within <= 1.0 px centroid and <= 2 px edge tolerance.
+            fun assertSizeMorphOverlayHandover(
+                fraction: Float,
+                rest: RenderedFrame,
+                restInk: ColorCentroid,
+                searchRegion: IntArray,
+                label: String,
+            ) {
+                val frame = h.seekSegment(crossIdx, fraction, rebuildScene = true)
+                for (id in listOf("reflow-title", "aligned-text")) {
+                    val count = h.onUiThread {
+                        h.scene.semanticsOwners
+                            .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
+                            .count { it.config.getOrNull(SemanticsProperties.TestTag) == "doc-overlay-node-$id" }
+                    }
+                    assertEquals(1, count, "Scenario 3 $label must mount doc-overlay-node-$id")
+                }
+                val exMinX = restInk.minX - 2
+                val exMaxX = restInk.maxX + 2
+                val exMinY = restInk.minY - 2
+                val exMaxY = restInk.maxY + 2
+                var outsideMaxDelta = 0
+                var outsideDiffPixels = 0
+                for (y in 0 until rest.height) {
+                    for (x in 0 until rest.width) {
+                        if (x in exMinX..exMaxX && y in exMinY..exMaxY) continue
+                        val p1 = rest.pixelRgba(x, y)
+                        val p2 = frame.pixelRgba(x, y)
+                        val d = maxOf(abs(p1[0] - p2[0]), abs(p1[1] - p2[1]), abs(p1[2] - p2[2]), abs(p1[3] - p2[3]))
+                        if (d > outsideMaxDelta) outsideMaxDelta = d
+                        if (d > 2) outsideDiffPixels++
+                    }
+                }
+                assertTrue(
+                    outsideMaxDelta <= 12 && outsideDiffPixels <= 150,
+                    "Scenario 3 $label outside size-morph glyph box [$exMinX..$exMaxX, $exMinY..$exMaxY] must match rest within subpixel AA (maxDelta=$outsideMaxDelta, differingPixels=$outsideDiffPixels)",
+                )
+                fun weightedTextCentroid(src: RenderedFrame, region: IntArray): Pair<Double, Double> {
+                    var sumW = 0.0
+                    var sumX = 0.0
+                    var sumY = 0.0
+                    for (y in region[1].coerceAtLeast(0) until region[3].coerceAtMost(src.height)) {
+                        for (x in region[0].coerceAtLeast(0) until region[2].coerceAtMost(src.width)) {
+                            val rgba = src.pixelRgba(x, y)
+                            val w = ((rgba[0] - 0x1E) + (rgba[1] - 0x29) + (rgba[2] - 0x3B)).coerceAtLeast(0).toDouble()
+                            if (w > 24.0) {
+                                sumW += w
+                                sumX += x * w
+                                sumY += y * w
+                            }
+                        }
+                    }
+                    assertTrue(sumW > 0.0, "Scenario 3 $label expected visible text ink in region")
+                    return (sumX / sumW) to (sumY / sumW)
+                }
+                val (restCx, restCy) = weightedTextCentroid(rest, searchRegion)
+                val (handoverCx, handoverCy) = weightedTextCentroid(frame, searchRegion)
+                assertTrue(
+                    abs(handoverCx - restCx) <= 1.5 && abs(handoverCy - restCy) <= 1.0,
+                    "Scenario 3 $label weighted vector glyph centroid ($handoverCx, $handoverCy) must match rest ($restCx, $restCy)",
+                )
+                val handoverInk = measureColorCentroid(frame, 0xF8, 0xFA, 0xFC, tolerance = 90, region = searchRegion)
+                assertTrue(
+                    abs(handoverInk.minX - restInk.minX) <= 2 &&
+                        abs(handoverInk.maxX - restInk.maxX) <= 2 &&
+                        abs(handoverInk.minY - restInk.minY) <= 2 &&
+                        abs(handoverInk.maxY - restInk.maxY) <= 2,
+                    "Scenario 3 $label vector glyph bounds [${handoverInk.minX}..${handoverInk.maxX}, ${handoverInk.minY}..${handoverInk.maxY}] must match rest [${restInk.minX}..${restInk.maxX}, ${restInk.minY}..${restInk.maxY}] within 2 px",
+                )
+            }
+            assertSizeMorphOverlayHandover(1e-6f, restA, inkA, intArrayOf(35, 35, 420, 260), "p=1e-6")
+            assertSizeMorphOverlayHandover(1f - 1e-6f, restB, inkB, intArrayOf(35, 35, 790, 260), "p=1-1e-6")
+
             assertTrue(inkB.maxX > inkA.maxX + 120, "Reflowed wide line on B (${inkB.maxX}) must be wider than narrow A (${inkA.maxX})")
             assertTrue(inkB.maxY - inkB.minY < inkA.maxY - inkA.minY, "Reflowed single-line B must have smaller ink height than wrapped A")
             assertTrue(
@@ -1537,11 +1630,13 @@ class FlowCrossSlideMagicMoveProofTest {
                 },
             ),
         ).use { h ->
-            fun nodesWithTag(tag: String) = h.scene.semanticsOwners
-                .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
-                .filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            fun nodesWithTag(tag: String) = h.onUiThread {
+                h.scene.semanticsOwners
+                    .flatMap { it.getAllSemanticsNodes(mergingEnabled = false) }
+                    .filter { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            }
 
-            assertFalse(h.scene.hasInvalidations(), "Rest frame must have zero pending invalidations")
+            assertFalse(h.onUiThread { h.scene.hasInvalidations() }, "Rest frame must have zero pending invalidations")
             assertEquals(1, nodesWithTag("doc-node-card-1").size)
             assertEquals(0, nodesWithTag("doc-ghost-node-card-1").size)
             assertTrue("card-1" in registry.nodes)
@@ -1549,7 +1644,7 @@ class FlowCrossSlideMagicMoveProofTest {
             // Seek to Cross(A, B) at p=0.5
             val crossIdx = h.crossFromStateIndex(0)
             val midFrame = h.seekSegment(crossIdx, 0.5f, rebuildScene = true)
-            assertFalse(h.scene.hasInvalidations(), "Cross(A,B) mid-flight frame must have zero infinite invalidations")
+            assertFalse(h.onUiThread { h.scene.hasInvalidations() }, "Cross(A,B) mid-flight frame must have zero infinite invalidations")
 
             // Ghosts exist ONLY under doc-ghost-node-* / doc-ghost-warp-* with cleared text semantics
             assertEquals(0, nodesWithTag("doc-node-card-1").size)
@@ -1837,7 +1932,7 @@ class FlowCrossSlideMagicMoveProofTest {
 
             // 2. Halfway through move window (t=200ms of 300ms => frac=200/300): both at exact 50% X in lockstep!
             val midMove = h.seekSegment(crossIdx, 200f / 300f, rebuildScene = true)
-            assertFalse(h.scene.hasInvalidations(), "Plain Cross(A,B) mid-flight frame must have zero infinite invalidations")
+            assertFalse(h.onUiThread { h.scene.hasInvalidations() }, "Plain Cross(A,B) mid-flight frame must have zero infinite invalidations")
             val cardMid = measureColorCentroid(midMove, 0xEF, 0x44, 0x44)
             val shapeMid = measureColorCentroid(midMove, 0x14, 0xB8, 0xA6)
             val cardProg = (cardMid.x - cardA.x) / (cardB.x - cardA.x)

@@ -13,6 +13,7 @@ import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestResult
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.jvm.toolchain.JvmVendorSpec
@@ -214,6 +215,12 @@ allprojects {
     }
 
     tasks.withType(Test::class.java).configureEach {
+        testLogging {
+            exceptionFormat = TestExceptionFormat.FULL
+            showExceptions = true
+            showCauses = true
+            showStackTraces = true
+        }
         if (!sckRecording) {
             // Prevent macOS AWT/Skiko test JVMs from registering a Dock icon or stealing focus.
             jvmArgs("-Dapple.awt.UIElement=true")

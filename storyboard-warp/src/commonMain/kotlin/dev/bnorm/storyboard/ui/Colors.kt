@@ -51,6 +51,7 @@ fun Token.color(): Color {
         scope.contains("attribute") -> Annotation
         scope.contains("keyword") -> Keyword
         scope.contains("storage") -> Keyword
+        scope.contains("entity.name.tag") -> Keyword
         scope.contains("string") -> String
         scope.contains("comment") -> Comment
         scope.contains("constant.language") -> Constant

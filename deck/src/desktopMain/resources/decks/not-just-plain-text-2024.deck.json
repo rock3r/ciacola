@@ -1893,19 +1893,47 @@
       ],
       "nodes": [
         {
-          "id": "if-you-guessed",
-          "frame": { "x": 505, "y": 452.13, "w": 857.4, "h": 127.41 },
-          "text": {
-            "value": "IF YOU GUESSED",
-            "font": "Novecento Sans",
-            "size": 85,
-            "weight": 700,
-            "color": "#000000",
-            "lineHeight": 103.61
-          },
-          "builds": [
-            { "kind": "enter", "beat": 1, "effect": "appear", "after": "what-do-we-do-then" }
-          ]
+          "id": "if-you-guessed-row",
+          "frame": { "x": 505, "y": 452.13 },
+          "row": {
+            "children": [
+              {
+                "id": "if-you-guessed",
+                "text": {
+                  "value": "IF YOU GUESSED",
+                  "font": "Novecento Sans",
+                  "size": 85,
+                  "weight": 700,
+                  "color": "#000000",
+                  "lineHeight": 103.61
+                },
+                "builds": [
+                  { "kind": "enter", "beat": 1, "effect": "appear", "after": "what-do-we-do-then" }
+                ]
+              },
+              {
+                "id": "hacks",
+                "text": {
+                  "value": "HACKS",
+                  "font": "Novecento Sans",
+                  "size": 85,
+                  "weight": 700,
+                  "color": "#D9A404",
+                  "lineHeight": 103.61
+                },
+                "builds": [
+                  {
+                    "kind": "enter",
+                    "beat": 1,
+                    "effect": "appear",
+                    "after": "if-you-guessed",
+                    "delayMs": 500
+                  }
+                ]
+              }
+            ],
+            "gap": 24
+          }
         },
         {
           "id": "here-s-your-trophy",
@@ -1935,27 +1963,6 @@
           },
           "builds": [
             { "kind": "enter", "beat": 1, "effect": "appear", "after": "hacks", "delayMs": 700 }
-          ]
-        },
-        {
-          "id": "hacks",
-          "frame": { "x": 1164, "y": 452.13, "w": 388.4, "h": 127.41 },
-          "text": {
-            "value": "HACKS",
-            "font": "Novecento Sans",
-            "size": 85,
-            "weight": 700,
-            "color": "#D9A404",
-            "lineHeight": 103.61
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 1,
-              "effect": "appear",
-              "after": "if-you-guessed",
-              "delayMs": 500
-            }
           ]
         },
         {
@@ -13992,7 +13999,7 @@
         },
         {
           "id": "this-pr-adds-animations-to-t-2",
-          "frame": { "x": 489, "y": 663, "w": 573, "h": 95 },
+          "frame": { "x": 489, "y": 663, "w": 636, "h": 95 },
           "text": {
             "value": [
               { "text": "This PR adds animations to the\n" },
