@@ -79,14 +79,23 @@ internal object DocumentTimelineTrackEdits {
         useActiveGesture: Boolean,
     ): Boolean {
         val clamped = newDurationMs.coerceAtLeast(0)
+        val doc = c.store.document
         return when (ref) {
-            is DocumentTimelineTrackRef.SlideBuildTrack -> c.updateBuildTiming(
-                slideId = ref.slideId,
-                nodeId = ref.nodeId,
-                buildIndex = ref.buildIndex,
-                durationMs = clamped,
-                useActiveGesture = useActiveGesture,
-            )
+            is DocumentTimelineTrackRef.SlideBuildTrack -> {
+                val buildDurationMs = DocumentTimelineMutationSupport.buildDurationForTotalSpan(
+                    doc = doc,
+                    snapshot = c.snapshot,
+                    ref = ref,
+                    requestedSpanMs = clamped,
+                )
+                c.updateBuildTiming(
+                    slideId = ref.slideId,
+                    nodeId = ref.nodeId,
+                    buildIndex = ref.buildIndex,
+                    durationMs = buildDurationMs,
+                    useActiveGesture = useActiveGesture,
+                )
+            }
             is DocumentTimelineTrackRef.SpecimenTrackBar -> c.updateSpecimenTrack(
                 slideId = ref.slideId,
                 nodeId = ref.nodeId,
@@ -97,10 +106,17 @@ internal object DocumentTimelineTrackEdits {
             is DocumentTimelineTrackRef.TransitionTrackBar -> {
                 val phase = DocumentTimelineMutationSupport.phaseForTransitionKind(ref.trackPlan.kind)
                 if (phase != null) {
+                    val phaseDurationMs = DocumentTimelineMutationSupport.transitionPhaseDurationForTotalSpan(
+                        doc = doc,
+                        themeName = c.activeThemeName,
+                        snapshot = c.snapshot,
+                        ref = ref,
+                        requestedSpanMs = clamped,
+                    )
                     c.updateTransitionPhaseTiming(
                         fromSlideId = ref.fromSlideId,
                         phase = phase,
-                        durationMs = clamped,
+                        durationMs = phaseDurationMs,
                         useActiveGesture = useActiveGesture,
                     )
                 } else {

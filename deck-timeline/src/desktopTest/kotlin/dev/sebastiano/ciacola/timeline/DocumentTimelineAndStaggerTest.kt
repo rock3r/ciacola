@@ -553,6 +553,115 @@ class DocumentTimelineAndStaggerTest {
         assertEquals(150, store.document.slides[1].nodes.first { it.id == "card-a" }.builds[2].delayMs)
     }
 
+    @Test
+    fun resizingStaggeredDeliveryTextMorphAndCodeWarpBarsMatchesRequestedTotalSpan() {
+        val doc = DeckDocument(
+            id = "resize-span-conversion",
+            title = "Resize Span Conversion",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "words",
+                            frame = FrameSpec(x = 100.0, y = 100.0, w = 500.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("One Two Three")),
+                            builds = listOf(
+                                Build.Enter(
+                                    id = "in",
+                                    beat = 1,
+                                    effect = "fade",
+                                    by = dev.sebastiano.ciacola.document.DeliveryBy.Word,
+                                    durationMs = 500,
+                                    stagger = Stagger(ms = 100),
+                                ),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "follow",
+                            frame = FrameSpec(x = 100.0, y = 220.0, w = 300.0, h = 60.0),
+                            text = TextPayload(RichTextValue.Plain("After")),
+                            builds = listOf(
+                                Build.Enter(id = "after-words", beat = 1, effect = "fade", after = "words", durationMs = 200),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "morph-node",
+                            frame = FrameSpec(x = 100.0, y = 320.0, w = 500.0, h = 80.0),
+                            text = TextPayload(RichTextValue.Plain("Alpha Beta")),
+                            builds = listOf(
+                                Build.Change(
+                                    id = "morph",
+                                    beat = 1,
+                                    durationMs = 400,
+                                    set = buildJsonObject {
+                                        put("text", buildJsonObject { put("value", "One Two Three Four") })
+                                    },
+                                    morph = TextMorphSpec(by = MorphBy.Word, stagger = Stagger(ms = 50)),
+                                ),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "code-node",
+                            frame = FrameSpec(x = 100.0, y = 440.0, w = 600.0, h = 160.0),
+                            code = dev.sebastiano.ciacola.document.CodePayload(value = "val x = 1", language = "kotlin"),
+                            builds = listOf(
+                                Build.Change(
+                                    id = "warp",
+                                    beat = 1,
+                                    durationMs = 1000,
+                                    set = buildJsonObject {
+                                        put("code", buildJsonObject { put("value", "val x = 42") })
+                                    },
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = dev.sebastiano.ciacola.document.DeckLoadState.Loaded)
+        val controller = DocumentTimelineController(store = store)
+
+        fun buildRef(nodeId: String) = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .single { it.nodeId == nodeId && it.beatIndex == 1 }
+
+        // 1. 3-word staggered Enter: 200ms max stagger + 500ms duration = 700ms displayed span.
+        // Extending right edge to 800ms must persist durationMs = 600ms so re-planned span is 800ms (and follower starts at 800ms).
+        val wordsRef = buildRef("words")
+        assertEquals(700, wordsRef.trackPlan.durationMs)
+        assertTrue(controller.beginGesture("Resize words"))
+        assertTrue(controller.resizeTrackBarDuration(wordsRef, 800, useActiveGesture = true))
+        controller.commitActiveGesture()
+        assertEquals(600, store.document.slides.single().nodes.first { it.id == "words" }.builds.single().durationMs)
+        assertEquals(800, buildRef("words").trackPlan.durationMs)
+        assertEquals(800, buildRef("follow").trackPlan.startMs, "Dependent build must start at 800ms, not 1000ms")
+
+        // Shrinking below stagger lead-in (200ms) clamps build.durationMs to 0 safely.
+        assertTrue(controller.resizeTrackBarDuration(buildRef("words"), 100, useActiveGesture = false))
+        assertEquals(0, store.document.slides.single().nodes.first { it.id == "words" }.builds.single().durationMs)
+
+        // 2. Staggered text morph: 150ms max slot start + 400ms duration = 550ms -> resize to 700ms persists 550ms and plans 700ms.
+        val morphRef = buildRef("morph-node")
+        assertEquals(550, morphRef.trackPlan.durationMs)
+        assertTrue(controller.resizeTrackBarDuration(morphRef, 700, useActiveGesture = false))
+        assertEquals(550, store.document.slides.single().nodes.first { it.id == "morph-node" }.builds.single().durationMs)
+        assertEquals(700, buildRef("morph-node").trackPlan.durationMs)
+
+        // 3. Code warp: resize to 1000ms inverts warpSchedule to the nearest achievable integer span (within 1ms, not 880ms).
+        val codeRef = buildRef("code-node")
+        assertEquals(880, codeRef.trackPlan.durationMs)
+        assertTrue(controller.resizeTrackBarDuration(codeRef, 1000, useActiveGesture = false))
+        assertTrue(
+            kotlin.math.abs(buildRef("code-node").trackPlan.durationMs - 1000) <= 1,
+            "Code warp span should match 1000ms within 1ms rounding, got ${buildRef("code-node").trackPlan.durationMs}",
+        )
+    }
+
     private fun collectAllSemanticTexts(root: SemanticsNode): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {

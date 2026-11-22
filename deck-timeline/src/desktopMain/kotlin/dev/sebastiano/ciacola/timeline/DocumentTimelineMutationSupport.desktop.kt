@@ -17,6 +17,8 @@ import dev.sebastiano.ciacola.document.TextMorphSpec
 import dev.sebastiano.ciacola.document.Timing
 import dev.sebastiano.ciacola.document.TrackKind
 import dev.sebastiano.ciacola.document.TransitionSpec
+import dev.sebastiano.ciacola.document.warpSchedule
+import kotlin.math.abs
 import dev.sebastiano.ciacola.document.TransitionType
 
 internal const val SEGMENT_PLANNER_DEFAULT_DURATION_MS: Int = 500
@@ -515,6 +517,102 @@ internal object DocumentTimelineMutationSupport {
             it.nodeId == ref.nodeId && it.buildIndex == ref.buildIndex
         } ?: ref.trackPlan
         return planned.dependencyEndMs
+    }
+
+    /**
+     * Converts a requested total displayed track span [requestedSpanMs] into the per-fragment
+     * or token `build.durationMs` to persist on [ref]:
+     * - Code warp: inverts [warpSchedule]'s `totalSpanMs`.
+     * - Staggered delivery (`by != Whole`): subtracts the max fragment start offset.
+     * - Text morph: subtracts the max start offset of slots inheriting `build.durationMs`.
+     * - Whole build: returns [requestedSpanMs] unchanged.
+     */
+    fun buildDurationForTotalSpan(
+        doc: DeckDocument,
+        snapshot: DocumentTimelineSnapshot,
+        ref: DocumentTimelineTrackRef.SlideBuildTrack,
+        requestedSpanMs: Int,
+    ): Int {
+        val clamped = requestedSpanMs.coerceAtLeast(0)
+        val beatPlan = snapshot.slideBeatPlans[ref.slideId]?.getOrNull(ref.beatIndex)
+        val planned = beatPlan?.tracks?.firstOrNull {
+            it.nodeId == ref.nodeId && it.buildIndex == ref.buildIndex
+        } ?: ref.trackPlan
+
+        if (planned.warpSchedule != null) {
+            return invertWarpSpanToTokenDurationMs(clamped)
+        }
+        val pieces = planned.pieces ?: return clamped
+        if (pieces.slots.isEmpty()) return clamped
+
+        if (!ref.isTextMorph) {
+            val maxSlotStart = pieces.slots.maxOf { it.startMs }
+            return (clamped - maxSlotStart).coerceAtLeast(0)
+        }
+
+        val slide = doc.slides.firstOrNull { it.id == ref.slideId }
+        val node = findNodeOnSlide(doc, ref.slideId, ref.nodeId)
+        val build = node?.builds?.getOrNull(ref.buildIndex) as? Build.Change
+        val effectivePhases = build?.morph?.phases ?: node?.text?.morph?.phases ?: slide?.beats?.getOrNull(ref.beatIndex)?.phases
+        val inheritedSlots = pieces.slots.filter { phaseExplicitDuration(effectivePhases, it.phase) == null }
+        val maxSlotStart = (inheritedSlots.ifEmpty { pieces.slots }).maxOf { it.startMs }
+        return (clamped - maxSlotStart).coerceAtLeast(0)
+    }
+
+    /**
+     * Converts a requested total displayed track span [requestedSpanMs] into the transition phase
+     * duration for [ref], subtracting staggered morph slot offsets when [ref] is a text morph.
+     */
+    fun transitionPhaseDurationForTotalSpan(
+        doc: DeckDocument,
+        themeName: String?,
+        snapshot: DocumentTimelineSnapshot,
+        ref: DocumentTimelineTrackRef.TransitionTrackBar,
+        requestedSpanMs: Int,
+    ): Int {
+        val clamped = requestedSpanMs.coerceAtLeast(0)
+        if (!ref.isTextMorph) return clamped
+        val trPlan = snapshot.transitionPlans[ref.fromSlideId to ref.toSlideId]
+        val planned = trPlan?.tracks?.firstOrNull {
+            it.nodeId == ref.nodeId && it.kind == ref.trackPlan.kind
+        } ?: ref.trackPlan
+        val pieces = planned.pieces ?: return clamped
+        if (pieces.slots.isEmpty()) return clamped
+
+        val tr = effectiveTransitionSpec(doc, themeName, ref.fromSlideId)
+        val toNode = findNodeOnSlide(doc, ref.toSlideId, ref.nodeId)
+        val fromNode = findNodeOnSlide(doc, ref.fromSlideId, ref.nodeId)
+        val morphPhases = (tr.text[ref.nodeId] ?: toNode?.text?.morph ?: fromNode?.text?.morph)?.phases
+        val effectivePhases = morphPhases ?: tr.phases
+        val inheritedSlots = pieces.slots.filter {
+            it.phase == SlotPhase.Move || phaseExplicitDuration(effectivePhases, it.phase) == null
+        }
+        val maxSlotStart = (inheritedSlots.ifEmpty { pieces.slots }).maxOf { it.startMs }
+        return (clamped - maxSlotStart).coerceAtLeast(0)
+    }
+
+    private fun phaseExplicitDuration(phases: Phases?, phase: SlotPhase): Int? = when (phase) {
+        SlotPhase.Exit -> phases?.exit?.durationMs
+        SlotPhase.Move -> phases?.move?.durationMs
+        SlotPhase.Enter -> phases?.enter?.durationMs
+    }
+
+    private fun invertWarpSpanToTokenDurationMs(targetSpanMs: Int): Int {
+        if (targetSpanMs <= 0) return 0
+        var lo = 0
+        var hi = targetSpanMs * 2 + 200
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (warpSchedule(mid, reducedMotion = false).totalSpanMs < targetSpanMs) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        if (lo == 0) return 0
+        val loDiff = abs(warpSchedule(lo, reducedMotion = false).totalSpanMs - targetSpanMs)
+        val prevDiff = abs(warpSchedule(lo - 1, reducedMotion = false).totalSpanMs - targetSpanMs)
+        return if (prevDiff <= loDiff) lo - 1 else lo
     }
 
     fun transitionTrackBaseDelay(
