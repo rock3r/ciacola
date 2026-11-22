@@ -740,11 +740,12 @@ object DeckStructureEdits {
                     rewriteNodeTree(root) { node ->
                         if (node.id != nodeId || node.text == null) return@rewriteNodeTree node
                         val resolvedBefore = JsonMergePatch.resolveNodeAtBeat(node, beat)
-                        val oldText = resolvedBefore.text?.value?.plainText ?: return@rewriteNodeTree node
-                        val newText = edit.applyTo(oldText)
+                        val currentValue = resolvedBefore.text?.value ?: return@rewriteNodeTree node
+                        val oldText = currentValue.plainText
+                        val newValue = RichTextValueEdits.applyRangeEdit(currentValue, edit)
                         val patch = JsonMergePatch.nestedPatch(
                             listOf("text", "value"),
-                            kotlinx.serialization.json.JsonPrimitive(newText),
+                            RichTextValueEdits.encodeJson(newValue),
                         )
                         val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch)
                         remapTextNodeManualDelays(
@@ -780,10 +781,12 @@ object DeckStructureEdits {
                     rewriteNodeTree(root) { node ->
                         if (node.id != nodeId || node.text == null) return@rewriteNodeTree node
                         val resolvedBefore = JsonMergePatch.resolveNodeAtBeat(node, beat)
-                        val oldText = resolvedBefore.text?.value?.plainText ?: return@rewriteNodeTree node
+                        val currentValue = resolvedBefore.text?.value ?: return@rewriteNodeTree node
+                        val oldText = currentValue.plainText
+                        val newValue = RichTextValueEdits.replaceWholeText(currentValue, newText)
                         val patch = JsonMergePatch.nestedPatch(
                             listOf("text", "value"),
-                            kotlinx.serialization.json.JsonPrimitive(newText),
+                            RichTextValueEdits.encodeJson(newValue),
                         )
                         val textPatched = JsonMergePatch.applyEditAtBeat(node, beat, patch)
                         remapTextNodeManualDelays(

@@ -10,11 +10,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import dev.sebastiano.ciacola.DeckCatalog
 import dev.sebastiano.ciacola.DeckEntry
+import dev.sebastiano.ciacola.document.CloseFlushResult
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckDocumentStore
+import dev.sebastiano.ciacola.document.SyncState
 import dev.sebastiano.ciacola.document.render.buildDocumentSpeakerNotes
 import dev.sebastiano.ciacola.forExternalFile
 import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
+import dev.sebastiano.ciacola.inspector.sync.DocumentSyncController
 import dev.sebastiano.ciacola.presenter.DeckSpeakerNotes
 import dev.sebastiano.ciacola.presenter.PresenterController
 import java.awt.FileDialog
@@ -223,6 +226,14 @@ fun saveSpeakerNote(store: DeckDocumentStore, slideId: String, beatIndex: Int, n
  * inline-text transactions, then commits an open speaker-notes draft into the outgoing store so the
  * flush that follows persists it (and nothing can land in the incoming deck).
  */
+internal fun pickDeckFileForCopyThemes(): Path? {
+    val dialog = FileDialog(null as Frame?, "Copy themes from .deck.json", FileDialog.LOAD)
+    dialog.isVisible = true
+    val dir = dialog.directory
+    val file = dialog.file
+    return if (dir != null && file != null) Path.of(dir, file) else null
+}
+
 internal fun prepareToLeaveDeck(
     workspace: StudioWorkspaceController,
     elementController: DocumentElementInspectorController,
@@ -231,4 +242,31 @@ internal fun prepareToLeaveDeck(
     workspace.cancelAnyActiveGesture()
     elementController.cancelInlineTextEdit()
     presenterController?.commitEditingNotesIfDirty()
+}
+
+/**
+ * Repeats the guarded close flush right before swapping sessions if the outgoing deck received new
+ * edits while the incoming deck was pre-opening asynchronously. Returns `true` when it is safe to
+ * dispose the outgoing session and swap, or `false` when the sync close guard is holding the swap.
+ */
+internal suspend fun flushOutgoingBeforeSwap(
+    syncController: DocumentSyncController?,
+    revisionAtSwitchStart: Long,
+    dirtyAtSwitchStart: Boolean,
+): Boolean {
+    val sync = syncController ?: return true
+    var baselineRevision = revisionAtSwitchStart
+    var baselineDirty = dirtyAtSwitchStart
+    repeat(3) {
+        val store = sync.store
+        if (store.sync is SyncState.ReadOnly && !store.isDirty) return true
+        val needsFlush = store.revision != baselineRevision || (!baselineDirty && store.isDirty)
+        if (!needsFlush) return true
+        val revBeforeFlush = store.revision
+        val result = sync.requestClose(onAllowClose = {})
+        if (result !is CloseFlushResult.Clean) return false
+        baselineRevision = revBeforeFlush
+        baselineDirty = false
+    }
+    return !sync.store.isDirty
 }

@@ -8,6 +8,7 @@ import kotlin.io.path.deleteRecursively
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -613,5 +614,126 @@ class DeckDocumentStoreAndProvenanceTest {
         } finally {
             dir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun textRangeAndWholeTextEditsPreserveRichTextRunsAndStyling() {
+        val richNode = NodeSpec(
+            id = "rich-title",
+            frame = FrameSpec(x = 100.0, y = 100.0, w = 800.0, h = 120.0),
+            text = TextPayload(
+                value = RichTextValue.Runs(
+                    listOf(
+                        TextRun(text = "Hello ", weight = 400, color = "#AAAAAA"),
+                        TextRun(text = "Compose", weight = 700, italic = true, color = "#FF6B35"),
+                    ),
+                ),
+            ),
+        )
+        val doc = DeckDocument(
+            format = 1,
+            id = "rich-edits",
+            title = "Rich Edits",
+            defaultTheme = "dark",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            slides = listOf(SlideSpec(id = "s0", beats = listOf(BeatSpec(), BeatSpec()), nodes = listOf(richNode))),
+        )
+
+        // Inline range edit on beat 0 must preserve runs and per-run styling.
+        val (afterRange, _) = DeckStructureEdits.applyTextRangeEdit(
+            document = doc,
+            slideId = "s0",
+            nodeId = "rich-title",
+            beat = 0,
+            edit = TextRangeEdit(start = 6, removedLength = 7, insertedText = "Desktop"),
+        )
+        val rangeValue = assertIs<RichTextValue.Runs>(afterRange.slides.single().nodes.single().text?.value)
+        assertEquals("Hello Desktop", rangeValue.plainText)
+        assertEquals(2, rangeValue.runs.size)
+        assertEquals("#AAAAAA", rangeValue.runs[0].color)
+        assertEquals(400, rangeValue.runs[0].weight)
+        assertEquals("#FF6B35", rangeValue.runs[1].color)
+        assertEquals(700, rangeValue.runs[1].weight)
+        assertEquals(true, rangeValue.runs[1].italic)
+
+        // Whole-text replacement on beat 0 and beat 1 must also preserve runs and styling.
+        val (afterWholeBeat0, _) = DeckStructureEdits.applyWholeTextReplacement(
+            document = doc,
+            slideId = "s0",
+            nodeId = "rich-title",
+            beat = 0,
+            newText = "Hello World",
+        )
+        val wholeValue0 = assertIs<RichTextValue.Runs>(afterWholeBeat0.slides.single().nodes.single().text?.value)
+        assertEquals("Hello World", wholeValue0.plainText)
+        assertEquals(2, wholeValue0.runs.size)
+        assertEquals("#FF6B35", wholeValue0.runs[1].color)
+        assertEquals(true, wholeValue0.runs[1].italic)
+
+        val (afterWholeBeat1, _) = DeckStructureEdits.applyWholeTextReplacement(
+            document = doc,
+            slideId = "s0",
+            nodeId = "rich-title",
+            beat = 1,
+            newText = "Hi Compose",
+        )
+        val resolvedBeat1 = JsonMergePatch.resolveNodeAtBeat(afterWholeBeat1.slides.single().nodes.single(), 1)
+        val wholeValue1 = assertIs<RichTextValue.Runs>(resolvedBeat1.text?.value)
+        assertEquals("Hi Compose", wholeValue1.plainText)
+        assertEquals(2, wholeValue1.runs.size)
+        assertEquals("#AAAAAA", wholeValue1.runs[0].color)
+        assertEquals("#FF6B35", wholeValue1.runs[1].color)
+
+        val (afterAppendBeat1, _) = DeckStructureEdits.applyWholeTextReplacement(
+            document = afterWholeBeat1,
+            slideId = "s0",
+            nodeId = "rich-title",
+            beat = 1,
+            newText = "Hi Compose!",
+        )
+        val resolvedAppendBeat1 = JsonMergePatch.resolveNodeAtBeat(afterAppendBeat1.slides.single().nodes.single(), 1)
+        val appendValue1 = assertIs<RichTextValue.Runs>(resolvedAppendBeat1.text?.value)
+        assertEquals("Hi Compose!", appendValue1.plainText)
+        assertEquals(2, appendValue1.runs.size)
+        assertEquals("#AAAAAA", appendValue1.runs[0].color)
+        assertEquals("#FF6B35", appendValue1.runs[1].color)
+    }
+
+    @Test
+    fun editAtEarlierBeatInsertsBeforeLaterBeatChangesAndResolvesChronologically() {
+        val nodeWithBeat2 = NodeSpec(
+            id = "mover",
+            frame = FrameSpec(x = 0.0, y = 100.0, w = 200.0, h = 80.0),
+            text = TextPayload(value = RichTextValue.Plain("Move")),
+            builds = listOf(
+                Build.Change(
+                    beat = 2,
+                    set = buildJsonObject { putJsonObject("frame") { put("x", 200.0) } },
+                ),
+            ),
+        )
+
+        val edited = JsonMergePatch.applyEditAtBeat(
+            node = nodeWithBeat2,
+            beat = 1,
+            patch = buildJsonObject { putJsonObject("frame") { put("x", 100.0) } },
+        )
+        val changeBeats = edited.builds.filterIsInstance<Build.Change>().map { it.beat }
+        assertEquals(listOf(1, 2), changeBeats, "New beat-1 change must be inserted before beat-2 change")
+        assertEquals(0.0, JsonMergePatch.resolveNodeAtBeat(edited, 0).frame?.x)
+        assertEquals(100.0, JsonMergePatch.resolveNodeAtBeat(edited, 1).frame?.x)
+        assertEquals(200.0, JsonMergePatch.resolveNodeAtBeat(edited, 2).frame?.x)
+
+        // Hand-authored out-of-order builds [beat 2, beat 1] must also resolve chronologically.
+        val outOfOrder = nodeWithBeat2.copy(
+            builds = nodeWithBeat2.builds + Build.Change(
+                beat = 1,
+                set = buildJsonObject { putJsonObject("frame") { put("x", 100.0) } },
+            ),
+        )
+        assertEquals(100.0, JsonMergePatch.resolveNodeAtBeat(outOfOrder, 1).frame?.x)
+        assertEquals(200.0, JsonMergePatch.resolveNodeAtBeat(outOfOrder, 2).frame?.x)
+        assertEquals(100.0, JsonMergePatch.resolveNodeBeforeBuild(outOfOrder, 0).frame?.x)
+        assertEquals(200.0, JsonMergePatch.resolveNodeAfterBuild(outOfOrder, 0).frame?.x)
     }
 }

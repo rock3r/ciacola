@@ -292,8 +292,8 @@ object JsonMergePatch {
         }
         recordMiss(roundTrip = true)
         var current = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
-        for ((idx, b) in node.builds.withIndex()) {
-            if (b is Build.Change && (b.beat < targetBuild.beat || (b.beat == targetBuild.beat && idx < buildIndex))) {
+        for ((idx, b) in chronologicalChangeBuilds(node.builds)) {
+            if (b.beat < targetBuild.beat || (b.beat == targetBuild.beat && idx < buildIndex)) {
                 current = apply(current, b.set).jsonObject
             }
         }
@@ -315,8 +315,8 @@ object JsonMergePatch {
         }
         recordMiss(roundTrip = true)
         var current = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
-        for ((idx, b) in node.builds.withIndex()) {
-            if (b is Build.Change && (b.beat < targetBuild.beat || (b.beat == targetBuild.beat && idx <= buildIndex))) {
+        for ((idx, b) in chronologicalChangeBuilds(node.builds)) {
+            if (b.beat < targetBuild.beat || (b.beat == targetBuild.beat && idx <= buildIndex)) {
                 current = apply(current, b.set).jsonObject
             }
         }
@@ -358,7 +358,8 @@ object JsonMergePatch {
      * Applies an edit [patch] to [node] while parked on [beat]:
      * - Beat 0: applies [patch] directly to the base node via RFC 7386 Merge Patch.
      * - Beat `b > 0`: merges [patch] into the **last** `change` build of [node] on beat `b`, or
-     *   appends a new `Build.Change(beat = b, set = patch)` if none exists on that beat.
+     *   inserts a new `Build.Change(beat = b, set = patch)` before the first `change` build on a
+     *   later beat so chronological override order is preserved.
      */
     fun applyEditAtBeat(node: NodeSpec, beat: Int, patch: JsonObject): NodeSpec {
         require(beat >= 0) { "Beat index must be >= 0, got $beat" }
@@ -373,7 +374,13 @@ object JsonMergePatch {
             val existing = updatedBuilds[lastChangeIdx] as Build.Change
             updatedBuilds[lastChangeIdx] = existing.copy(set = composeSetPatch(existing.set, patch))
         } else {
-            updatedBuilds.add(Build.Change(beat = beat, set = patch))
+            val newChange = Build.Change(beat = beat, set = patch)
+            val insertIdx = updatedBuilds.indexOfFirst { it is Build.Change && it.beat > beat }
+            if (insertIdx >= 0) {
+                updatedBuilds.add(insertIdx, newChange)
+            } else {
+                updatedBuilds.add(newChange)
+            }
         }
         return node.copy(builds = updatedBuilds)
     }
@@ -426,12 +433,34 @@ object JsonMergePatch {
 
     private fun computeResolvedNodeJsonAtBeat(node: NodeSpec, beat: Int): JsonObject {
         var current = strictJson.encodeToJsonElement(NodeSpec.serializer(), node).jsonObject
-        for (build in node.builds) {
-            if (build is Build.Change && build.beat <= beat) {
+        for ((_, build) in chronologicalChangeBuilds(node.builds)) {
+            if (build.beat <= beat) {
                 current = apply(current, build.set).jsonObject
             }
         }
         return current
+    }
+
+    /**
+     * Returns all [Build.Change] entries paired with their original index, ordered chronologically
+     * by `(beat, originalIndex)` so earlier-beat changes never override later beats while same-beat
+     * ordering stays intact.
+     */
+    private fun chronologicalChangeBuilds(builds: List<Build>): List<IndexedValue<Build.Change>> {
+        val changes = ArrayList<IndexedValue<Build.Change>>(builds.size)
+        var prevBeat = Int.MIN_VALUE
+        var outOfOrder = false
+        for ((idx, b) in builds.withIndex()) {
+            if (b is Build.Change) {
+                if (b.beat < prevBeat) outOfOrder = true
+                prevBeat = b.beat
+                changes.add(IndexedValue(idx, b))
+            }
+        }
+        if (outOfOrder) {
+            changes.sortWith(compareBy<IndexedValue<Build.Change>> { it.value.beat }.thenBy { it.index })
+        }
+        return changes
     }
 
     private fun hasContainerPayload(node: NodeSpec): Boolean =

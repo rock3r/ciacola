@@ -13,9 +13,11 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.DeckCatalog
+import dev.sebastiano.ciacola.document.BeatSpec
 import dev.sebastiano.ciacola.document.CanonicalJson
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckDocumentStore
+import dev.sebastiano.ciacola.document.DeckFileSync
 import dev.sebastiano.ciacola.document.DeckLoadState
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.Fill
@@ -35,6 +37,8 @@ import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
 import dev.sebastiano.ciacola.inspector.lint.DocumentLintIssue
 import dev.sebastiano.ciacola.inspector.lint.DocumentLintSource
 import dev.sebastiano.ciacola.inspector.lint.LintSeverity
+import dev.sebastiano.ciacola.inspector.sync.CloseGuardState
+import dev.sebastiano.ciacola.inspector.sync.DocumentSyncController
 import dev.sebastiano.ciacola.loadFoundationTestDocument
 import dev.sebastiano.ciacola.timeline.DocumentTimelineController
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
@@ -273,5 +277,61 @@ class StudioUxPolishTest {
         assertNull(nonSkippedSceneIndexForIssue(workspace, issueOnSkipped))
 
         lintController.close()
+    }
+
+    @Test
+    fun flushOutgoingBeforeSwapPersistsLateEditsAndHoldsOnExternalConflict(): Unit = runBlocking {
+        val tempRoot = Files.createTempDirectory("studio-preswap-flush-")
+        try {
+            val deckFile = tempRoot.resolve("outgoing.deck.json")
+            val recoveryDir = tempRoot.resolve("recovery")
+            val initialDoc = DeckDocument(
+                format = 1,
+                id = "outgoing",
+                title = "Initial Title",
+                defaultTheme = "dark",
+                themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+                slides = listOf(SlideSpec(id = "s0", title = "Slide 1", beats = listOf(BeatSpec()))),
+            )
+            Files.writeString(deckFile, CanonicalJson.print(initialDoc))
+
+            val store = DeckDocumentStore()
+            val fileSync = DeckFileSync(targetFile = deckFile, recoveryRootDir = recoveryDir, store = store)
+            val syncController = DocumentSyncController(store = store, fileSync = fileSync)
+            try {
+                assertEquals(DeckLoadState.Loaded, fileSync.open())
+                val revAtSwitchStart = store.revision
+                val dirtyAtSwitchStart = store.isDirty
+
+                // Simulate a late edit made while the incoming deck was pre-opening asynchronously.
+                assertTrue(store.edit("Late edit during switch") { d -> d.copy(title = "Late Saved Title") })
+                assertTrue(store.isDirty)
+
+                assertTrue(
+                    flushOutgoingBeforeSwap(syncController, revAtSwitchStart, dirtyAtSwitchStart),
+                    "Clean late edit must flush before swapping sessions",
+                )
+                assertEquals(SyncState.Saved, store.sync)
+                assertTrue(
+                    Files.readString(deckFile).contains("\"Late Saved Title\""),
+                    "Late edit must be written to disk before outgoing session is disposed",
+                )
+
+                // Now simulate a second late edit that conflicts with an external disk modification.
+                val revBeforeConflict = store.revision
+                assertTrue(store.edit("Conflicting late edit") { d -> d.copy(title = "Mine Late") })
+                Files.writeString(deckFile, CanonicalJson.print(initialDoc.copy(title = "Theirs External")))
+
+                assertFalse(
+                    flushOutgoingBeforeSwap(syncController, revBeforeConflict, dirtyAtSwitchStart = false),
+                    "Conflicting late edit must hold the swap and open the close guard",
+                )
+                assertIs<CloseGuardState.Confirming>(syncController.closeGuard)
+            } finally {
+                fileSync.close()
+            }
+        } finally {
+            tempRoot.toFile().deleteRecursively()
+        }
     }
 }

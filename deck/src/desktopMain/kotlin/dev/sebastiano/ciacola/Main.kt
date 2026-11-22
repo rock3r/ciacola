@@ -91,6 +91,7 @@ import dev.sebastiano.ciacola.studio.buildDualPassVideoStoryboard
 import dev.sebastiano.ciacola.studio.buildPerThumbnailOverviewStoryboard
 import dev.sebastiano.ciacola.studio.clearDesktopQuitHandler
 import dev.sebastiano.ciacola.studio.externalDeckEntryFor
+import dev.sebastiano.ciacola.studio.flushOutgoingBeforeSwap
 import dev.sebastiano.ciacola.studio.formatStudioBreadcrumb
 import dev.sebastiano.ciacola.studio.installDesktopQuitHandler
 import dev.sebastiano.ciacola.studio.loadPersistedInspectorWidthDp
@@ -99,6 +100,7 @@ import dev.sebastiano.ciacola.studio.openRecoveryCopyIntoStore
 import dev.sebastiano.ciacola.studio.persistActiveDeckId
 import dev.sebastiano.ciacola.studio.persistInspectorWidthDp
 import dev.sebastiano.ciacola.studio.persistSelectedThemeForDeck
+import dev.sebastiano.ciacola.studio.pickDeckFileForCopyThemes
 import dev.sebastiano.ciacola.studio.pickDeckJsonFile
 import dev.sebastiano.ciacola.studio.preOpenDeckSession
 import dev.sebastiano.ciacola.studio.prepareToLeaveDeck
@@ -122,8 +124,6 @@ import dev.sebastiano.ciacola.timeline.rememberDocumentTimelineWindow
 import dev.sebastiano.ciacola.ui.AuthoringTextInputFocusTracker
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.LocalAuthoringTextInputTracker
-import java.awt.FileDialog
-import java.awt.Frame
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.CancellationException
@@ -598,6 +598,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
         if (target.id == switchingToDeckId && target.externalFilePath == null) return
         switchJob?.cancel()
         val token = ++switchToken
+        val outgoingRevision = store.revision
+        val outgoingDirty = store.isDirty
         switchingToDeckId = target.id
         deckSwitchTimer.markRequested(activeSession.entry.id, target.id)
         switchJob = appScope.launch {
@@ -613,8 +615,16 @@ private fun ApplicationScope.CiacolaStudioApplication(
                     runCatching { nextSession.fileSync?.close() }
                     return@launch
                 }
-                studioWorkspace.cancelAnyActiveGesture()
-                elementController.cancelInlineTextEdit()
+                prepareToLeaveDeck(studioWorkspace, elementController, presenterWindowHolder?.controller)
+                if (!flushOutgoingBeforeSwap(syncController, outgoingRevision, outgoingDirty)) {
+                    runCatching { nextSession.fileSync?.close() }
+                    pendingCloseAction = { performSwitchToDeck(target, decksDirOverride) }
+                    return@launch
+                }
+                if (token != switchToken) {
+                    runCatching { nextSession.fileSync?.close() }
+                    return@launch
+                }
                 elementController.selectNode(null)
                 timelineController.clearSelection()
                 keyboardController.exitInteractive()
@@ -758,16 +768,6 @@ private fun ApplicationScope.CiacolaStudioApplication(
             ?.elementId
     }
 
-    val pickDeckFileForCopyThemes: () -> Path? = remember {
-        {
-            val dialog = FileDialog(null as Frame?, "Copy themes from .deck.json", FileDialog.LOAD)
-            dialog.isVisible = true
-            val dir = dialog.directory
-            val file = dialog.file
-            if (dir != null && file != null) Path.of(dir, file) else null
-        }
-    }
-
     val themeWindow = rememberDocumentThemeInspectorWindow(
         controller = themeController,
         isDarkProvider = { isDarkTheme },
@@ -778,7 +778,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         onToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused,
         isEditorShownProvider = { studioWorkspace.isDesignEditorVisible },
         onToggleEditor = { studioWorkspace.toggleDesignSystemEditor() },
-        onPickDeckFileToCopyThemes = pickDeckFileForCopyThemes,
+        onPickDeckFileToCopyThemes = ::pickDeckFileForCopyThemes,
     )
 
     var lintWindowHolder by remember { mutableStateOf<DocumentDeckLintWindow?>(null) }
@@ -1011,7 +1011,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         themeSheet = {
             StudioThemeSheet(
                 workspace = studioWorkspace,
-                onPickDeckFileToCopyThemes = pickDeckFileForCopyThemes,
+                onPickDeckFileToCopyThemes = ::pickDeckFileForCopyThemes,
             )
         },
         issuesDock = if (timelineWindow.dockedInStoryWindow) {
