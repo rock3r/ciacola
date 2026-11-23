@@ -245,7 +245,7 @@ class SyntaxParserTest {
     }
 
     @Test
-    fun allSeventeenBuiltInLanguagesParseLosslesslyMapColorsAndBuildDiffLists() {
+    fun allBuiltInLanguagesParseLosslesslyMapColorsAndBuildDiffLists() {
         data class LangSample(
             val language: Language,
             val before: String,
@@ -271,10 +271,15 @@ class SyntaxParserTest {
             LangSample(Glsl, "#version 450\nlayout(location = 0) out vec4 color;\nvoid main() { color = vec4(1.0); }", "#version 450\nlayout(location = 0) out vec4 color;\nvoid main() { color = vec4(0.5); }", "void"),
             LangSample(Sksl, "uniform shader child;\nhalf4 main(float2 p) {\n  return child.eval(p);\n}", "uniform shader child;\nhalf4 main(float2 p) {\n  return child.eval(p * 2.0);\n}", "uniform"),
             LangSample(Agsl, "uniform float2 iResolution;\n\nhalf4 main(float2 coord) {\n  return half4(coord / iResolution, 0.0, 1.0);\n}", "uniform float2 iResolution;\n\nhalf4 main(float2 coord) {\n  return half4(coord / iResolution, 1.0, 1.0);\n}", "uniform"),
+            LangSample(Yaml, "server:\n  host: \"127.0.0.1\"\n  port: 8080", "server:\n  host: \"127.0.0.1\"\n  port: 9090"),
+            LangSample(Sql, "SELECT id, name\nFROM users\nWHERE active = TRUE;", "SELECT id, email\nFROM users\nWHERE active = TRUE;", "SELECT"),
+            LangSample(Shell, "if [[ -n \"${'$'}ENV\" ]]; then\n  echo \"ok\"\nfi", "if [[ -n \"${'$'}ENV\" ]]; then\n  echo \"ready\"\nfi", "if"),
+            LangSample(CSharp, "public record Point(int X, int Y) {\n  public int Sum => X + Y;\n}", "public record Point(int X, int Y) {\n  public int Sum => X + Y + 1;\n}", "record"),
+            LangSample(Php, "<?php\nfunction add(int ${'$'}a, int ${'$'}b): int {\n  return ${'$'}a + ${'$'}b;\n}", "<?php\nfunction add(int ${'$'}a, int ${'$'}b): int {\n  return ${'$'}a + ${'$'}b + 1;\n}", "function"),
         )
 
-        assertEquals(17, samples.size)
-        assertEquals(17, samples.map { it.language }.toSet().size)
+        assertEquals(22, samples.size)
+        assertEquals(22, samples.map { it.language }.toSet().size)
 
         for (sample in samples) {
             val beforeTokens = assertLosslessAndWellFormed(sample.before, sample.language)

@@ -10,8 +10,9 @@ import kotlin.test.assertTrue
 class SyntaxHighlighterTest {
 
     @Test
-    fun resolvesAllSeventeenLanguagesByIdAndAliases() {
-        assertEquals(17, SyntaxLanguage.entries.size)
+    fun resolvesAllLanguagesByIdAndAliases() {
+        assertEquals(SyntaxLanguage.entries.size, SyntaxLanguage.entries.toSet().size)
+        assertEquals(22, SyntaxLanguage.entries.size)
 
         for (lang in SyntaxLanguage.entries) {
             assertEquals(lang, SyntaxLanguage.fromNameOrAlias(lang.id))
@@ -25,13 +26,18 @@ class SyntaxHighlighterTest {
         assertEquals(SyntaxLanguage.Cpp, SyntaxLanguage.fromNameOrAlias("c++"))
         assertEquals(SyntaxLanguage.TypeScript, SyntaxLanguage.fromNameOrAlias("tsx"))
         assertEquals(SyntaxLanguage.Json, SyntaxLanguage.fromNameOrAlias("jsonc"))
+        assertEquals(SyntaxLanguage.Yaml, SyntaxLanguage.fromNameOrAlias("yml"))
+        assertEquals(SyntaxLanguage.Sql, SyntaxLanguage.fromNameOrAlias("postgresql"))
+        assertEquals(SyntaxLanguage.Shell, SyntaxLanguage.fromNameOrAlias("zsh"))
+        assertEquals(SyntaxLanguage.CSharp, SyntaxLanguage.fromNameOrAlias("c#"))
+        assertEquals(SyntaxLanguage.Php, SyntaxLanguage.fromNameOrAlias("phtml"))
         assertNull(SyntaxLanguage.fromNameOrAlias(""))
         assertNull(SyntaxLanguage.fromNameOrAlias("   "))
         assertNull(SyntaxLanguage.fromNameOrAlias("brainfuck"))
     }
 
     @Test
-    fun registryProvidesAllSeventeenSupportedLanguagesAndHandlesUnknownCleanly() {
+    fun registryProvidesAllSupportedLanguagesAndHandlesUnknownCleanly() {
         assertEquals(
             SyntaxLanguage.entries.toSet(),
             SyntaxHighlighter.supportedLanguages,
@@ -62,8 +68,14 @@ class SyntaxHighlighterTest {
             "vert" to "vec4 p = vec4(1.0);",
             "sksl" to "half4 main(float2 p) { return half4(1.0); }",
             "agsl" to "uniform float2 iResolution;",
+            "yml" to "key: true",
+            "postgresql" to "SELECT 1;",
+            "zsh" to "echo \"hello ${'$'}USER\"",
+            "cs" to "record Point(int X, int Y);",
+            "phtml" to "<?php echo 1; ?>",
         )
-        assertEquals(17, aliasSamples.size)
+        assertEquals(22, aliasSamples.size)
+        assertEquals(SyntaxLanguage.entries.size, aliasSamples.size)
         for ((alias, snippet) in aliasSamples) {
             val aliasTokens = SyntaxHighlighter.lex(snippet, alias)
             assertNotNull(aliasTokens, "Expected lexer for alias '$alias'")
@@ -86,7 +98,7 @@ class SyntaxHighlighterTest {
     }
 
     @Test
-    fun validSnippetsAcrossAllSeventeenLanguagesProduceZeroInvalidTokens() {
+    fun validSnippetsAcrossAllLanguagesProduceZeroInvalidTokens() {
         val validSnippets: Map<SyntaxLanguage, String> = mapOf(
             SyntaxLanguage.Kotlin to """
                 @Composable
@@ -204,6 +216,41 @@ class SyntaxHighlighterTest {
                 half4 main(float2 fragCoord) {
                     float2 uv = fragCoord / iResolution;
                     return half4(uv, 0.5, 1.0);
+                }
+            """.trimIndent(),
+            SyntaxLanguage.Yaml to """
+                %YAML 1.2
+                ---
+                # Config
+                name: ciacola
+                ports: [8080, 8443]
+                enabled: true
+            """.trimIndent(),
+            SyntaxLanguage.Sql to """
+                /* query */
+                SELECT u.id, COUNT(*) AS total
+                FROM users u
+                WHERE u.active = TRUE;
+            """.trimIndent(),
+            SyntaxLanguage.Shell to """
+                #!/usr/bin/env bash
+                # Deploy script
+                export APP_ENV="prod"
+                if [[ -n "${'$'}APP_ENV" ]]; then
+                    echo "${'$'}APP_ENV"
+                fi
+            """.trimIndent(),
+            SyntaxLanguage.CSharp to """
+                [Serializable]
+                public record User(string Name) {
+                    public string Greet() => $"Hello, {Name}!";
+                }
+            """.trimIndent(),
+            SyntaxLanguage.Php to """
+                <?php
+                #[Route('/api')]
+                function greet(string ${'$'}name): string {
+                    return "Hello, ${'$'}name!";
                 }
             """.trimIndent(),
         )
@@ -347,6 +394,46 @@ class SyntaxHighlighterTest {
                     "// line\n" to null,
                 ) to listOf("/* b */", "*/", "float2 p = float2(1.0);")
                 ),
+            SyntaxLanguage.Yaml to (
+                listOf(
+                    "\"hello\"" to SyntaxTokenKind.String,
+                    "'world'" to SyntaxTokenKind.String,
+                    "# note\n" to null,
+                    "a: |\n  line 1\n  line 2\n" to null,
+                ) to listOf(" b: \"next\"\n", " c: 'tail'\n", " # end\n")
+                ),
+            SyntaxLanguage.Sql to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "/* a /* nested */ b */" to SyntaxTokenKind.Comment,
+                    "'hello'" to SyntaxTokenKind.String,
+                    "${'$'}${'$'}raw${'$'}${'$'}" to SyntaxTokenKind.String,
+                    "${'$'}tag${'$'}a ${'$'}x${'$'} b${'$'}tag${'$'}" to SyntaxTokenKind.String,
+                ) to listOf(" /* c */", " 'd'", " ${'$'}tag${'$'}e${'$'}tag${'$'}", "*/", " SELECT 1;")
+                ),
+            SyntaxLanguage.Shell to (
+                listOf(
+                    "# comment\n" to null,
+                    "'single'" to SyntaxTokenKind.String,
+                    "\"double\"" to null,
+                    "cat <<'EOF'\nbody\nEOF\n" to null,
+                ) to listOf(" ; echo hi", " # tail\n", " 'next'")
+                ),
+            SyntaxLanguage.CSharp to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "@\"verb\"" to SyntaxTokenKind.String,
+                    "\"\"\"raw\"\"\"" to SyntaxTokenKind.String,
+                    "\"hello\"" to SyntaxTokenKind.String,
+                ) to listOf("/* b */", " \"c\"", "*/", " \"\"\"d\"\"\"")
+                ),
+            SyntaxLanguage.Php to (
+                listOf(
+                    "<?php /* a */ ?>" to null,
+                    "<?php 'hello' ?>" to null,
+                    "<?php \"world\" ?>" to null,
+                ) to listOf("<?php /* b */ ?>", "<div>hi</div>", "<?= 1 ?>")
+                ),
         )
         assertEquals(SyntaxLanguage.entries.toSet(), cases.keys)
         for ((language, pair) in cases) {
@@ -396,6 +483,7 @@ class SyntaxHighlighterTest {
             SyntaxLanguage.Glsl,
             SyntaxLanguage.Sksl,
             SyntaxLanguage.Agsl,
+            SyntaxLanguage.CSharp,
         )) {
             val tokens = assertValidSnippetHasNoInvalidTokens(
                 SyntaxHighlighter.lexer(language),
@@ -405,6 +493,38 @@ class SyntaxHighlighterTest {
             assertEquals(1, tokens.size, "[${language.id}] Expected single Comment token for '$commentEndingInEmoji', got $tokens")
             assertEquals(SyntaxTokenKind.Comment, tokens.single().kind)
         }
+
+        val hashCommentEndingInEmoji = "# hi 🎉"
+        for (language in listOf(
+            SyntaxLanguage.Python,
+            SyntaxLanguage.Toml,
+            SyntaxLanguage.Yaml,
+            SyntaxLanguage.Shell,
+        )) {
+            val tokens = assertValidSnippetHasNoInvalidTokens(
+                SyntaxHighlighter.lexer(language),
+                hashCommentEndingInEmoji,
+                "${language.id}:trailing-emoji-hash-comment",
+            )
+            assertEquals(1, tokens.size, "[${language.id}] Expected single Comment token for '$hashCommentEndingInEmoji', got $tokens")
+            assertEquals(SyntaxTokenKind.Comment, tokens.single().kind)
+        }
+
+        val sqlTokens = assertValidSnippetHasNoInvalidTokens(
+            SyntaxHighlighter.lexer(SyntaxLanguage.Sql),
+            "-- hi 🎉",
+            "sql:trailing-emoji-dash-comment",
+        )
+        assertEquals(1, sqlTokens.size, "[sql] Expected single Comment token for '-- hi 🎉', got $sqlTokens")
+        assertEquals(SyntaxTokenKind.Comment, sqlTokens.single().kind)
+
+        val phpTokens = assertValidSnippetHasNoInvalidTokens(
+            SyntaxHighlighter.lexer(SyntaxLanguage.Php),
+            "<?php // hi 🎉",
+            "php:trailing-emoji-comment",
+        )
+        assertEquals(SyntaxTokenKind.Comment, phpTokens.last().kind)
+        assertEquals("// hi 🎉", phpTokens.last().slice("<?php // hi 🎉"))
     }
 
     @Test

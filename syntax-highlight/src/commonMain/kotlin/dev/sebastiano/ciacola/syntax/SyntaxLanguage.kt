@@ -26,6 +26,11 @@ public enum class SyntaxLanguage(
     Glsl("glsl", "source.glsl", setOf("vert", "frag", "comp", "geom", "tesc", "tese")),
     Sksl("sksl", "source.sksl", emptySet()),
     Agsl("agsl", "source.agsl", emptySet()),
+    Yaml("yaml", "source.yaml", setOf("yml")),
+    Sql("sql", "source.sql", setOf("postgres", "postgresql", "pgsql", "mysql", "sqlite", "tsql", "plsql")),
+    Shell("shell", "source.shell", setOf("sh", "bash", "zsh", "shellscript", "shell-script")),
+    CSharp("csharp", "source.cs", setOf("cs", "c#")),
+    Php("php", "source.php", setOf("phtml")),
     ;
 
     public companion object {

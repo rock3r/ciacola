@@ -123,6 +123,41 @@ object Sksl : Language {
     }
 }
 
+/** YAML Ain't Markup Language. */
+object Yaml : Language {
+    override fun scopeName(): String {
+        return "source.yaml"
+    }
+}
+
+/** Structured Query Language (SQL). */
+object Sql : Language {
+    override fun scopeName(): String {
+        return "source.sql"
+    }
+}
+
+/** POSIX sh, Bash, and Zsh shell scripts. */
+object Shell : Language {
+    override fun scopeName(): String {
+        return "source.shell"
+    }
+}
+
+/** The C# programming language. */
+object CSharp : Language {
+    override fun scopeName(): String {
+        return "source.cs"
+    }
+}
+
+/** The PHP programming language. */
+object Php : Language {
+    override fun scopeName(): String {
+        return "source.php"
+    }
+}
+
 /** A custom language that is [Parser] aware */
 class Custom(val parser: Parser) : Language {
     override fun scopeName(): String {

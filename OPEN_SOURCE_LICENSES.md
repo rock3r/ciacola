@@ -42,6 +42,8 @@ license.
 | **Ktor Client** | `io.ktor:ktor-client-{core,content-negotiation,js,okhttp}:3.5.2`, `io.ktor:ktor-serialization-kotlinx-json:3.5.2` (`:examples:interactive`) | JetBrains s.r.o. and Ktor contributors | Apache-2.0 | <https://github.com/ktorio/ktor> |
 | **OkHttp** | `com.squareup.okhttp3:okhttp` (via `ktor-client-okhttp`, `:examples:interactive`) | Square, Inc. | Apache-2.0 | <https://square.github.io/okhttp/> |
 
+> **First-party `:syntax-highlight` lexer grammars:** Aside from the adapted `KotlinLexer.g4` / `UnicodeClasses.g4` (Apache-2.0), `XMLLexer.g4` (BSD-3-Clause), and UCD-generated `Unicode*Ident.g4` tables (Unicode-3.0) listed above, all remaining ANTLR4 lexer grammars and base lexers across `:syntax-highlight`'s 22 supported languages (JSON, HTML, CSS, JavaScript/TypeScript, Rust, Go, Python, TOML, Java, C/C++, GLSL/SkSL/AGSL, YAML, SQL, Shell, C#, and PHP) are original first-party Ciacola sources licensed under Apache-2.0 with zero additional third-party runtime or build dependencies.
+
 ### Testing & Build Tooling
 
 | Component | Artifact(s) / Version | Copyright / Project | License | Upstream |
