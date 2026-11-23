@@ -97,6 +97,64 @@ class CppSyntaxLexerTest {
     }
 
     @Test
+    fun handlesUserDefinedLiteralsCoroutinesGenericLambdasWeirdDelimitersAndPointerToMember() {
+        val code = """
+            export module demo;
+            import <map>;
+            [[gnu::always_inline, nodiscard("msg")]]
+            auto edge() {
+                auto r1 = R"---(raw )-- " text)---";
+                auto r2 = uR"()" + UR"()";
+                auto dur = 100ms;
+                auto sv = "hi"sv;
+                auto hx = 0xFF_u8;
+                long double hf = 0x1.8p-3L;
+                std::map<std::string, std::vector<int>> m;
+                auto lam = [=, &m]<typename T>(T&& v) mutable noexcept -> auto {
+                    return not (true and false) or (hf <=> 0.0);
+                };
+                consteval int k = 1;
+                constinit int g = 2;
+                return lam(k + g);
+            }
+            struct S { int x; };
+            int pm(S* p, int S::* mptr) {
+                return p->*mptr + (*p).*mptr;
+            }
+            auto coro() {
+                co_await 1;
+                co_yield 2;
+                co_return 3;
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(CppSyntaxLexer, code, "cpp-edge")
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "export" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "module" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "import" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "gnu" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "always_inline" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "nodiscard" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"msg\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "R\"---(raw )-- \" text)---\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "uR\"()\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "UR\"()\"" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "100ms" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"hi\"sv" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0xFF_u8" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0x1.8p-3L" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.last { it.slice(code) == "map" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "string" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "T" && it.startIndex > code.indexOf(">(") }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "<=>" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "->*" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == ".*" }.kind)
+        for (kw in listOf("not", "and", "or", "consteval", "constinit", "co_await", "co_yield", "co_return")) {
+            assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == kw }.kind)
+        }
+    }
+
+    @Test
     fun matchesShikiAndPygmentsOracles() {
         assertAllOracleFixtures(cppOracleFixtures)
     }

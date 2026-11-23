@@ -74,7 +74,7 @@ private val CPP_STD_TYPES = setOf(
 private class RawCppToken(
     val type: Int,
     val start: Int,
-    val end: Int,
+    var end: Int,
     var kind: SyntaxTokenKind,
     val isHidden: Boolean,
 )
@@ -180,20 +180,49 @@ private fun emitCppRawToken(
 
 private fun classifyCppRawTokens(
     code: String,
-    raw: List<RawCppToken>,
+    raw: MutableList<RawCppToken>,
     dialect: CFamilyDialect,
 ) {
+    // Merge C++11+ user-defined literal suffixes (`100ms`, `0xFF_u8`, `"hi"sv`, `R"(x)"_s`)
+    if (dialect.isCpp) {
+        var m = 0
+        while (m + 1 < raw.size) {
+            val cur = raw[m]
+            val nxt = raw[m + 1]
+            if (
+                cur.end == nxt.start &&
+                nxt.type == CppTokens.IDENT &&
+                isCppUdlBaseLiteral(cur.type)
+            ) {
+                cur.end = nxt.end
+                raw.removeAt(m + 1)
+            } else {
+                m++
+            }
+        }
+    }
+
     val visible = ArrayList<Int>(raw.size)
     for (idx in raw.indices) {
         if (!raw[idx].isHidden) visible += idx
     }
 
     var inDoubleBracketAttr = false
+    val templateTypeParams = HashSet<String>()
+    var braceDepth = 0
     var i = 0
     while (i < visible.size) {
         val tok = raw[visible[i]]
         val prev = if (i > 0) raw[visible[i - 1]] else null
         val next = if (i + 1 < visible.size) raw[visible[i + 1]] else null
+
+        when (tok.type) {
+            CppTokens.LBRACE -> braceDepth++
+            CppTokens.RBRACE -> {
+                if (braceDepth > 0) braceDepth--
+                if (braceDepth == 0) templateTypeParams.clear()
+            }
+        }
 
         if (inDoubleBracketAttr) {
             if (
@@ -232,11 +261,30 @@ private fun classifyCppRawTokens(
                 prev = prev,
                 next = next,
                 dialect = dialect,
+                templateTypeParams = templateTypeParams,
             )
+            val prevText = if (prev != null && prev.type == CppTokens.IDENT) code.substring(prev.start, prev.end) else null
+            if (dialect.isCpp && (prevText == "typename" || prevText == "class") && text.isNotEmpty() && text[0].isUpperCase()) {
+                templateTypeParams += text
+            }
         }
 
         i++
     }
+}
+
+private fun isCppUdlBaseLiteral(type: Int): Boolean = when (type) {
+    CppTokens.RAW_STRING,
+    CppTokens.STRING,
+    CppTokens.CHAR_LITERAL,
+    CppTokens.HEX_FLOAT,
+    CppTokens.HEX_INT,
+    CppTokens.BIN_INT,
+    CppTokens.OCT_INT,
+    CppTokens.FLOAT,
+    CppTokens.DEC_INT,
+    -> true
+    else -> false
 }
 
 private fun classifyCppIdentifier(
@@ -245,6 +293,7 @@ private fun classifyCppIdentifier(
     prev: RawCppToken?,
     next: RawCppToken?,
     dialect: CFamilyDialect,
+    templateTypeParams: Set<String>,
 ): SyntaxTokenKind {
     if (text in dialect.constants) return SyntaxTokenKind.Constant
     if (text in dialect.keywords) return SyntaxTokenKind.Keyword
@@ -262,6 +311,10 @@ private fun classifyCppIdentifier(
     }
 
     if (dialect.isCpp && prev?.type == CppTokens.COLONCOLON && text in CPP_STD_TYPES) {
+        return SyntaxTokenKind.Type
+    }
+
+    if (dialect.isCpp && text in templateTypeParams) {
         return SyntaxTokenKind.Type
     }
 

@@ -146,6 +146,65 @@ class RustSyntaxLexerTest {
     }
 
     @Test
+    fun handlesAdvancedEdgeCasesTupleChainingHrtbTurbofishConstGenericsAndRawIdents() {
+        val code = """
+            #![feature(generic_const_exprs)]
+            #[cfg_attr(all(unix, not(target_os = "macos")), inline)]
+            /*! inner block doc */
+            unsafe extern "C" fn hrtb<'a, F, T, const N: usize>(
+                f: F,
+                arr: [T; N],
+                tup: (i32, i32),
+            ) -> i32
+            where
+                F: for<'b> Fn(&'b str) -> &'b str + Send + 'static,
+            {
+                let v = Vec::<i32>::new();
+                let d: &(dyn Send + 'static) = &v;
+                let a = b'\x7f';
+                let b = b'\\';
+                let c = '\u{10FFFF}';
+                let y = tup.0.1;
+                let r = 'outer: loop {
+                    break 'outer r#match(42);
+                };
+                r + y + (a as i32) + (b as i32) + (c as i32)
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(RustSyntaxLexer, code, "rust-edge")
+        assertEquals(SyntaxTokenKind.Annotation, tokens.first { it.slice(code) == "feature" }.kind)
+        assertEquals(SyntaxTokenKind.Annotation, tokens.first { it.slice(code) == "cfg_attr" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, tokens.first { it.slice(code) == "/*! inner block doc */" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "unsafe" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "extern" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "dyn" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "Fn" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "'b" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "T" && it.startIndex > code.indexOf("arr:") }.kind)
+        assertEquals(SyntaxTokenKind.Constant, tokens.first { it.slice(code) == "N" && it.startIndex > code.indexOf("arr:") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "b'\\x7f'" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "b'\\\\'" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "'\\u{10FFFF}'" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "'outer" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "r#match" }.kind)
+
+        // Ensure `tup.0.1` splits into `tup`, `.`, `0`, `.`, `1` rather than float `0.1`
+        val tupStart = code.indexOf("tup.0.1")
+        val tupTokens = tokens.filter { it.startIndex >= tupStart && it.endIndex <= tupStart + "tup.0.1".length }
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Plain to "tup",
+                SyntaxTokenKind.Punctuation to ".",
+                SyntaxTokenKind.Number to "0",
+                SyntaxTokenKind.Punctuation to ".",
+                SyntaxTokenKind.Number to "1",
+            ),
+            tupTokens.map { it.kind to it.slice(code) },
+        )
+    }
+
+    @Test
     fun matchesShikiAndPygmentsOracles() {
         assertAllOracleFixtures(rustOracleFixtures)
     }

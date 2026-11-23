@@ -117,6 +117,66 @@ class GoSyntaxLexerTest {
     }
 
     @Test
+    fun handlesGenericsConstraintsStructTagsImaginaryAndChannelDirections() {
+        val code = """
+            package edge
+
+            type Number interface {
+                ~int | ~string
+            }
+
+            type Item struct {
+                ID string `json:"id,omitempty"`
+            }
+
+            func Map[T any, U comparable](s []T, fn func(T) U, rest ...T) []U {
+                out := make([]U, 0, len(s))
+                var inCh <-chan int
+                var outCh chan<- int
+                x := 0i + 0x1.fp2i + 1_000i + 0x1.p-2
+                r1 := '\U0010FFFF'
+                r2 := '\377'
+                _, _, _, _, _, _ = inCh, outCh, x, r1, r2, rest
+            outer:
+                for _, v := range s {
+                    if len(out) > max(1, min(2, 3)) {
+                        break outer
+                    }
+                    out = append(out, fn(v))
+                }
+                clear(out)
+                return out
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(GoSyntaxLexer, code, "go-edge")
+        assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "Map" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "comparable" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "~" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "ID" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "`json:\"id,omitempty\"`" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "..." }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0i" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0x1.fp2i" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "1_000i" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0x1.p-2" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "'\\U0010FFFF'" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "'\\377'" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "max" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "min" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "clear" }.kind)
+
+        // All generic `T` and `U` occurrences (including `fn func(T) U`) must be `Type`, never `Function`
+        val tTokens = tokens.filter { it.slice(code) == "T" }
+        val uTokens = tokens.filter { it.slice(code) == "U" }
+        assertEquals(4, tTokens.size)
+        assertEquals(4, uTokens.size)
+        for (tok in tTokens + uTokens) {
+            assertEquals(SyntaxTokenKind.Type, tok.kind, "Expected Type for ${tok.slice(code)} at ${tok.startIndex}")
+        }
+    }
+
+    @Test
     fun matchesShikiAndPygmentsOracles() {
         assertAllOracleFixtures(goOracleFixtures)
     }

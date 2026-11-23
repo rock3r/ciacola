@@ -123,6 +123,10 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
     var structBraceDepth = 0
     val structDepthStack = ArrayList<Int>()
     var braceDepth = 0
+    var parenDepth = 0
+    var expectingTypeParamBracket = false
+    var typeParamBracketDepth = 0
+    val declaredTypeParams = HashSet<String>()
 
     for (i in visible.indices) {
         val tok = raw[visible[i]]
@@ -130,7 +134,10 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
         val next = if (i + 1 < visible.size) raw[visible[i + 1]] else null
         val lineStart = precededByNewline[i]
 
+        val parenDepthBefore = parenDepth
         when (tok.type) {
+            GoTokens.LPAREN -> parenDepth++
+            GoTokens.RPAREN -> if (parenDepth > 0) parenDepth--
             GoTokens.LBRACE -> {
                 braceDepth++
                 if (pendingStructOrInterface) {
@@ -143,6 +150,18 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
                     structDepthStack.removeAt(structDepthStack.lastIndex)
                 }
                 if (braceDepth > 0) braceDepth--
+                if (braceDepth == 0) declaredTypeParams.clear()
+            }
+            GoTokens.LBRACK -> {
+                if (expectingTypeParamBracket) {
+                    typeParamBracketDepth = 1
+                    expectingTypeParamBracket = false
+                } else if (typeParamBracketDepth > 0) {
+                    typeParamBracketDepth++
+                }
+            }
+            GoTokens.RBRACK -> {
+                if (typeParamBracketDepth > 0) typeParamBracketDepth--
             }
         }
         structBraceDepth = structDepthStack.lastOrNull() ?: 0
@@ -157,21 +176,33 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
             }
         } else if (afterFuncKeyword) {
             afterFuncKeyword = false
-            if (tok.type == GoTokens.LPAREN) {
+            if (tok.type == GoTokens.LPAREN && braceDepth == 0 && parenDepthBefore == 0) {
                 receiverParenDepth = 1
             } else if (tok.type == GoTokens.IDENT) {
                 tok.kind = SyntaxTokenKind.Function
+                if (next?.type == GoTokens.LBRACK) {
+                    expectingTypeParamBracket = true
+                    declaredTypeParams.clear()
+                }
                 continue
             }
         } else if (expectingMethodNameAfterReceiver) {
             expectingMethodNameAfterReceiver = false
             if (tok.type == GoTokens.IDENT) {
                 tok.kind = SyntaxTokenKind.Function
+                if (next?.type == GoTokens.LBRACK) {
+                    expectingTypeParamBracket = true
+                }
                 continue
             }
         }
 
-        if (tok.type != GoTokens.IDENT) continue
+        if (tok.type != GoTokens.IDENT) {
+            if (tok.type != GoTokens.LBRACK && tok.type != GoTokens.IDENT) {
+                expectingTypeParamBracket = false
+            }
+            continue
+        }
         val text = code.substring(tok.start, tok.end)
 
         if (text in GO_CONSTANTS) {
@@ -195,6 +226,21 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
 
         val prevText = if (prev != null && prev.type == GoTokens.IDENT) code.substring(prev.start, prev.end) else null
         if (prevText == "type") {
+            tok.kind = SyntaxTokenKind.Type
+            if (next?.type == GoTokens.LBRACK) {
+                expectingTypeParamBracket = true
+                declaredTypeParams.clear()
+            }
+            continue
+        }
+
+        if (typeParamBracketDepth > 0 && text.isNotEmpty() && text[0].isUpperCase()) {
+            declaredTypeParams += text
+            tok.kind = SyntaxTokenKind.Type
+            continue
+        }
+
+        if (text in declaredTypeParams && prev?.type != GoTokens.DOT) {
             tok.kind = SyntaxTokenKind.Type
             continue
         }

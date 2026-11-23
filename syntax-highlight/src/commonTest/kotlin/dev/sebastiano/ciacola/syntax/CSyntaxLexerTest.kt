@@ -99,6 +99,36 @@ class CSyntaxLexerTest {
     }
 
     @Test
+    fun handlesC11C23KeywordsAndPreprocessorStringizePaste() {
+        val code = """
+            #include <sys/types.h>
+            #define STR(x) #x
+            #define PASTE(a, b) a##b
+            _Static_assert(sizeof(int) >= 2, "int");
+            _Noreturn void die(void);
+            _Alignas(16) static _Atomic int cnt = 0;
+            _Thread_local _Bool ok = 1;
+            double _Complex z = 1.0;
+            int test(int v) {
+                typeof(v) c = v;
+                int a = _Alignof(int) + 0b1010;
+                return _Generic(c, int: c + a, default: 0);
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(CSyntaxLexer, code, "c11-c23")
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "<sys/types.h>" }.kind)
+        assertEquals(SyntaxTokenKind.Preprocessor, tokens.first { it.slice(code) == "#x" }.kind)
+        assertEquals(SyntaxTokenKind.Preprocessor, tokens.first { it.slice(code) == "a##b" }.kind)
+        for (kw in listOf("_Static_assert", "_Noreturn", "_Alignas", "_Atomic", "_Thread_local", "typeof", "_Alignof", "_Generic")) {
+            assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == kw }.kind)
+        }
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "_Bool" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "_Complex" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0b1010" }.kind)
+    }
+
+    @Test
     fun matchesShikiAndPygmentsOracles() {
         assertAllOracleFixtures(cOracleFixtures)
     }

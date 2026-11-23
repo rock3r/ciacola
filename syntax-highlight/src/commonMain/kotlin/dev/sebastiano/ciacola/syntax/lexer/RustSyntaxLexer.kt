@@ -101,18 +101,36 @@ private fun emitRustRawToken(
 
 private fun classifyRustRawTokens(code: String, raw: MutableList<RawRustToken>) {
     // Merge `ident` + `!` (when adjacent and not `!=`) into a single Function macro token (`println!`, `vec!`, `macro_rules!`).
+    // Also split chained tuple field access like `tuple.0.1` where `.` is followed by a simple decimal `a.b` float token.
     var mergeIdx = 0
-    while (mergeIdx + 1 < raw.size) {
+    while (mergeIdx < raw.size) {
         val cur = raw[mergeIdx]
-        val nxt = raw[mergeIdx + 1]
-        if (cur.type == RustTokens.IDENT && nxt.type == RustTokens.BANG && cur.end == nxt.start) {
-            cur.end = nxt.end
-            cur.kind = SyntaxTokenKind.Function
-            cur.type = MACRO_SYNTHETIC_TYPE
-            raw.removeAt(mergeIdx + 1)
-        } else {
-            mergeIdx++
+        if (mergeIdx + 1 < raw.size) {
+            val nxt = raw[mergeIdx + 1]
+            if (cur.type == RustTokens.IDENT && nxt.type == RustTokens.BANG && cur.end == nxt.start) {
+                cur.end = nxt.end
+                cur.kind = SyntaxTokenKind.Function
+                cur.type = MACRO_SYNTHETIC_TYPE
+                raw.removeAt(mergeIdx + 1)
+                mergeIdx++
+                continue
+            }
+            if (cur.type == RustTokens.DOT && nxt.type == RustTokens.FLOAT_LITERAL && cur.end == nxt.start) {
+                val floatText = code.substring(nxt.start, nxt.end)
+                val dotOffset = floatText.indexOf('.')
+                if (
+                    dotOffset > 0 &&
+                    dotOffset < floatText.length - 1 &&
+                    floatText.all { it.isDigit() || it == '_' || it == '.' }
+                ) {
+                    val splitAt = nxt.start + dotOffset
+                    raw[mergeIdx + 1] = RawRustToken(RustTokens.INT_LITERAL, nxt.start, splitAt, SyntaxTokenKind.Number, isHidden = false)
+                    raw.add(mergeIdx + 2, RawRustToken(RustTokens.DOT, splitAt, splitAt + 1, SyntaxTokenKind.Punctuation, isHidden = false))
+                    raw.add(mergeIdx + 3, RawRustToken(RustTokens.INT_LITERAL, splitAt + 1, nxt.end, SyntaxTokenKind.Number, isHidden = false))
+                }
+            }
         }
+        mergeIdx++
     }
 
     val visible = ArrayList<Int>(raw.size)
@@ -236,6 +254,7 @@ private fun classifyRustIdentifier(
             angleDepth > 0 ||
                 prev?.type == RustTokens.COLON ||
                 prev?.type == RustTokens.RARROW ||
+                (prev?.type == RustTokens.LBRACK && next?.type == RustTokens.SEMI) ||
                 prevText == "impl" ||
                 prevText == "for" ||
                 next?.type == RustTokens.COLON ||
@@ -243,6 +262,15 @@ private fun classifyRustIdentifier(
             )
     ) {
         return SyntaxTokenKind.Type
+    }
+
+    if (
+        rawName.length == 1 &&
+        rawName[0].isUpperCase() &&
+        prev?.type == RustTokens.SEMI &&
+        next?.type == RustTokens.RBRACK
+    ) {
+        return SyntaxTokenKind.Constant
     }
 
     if (rawName.length > 1 && rawName[0].isUpperCase() && rawName.all { it.isUpperCase() || it.isDigit() || it == '_' }) {
