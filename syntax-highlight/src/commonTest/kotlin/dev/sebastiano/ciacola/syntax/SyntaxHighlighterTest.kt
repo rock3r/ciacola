@@ -362,15 +362,17 @@ class SyntaxHighlighterTest {
 
     @Test
     fun handlesTrailingSupplementaryCodePointsAndUnpairedSurrogatesLosslesslyAcrossAllLanguages() {
+        val loneHigh = 0xD800.toChar()
+        val loneLow = 0xDC00.toChar()
         val trickyInputs = listOf(
             "𠮷",
             "const x = 𠮷",
             "// trailing emoji 🎉",
             "\"emoji at end 🎉\"",
-            "a\uD800",
-            "𠮷\uD800",
-            "𠮷\uD800x",
-            "\uDC00a",
+            "a$loneHigh",
+            "𠮷$loneHigh",
+            "𠮷${loneHigh}x",
+            "${loneLow}a",
         )
         for (language in SyntaxLanguage.entries) {
             val lexer = SyntaxHighlighter.lexer(language)
@@ -406,76 +408,85 @@ class SyntaxHighlighterTest {
     }
 
     @Test
-    fun unicodeXidIdentifiersAcceptValidCodePointsAndRejectNonXidPunctuation() {
-        val xidLanguages = listOf(
-            SyntaxLanguage.JavaScript,
-            SyntaxLanguage.TypeScript,
-            SyntaxLanguage.Rust,
-            SyntaxLanguage.Go,
-            SyntaxLanguage.Python,
-            SyntaxLanguage.Java,
-            SyntaxLanguage.C,
-            SyntaxLanguage.Cpp,
-        )
-        val validIdents = listOf(
-            "人々", // U+3005 CJK iteration mark (XID_Start)
-            "a\u302Ab", // U+302A ideographic level tone mark (XID_Continue \ XID_Start)
-            "a\uFF10\uFF3Fb", // U+FF10 fullwidth digit zero + U+FF3F fullwidth low line (XID_Continue)
-            "𠮷", // U+20BB7 supplementary CJK ideograph (XID_Start)
-            "𝐀", // U+1D400 mathematical bold A (XID_Start)
-        )
-        val nonXidChars = listOf(
-            '\u060C', // Arabic comma
-            '\u1680', // Ogham space mark
-            '\u2E00', // Right angle substitution marker
-            '\uFFE0', // Fullwidth cent sign
-        )
+    fun unicodeIdentifiersAndWhitespaceFollowPerLanguageSpecifications() {
+        fun assertSingleIdent(language: SyntaxLanguage, ident: String) {
+            val tokens = assertValidSnippetHasNoInvalidTokens(
+                SyntaxHighlighter.lexer(language),
+                ident,
+                "${language.id}:ident:$ident",
+            )
+            assertEquals(
+                1,
+                tokens.size,
+                "[${language.id}] Expected '$ident' to lex as a single identifier token, got $tokens",
+            )
+            assertEquals(SyntaxTokenKind.Plain, tokens.single().kind, "[${language.id}] Expected '$ident' to be Plain")
+        }
 
-        for (language in xidLanguages) {
-            val lexer = SyntaxHighlighter.lexer(language)
-            for (ident in validIdents) {
-                val tokens = assertValidSnippetHasNoInvalidTokens(lexer, ident, "${language.id}:xid:$ident")
-                assertEquals(
-                    1,
-                    tokens.size,
-                    "[${language.id}] Expected '$ident' to lex as a single identifier token, got $tokens",
-                )
-                assertEquals(
-                    SyntaxTokenKind.Plain,
-                    tokens.single().kind,
-                    "[${language.id}] Expected '$ident' to have kind Plain",
-                )
-            }
+        fun assertSplitBy(language: SyntaxLanguage, separator: Char, expectedSepKind: SyntaxTokenKind) {
+            val code = "foo${separator}bar"
+            val tokens = assertLosslessInvariants(
+                SyntaxHighlighter.lexer(language),
+                code,
+                "${language.id}:sep:U+${separator.code.toString(16).uppercase()}",
+            )
+            assertEquals(
+                3,
+                tokens.size,
+                "[${language.id}] Expected U+${separator.code.toString(16).uppercase()} to split identifiers, got $tokens",
+            )
+            assertEquals("foo", tokens[0].slice(code))
+            assertEquals(SyntaxTokenKind.Plain, tokens[0].kind)
+            assertEquals(separator.toString(), tokens[1].slice(code))
+            assertEquals(expectedSepKind, tokens[1].kind)
+            assertEquals("bar", tokens[2].slice(code))
+            assertEquals(SyntaxTokenKind.Plain, tokens[2].kind)
+        }
 
-            // U+302A is XID_Continue but NOT XID_Start, so it cannot start an identifier.
-            val badStart = "\u302Afoo"
-            val badStartTokens = assertLosslessInvariants(lexer, badStart, "${language.id}:xid-bad-start")
-            assertEquals(2, badStartTokens.size, "[${language.id}] Expected U+302A not to start an identifier")
-            assertEquals(SyntaxTokenKind.Invalid, badStartTokens[0].kind)
-            assertEquals("\u302A", badStartTokens[0].slice(badStart))
-            assertEquals(SyntaxTokenKind.Plain, badStartTokens[1].kind)
-            assertEquals("foo", badStartTokens[1].slice(badStart))
+        fun assertRejectedAtStart(language: SyntaxLanguage, badStartChar: Char) {
+            val code = "${badStartChar}foo"
+            val tokens = assertLosslessInvariants(
+                SyntaxHighlighter.lexer(language),
+                code,
+                "${language.id}:bad-start:U+${badStartChar.code.toString(16).uppercase()}",
+            )
+            assertEquals(2, tokens.size, "[${language.id}] Expected U+${badStartChar.code.toString(16).uppercase()} not to start an identifier")
+            assertEquals(SyntaxTokenKind.Invalid, tokens[0].kind)
+            assertEquals(badStartChar.toString(), tokens[0].slice(code))
+            assertEquals(SyntaxTokenKind.Plain, tokens[1].kind)
+            assertEquals("foo", tokens[1].slice(code))
+        }
 
-            // Non-XID punctuation/space code points must never be merged into identifiers.
-            for (badChar in nonXidChars) {
-                val code = "foo${badChar}bar"
-                val tokens = assertLosslessInvariants(
-                    lexer,
-                    code,
-                    "${language.id}:non-xid:U+${badChar.code.toString(16).uppercase()}",
-                )
-                assertEquals(
-                    3,
-                    tokens.size,
-                    "[${language.id}] Non-XID U+${badChar.code.toString(16).uppercase()} must split identifiers, got $tokens",
-                )
-                assertEquals("foo", tokens[0].slice(code))
-                assertEquals(SyntaxTokenKind.Plain, tokens[0].kind)
-                assertEquals(badChar.toString(), tokens[1].slice(code))
-                assertEquals(SyntaxTokenKind.Invalid, tokens[1].kind)
-                assertEquals("bar", tokens[2].slice(code))
-                assertEquals(SyntaxTokenKind.Plain, tokens[2].kind)
-            }
+        // 1. UAX #31 XID_Start / XID_Continue languages: Rust, Python, C23, C++23.
+        val xidIdents = listOf("人々", "a\u302Ab", "a\uFF10\uFF3Fb", "𠮷", "𝐀")
+        val xidNonIdentChars = listOf('\u060C', '\u1680', '\u2E00', '\uFFE0')
+        for (language in listOf(SyntaxLanguage.Rust, SyntaxLanguage.Python, SyntaxLanguage.C, SyntaxLanguage.Cpp)) {
+            for (ident in xidIdents) assertSingleIdent(language, ident)
+            assertRejectedAtStart(language, '\u302A')
+            for (bad in xidNonIdentChars) assertSplitBy(language, bad, SyntaxTokenKind.Invalid)
+        }
+
+        // 2. ECMAScript (JS / TS): XID + '$' + ZWNJ/ZWJ, and Unicode Zs (e.g. U+1680, U+3000) is WhiteSpace.
+        val jsIdents = listOf("人々", "a\u302Ab", "a\uFF10\uFF3Fb", "𠮷", "𝐀", "\$foo", "a\u200Cb", "a\u200Db")
+        for (language in listOf(SyntaxLanguage.JavaScript, SyntaxLanguage.TypeScript)) {
+            for (ident in jsIdents) assertSingleIdent(language, ident)
+            assertRejectedAtStart(language, '\u302A')
+            for (bad in listOf('\u060C', '\u2E00', '\uFFE0')) assertSplitBy(language, bad, SyntaxTokenKind.Invalid)
+            for (ws in listOf('\u00A0', '\u1680', '\u3000')) assertSplitBy(language, ws, SyntaxTokenKind.Whitespace)
+        }
+
+        // 3. Java (JLS §3.8): allows Unicode currency symbols (Sc, e.g. U+FFE0, £, €) and connector punctuation (Pc, e.g. U+FF3F) as start and part.
+        val javaIdents = listOf("人々", "a\u302Ab", "a\uFF10\uFF3Fb", "𠮷", "𝐀", "foo\uFFE0bar", "\uFFE0price", "€amount", "\uFF3Fstart")
+        for (ident in javaIdents) assertSingleIdent(SyntaxLanguage.Java, ident)
+        assertRejectedAtStart(SyntaxLanguage.Java, '\u302A')
+        for (bad in listOf('\u060C', '\u1680', '\u2E00')) assertSplitBy(SyntaxLanguage.Java, bad, SyntaxTokenKind.Invalid)
+
+        // 4. Go: unicode_letter (L) | '_' for start, L | Nd | '_' for continuation; rejects Mn (U+302A) and non-ASCII Pc (U+FF3F).
+        val goIdents = listOf("人々", "a\uFF10b", "𠮷", "𝐀", "_ident")
+        for (ident in goIdents) assertSingleIdent(SyntaxLanguage.Go, ident)
+        assertRejectedAtStart(SyntaxLanguage.Go, '\u302A')
+        for (bad in listOf('\u302A', '\uFF3F', '\u060C', '\u1680', '\u2E00', '\uFFE0')) {
+            assertSplitBy(SyntaxLanguage.Go, bad, SyntaxTokenKind.Invalid)
         }
     }
 }

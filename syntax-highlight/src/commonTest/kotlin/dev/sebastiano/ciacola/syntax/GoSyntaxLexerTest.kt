@@ -178,15 +178,21 @@ class GoSyntaxLexerTest {
 
     @Test
     fun supportsBmpAndSupplementaryUnicodeIdentifiers() {
-        val code = "package main\nfunc привет(α float64, café string, e\u0301 int, 𠮷 int, 𝐀 bool) {}"
+        val code = "package main\nfunc привет(α float64, café string, 人々 int, 𠮷 int, 𝐀 bool, n\uFF10 int) {}"
         val tokens = assertLosslessInvariants(GoSyntaxLexer, code, "go-unicode")
         assertEquals(0, tokens.count { it.kind == SyntaxTokenKind.Invalid })
         assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "привет" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "α" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "café" }.kind)
-        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "e\u0301" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "人々" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𠮷" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𝐀" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "n\uFF10" }.kind)
+
+        // Combining marks (Mn) are not legal in Go identifiers (Go spec: letter | unicode_digit).
+        val combiningCode = "var e\u0301 = 1"
+        val combiningTokens = assertLosslessInvariants(GoSyntaxLexer, combiningCode, "go-combining-mark")
+        assertEquals(SyntaxTokenKind.Invalid, combiningTokens.first { it.slice(combiningCode) == "\u0301" }.kind)
     }
 
     @Test

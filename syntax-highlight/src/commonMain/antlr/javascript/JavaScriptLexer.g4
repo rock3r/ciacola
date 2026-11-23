@@ -224,11 +224,11 @@ SHEBANG
     ;
 
 WS
-    : [ \t\r\n\uFEFF]+
+    : [ \t\r\n\u000B\u000C\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+
     ;
 
 LINE_COMMENT
-    : '//' ~[\r\n]*
+    : '//' ~[\r\n\u2028\u2029]*
     ;
 
 BLOCK_COMMENT

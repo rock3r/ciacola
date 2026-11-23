@@ -481,7 +481,7 @@ val ciacolaStaticCheck = tasks.register("ciacolaStaticCheck") {
             sha256.digest(token.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
         val tokenRegex = Regex("""[a-z0-9]+(?:-[a-z0-9]+)*""")
-        val scannableExtensions = setOf("kt", "kts", "md", "toml", "properties", "txt")
+        val scannableExtensions = setOf("kt", "kts", "md", "toml", "properties", "txt", "g4", "py")
         rootDir.walkTopDown()
             .onEnter { dir ->
                 val name = dir.name

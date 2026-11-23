@@ -49,7 +49,17 @@ class SafeCodePointCharStreamTest {
         assertEquals(IntStream.EOF, singleSupp.LA(2))
         assertEquals("𠮷", singleSupp.getText(Interval(0, 0)))
 
-        val mixed = SafeCodePointCharStream("a𠮷\uD800b\uD800")
+        // Build unpaired surrogates dynamically so Kotlin/JS UTF-8 string-literal encoding does not
+        // replace lone surrogate literals with '?'.
+        val loneHigh = 0xD800.toChar()
+        val mixedText = buildString {
+            append('a')
+            append("𠮷")
+            append(loneHigh)
+            append('b')
+            append(loneHigh)
+        }
+        val mixed = SafeCodePointCharStream(mixedText)
         assertEquals(5, mixed.size())
         assertEquals('a'.code, mixed.LA(1))
         assertEquals(0x20BB7, mixed.LA(2))
@@ -57,8 +67,8 @@ class SafeCodePointCharStreamTest {
         assertEquals('b'.code, mixed.LA(4))
         assertEquals(0xD800, mixed.LA(5))
         assertEquals(IntStream.EOF, mixed.LA(6))
-        assertEquals("𠮷\uD800b", mixed.getText(Interval(1, 3)))
-        assertEquals("\uD800", mixed.getText(Interval(4, 4)))
+        assertEquals("𠮷${loneHigh}b", mixed.getText(Interval(1, 3)))
+        assertEquals(loneHigh.toString(), mixed.getText(Interval(4, 4)))
 
         mixed.seek(5)
         assertEquals(0xD800, mixed.LA(-1))

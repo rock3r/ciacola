@@ -44,7 +44,7 @@ class DeckThemeTest {
             assertEquals(palette.number, codeStyle.number.color)
             assertEquals(palette.annotation, codeStyle.annotation.color)
             assertEquals(palette.keyword, palette.colorForWarpScope("keyword.control.kotlin"))
-            assertEquals(palette.keyword, palette.colorForWarpScope("storage.modifier.agsl"))
+            assertEquals(palette.keyword, palette.colorForWarpScope("storage.modifier.java"))
             assertEquals(palette.type, palette.colorForWarpScope("storage.type.agsl"))
             assertEquals(palette.string, palette.colorForWarpScope("string.quoted.double.kotlin"))
             assertEquals(palette.functionCall, palette.colorForWarpScope("entity.name.function.kotlin"))

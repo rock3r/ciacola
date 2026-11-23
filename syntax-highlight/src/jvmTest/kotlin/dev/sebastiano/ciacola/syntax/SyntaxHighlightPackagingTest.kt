@@ -116,8 +116,27 @@ class SyntaxHighlightPackagingTest {
         assertTrue(noticeFile.isFile, "Expected module NOTICE.txt at ${noticeFile.path}")
         val noticeText = noticeFile.readText()
         assertTrue(noticeText.contains("Apache License, Version 2.0"), "NOTICE.txt must cite Apache-2.0")
-        assertTrue(noticeText.contains("Copyright (c) 2013 Terence Parr"), "NOTICE.txt must retain XML BSD-3-Clause notice")
-        assertTrue(noticeText.contains("DerivedCoreProperties-16.0.0.txt"), "NOTICE.txt must cite Unicode UCD")
+        assertTrue(noticeText.contains("Copyright (c) 2013 Terence Parr"), "NOTICE.txt must retain XML BSD-3-Clause copyright")
+        assertTrue(
+            noticeText.contains("Redistribution and use in source and binary forms"),
+            "NOTICE.txt must retain XML BSD-3-Clause permission text",
+        )
+        assertTrue(noticeText.contains("DerivedCoreProperties-16.0.0.txt"), "NOTICE.txt must cite DerivedCoreProperties-16.0.0.txt")
+        assertTrue(noticeText.contains("UnicodeData-16.0.0.txt"), "NOTICE.txt must cite UnicodeData-16.0.0.txt")
+        assertTrue(noticeText.contains("UNICODE LICENSE V3"), "NOTICE.txt must contain Unicode License v3 title")
+        assertTrue(
+            noticeText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
+            "NOTICE.txt must contain the Unicode License v3 permission notice",
+        )
+
+        val unicodeIdentFile = File(moduleDir, "src/commonMain/antlr/shared/UnicodeIdent.g4")
+        assertTrue(unicodeIdentFile.isFile, "Expected UnicodeIdent.g4 at ${unicodeIdentFile.path}")
+        val unicodeIdentText = unicodeIdentFile.readText()
+        assertTrue(unicodeIdentText.contains("UNICODE LICENSE V3"), "UnicodeIdent.g4 must carry Unicode License v3 header")
+        assertTrue(
+            unicodeIdentText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
+            "UnicodeIdent.g4 must carry the Unicode License v3 permission notice",
+        )
 
         for (root in activeGeneratedRoots) {
             val sidecars = root.walkTopDown()

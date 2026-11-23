@@ -59,7 +59,7 @@ private class RawJsToken(
 private fun containsNewline(source: String, start: Int, end: Int): Boolean {
     for (i in start until end) {
         val c = source[i]
-        if (c == '\n' || c == '\r') return true
+        if (c == '\n' || c == '\r' || c == '\u2028' || c == '\u2029') return true
     }
     return false
 }

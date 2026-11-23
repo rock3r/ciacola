@@ -38,7 +38,7 @@ license.
 | **FileKit** | `io.github.vinceglb:filekit-core:0.15.0`, `io.github.vinceglb:filekit-dialogs-compose:0.15.0` (`:storyboard-easel`) | Copyright Vinceglb and FileKit contributors | MIT | <https://github.com/vinceglb/FileKit> |
 | **ANTLR Kotlin** | `com.strumenta:antlr-kotlin-runtime:1.0.13`, `com.strumenta.antlr-kotlin:1.0.13` (`:syntax-highlight`, `:storyboard-text`) | Strumenta and ANTLR 4 contributors | Apache-2.0 & BSD-3-Clause | <https://github.com/Strumenta/antlr-kotlin> |
 | **ANTLR v4 Kotlin & XML Lexer Grammars** | `KotlinLexer.g4`, `UnicodeClasses.g4`, `XMLLexer.g4` (`:syntax-highlight`, `:storyboard-text`) | JetBrains s.r.o. (Kotlin grammar, Apache-2.0); Copyright 2013 Terence Parr (XML reference grammar, BSD-3-Clause) | Apache-2.0 & BSD-3-Clause | <https://kotlinlang.org/docs/reference/grammar.html>, <https://github.com/antlr/grammars-v4> |
-| **Unicode Character Database** | `DerivedCoreProperties-16.0.0.txt` (used to generate `UnicodeIdent.g4` in `:syntax-highlight`) | Copyright (c) 1991-2024 Unicode, Inc. | Unicode-3.0 | <https://www.unicode.org/Public/16.0.0/ucd/DerivedCoreProperties.txt> |
+| **Unicode Character Database** | `DerivedCoreProperties-16.0.0.txt`, `UnicodeData-16.0.0.txt` (used to generate `UnicodeIdent.g4` in `:syntax-highlight`) | Copyright © 1991-2026 Unicode, Inc. | Unicode-3.0 | <https://www.unicode.org/Public/16.0.0/ucd/> |
 | **Ktor Client** | `io.ktor:ktor-client-{core,content-negotiation,js,okhttp}:3.5.2`, `io.ktor:ktor-serialization-kotlinx-json:3.5.2` (`:examples:interactive`) | JetBrains s.r.o. and Ktor contributors | Apache-2.0 | <https://github.com/ktorio/ktor> |
 | **OkHttp** | `com.squareup.okhttp3:okhttp` (via `ktor-client-okhttp`, `:examples:interactive`) | Square, Inc. | Apache-2.0 | <https://square.github.io/okhttp/> |
 
@@ -794,4 +794,49 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE, ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+
+### Unicode License v3
+
+```text
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2026 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
 ```

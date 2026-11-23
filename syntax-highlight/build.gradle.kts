@@ -147,39 +147,67 @@ tasks.withType(org.gradle.jvm.tasks.Jar::class.java).configureEach {
 
 val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourcesJar") {
     group = "verification"
-    description = "Verifies jvmJar and jvmSourcesJar notices, layout, hygiene, and internal visibility."
+    description = "Verifies published JAR notices, UnicodeIdent.g4 notice header, sources layout, hygiene, and internal visibility."
     val jvmJarTask = tasks.named("jvmJar", org.gradle.jvm.tasks.Jar::class.java)
     val sourcesJarTask = tasks.named("jvmSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
-    dependsOn(jvmJarTask, sourcesJarTask)
-    val jvmJarProvider = jvmJarTask.flatMap { it.archiveFile }
+    val jsSourcesJarTask = tasks.named("jsSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
+    val wasmJsSourcesJarTask = tasks.named("wasmJsSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
+    val allMetadataJarTask = tasks.named("allMetadataJar", org.gradle.jvm.tasks.Jar::class.java)
+    dependsOn(jvmJarTask, sourcesJarTask, jsSourcesJarTask, wasmJsSourcesJarTask, allMetadataJarTask)
+
+    val jarProviders = listOf(
+        jvmJarTask.flatMap { it.archiveFile },
+        sourcesJarTask.flatMap { it.archiveFile },
+        jsSourcesJarTask.flatMap { it.archiveFile },
+        wasmJsSourcesJarTask.flatMap { it.archiveFile },
+        allMetadataJarTask.flatMap { it.archiveFile },
+    )
     val sourcesJarProvider = sourcesJarTask.flatMap { it.archiveFile }
-    inputs.file(jvmJarProvider)
-    inputs.file(sourcesJarProvider)
+    val unicodeIdentFile = layout.projectDirectory.file("src/commonMain/antlr/shared/UnicodeIdent.g4")
+    jarProviders.forEach { inputs.file(it) }
+    inputs.file(unicodeIdentFile)
 
     doLast {
-        val jvmJarFile = jvmJarProvider.get().asFile
-        val sourcesJarFile = sourcesJarProvider.get().asFile
         val violations = mutableListOf<String>()
+        val requiredNoticeSnippets = listOf(
+            "Apache License, Version 2.0",
+            "Copyright (c) 2013 Terence Parr",
+            "Redistribution and use in source and binary forms",
+            "UNICODE LICENSE V3",
+            "Permission is hereby granted, free of charge, to any person obtaining",
+        )
 
-        ZipFile(jvmJarFile).use { zip ->
-            val names = zip.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toSet()
-            if ("META-INF/LICENSE.txt" !in names) {
-                violations += "Missing META-INF/LICENSE.txt in ${jvmJarFile.name}"
-            }
-            if ("META-INF/NOTICE.txt" !in names) {
-                violations += "Missing META-INF/NOTICE.txt in ${jvmJarFile.name}"
+        val unicodeIdentText = unicodeIdentFile.asFile.readText()
+        if (!unicodeIdentText.contains("UNICODE LICENSE V3") ||
+            !unicodeIdentText.contains("Permission is hereby granted, free of charge, to any person obtaining")
+        ) {
+            violations += "UnicodeIdent.g4 is missing the Unicode License v3 copyright and permission notice header"
+        }
+
+        for (jarProvider in jarProviders) {
+            val jarFile = jarProvider.get().asFile
+            ZipFile(jarFile).use { zip ->
+                val licenseEntry = zip.getEntry("META-INF/LICENSE.txt")
+                if (licenseEntry == null) {
+                    violations += "Missing META-INF/LICENSE.txt in ${jarFile.name}"
+                }
+                val noticeEntry = zip.getEntry("META-INF/NOTICE.txt")
+                if (noticeEntry == null) {
+                    violations += "Missing META-INF/NOTICE.txt in ${jarFile.name}"
+                } else {
+                    val noticeText = zip.getInputStream(noticeEntry).bufferedReader().use { it.readText() }
+                    for (snippet in requiredNoticeSnippets) {
+                        if (!noticeText.contains(snippet)) {
+                            violations += "META-INF/NOTICE.txt in ${jarFile.name} is missing required notice text: '$snippet'"
+                        }
+                    }
+                }
             }
         }
 
+        val sourcesJarFile = sourcesJarProvider.get().asFile
         ZipFile(sourcesJarFile).use { zip ->
             val entries = zip.entries().asSequence().toList()
-            val entryNames = entries.filter { !it.isDirectory }.map { it.name }.toSet()
-            if ("META-INF/LICENSE.txt" !in entryNames) {
-                violations += "Missing META-INF/LICENSE.txt in ${sourcesJarFile.name}"
-            }
-            if ("META-INF/NOTICE.txt" !in entryNames) {
-                violations += "Missing META-INF/NOTICE.txt in ${sourcesJarFile.name}"
-            }
             val ktEntries = entries.filter { !it.isDirectory && it.name.endsWith(".kt") }
             if (ktEntries.none { it.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") }) {
                 violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${sourcesJarFile.name}"
@@ -237,6 +265,16 @@ mavenPublishing {
             license {
                 name = "The Apache Software License, Version 2.0"
                 url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                distribution = "repo"
+            }
+            license {
+                name = "BSD 3-Clause License (adapted XML grammar)"
+                url = "https://opensource.org/licenses/BSD-3-Clause"
+                distribution = "repo"
+            }
+            license {
+                name = "Unicode License v3 (UCD-derived identifier tables)"
+                url = "https://www.unicode.org/license.txt"
                 distribution = "repo"
             }
         }
