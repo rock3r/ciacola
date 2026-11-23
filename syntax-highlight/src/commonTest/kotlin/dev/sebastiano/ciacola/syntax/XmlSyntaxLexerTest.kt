@@ -1,0 +1,193 @@
+package dev.sebastiano.ciacola.syntax
+
+import dev.sebastiano.ciacola.syntax.lexer.XmlSyntaxLexer
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class XmlSyntaxLexerTest {
+
+    @Test
+    fun classifiesPrologDoctypeTagsAttributesEntitiesCdataAndComments() {
+        val code = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <?custom-pi target?>
+            <!DOCTYPE layout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:orientation='vertical'>
+                <!-- multi-line
+                     comment -->
+                <TextView text="Hello &amp; &#10; &#x20; world" />
+                <![CDATA[raw <text> &stuff;]]>
+            </LinearLayout>
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-features")
+
+        fun firstKind(text: String, predicate: (SyntaxToken) -> Boolean = { true }): SyntaxTokenKind =
+            tokens.first { it.slice(code) == text && predicate(it) }.kind
+
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("<?xml"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("<?custom-pi target?>"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("<!DOCTYPE"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("layout"))
+        assertEquals(SyntaxTokenKind.Tag, firstKind("LinearLayout"))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("android:layout_width"))
+        assertEquals(SyntaxTokenKind.String, firstKind("\"match_parent\""))
+        assertEquals(SyntaxTokenKind.String, firstKind("'vertical'"))
+        assertEquals(SyntaxTokenKind.Comment, tokens.first { it.slice(code).startsWith("<!--") }.kind)
+        assertEquals(SyntaxTokenKind.Tag, firstKind("TextView"))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("text"))
+        assertEquals(SyntaxTokenKind.String, firstKind("<![CDATA[raw <text> &stuff;]]>"))
+
+        val inlineRefCode = "<p>Hello &amp; &#10; &#x20;</p>"
+        val inlineTokens = assertLosslessInvariants(XmlSyntaxLexer, inlineRefCode, "xml-refs")
+        assertEquals(SyntaxTokenKind.Constant, inlineTokens.first { it.slice(inlineRefCode) == "&amp;" }.kind)
+        assertEquals(SyntaxTokenKind.Constant, inlineTokens.first { it.slice(inlineRefCode) == "&#10;" }.kind)
+        assertEquals(SyntaxTokenKind.Constant, inlineTokens.first { it.slice(inlineRefCode) == "&#x20;" }.kind)
+
+        val malformed = "<Tag @bad=\"1\" />"
+        val badTokens = assertLosslessInvariants(XmlSyntaxLexer, malformed, "xml-malformed")
+        assertTrue(badTokens.any { it.slice(malformed) == "@" && it.kind == SyntaxTokenKind.Invalid })
+    }
+
+    @Test
+    fun prefixTruncationAndFuzzAreLossless() {
+        val sample = """
+            <?xml version="1.0"?>
+            <root id="1">
+                <!-- note -->
+                <child enabled="true">&lt;ok&gt;</child>
+            </root>
+        """.trimIndent()
+        assertPrefixTruncationSafety(XmlSyntaxLexer, sample)
+        assertMalformedAndFuzzSafety(XmlSyntaxLexer, seed = 0x584D4C21L, iterations = 60)
+    }
+
+    @Test
+    fun linearPerformanceOnPathologicalInputs() {
+        val manyElements = buildString {
+            append("<root>")
+            repeat(1_500) { idx ->
+                append("<item id=\"").append(idx).append("\">val").append(idx).append("</item>")
+            }
+            append("</root>")
+        }
+        val hugeText = "<doc>" + "plain text &amp; ".repeat(2_000) + "</doc>"
+        val unclosedAttr = "<tag " + "attr=\"val\" ".repeat(2_000)
+
+        assertLinearPerformance(
+            lexer = XmlSyntaxLexer,
+            pathologicalInputs = listOf(
+                "many-elements" to manyElements,
+                "huge-text" to hugeText,
+                "unclosed-tag" to unclosedAttr,
+            ),
+        )
+    }
+
+    @Test
+    fun handlesStandalonePrologDtdInternalSubsetAndCdataWithDoubleBrackets() {
+        val code = """
+            <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+            <?xml-stylesheet type="text/xsl" href="style.xsl"?>
+            <!DOCTYPE note [
+              <!ELEMENT note (to,from)>
+              <!ENTITY app "Ciacola">
+            ]>
+            <note xmlns:app="http://example.com/ns">
+                <![CDATA[value ]] inside &amp; <notATag>]]>
+                <app:item id="1" />
+            </note>
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-backfill")
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "standalone" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<!DOCTYPE" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<!ELEMENT" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "]>" || it.slice(code) == "]" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "xmlns:app" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).startsWith("<![CDATA[") && it.slice(code).contains("]] inside") }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "app:item" }.kind)
+    }
+
+    @Test
+    fun handlesUnterminatedCommentCdataAndProcessingInstructionCleanly() {
+        val unclosedComment = "<!-- unclosed <item/>"
+        val commentTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedComment, "xml-unclosed-comment")
+        assertEquals(listOf(SyntaxToken(SyntaxTokenKind.Comment, 0, unclosedComment.length)), commentTokens)
+
+        val unclosedCdata = "<![CDATA[ unclosed"
+        val cdataTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedCdata, "xml-unclosed-cdata")
+        assertEquals(listOf(SyntaxToken(SyntaxTokenKind.String, 0, unclosedCdata.length)), cdataTokens)
+
+        val unclosedPi = "<?target unclosed"
+        val piTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedPi, "xml-unclosed-pi")
+        assertEquals(listOf(SyntaxToken(SyntaxTokenKind.Keyword, 0, unclosedPi.length)), piTokens)
+    }
+
+    @Test
+    fun dtdDoesNotSwallowCommentsOrMultipleCdataSectionsAndSupportsXmlUnicodeNames() {
+        val commentBeforeRoot = "<!-- TODO [wip -->\n<root>\n  <child/>\n</root>\n"
+        val commentTokens = assertLosslessInvariants(XmlSyntaxLexer, commentBeforeRoot, "xml-comment-bracket")
+        assertEquals(SyntaxTokenKind.Comment, commentTokens.first { it.slice(commentBeforeRoot) == "<!-- TODO [wip -->" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, commentTokens.first { it.slice(commentBeforeRoot) == "root" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, commentTokens.first { it.slice(commentBeforeRoot) == "child" }.kind)
+
+        val multiCdata = "<r><a><![CDATA[Don't]]></a><b name=\"x\">text</b><c><![CDATA[Can't]]></c></r>"
+        val cdataTokens = assertLosslessInvariants(XmlSyntaxLexer, multiCdata, "xml-multi-cdata")
+        assertEquals(SyntaxTokenKind.String, cdataTokens.first { it.slice(multiCdata) == "<![CDATA[Don't]]>" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, cdataTokens.first { it.slice(multiCdata) == "name" }.kind)
+        assertEquals(SyntaxTokenKind.String, cdataTokens.first { it.slice(multiCdata) == "<![CDATA[Can't]]>" }.kind)
+
+        val unicodeNames = "\uFEFF<café prix=\"1\"><größe/></café>"
+        val unicodeTokens = assertLosslessInvariants(XmlSyntaxLexer, unicodeNames, "xml-unicode-names-bom")
+        assertTrue(unicodeTokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, unicodeTokens.first().kind)
+        assertEquals(SyntaxTokenKind.Tag, unicodeTokens.first { it.slice(unicodeNames) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, unicodeTokens.first { it.slice(unicodeNames) == "prix" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, unicodeTokens.first { it.slice(unicodeNames) == "größe" }.kind)
+    }
+
+    @Test
+    fun handlesDoctypeInternalSubsetCommentWithApostrophe() {
+        val code = "<!DOCTYPE r [\n<!-- don't remove -->\n<!ELEMENT r ANY>\n]>\n<r a='1'>x</r>\n"
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-dtd-comment-apostrophe")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Comment, tokens.first { it.slice(code) == "<!-- don't remove -->" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<!ELEMENT" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "r" && it.startIndex > code.indexOf("]>") }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "a" && it.startIndex > code.indexOf("]>") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "'1'" }.kind)
+    }
+
+    @Test
+    fun acceptsProcessingInstructionTargetsNamedXAndXmWithoutBreakingXmlDecl() {
+        val code = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <?x instruction <not-a-tag>?>
+            <?xm instruction <also-not-a-tag>?>
+            <?x?>
+            <?xm??>
+            <?x?data?>
+            <?xml-stylesheet href="a.xsl"?>
+            <root/>
+        """.trimIndent()
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-pi-x-xm")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<?xml" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "version" }.kind)
+        for (pi in listOf(
+            "<?x instruction <not-a-tag>?>",
+            "<?xm instruction <also-not-a-tag>?>",
+            "<?x?>",
+            "<?xm??>",
+            "<?x?data?>",
+            "<?xml-stylesheet href=\"a.xsl\"?>",
+        )) {
+            assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == pi }.kind, pi)
+        }
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "root" }.kind)
+    }
+}

@@ -41,6 +41,7 @@ dokka {
 }
 
 dependencies {
+    dokka(project(":syntax-highlight"))
     dokka(project(":storyboard"))
     dokka(project(":storyboard-easel"))
     dokka(project(":storyboard-text"))
@@ -323,29 +324,31 @@ allprojects {
 
     plugins.withId("com.vanniktech.maven.publish") {
         apply(plugin = "org.jetbrains.dokka")
-        configure<MavenPublishBaseExtension> {
-            signAllPublications()
-            pom {
-                description = "Compose Multiplatform library for building presentations."
-                name = project.name
-                url = "https://github.com/bnorm/storyboard/"
-                licenses {
-                    license {
-                        name = "The Apache Software License, Version 2.0"
-                        url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
-                        distribution = "repo"
-                    }
-                }
-                developers {
-                    developer {
-                        id = "bnorm"
-                        name = "Brian Norman"
-                    }
-                }
-                scm {
+        if (project.path != ":syntax-highlight") {
+            configure<MavenPublishBaseExtension> {
+                signAllPublications()
+                pom {
+                    description = "Compose Multiplatform library for building presentations."
+                    name = project.name
                     url = "https://github.com/bnorm/storyboard/"
-                    connection = "scm:git:https://github.com/bnorm/storyboard.git"
-                    developerConnection = "scm:git:ssh://git@github.com/bnorm/storyboard.git"
+                    licenses {
+                        license {
+                            name = "The Apache Software License, Version 2.0"
+                            url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                            distribution = "repo"
+                        }
+                    }
+                    developers {
+                        developer {
+                            id = "bnorm"
+                            name = "Brian Norman"
+                        }
+                    }
+                    scm {
+                        url = "https://github.com/bnorm/storyboard/"
+                        connection = "scm:git:https://github.com/bnorm/storyboard.git"
+                        developerConnection = "scm:git:ssh://git@github.com/bnorm/storyboard.git"
+                    }
                 }
             }
         }
@@ -355,10 +358,12 @@ allprojects {
         configure<DokkaExtension> {
             dokkaSourceSets.configureEach {
                 documentedVisibilities.add(VisibilityModifier.Public)
-                sourceLink {
-                    localDirectory = rootProject.projectDir
-                    remoteUrl("https://github.com/bnorm/storyboard/tree/main/")
-                    remoteLineSuffix = "#L"
+                if (project.path != ":syntax-highlight") {
+                    sourceLink {
+                        localDirectory = rootProject.projectDir
+                        remoteUrl("https://github.com/bnorm/storyboard/tree/main/")
+                        remoteLineSuffix = "#L"
+                    }
                 }
             }
         }

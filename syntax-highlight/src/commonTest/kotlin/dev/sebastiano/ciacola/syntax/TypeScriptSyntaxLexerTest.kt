@@ -1,0 +1,326 @@
+package dev.sebastiano.ciacola.syntax
+
+import dev.sebastiano.ciacola.syntax.lexer.TypeScriptSyntaxLexer
+import dev.sebastiano.ciacola.syntax.oracle.TypeScriptOracleFixtures
+import dev.sebastiano.ciacola.syntax.oracle.assertMatchesOracleFixture
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class TypeScriptSyntaxLexerTest {
+
+    @Test
+    fun matchesOracleFixtures() {
+        for (fixture in TypeScriptOracleFixtures.all) {
+            assertMatchesOracleFixture(fixture)
+        }
+    }
+
+    @Test
+    fun classifiesTypeScriptKeywordsTypesGenericsDecoratorsAndTsx() {
+        val code = """
+            import type { FC } from "react";
+
+            interface Box<out T extends Record<string, unknown>> {
+              readonly value: Array<Map<string, number>>;
+            }
+
+            type Result<T> = T extends Promise<infer U> ? U : never;
+
+            enum Mode { Fast = 1, Safe = 2 }
+
+            @Injectable()
+            export abstract class Service implements Disposable {
+              private accessor count: number = 0;
+              protected items: Partial<Record<string, any>> = {};
+              public override toString(): string {
+                const cmp = a < b && c > d;
+                const val = (this.count satisfies number) as number;
+                return `${'$'}{cmp}:${'$'}{val}`;
+              }
+            }
+
+            export function assertBox(x: unknown): asserts x is Box<object> {
+              if (!x) throw new Error("bad");
+            }
+
+            declare namespace App {
+              export type Keys<T> = keyof T;
+            }
+
+            const id = <T,>(x: T): T => x;
+            const pair = <K extends string, V = number>(k: K, v: V) => ({ k, v });
+
+            export const View: FC<{ label: string }> = ({ label }) => (
+              <section data-active={true}>
+                <h1>{label}</h1>
+              </section>
+            );
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-features")
+
+        fun firstKind(text: String, after: Int = 0): SyntaxTokenKind =
+            tokens.first { it.startIndex >= after && it.slice(code) == text }.kind
+
+        for (kw in listOf(
+            "import", "type", "interface", "out", "extends", "readonly", "enum",
+            "export", "abstract", "class", "implements", "private", "accessor",
+            "protected", "public", "override", "satisfies", "as", "asserts", "is",
+            "declare", "namespace", "keyof", "infer",
+        )) {
+            assertEquals(SyntaxTokenKind.Keyword, firstKind(kw), "TS keyword $kw")
+        }
+
+        for (ty in listOf("Box", "Record", "string", "unknown", "Array", "Map", "number", "Promise", "never", "Partial", "any", "object")) {
+            assertEquals(SyntaxTokenKind.Type, firstKind(ty), "TS type $ty")
+        }
+        assertEquals(SyntaxTokenKind.Plain, firstKind("FC"))
+        assertEquals(SyntaxTokenKind.Type, firstKind("FC", after = code.indexOf("View")))
+
+        assertEquals(SyntaxTokenKind.Plain, firstKind("Fast"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("Safe"))
+        assertEquals(SyntaxTokenKind.Annotation, firstKind("Injectable"))
+        assertEquals(SyntaxTokenKind.Operator, firstKind("<", after = code.indexOf("cmp =")))
+        assertEquals(SyntaxTokenKind.Operator, firstKind(">", after = code.indexOf("cmp =")))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("k", after = code.indexOf("(k: K")))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("v", after = code.indexOf("k: K,")))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("View"))
+        assertEquals(SyntaxTokenKind.Tag, firstKind("section"))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("data-active"))
+        assertEquals(SyntaxTokenKind.Tag, firstKind("h1"))
+    }
+
+    @Test
+    fun prefixTruncationAndFuzzAreLossless() {
+        val sample = """
+            interface Pair<A, B> { left: A; right: B; }
+            const fn = <T,>(x: T): Array<T> => [x];
+            const el = <Badge active={a < b && c > d}>{fn("ok")}</Badge>;
+        """.trimIndent()
+        assertPrefixTruncationSafety(TypeScriptSyntaxLexer, sample)
+        assertMalformedAndFuzzSafety(TypeScriptSyntaxLexer, seed = 0x54535831L, iterations = 70)
+    }
+
+    @Test
+    fun linearPerformanceOnPathologicalInputs() {
+        val deepGenerics = "type Deep = " + "Array<".repeat(400) + "string" + ">".repeat(400) + ";"
+        val manyInterfaces = buildString {
+            repeat(1_000) { idx ->
+                append("interface I").append(idx).append(" { id: number; name: string; }\n")
+            }
+        }
+        val alternatingComparisons = "const ok = " + (1..3_000).joinToString(" && ") { "a$it < b$it" } + ";"
+        val largeTsx = "export const List: FC = () => (<ul>" + "<li data-id=\"1\">item</li>".repeat(800) + "</ul>);"
+        val repeatedAngles = "<T>".repeat(3_000)
+
+        assertLinearPerformance(
+            lexer = TypeScriptSyntaxLexer,
+            pathologicalInputs = listOf(
+                "deep-generics" to deepGenerics,
+                "many-interfaces" to manyInterfaces,
+                "alternating-comparisons" to alternatingComparisons,
+                "large-tsx" to largeTsx,
+                "repeated-angles" to repeatedAngles,
+            ),
+        )
+
+        val largeTsxTokens = TypeScriptSyntaxLexer.lex(largeTsx)
+        assertEquals(SyntaxTokenKind.Tag, largeTsxTokens.first { it.slice(largeTsx) == "ul" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, largeTsxTokens.first { it.slice(largeTsx) == "li" }.kind)
+    }
+
+    @Test
+    fun handlesConstTypeParamsMappedTemplateTypesConstEnumsAndAmbientModules() {
+        val code = """
+            const freeze = <const T,>(x: T) => x;
+            type Mapped<T> = { readonly [K in keyof T]: T[K] };
+            type Ev<T extends string> = `on${'$'}{Capitalize<T>}`;
+            const arr = [1, 2] as const;
+            const enum Dir { Up, Down }
+            declare module "*.css" {
+              const styles: Record<string, string>;
+              export default styles;
+            }
+            abstract class Base { abstract override accessor v: number; }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-edge-cases")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+
+        fun firstKind(text: String, after: Int = 0): SyntaxTokenKind =
+            tokens.first { it.startIndex >= after && it.slice(code) == text }.kind
+
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("const", after = code.indexOf("<const")))
+        assertEquals(SyntaxTokenKind.Type, firstKind("T", after = code.indexOf("<const")))
+        assertEquals(SyntaxTokenKind.Type, firstKind("K", after = code.indexOf("Mapped")))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("in", after = code.indexOf("Mapped")))
+        assertEquals(SyntaxTokenKind.Type, firstKind("Capitalize"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("const", after = code.indexOf("as const")))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("enum"))
+        assertEquals(SyntaxTokenKind.Type, firstKind("Dir"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("Up"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("module"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("abstract"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("override"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("accessor"))
+    }
+
+    @Test
+    fun resetsAngleDepthAfterComparisonsAndSupportsGenericTsxAndUnicodeIdents() {
+        val code = """
+            if (a < b) { void f(); const B = A; }
+            const view = <Select<string> value="a" />;
+            const nested = <Select<Map<string, Array<number>>> value="b">ok</Select>;
+            const arrow = <T,>(x: T): T => x;
+            const café: number = 1;
+            const 𠮷: string = "hi";
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-comparison-generic-tsx-unicode")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+
+        fun firstKind(text: String, after: Int = 0): SyntaxTokenKind =
+            tokens.first { it.startIndex >= after && it.slice(code) == text }.kind
+
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("void"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("B"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("A"))
+
+        val viewIdx = code.indexOf("view =")
+        assertEquals(SyntaxTokenKind.Tag, firstKind("Select", after = viewIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("string", after = viewIdx))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("value", after = viewIdx))
+        assertEquals(SyntaxTokenKind.String, firstKind("\"a\"", after = viewIdx))
+
+        val nestedIdx = code.indexOf("nested =")
+        assertEquals(SyntaxTokenKind.Tag, firstKind("Select", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("Map", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("Array", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("number", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("value", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("ok", after = nestedIdx))
+
+        val arrowIdx = code.indexOf("arrow =")
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("=>", after = arrowIdx))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("café"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("𠮷"))
+    }
+
+    @Test
+    fun distinguishesGenericArrowsAndAngleAssertionsFromBareJsxTags() {
+        val code1 = "const id = <T>(x: T): T => x;\nexport function next() { return 1; }"
+        val t1 = assertLosslessInvariants(TypeScriptSyntaxLexer, code1, "ts-generic-arrow-no-comma")
+        assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "export" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "function" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t1.first { it.slice(code1) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "return" }.kind)
+
+        val code2 = "register(<T>(value: T) => value);\nconst after = 1;"
+        val t2 = assertLosslessInvariants(TypeScriptSyntaxLexer, code2, "ts-generic-arrow-arg")
+        assertEquals(SyntaxTokenKind.Keyword, t2.first { it.slice(code2) == "=>" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t2.first { it.slice(code2) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t2.first { it.slice(code2) == "after" }.kind)
+
+        val code3 = "const el = <HTMLElement>document.body;\nconst n = 1;"
+        val t3 = assertLosslessInvariants(TypeScriptSyntaxLexer, code3, "ts-angle-cast")
+        assertEquals(SyntaxTokenKind.Keyword, t3.last { it.slice(code3) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Property, t3.first { it.slice(code3) == "body" }.kind)
+
+        val jsxParen = "const ui = <div>(hello)</div>;"
+        val t4 = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxParen, "tsx-paren-children")
+        assertEquals(SyntaxTokenKind.Tag, t4.first { it.slice(jsxParen) == "div" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t4.first { it.slice(jsxParen) == "(hello)" }.kind)
+
+        val jsxGeneric = "const sel = <Select<string>><Option /></Select>;"
+        val t5 = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxGeneric, "tsx-generic-bare")
+        assertEquals(SyntaxTokenKind.Tag, t5.first { it.slice(jsxGeneric) == "Select" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t5.first { it.slice(jsxGeneric) == "string" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, t5.first { it.slice(jsxGeneric) == "Option" }.kind)
+
+        val jsxGenericAttr = "const selAttr = <Select<string> value=\"a\" />;"
+        val t5b = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxGenericAttr, "tsx-generic-attr")
+        assertEquals(SyntaxTokenKind.Tag, t5b.first { it.slice(jsxGenericAttr) == "Select" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t5b.first { it.slice(jsxGenericAttr) == "string" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, t5b.first { it.slice(jsxGenericAttr) == "value" }.kind)
+
+        val longTsxBody = "const list = (\n  <ul>\n    " + "<li>item</li>\n    ".repeat(120) + "  </ul>\n);"
+        val tLong = assertLosslessInvariants(TypeScriptSyntaxLexer, longTsxBody, "tsx-bare-long-body")
+        assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longTsxBody) == "ul" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longTsxBody) == "li" }.kind)
+
+        val parenColonTsx = "const note = <span>(c): 2024</span>;"
+        val tParenColon = assertLosslessInvariants(TypeScriptSyntaxLexer, parenColonTsx, "tsx-paren-colon-text")
+        assertEquals(SyntaxTokenKind.Tag, tParenColon.first { it.slice(parenColonTsx) == "span" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tParenColon.first { it.slice(parenColonTsx) == "(c):" }.kind)
+    }
+
+    @Test
+    fun handlesCjkIterationMarkIdentifiers() {
+        val code = "const 時々: number = 1;"
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-cjk-iteration-mark")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "時々" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "number" }.kind)
+    }
+
+    @Test
+    fun distinguishesObjectLiteralDivisionFromBlockFollowedByRegex() {
+        val code = "const n: number = { valueOf: () => 12 } / 2 / 3;\nif (n > 0) { log(n) }\n/ok/i.test(s);"
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-obj-div-vs-block-regex")
+        assertEquals(2, tokens.count { it.slice(code) == "/" && it.kind == SyntaxTokenKind.Operator })
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "2" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "3" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "/ok/i" }.kind)
+
+        val genericFn = "function f(): Promise<void> { }\n/re/.test(s);"
+        val gtFnTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, genericFn, "ts-gt-fn-regex")
+        assertEquals(SyntaxTokenKind.String, gtFnTokens.first { it.slice(genericFn) == "/re/" }.kind)
+
+        val genericClass = "class Box<T> { v?: T }\n/re/.test(s);"
+        val gtClassTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, genericClass, "ts-gt-class-regex")
+        assertEquals(SyntaxTokenKind.String, gtClassTokens.first { it.slice(genericClass) == "/re/" }.kind)
+
+        val arrayReturn = "function g(): string[] { return [] }\n/re/.test(s);"
+        val rbrackTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, arrayReturn, "ts-rbrack-fn-regex")
+        assertEquals(SyntaxTokenKind.String, rbrackTokens.first { it.slice(arrayReturn) == "/re/" }.kind)
+
+        val ambientMod = "declare module \"x\" { }\n/re/.test(s);"
+        val modTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, ambientMod, "ts-ambient-mod-regex")
+        assertEquals(SyntaxTokenKind.String, modTokens.first { it.slice(ambientMod) == "/re/" }.kind)
+
+        val classThenTsx = "class Box<T> { }\n<div className=\"a\" />;"
+        val classTsxTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, classThenTsx, "ts-gt-class-tsx")
+        assertEquals(SyntaxTokenKind.Tag, classTsxTokens.first { it.slice(classThenTsx) == "div" }.kind)
+
+        val ternaryTypedArrow = "const v = ok ? (e: number) => e : { valueOf: () => 12 } / 2 / 3;"
+        val ternTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, ternaryTypedArrow, "ts-ternary-paren-colon")
+        assertTrue(ternTokens.none { it.kind == SyntaxTokenKind.String })
+        assertEquals(2, ternTokens.count { it.slice(ternaryTypedArrow) == "/" && it.kind == SyntaxTokenKind.Operator })
+
+        val voidFnRegex = "function f(): void { }\n/re/.test(s);"
+        val voidRegexTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, voidFnRegex, "ts-void-fn-regex")
+        assertEquals(SyntaxTokenKind.String, voidRegexTokens.first { it.slice(voidFnRegex) == "/re/" }.kind)
+
+        val voidFnTsx = "function f(): void { }\n<div className=\"a\" />;"
+        val voidTsxTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, voidFnTsx, "ts-void-fn-tsx")
+        assertEquals(SyntaxTokenKind.Tag, voidTsxTokens.first { it.slice(voidFnTsx) == "div" }.kind)
+
+        val rshiftGeneric = "function f(): Promise<Array<number>> { }\n/re/.test(s);"
+        val rshiftTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, rshiftGeneric, "ts-rshift-fn-regex")
+        assertEquals(SyntaxTokenKind.String, rshiftTokens.first { it.slice(rshiftGeneric) == "/re/" }.kind)
+
+        val urshiftGeneric = "class A implements B<C<D<E>>> { }\n/re/.test(s);"
+        val urshiftTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, urshiftGeneric, "ts-urshift-class-regex")
+        assertEquals(SyntaxTokenKind.String, urshiftTokens.first { it.slice(urshiftGeneric) == "/re/" }.kind)
+
+        val literalReturn = "function bit(): 0 | 1 { return 1 }\n/re/.test(s);"
+        val litRetTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, literalReturn, "ts-literal-return-regex")
+        assertEquals(SyntaxTokenKind.String, litRetTokens.first { it.slice(literalReturn) == "/re/" }.kind)
+
+        val unionObjectReturn = "function mk(): A | { x: number } { return { x: 1 } }\n/re/.test(s);"
+        val unionObjTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, unionObjectReturn, "ts-union-obj-return-regex")
+        assertEquals(SyntaxTokenKind.String, unionObjTokens.first { it.slice(unionObjectReturn) == "/re/" }.kind)
+    }
+}

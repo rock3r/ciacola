@@ -39,14 +39,28 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.bnorm.storyboard.Agsl as WarpAgslLanguage
 import dev.bnorm.storyboard.BasicCode
+import dev.bnorm.storyboard.C as WarpCLanguage
+import dev.bnorm.storyboard.Cpp as WarpCppLanguage
+import dev.bnorm.storyboard.Css as WarpCssLanguage
 import dev.bnorm.storyboard.DiffContents
 import dev.bnorm.storyboard.Frame
+import dev.bnorm.storyboard.Glsl as WarpGlslLanguage
+import dev.bnorm.storyboard.Go as WarpGoLanguage
+import dev.bnorm.storyboard.Html as WarpHtmlLanguage
+import dev.bnorm.storyboard.Java as WarpJavaLanguage
+import dev.bnorm.storyboard.JavaScript as WarpJavaScriptLanguage
 import dev.bnorm.storyboard.Json as WarpJsonLanguage
 import dev.bnorm.storyboard.Kotlin as WarpKotlinLanguage
 import dev.bnorm.storyboard.Language as WarpLanguage
+import dev.bnorm.storyboard.Python as WarpPythonLanguage
+import dev.bnorm.storyboard.Rust as WarpRustLanguage
+import dev.bnorm.storyboard.Sksl as WarpSkslLanguage
 import dev.bnorm.storyboard.State as WarpTokenState
 import dev.bnorm.storyboard.Token
+import dev.bnorm.storyboard.Toml as WarpTomlLanguage
+import dev.bnorm.storyboard.TypeScript as WarpTypeScriptLanguage
 import dev.bnorm.storyboard.Xml as WarpXmlLanguage
 import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
@@ -61,6 +75,7 @@ import dev.sebastiano.ciacola.document.TrackKind
 import dev.sebastiano.ciacola.document.mirroredWarpWindow
 import dev.sebastiano.ciacola.document.rootSegment
 import dev.sebastiano.ciacola.effects.LocalWarpSegmentObserver
+import dev.sebastiano.ciacola.syntax.SyntaxLanguage
 import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.DeckTheme
 import kotlin.math.roundToInt
@@ -575,11 +590,26 @@ private fun buildCodeStateTimeline(rawNode: NodeSpec, beatCount: Int): CodeState
     return CodeStateTimeline(states, highlights, beatToIdx)
 }
 
-private fun resolveWarpLanguage(language: String?): WarpLanguage = when (language?.lowercase()) {
-    "json" -> WarpJsonLanguage
-    "xml", "html", "svg" -> WarpXmlLanguage
-    else -> WarpKotlinLanguage
-}
+internal fun resolveWarpLanguage(language: String?): WarpLanguage =
+    when (language?.let(SyntaxLanguage::fromNameOrAlias)) {
+        SyntaxLanguage.Kotlin, null -> WarpKotlinLanguage
+        SyntaxLanguage.Xml -> WarpXmlLanguage
+        SyntaxLanguage.Json -> WarpJsonLanguage
+        SyntaxLanguage.Html -> WarpHtmlLanguage
+        SyntaxLanguage.Css -> WarpCssLanguage
+        SyntaxLanguage.JavaScript -> WarpJavaScriptLanguage
+        SyntaxLanguage.TypeScript -> WarpTypeScriptLanguage
+        SyntaxLanguage.Rust -> WarpRustLanguage
+        SyntaxLanguage.Go -> WarpGoLanguage
+        SyntaxLanguage.Python -> WarpPythonLanguage
+        SyntaxLanguage.Toml -> WarpTomlLanguage
+        SyntaxLanguage.Java -> WarpJavaLanguage
+        SyntaxLanguage.C -> WarpCLanguage
+        SyntaxLanguage.Cpp -> WarpCppLanguage
+        SyntaxLanguage.Glsl -> WarpGlslLanguage
+        SyntaxLanguage.Sksl -> WarpSkslLanguage
+        SyntaxLanguage.Agsl -> WarpAgslLanguage
+    }
 
 private fun defaultCodeSurfaceSpec(theme: DeckTheme, density: Density): SurfaceSpec {
     val scale = density.density.toDouble()
@@ -661,10 +691,12 @@ private fun collectKeyRowMap(diff: DiffContents): Map<String, Int> {
 
 private fun Token.docColorIn(palette: DeckCodePalette): Color = palette.colorForWarpScope(scope)
 
+private fun String.isPlainWarpScope(): Boolean = startsWith("source.") || startsWith("text.")
+
 private fun WarpTokenState.docResolveColorToken(): Token = if (
     this is WarpTokenState.Match &&
-    current.scope.startsWith("source.") &&
-    !previous.scope.startsWith("source.")
+    current.scope.isPlainWarpScope() &&
+    !previous.scope.isPlainWarpScope()
 ) {
     previous
 } else {
