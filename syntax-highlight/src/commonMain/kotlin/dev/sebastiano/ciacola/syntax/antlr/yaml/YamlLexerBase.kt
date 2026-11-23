@@ -15,6 +15,13 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
     private var blockParentIndent: Int = -1
     private var blockExplicitIndent: Int = 0
     private var pendingBlockScalarEndCp: Int = -1
+    private var lineStartIndex: Int = 0
+    private var inLineLeadingIndicators: Boolean = true
+    private var lineLastIndicatorIndent: Int = -1
+    private var lineKeyIndent: Int = -1
+    private var lineHasMappingColon: Boolean = false
+    private var pendingBlockOwnerIndent: Int = -1
+    private var plainScalarMinIndent: Int = -1
 
     override fun reset() {
         super.reset()
@@ -23,6 +30,90 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
         blockParentIndent = -1
         blockExplicitIndent = 0
         pendingBlockScalarEndCp = -1
+        lineStartIndex = 0
+        inLineLeadingIndicators = true
+        lineLastIndicatorIndent = -1
+        lineKeyIndent = -1
+        lineHasMappingColon = false
+        pendingBlockOwnerIndent = -1
+        plainScalarMinIndent = -1
+    }
+
+    protected fun onWs() {
+        if (lineStartIndex == 0 && _tokenStartCharIndex == 0 && _input.index() > 0) {
+            val firstCp = _input.LA(-(_input.index()))
+            if (firstCp == BOM_CODE_POINT) {
+                lineStartIndex = 1
+            }
+        }
+    }
+
+    protected fun onNewline() {
+        lineStartIndex = _input.index()
+        inLineLeadingIndicators = true
+        lineLastIndicatorIndent = -1
+        lineKeyIndent = -1
+        lineHasMappingColon = false
+    }
+
+    protected fun onDirectiveStart() {
+        pendingBlockOwnerIndent = -1
+        plainScalarMinIndent = -1
+        markNonIndicatorContent()
+    }
+
+    protected fun markNonIndicatorContent() {
+        if (inLineLeadingIndicators) {
+            inLineLeadingIndicators = false
+            lineKeyIndent = currentTokenCol()
+        }
+    }
+
+    protected fun onLeadingIndicator() {
+        if (flowDepth == 0 && inLineLeadingIndicators) {
+            val col = currentTokenCol()
+            lineLastIndicatorIndent = col
+            pendingBlockOwnerIndent = col
+        }
+    }
+
+    protected fun onMappingColon() {
+        if (flowDepth == 0) {
+            if (inLineLeadingIndicators) {
+                val col = currentTokenCol()
+                lineLastIndicatorIndent = col
+                pendingBlockOwnerIndent = col
+            } else {
+                lineHasMappingColon = true
+                pendingBlockOwnerIndent = if (lineKeyIndent >= 0) lineKeyIndent else currentTokenCol()
+            }
+        }
+    }
+
+    protected fun onNonPlainScalar(quoted: Boolean) {
+        markNonIndicatorContent()
+        pendingBlockOwnerIndent = -1
+        lastNonHiddenWasQuoted = quoted
+    }
+
+    protected fun onQuotedScalarDone() {
+        markNonIndicatorContent()
+        pendingBlockOwnerIndent = -1
+        lastNonHiddenWasQuoted = true
+        val tokenLen = _input.index() - _tokenStartCharIndex
+        for (back in 1..tokenLen) {
+            val ch = _input.LA(-back)
+            if (ch == '\n'.code || ch == '\r'.code) {
+                lineStartIndex = _input.index() - back + 1
+                break
+            }
+        }
+    }
+
+    protected fun onBlockScalarBodyDone() {
+        pendingBlockOwnerIndent = -1
+        plainScalarMinIndent = -1
+        inLineLeadingIndicators = false
     }
 
     protected fun isAtLineStart(): Boolean {
@@ -53,6 +144,9 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
     protected fun onDocMarker() {
         flowDepth = 0
         lastNonHiddenWasQuoted = false
+        pendingBlockOwnerIndent = -1
+        plainScalarMinIndent = -1
+        markNonIndicatorContent()
     }
 
     protected fun isIndicatorBoundary(): Boolean = isWhitespaceOrEof(_input.LA(1))
@@ -66,7 +160,11 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun isScalarBoundary(): Boolean {
         val next = _input.LA(1)
-        if (next == IntStream.EOF || next == '\r'.code || next == '\n'.code) return true
+        if (next == IntStream.EOF) return true
+        if (next == '\r'.code || next == '\n'.code) {
+            val minIndent = computePlainContinuationMinIndent()
+            return !hasPlainContinuationAfterOffset(1, minIndent)
+        }
         if (next == ':'.code) return isColonEndAt(2)
         if (flowDepth > 0 && isFlowClosingOrComma(next)) return true
         if (next == ' '.code || next == '\t'.code) {
@@ -76,8 +174,12 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
                 if (ch == ' '.code || ch == '\t'.code) {
                     offset++
                 } else {
-                    if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code || ch == '#'.code) {
+                    if (ch == IntStream.EOF || ch == '#'.code) {
                         return true
+                    }
+                    if (ch == '\r'.code || ch == '\n'.code) {
+                        val minIndent = computePlainContinuationMinIndent()
+                        return !hasPlainContinuationAfterOffset(offset, minIndent)
                     }
                     if (ch == ':'.code) {
                         return isColonEndAt(offset + 1)
@@ -87,6 +189,33 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         return false
+    }
+
+    protected fun onPlainScalarDone(plainContMode: Int) {
+        val minIndent = computePlainContinuationMinIndent()
+        markNonIndicatorContent()
+        pendingBlockOwnerIndent = -1
+        lastNonHiddenWasQuoted = false
+        val eolOffset = findLineEndOffsetAfterTrailingWs()
+        if (eolOffset > 0 && hasPlainContinuationAfterOffset(eolOffset, minIndent)) {
+            plainScalarMinIndent = minIndent
+            pushMode(plainContMode)
+        } else {
+            plainScalarMinIndent = -1
+        }
+    }
+
+    protected fun consumePlainScalarContinuation() {
+        consumePlainScalar()
+        markNonIndicatorContent()
+        lastNonHiddenWasQuoted = false
+        val eolOffset = findLineEndOffsetAfterTrailingWs()
+        if (eolOffset <= 0 || !hasPlainContinuationAfterOffset(eolOffset, plainScalarMinIndent)) {
+            plainScalarMinIndent = -1
+            if (!_modeStack.isEmpty) {
+                popMode()
+            }
+        }
     }
 
     protected fun consumePlainScalar() {
@@ -167,6 +296,8 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
     protected fun onBlockScalarStart() {
         blockExplicitIndent = 0
         blockParentIndent = computeParentIndentForCurrentLine()
+        markNonIndicatorContent()
+        pendingBlockOwnerIndent = -1
     }
 
     protected fun onBlockScalarIndentDigit(digitCodePoint: Int) {
@@ -193,7 +324,9 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun onOpenFlow() {
+        markNonIndicatorContent()
         flowDepth++
+        pendingBlockOwnerIndent = -1
         lastNonHiddenWasQuoted = false
     }
 
@@ -204,6 +337,67 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun markQuoted(quoted: Boolean) {
         lastNonHiddenWasQuoted = quoted
+    }
+
+    private fun currentTokenCol(): Int {
+        val col = _tokenStartCharIndex - lineStartIndex
+        return if (col < 0) 0 else col
+    }
+
+    private fun computePlainContinuationMinIndent(): Int {
+        if (flowDepth > 0) return 0
+        val parentIndent = when {
+            lineHasMappingColon -> if (lineKeyIndent >= 0) lineKeyIndent else pendingBlockOwnerIndent
+            lineLastIndicatorIndent >= 0 -> lineLastIndicatorIndent
+            pendingBlockOwnerIndent >= 0 && currentTokenCol() > pendingBlockOwnerIndent -> pendingBlockOwnerIndent
+            else -> -1
+        }
+        return if (parentIndent >= 0) parentIndent + 1 else 0
+    }
+
+    private fun findLineEndOffsetAfterTrailingWs(): Int {
+        var offset = 1
+        while (true) {
+            val ch = _input.LA(offset)
+            when (ch) {
+                ' '.code, '\t'.code -> offset++
+                '\r'.code, '\n'.code -> return offset
+                else -> return -1
+            }
+        }
+    }
+
+    private fun hasPlainContinuationAfterOffset(eolOffset: Int, minIndent: Int): Boolean {
+        val eolChar = _input.LA(eolOffset)
+        if (eolChar != '\r'.code && eolChar != '\n'.code) return false
+        var pos = advancePastNewline(eolOffset, eolChar)
+        while (true) {
+            val first = _input.LA(pos)
+            if (first == IntStream.EOF) return false
+            if (isDocMarkerAt(pos)) return false
+
+            var spaces = 0
+            var p = pos
+            while (_input.LA(p) == ' '.code) {
+                spaces++
+                p++
+            }
+            var afterWsPos = p
+            while (_input.LA(afterWsPos) == ' '.code || _input.LA(afterWsPos) == '\t'.code) {
+                afterWsPos++
+            }
+            val ch = _input.LA(afterWsPos)
+            if (ch == IntStream.EOF) return false
+            if (ch == '\r'.code || ch == '\n'.code) {
+                pos = advancePastNewline(afterWsPos, ch)
+                continue
+            }
+            if (ch == '#'.code || ch == BOM_CODE_POINT) return false
+            if (flowDepth == 0 && spaces < minIndent) return false
+            if (flowDepth > 0 && isAnyFlowIndicator(ch)) return false
+            if (ch == ':'.code && isColonEndAt(afterWsPos + 1)) return false
+            return true
+        }
     }
 
     private fun codePointBeforeTokenStart(): Int {

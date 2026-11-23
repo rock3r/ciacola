@@ -9,16 +9,15 @@ options {
 }
 
 WS
-    : [ \t\uFEFF]+
+    : [ \t\uFEFF]+ { onWs(); }
     ;
 
 NEWLINE
-    : '\r'? '\n'
-    | '\r'
+    : ( '\r'? '\n' | '\r' ) { onNewline(); }
     ;
 
 DIRECTIVE_START
-    : '%' { isAtLineStart() }? -> pushMode(DIRECTIVE_MODE)
+    : '%' { isAtLineStart() }? { onDirectiveStart(); } -> pushMode(DIRECTIVE_MODE)
     ;
 
 DOC_START
@@ -34,19 +33,19 @@ COMMENT
     ;
 
 MERGE_KEY
-    : '<<' { isFollowedByMappingColon() }? { markQuoted(false); }
+    : '<<' { isFollowedByMappingColon() }? { markNonIndicatorContent(); markQuoted(false); }
     ;
 
 SEQUENCE_ENTRY
-    : '-' { isIndicatorBoundary() }? { markQuoted(false); }
+    : '-' { isIndicatorBoundary() }? { onLeadingIndicator(); markQuoted(false); }
     ;
 
 COMPLEX_KEY
-    : '?' { isIndicatorBoundary() }? { markQuoted(false); }
+    : '?' { isIndicatorBoundary() }? { onLeadingIndicator(); markQuoted(false); }
     ;
 
 COLON
-    : ':' { isMappingColon() }? { markQuoted(false); }
+    : ':' { isMappingColon() }? { onMappingColon(); markQuoted(false); }
     ;
 
 LBRACE
@@ -70,19 +69,19 @@ COMMA
     ;
 
 ANCHOR_SIGIL
-    : '&' { isFollowedByAnchorChar() }? { markQuoted(false); } -> pushMode(ANCHOR_MODE)
+    : '&' { isFollowedByAnchorChar() }? { markNonIndicatorContent(); markQuoted(false); } -> pushMode(ANCHOR_MODE)
     ;
 
 ALIAS_SIGIL
-    : '*' { isFollowedByAnchorChar() }? { markQuoted(false); } -> pushMode(ALIAS_MODE)
+    : '*' { isFollowedByAnchorChar() }? { onNonPlainScalar(false); } -> pushMode(ALIAS_MODE)
     ;
 
 VERBATIM_TAG
-    : '!<' ~[ \t\r\n><[\]{}]+ '>' { markQuoted(false); }
+    : '!<' ~[ \t\r\n><[\]{}]+ '>' { markNonIndicatorContent(); markQuoted(false); }
     ;
 
 TAG
-    : '!' '!'? TagChar* { markQuoted(false); }
+    : '!' '!'? TagChar* { markNonIndicatorContent(); markQuoted(false); }
     ;
 
 BLOCK_SCALAR_START
@@ -90,31 +89,31 @@ BLOCK_SCALAR_START
     ;
 
 DOUBLE_QUOTED_STRING
-    : '"' ( '\\' ( '\r'? '\n' | . ) | ~["\\] )* '"' { markQuoted(true); }
+    : '"' ( '\\' ( '\r'? '\n' | . ) | ~["\\] )* '"' { onQuotedScalarDone(); }
     ;
 
 UNTERMINATED_DOUBLE_QUOTED_STRING
-    : '"' ( '\\' ( '\r'? '\n' | . ) | ~["\\] )* '\\'? { markQuoted(true); }
+    : '"' ( '\\' ( '\r'? '\n' | . ) | ~["\\] )* '\\'? { onQuotedScalarDone(); }
     ;
 
 SINGLE_QUOTED_STRING
-    : '\'' ( '\'\'' | ~['] )* '\'' { markQuoted(true); }
+    : '\'' ( '\'\'' | ~['] )* '\'' { onQuotedScalarDone(); }
     ;
 
 UNTERMINATED_SINGLE_QUOTED_STRING
-    : '\'' ( '\'\'' | ~['] )* { markQuoted(true); }
+    : '\'' ( '\'\'' | ~['] )* { onQuotedScalarDone(); }
     ;
 
 BOOL
-    : ( 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE' ) { isScalarBoundary() }? { markQuoted(false); }
+    : ( 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE' ) { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 NULL
-    : ( 'null' | 'Null' | 'NULL' | '~' ) { isScalarBoundary() }? { markQuoted(false); }
+    : ( 'null' | 'Null' | 'NULL' | '~' ) { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 SPECIAL_FLOAT
-    : [+-]? ( '.inf' | '.Inf' | '.INF' | '.nan' | '.NaN' | '.NAN' ) { isScalarBoundary() }? { markQuoted(false); }
+    : [+-]? ( '.inf' | '.Inf' | '.INF' | '.nan' | '.NaN' | '.NAN' ) { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 TIMESTAMP
@@ -122,15 +121,15 @@ TIMESTAMP
       ( ( [Tt] | [ \t]+ ) [0-9][0-9]? ':' [0-9][0-9] ':' [0-9][0-9] ( '.' [0-9]* )?
         ( [ \t]* ( [Zz] | [+-] [0-9][0-9]? ( ':' [0-9][0-9] )? ) )?
       )?
-      { isScalarBoundary() }? { markQuoted(false); }
+      { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 HEX_INT
-    : '0x' [0-9a-fA-F]+ { isScalarBoundary() }? { markQuoted(false); }
+    : '0x' [0-9a-fA-F]+ { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 OCT_INT
-    : '0o' [0-7]+ { isScalarBoundary() }? { markQuoted(false); }
+    : '0o' [0-7]+ { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 FLOAT
@@ -139,19 +138,19 @@ FLOAT
       | '.' [0-9]+ ( [eE] [+-]? [0-9]+ )?
       | [0-9]+ [eE] [+-]? [0-9]+
       )
-      { isScalarBoundary() }? { markQuoted(false); }
+      { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 INT
-    : [+-]? [0-9]+ { isScalarBoundary() }? { markQuoted(false); }
+    : [+-]? [0-9]+ { isScalarBoundary() }? { onNonPlainScalar(false); }
     ;
 
 PLAIN_SCALAR
-    : PlainStartChar { consumePlainScalar(); markQuoted(false); }
+    : PlainStartChar { consumePlainScalar(); onPlainScalarDone(Modes.PLAIN_CONT_MODE); }
     ;
 
 ERROR_CHAR
-    : . { markQuoted(false); }
+    : . { onNonPlainScalar(false); }
     ;
 
 fragment TagChar
@@ -169,7 +168,7 @@ DIR_WS
     ;
 
 DIR_NEWLINE
-    : ( '\r'? '\n' | '\r' ) -> popMode
+    : ( '\r'? '\n' | '\r' ) { onNewline(); } -> popMode
     ;
 
 DIR_COMMENT
@@ -231,7 +230,7 @@ BS_COMMENT
     ;
 
 BS_NEWLINE
-    : ( '\r'? '\n' | '\r' ) { onBlockScalarHeaderNewline(Modes.BLOCK_SCALAR_BODY_MODE); }
+    : ( '\r'? '\n' | '\r' ) { onNewline(); onBlockScalarHeaderNewline(Modes.BLOCK_SCALAR_BODY_MODE); }
     ;
 
 BS_ERROR
@@ -241,5 +240,19 @@ BS_ERROR
 mode BLOCK_SCALAR_BODY_MODE;
 
 BLOCK_SCALAR_BODY
-    : . { consumeBlockScalarBody(); } -> popMode
+    : . { consumeBlockScalarBody(); onBlockScalarBodyDone(); } -> popMode
+    ;
+
+mode PLAIN_CONT_MODE;
+
+PC_WS
+    : [ \t]+
+    ;
+
+PC_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onNewline(); }
+    ;
+
+PC_PLAIN_SCALAR
+    : ~[ \t\r\n] { consumePlainScalarContinuation(); }
     ;

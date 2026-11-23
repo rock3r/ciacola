@@ -54,6 +54,8 @@ internal object YamlSyntaxLexer : SyntaxLexer {
                 YamlTokens.DIR_NEWLINE,
                 YamlTokens.BS_WS,
                 YamlTokens.BS_NEWLINE,
+                YamlTokens.PC_WS,
+                YamlTokens.PC_NEWLINE,
                 -> SyntaxTokenKind.Whitespace
 
                 YamlTokens.COMMENT,
@@ -134,6 +136,7 @@ internal object YamlSyntaxLexer : SyntaxLexer {
                 YamlTokens.UNTERMINATED_DOUBLE_QUOTED_STRING,
                 YamlTokens.UNTERMINATED_SINGLE_QUOTED_STRING,
                 YamlTokens.BLOCK_SCALAR_BODY,
+                YamlTokens.PC_PLAIN_SCALAR,
                 -> SyntaxTokenKind.String
 
                 else -> SyntaxTokenKind.Invalid

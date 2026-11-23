@@ -243,6 +243,9 @@ class YamlSyntaxLexerTest {
         val hugeBlock = "block: |\n" + "  line of block text with : and # not-comment\n".repeat(3_000) + "after: true\n"
         val flowUnterminatedTags = "[" + "!<x,".repeat(8_000) + "]"
         val repeatedUnterminatedTags = "!<".repeat(8_000)
+        val typedBlankLines = "k: 1" + "\n".repeat(10_000) + "next: 2\n"
+        val hugeMultilinePlain = "key: a\n" + "  \"cont line\n".repeat(4_000) + "next: 1\n"
+        val flowMidLinePops = "[" + "a\n  \"b,".repeat(3_000) + "c]"
 
         assertLinearPerformance(
             lexer = YamlSyntaxLexer,
@@ -252,8 +255,104 @@ class YamlSyntaxLexerTest {
                 "huge-block" to hugeBlock,
                 "flow-unterminated-tags" to flowUnterminatedTags,
                 "repeated-unterminated-tags" to repeatedUnterminatedTags,
+                "typed-blank-lines" to typedBlankLines,
+                "huge-multiline-plain" to hugeMultilinePlain,
+                "flow-midline-pops" to flowMidLinePops,
             ),
         )
+    }
+
+    @Test
+    fun preservesPlainScalarContextAcrossContinuationLines() {
+        val quotedCont = "key: a\n  \"hello\n  'world\nnext: value\n"
+        val tQuoted = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, quotedCont, "yaml-plain-cont-quotes")
+        assertEquals(SyntaxTokenKind.Property, tQuoted.first { it.slice(quotedCont) == "key" }.kind)
+        assertEquals(SyntaxTokenKind.String, tQuoted.first { it.slice(quotedCont) == "a" }.kind)
+        assertEquals(SyntaxTokenKind.String, tQuoted.first { it.slice(quotedCont) == "\"hello" }.kind)
+        assertEquals(SyntaxTokenKind.String, tQuoted.first { it.slice(quotedCont) == "'world" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tQuoted.first { it.slice(quotedCont) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.String, tQuoted.first { it.slice(quotedCont) == "value" }.kind)
+
+        val nestedOwnLine = "outer:\n  key:\n\n    a\n\n    \"hello # trailing\n  \"next\": value\n"
+        val tNested = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, nestedOwnLine, "yaml-plain-cont-nested")
+        assertEquals(SyntaxTokenKind.String, tNested.first { it.slice(nestedOwnLine) == "\"hello" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, tNested.first { it.slice(nestedOwnLine) == "# trailing" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tNested.first { it.slice(nestedOwnLine) == "\"next\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tNested.first { it.slice(nestedOwnLine) == "value" }.kind)
+
+        val boolAndNumCont = "flag: true\n  \"still string\ncount: 123\n  'also string\nafter: 42\n"
+        val tTyped = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, boolAndNumCont, "yaml-plain-cont-typed")
+        assertEquals(SyntaxTokenKind.String, tTyped.first { it.slice(boolAndNumCont) == "true" }.kind)
+        assertEquals(SyntaxTokenKind.String, tTyped.first { it.slice(boolAndNumCont) == "\"still string" }.kind)
+        assertEquals(SyntaxTokenKind.String, tTyped.first { it.slice(boolAndNumCont) == "123" }.kind)
+        assertEquals(SyntaxTokenKind.String, tTyped.first { it.slice(boolAndNumCont) == "'also string" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tTyped.first { it.slice(boolAndNumCont) == "after" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tTyped.first { it.slice(boolAndNumCont) == "42" }.kind)
+
+        val seqAndFlowCont = """
+            items:
+              - a
+                "seq cont
+              - b: c
+                  "nested map cont
+                "sibling": 1
+            flow: [x
+              "flow cont,
+              "real string"]
+            next: true
+        """.trimIndent() + "\n"
+        val tSeqFlow = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, seqAndFlowCont, "yaml-plain-cont-seq-flow")
+        assertEquals(SyntaxTokenKind.String, tSeqFlow.first { it.slice(seqAndFlowCont) == "\"seq cont" }.kind)
+        assertEquals(SyntaxTokenKind.String, tSeqFlow.first { it.slice(seqAndFlowCont) == "\"nested map cont" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tSeqFlow.first { it.slice(seqAndFlowCont) == "\"sibling\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tSeqFlow.first { it.slice(seqAndFlowCont) == "\"flow cont" }.kind)
+        assertEquals(SyntaxTokenKind.String, tSeqFlow.first { it.slice(seqAndFlowCont) == "\"real string\"" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tSeqFlow.first { it.slice(seqAndFlowCont) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.Constant, tSeqFlow.first { it.slice(seqAndFlowCont) == "true" }.kind)
+
+        val docMarkerStopsCont = "top\n  \"still top\n---\nnext: 1\n"
+        val tDoc = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, docMarkerStopsCont, "yaml-plain-cont-doc")
+        assertEquals(SyntaxTokenKind.String, tDoc.first { it.slice(docMarkerStopsCont) == "\"still top" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tDoc.first { it.slice(docMarkerStopsCont) == "---" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tDoc.first { it.slice(docMarkerStopsCont) == "next" }.kind)
+
+        val crlfAndCr = "k1: a\r\n  \"crlf\r\nk2: b\r  'cr\rnext: 9\r\n"
+        val tLineEndings = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, crlfAndCr, "yaml-plain-cont-crlf-cr")
+        assertEquals(SyntaxTokenKind.String, tLineEndings.first { it.slice(crlfAndCr) == "\"crlf" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tLineEndings.first { it.slice(crlfAndCr) == "k2" }.kind)
+        assertEquals(SyntaxTokenKind.String, tLineEndings.first { it.slice(crlfAndCr) == "'cr" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tLineEndings.first { it.slice(crlfAndCr) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tLineEndings.first { it.slice(crlfAndCr) == "9" }.kind)
+
+        val bomCont = "\uFEFFkey: a\n \"bom cont\nnext: 1\n"
+        val tBom = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, bomCont, "yaml-plain-cont-bom")
+        assertEquals(SyntaxTokenKind.Property, tBom.first { it.slice(bomCont) == "key" }.kind)
+        assertEquals(SyntaxTokenKind.String, tBom.first { it.slice(bomCont) == "\"bom cont" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tBom.first { it.slice(bomCont) == "next" }.kind)
+
+        val complexKey = "? a\n  \"b\n: val\n"
+        val tComplex = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, complexKey, "yaml-plain-cont-complex-key")
+        assertEquals(SyntaxTokenKind.String, tComplex.first { it.slice(complexKey) == "\"b" }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, tComplex.first { it.slice(complexKey) == ":" }.kind)
+        assertEquals(SyntaxTokenKind.String, tComplex.first { it.slice(complexKey) == "val" }.kind)
+
+        val anchorAndTag = "anchored: &a\n  v\n  \"w\ntagged:\n  !tag x\n  \"y\nblock: |\n  body line\nnext: 7\n"
+        val tAnchorTag = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, anchorAndTag, "yaml-plain-cont-anchor-tag-block")
+        assertEquals(SyntaxTokenKind.String, tAnchorTag.first { it.slice(anchorAndTag) == "\"w" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tAnchorTag.first { it.slice(anchorAndTag) == "tagged" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tAnchorTag.first { it.slice(anchorAndTag) == "!tag" }.kind)
+        assertEquals(SyntaxTokenKind.String, tAnchorTag.first { it.slice(anchorAndTag) == "\"y" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tAnchorTag.first { it.slice(anchorAndTag) == "block" }.kind)
+        assertTrue(tAnchorTag.any { it.kind == SyntaxTokenKind.String && it.slice(anchorAndTag).contains("body line") })
+        assertEquals(SyntaxTokenKind.Property, tAnchorTag.first { it.slice(anchorAndTag) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tAnchorTag.first { it.slice(anchorAndTag) == "7" }.kind)
+
+        val malformedContRecovery = "key: a\n  b: c\nnext: d\nmore: 1\n"
+        val tMalformed = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, malformedContRecovery, "yaml-plain-cont-malformed-recovery")
+        assertEquals(SyntaxTokenKind.Property, tMalformed.first { it.slice(malformedContRecovery) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.String, tMalformed.first { it.slice(malformedContRecovery) == "d" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tMalformed.first { it.slice(malformedContRecovery) == "more" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tMalformed.first { it.slice(malformedContRecovery) == "1" }.kind)
     }
 
     @Test
