@@ -167,6 +167,53 @@ class YamlSyntaxLexerTest {
             anchoredTokens.any { it.kind == SyntaxTokenKind.String && it.slice(anchoredSeq) == "  key: value # inside block" },
             "Expected anchored sequence block body to be a single String token, got $anchoredTokens",
         )
+
+        val standaloneEmptyBlock = "root:\n  text:\n    |\n  next: value\nafter: ok\n"
+        val standaloneEmptyTokens = assertValidSnippetHasNoInvalidTokens(
+            YamlSyntaxLexer,
+            standaloneEmptyBlock,
+            "yaml-standalone-empty-block",
+        )
+        assertEquals(SyntaxTokenKind.Property, standaloneEmptyTokens.first { it.slice(standaloneEmptyBlock) == "text" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, standaloneEmptyTokens.first { it.slice(standaloneEmptyBlock) == "|" }.kind)
+        assertEquals(SyntaxTokenKind.Property, standaloneEmptyTokens.first { it.slice(standaloneEmptyBlock) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.String, standaloneEmptyTokens.first { it.slice(standaloneEmptyBlock) == "value" }.kind)
+        assertEquals(SyntaxTokenKind.Property, standaloneEmptyTokens.first { it.slice(standaloneEmptyBlock) == "after" }.kind)
+
+        val standaloneNonEmptyAndSeq = """
+            root:
+              text:
+                |
+                  hello: 1
+              same_indent:
+              |
+                world: 2
+              anchored: &anc
+                |
+              next: 3
+            items:
+              -
+                |
+              - second
+        """.trimIndent() + "\n"
+        val standaloneMixedTokens = assertValidSnippetHasNoInvalidTokens(
+            YamlSyntaxLexer,
+            standaloneNonEmptyAndSeq,
+            "yaml-standalone-mixed-block",
+        )
+        assertTrue(
+            standaloneMixedTokens.any { it.kind == SyntaxTokenKind.String && it.slice(standaloneNonEmptyAndSeq).contains("hello: 1") },
+            "Expected standalone block body 'hello: 1' to be String",
+        )
+        assertTrue(
+            standaloneMixedTokens.any { it.kind == SyntaxTokenKind.String && it.slice(standaloneNonEmptyAndSeq).contains("world: 2") },
+            "Expected same-indent standalone block body 'world: 2' to be String",
+        )
+        assertEquals(SyntaxTokenKind.Property, standaloneMixedTokens.first { it.slice(standaloneNonEmptyAndSeq) == "same_indent" }.kind)
+        assertEquals(SyntaxTokenKind.Property, standaloneMixedTokens.first { it.slice(standaloneNonEmptyAndSeq) == "anchored" }.kind)
+        assertEquals(SyntaxTokenKind.Property, standaloneMixedTokens.first { it.slice(standaloneNonEmptyAndSeq) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.Number, standaloneMixedTokens.first { it.slice(standaloneNonEmptyAndSeq) == "3" }.kind)
+        assertEquals(SyntaxTokenKind.String, standaloneMixedTokens.first { it.slice(standaloneNonEmptyAndSeq) == "second" }.kind)
     }
 
     @Test

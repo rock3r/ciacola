@@ -595,6 +595,72 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun requiresCompleteUnquotedReservedWordsForCaseAndControlState() {
+        val caseAssignInCmdSub = "echo \"\$(case=1; echo in)\"; echo after # comment\n"
+        val tAssign = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, caseAssignInCmdSub, "shell-case-assign-cmdsub")
+        assertEquals(SyntaxTokenKind.Property, tAssign.first { it.slice(caseAssignInCmdSub) == "case" }.kind)
+        assertEquals(3, tAssign.count { it.slice(caseAssignInCmdSub) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tAssign.first { it.slice(caseAssignInCmdSub) == "after" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, tAssign.first { it.slice(caseAssignInCmdSub) == "# comment" }.kind)
+
+        val partialQuotedCase = "echo \"\$(case\"x\"; echo in)\"; echo after2 # comment2\n"
+        val tQuoted = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, partialQuotedCase, "shell-case-partial-quoted")
+        assertEquals(SyntaxTokenKind.Function, tQuoted.first { it.slice(partialQuotedCase) == "case" }.kind)
+        assertEquals(3, tQuoted.count { it.slice(partialQuotedCase) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tQuoted.first { it.slice(partialQuotedCase) == "after2" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, tQuoted.first { it.slice(partialQuotedCase) == "# comment2" }.kind)
+
+        val quotedEsacAndAssign = "case \$x in esac\"x\") esac=1; echo inside;; esac; echo after3\n"
+        val tEsac = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, quotedEsacAndAssign, "shell-case-esac-guards")
+        val esacTokens = tEsac.filter { it.slice(quotedEsacAndAssign) == "esac" }
+        assertEquals(3, esacTokens.size)
+        assertEquals(SyntaxTokenKind.Plain, esacTokens[0].kind)
+        assertEquals(SyntaxTokenKind.Property, esacTokens[1].kind)
+        assertEquals(SyntaxTokenKind.Keyword, esacTokens[2].kind)
+        assertEquals(2, tEsac.count { it.slice(quotedEsacAndAssign) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tEsac.first { it.slice(quotedEsacAndAssign) == "after3" }.kind)
+
+        val validCompactCase = "echo \"\$(case x in a) echo hi;; esac)\"; echo after4\n"
+        val tCompact = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, validCompactCase, "shell-case-compact-cmdsub")
+        assertEquals(SyntaxTokenKind.Keyword, tCompact.first { it.slice(validCompactCase) == "case" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tCompact.first { it.slice(validCompactCase) == "in" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tCompact.first { it.slice(validCompactCase) == "esac" }.kind)
+        assertEquals(3, tCompact.count { it.slice(validCompactCase) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tCompact.first { it.slice(validCompactCase) == "after4" }.kind)
+
+        val adjacentCloserPatterns =
+            "case \$x in \$(echo a)esac) echo hit1;; `cmd`esac) echo hit2;; \$((1))esac) echo hit3;; esac\n"
+        val tClosers = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, adjacentCloserPatterns, "shell-case-adjacent-closers")
+        val closerEsacs = tClosers.filter { it.slice(adjacentCloserPatterns) == "esac" }
+        assertEquals(4, closerEsacs.size)
+        assertEquals(SyntaxTokenKind.Plain, closerEsacs[0].kind)
+        assertEquals(SyntaxTokenKind.Plain, closerEsacs[1].kind)
+        assertEquals(SyntaxTokenKind.Plain, closerEsacs[2].kind)
+        assertEquals(SyntaxTokenKind.Keyword, closerEsacs[3].kind)
+        assertEquals(4, tClosers.count { it.slice(adjacentCloserPatterns) == "echo" && it.kind == SyntaxTokenKind.Function })
+
+        val openingBacktickNotBoundary = "case`echo x` in; echo after_bt\n"
+        val tOpenBt = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, openingBacktickNotBoundary, "shell-case-opening-bt")
+        assertEquals(SyntaxTokenKind.Function, tOpenBt.first { it.slice(openingBacktickNotBoundary) == "case" }.kind)
+        assertEquals(2, tOpenBt.count { it.slice(openingBacktickNotBoundary) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tOpenBt.first { it.slice(openingBacktickNotBoundary) == "after_bt" }.kind)
+
+        val closingBacktickAndEscapedBacktick = "echo `case x in a) echo hi;; esac` `echo \\`case y in b) echo ok;; esac\\``\n"
+        val tCloseBt = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, closingBacktickAndEscapedBacktick, "shell-case-closing-bt")
+        assertEquals(2, tCloseBt.count { it.slice(closingBacktickAndEscapedBacktick) == "case" && it.kind == SyntaxTokenKind.Keyword })
+        assertEquals(2, tCloseBt.count { it.slice(closingBacktickAndEscapedBacktick) == "esac" && it.kind == SyntaxTokenKind.Keyword })
+
+        val lineContAndForGuards = "case\\\n x in a) echo lc;; esac\nfor i in do\"x\"; do echo \$i; done\n"
+        val tLcFor = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, lineContAndForGuards, "shell-linecont-for-guards")
+        assertEquals(SyntaxTokenKind.Keyword, tLcFor.first { it.slice(lineContAndForGuards) == "case" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tLcFor.first { it.slice(lineContAndForGuards) == "esac" }.kind)
+        val doTokens = tLcFor.filter { it.slice(lineContAndForGuards) == "do" }
+        assertEquals(2, doTokens.size)
+        assertEquals(SyntaxTokenKind.Plain, doTokens[0].kind)
+        assertEquals(SyntaxTokenKind.Keyword, doTokens[1].kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }

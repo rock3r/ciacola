@@ -162,6 +162,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onDefaultWord(lexeme: String) {
         val scope = currentScope()
+        val isCompleteWord = scope.atWordBoundary && isWordEndBoundaryAhead()
         scope.atWordBoundary = false
         if (scope.expectingFuncHeaderName) {
             scope.expectingFuncHeaderName = false
@@ -181,14 +182,14 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                     scope.sawFuncDeclCommand = false
                     return
                 }
-                topCase.awaitingIn && lexeme == "in" -> {
+                topCase.awaitingIn && isCompleteWord && lexeme == "in" -> {
                     topCase.awaitingIn = false
                     topCase.inPattern = true
                     scope.atCommandPosition = false
                     scope.sawFuncDeclCommand = false
                     return
                 }
-                lexeme == "esac" && (scope.atCommandPosition || topCase.inPattern) -> {
+                isCompleteWord && lexeme == "esac" && (scope.atCommandPosition || topCase.inPattern) -> {
                     scope.caseStack.removeAt(scope.caseStack.lastIndex)
                     scope.atCommandPosition = false
                     scope.sawFuncDeclCommand = false
@@ -198,6 +199,11 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         }
 
         if (scope.atCommandPosition) {
+            if (!isCompleteWord) {
+                scope.atCommandPosition = false
+                scope.sawFuncDeclCommand = false
+                return
+            }
             when (lexeme) {
                 "case" -> {
                     scope.caseStack.add(CaseFrame(baseParenDepth = scope.parenDepth))
@@ -222,6 +228,32 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             }
         } else {
             scope.sawFuncDeclCommand = false
+        }
+    }
+
+    private fun isWordEndBoundaryAhead(): Boolean {
+        var offset = 1
+        while (true) {
+            val next = _input.LA(offset)
+            if (next == '\\'.code) {
+                val afterBs = _input.LA(offset + 1)
+                if (afterBs == '\n'.code) {
+                    offset += 2
+                    continue
+                }
+                if (afterBs == '\r'.code) {
+                    offset += if (_input.LA(offset + 2) == '\n'.code) 3 else 2
+                    continue
+                }
+                if (afterBs == '`'.code && currentScope().kind == ScopeKind.BACKTICK_ESCAPED) {
+                    return true
+                }
+                return false
+            }
+            if (next == '`'.code) {
+                return currentScope().kind == ScopeKind.BACKTICK
+            }
+            return next == IntStream.EOF || isWordEndDelimiterChar(next)
         }
     }
 
@@ -1277,7 +1309,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private companion object {
-        fun isCommentBoundaryChar(ch: Int): Boolean =
+        fun isWordEndDelimiterChar(ch: Int): Boolean =
             ch == ' '.code ||
                 ch == '\t'.code ||
                 ch == '\r'.code ||
@@ -1290,8 +1322,10 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 ch == '('.code ||
                 ch == ')'.code ||
                 ch == '<'.code ||
-                ch == '>'.code ||
-                ch == '`'.code
+                ch == '>'.code
+
+        fun isCommentBoundaryChar(ch: Int): Boolean =
+            isWordEndDelimiterChar(ch) || ch == '`'.code
 
         fun toCodePoints(s: String): IntArray {
             val cps = IntArray(s.length)

@@ -295,7 +295,14 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onBlockScalarStart() {
         blockExplicitIndent = 0
-        blockParentIndent = computeParentIndentForCurrentLine()
+        val sameLineParent = computeParentIndentForCurrentLine()
+        blockParentIndent = if (sameLineParent >= 0) {
+            sameLineParent
+        } else if (pendingBlockOwnerIndent >= 0 && currentTokenCol() >= pendingBlockOwnerIndent) {
+            pendingBlockOwnerIndent
+        } else {
+            -1
+        }
         markNonIndicatorContent()
         pendingBlockOwnerIndent = -1
     }

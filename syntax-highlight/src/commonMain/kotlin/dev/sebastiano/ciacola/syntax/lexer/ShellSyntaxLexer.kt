@@ -309,6 +309,7 @@ private enum class ForStage {
 private class CommandScopeFrame(
     val openedByType: Int,
     var expectingCommand: Boolean = true,
+    var atWordBoundary: Boolean = true,
     var expectingFuncName: Boolean = false,
     var inDeclarationCmd: Boolean = false,
     var inPrefixAssignRhs: Boolean = false,
@@ -337,6 +338,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
     }
     val paramExpStack = ArrayList<ParamExpFrame>()
     val arithParenDepthStack = ArrayList<Int>()
+    val arithIsCmdStack = ArrayList<Boolean>()
     // Mode stack mirrors ShellLexer's mode transitions for PARAM_EXP / ARITH / DQUOTE vs command contexts.
     val activeSubMode = ArrayList<Int>() // 0 = command/default, 1 = DQUOTE, 2 = PARAM_EXP, 3 = ARITH
 
@@ -370,6 +372,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             -> {
                 if (curMode == MODE_CMD) {
                     val cmd = currentCmd()
+                    cmd.atWordBoundary = false
                     if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                         cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                     }
@@ -399,6 +402,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             -> {
                 if (curMode == MODE_CMD) {
                     val cmd = currentCmd()
+                    cmd.atWordBoundary = false
                     if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                         cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                     }
@@ -429,6 +433,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             -> {
                 if (curMode == MODE_CMD) {
                     val cmd = currentCmd()
+                    cmd.atWordBoundary = false
                     if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                         cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                     }
@@ -436,6 +441,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                     cmd.expectingRedirTarget = false
                 }
                 arithParenDepthStack.add(0)
+                arithIsCmdStack.add(type == ShellTokens.ARITH_CMD_START)
                 activeSubMode.add(MODE_ARITH)
                 i++
                 continue
@@ -445,11 +451,17 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                 if (arithParenDepthStack.isNotEmpty()) {
                     arithParenDepthStack.removeAt(arithParenDepthStack.lastIndex)
                 }
+                val isArithCmd = if (arithIsCmdStack.isNotEmpty()) {
+                    arithIsCmdStack.removeAt(arithIsCmdStack.lastIndex)
+                } else {
+                    false
+                }
                 if (activeSubMode.lastOrNull() == MODE_ARITH) {
                     activeSubMode.removeAt(activeSubMode.lastIndex)
                 }
-                if (activeSubMode.lastOrNull() == MODE_CMD) {
+                if ((activeSubMode.lastOrNull() ?: MODE_CMD) == MODE_CMD) {
                     val cmd = currentCmd()
+                    cmd.atWordBoundary = isArithCmd
                     if (cmd.forStage == ForStage.AWAITING_VAR) {
                         // C-style `for (( i = 0; i < n; i++ ))`
                         cmd.forStage = ForStage.NONE
@@ -469,6 +481,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             -> {
                 if (curMode == MODE_CMD) {
                     val cmd = currentCmd()
+                    cmd.atWordBoundary = false
                     if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                         cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                     }
@@ -493,9 +506,13 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                 if (curMode == MODE_CMD && topCmd != null && topCmd.openedByType == ShellTokens.BACKTICK && cmdStack.size > 1) {
                     cmdStack.removeAt(cmdStack.lastIndex)
                     if (activeSubMode.lastOrNull() == MODE_CMD) activeSubMode.removeAt(activeSubMode.lastIndex)
+                    if ((activeSubMode.lastOrNull() ?: MODE_CMD) == MODE_CMD) {
+                        currentCmd().atWordBoundary = false
+                    }
                 } else {
                     if (curMode == MODE_CMD) {
                         val cmd = currentCmd()
+                        cmd.atWordBoundary = false
                         if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                             cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                         }
@@ -517,8 +534,12 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                     tok.kind = SyntaxTokenKind.Punctuation
                     cmdStack.removeAt(cmdStack.lastIndex)
                     if (activeSubMode.lastOrNull() == MODE_CMD) activeSubMode.removeAt(activeSubMode.lastIndex)
+                    if ((activeSubMode.lastOrNull() ?: MODE_CMD) == MODE_CMD) {
+                        currentCmd().atWordBoundary = false
+                    }
                 } else if (curMode == MODE_CMD && topCmd != null && topCmd.openedByType == ShellTokens.BACKTICK) {
                     tok.kind = SyntaxTokenKind.Punctuation
+                    topCmd.atWordBoundary = false
                     if (topCmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                         topCmd.caseStack[topCmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                     }
@@ -530,6 +551,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                     cmdStack.add(CommandScopeFrame(openedByType = ShellTokens.ESCAPED_BACKTICK))
                 } else if (curMode == MODE_CMD) {
                     val cmd = currentCmd()
+                    cmd.atWordBoundary = false
                     cmd.expectingCommand = false
                 }
                 i++
@@ -607,8 +629,16 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                             arithParenDepthStack[idx] = depth - 1
                         } else {
                             arithParenDepthStack.removeAt(idx)
+                            val isArithCmd = if (arithIsCmdStack.isNotEmpty()) {
+                                arithIsCmdStack.removeAt(arithIsCmdStack.lastIndex)
+                            } else {
+                                false
+                            }
                             if (activeSubMode.lastOrNull() == MODE_ARITH) {
                                 activeSubMode.removeAt(activeSubMode.lastIndex)
+                            }
+                            if ((activeSubMode.lastOrNull() ?: MODE_CMD) == MODE_CMD) {
+                                currentCmd().atWordBoundary = isArithCmd
                             }
                         }
                     } else if (activeSubMode.lastOrNull() == MODE_ARITH) {
@@ -630,6 +660,9 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
 
         // Hidden tokens (Whitespace / Newline / Comment)
         if (tok.isHidden) {
+            if (type != ShellTokens.LINE_CONTINUATION) {
+                cmd.atWordBoundary = true
+            }
             if (type == ShellTokens.NEWLINE || type == ShellTokens.HL_NEWLINE || type == ShellTokens.HE_NEWLINE) {
                 if (cmd.inPrefixAssignRhs && cmd.assignParenDepth == 0) {
                     cmd.inPrefixAssignRhs = false
@@ -659,6 +692,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
 
         // Redirection target word consumption (`>out.log cat`)
         if (cmd.expectingRedirTarget) {
+            cmd.atWordBoundary = false
             cmd.expectingRedirTarget = false
             if (type == ShellTokens.WORD || type == ShellTokens.DOT || type == ShellTokens.MINUS) {
                 tok.kind = SyntaxTokenKind.Plain
@@ -679,6 +713,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.AND_AND,
             ShellTokens.OR_OR,
             -> {
+                cmd.atWordBoundary = true
                 val topCase = cmd.caseStack.lastOrNull()
                 if (type == ShellTokens.PIPE && topCase == CaseStage.IN_PATTERN) {
                     cmd.expectingCommand = false
@@ -701,6 +736,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.SEMI_AMP,
             ShellTokens.SEMI_SEMI_AMP,
             -> {
+                cmd.atWordBoundary = true
                 if (cmd.caseStack.isNotEmpty()) {
                     cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.IN_PATTERN
                     cmd.expectingCommand = false
@@ -713,8 +749,9 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
 
             ShellTokens.LBRACE -> {
                 val canOpenGroup = cmd.expectingCommand || cmd.justClosedFuncHeader
-                val prevOk = i == 0 || raw[i - 1].isHidden || isGroupOpenPredecessor(raw[i - 1].type)
+                val prevOk = cmd.atWordBoundary
                 val nextOk = tok.end == source.length || isShellWhitespaceOrNewline(source[tok.end])
+                cmd.atWordBoundary = false
                 if (canOpenGroup && prevOk && nextOk) {
                     cmd.expectingCommand = true
                     cmd.inDeclarationCmd = false
@@ -729,6 +766,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.RBRACE -> {
+                cmd.atWordBoundary = false
                 cmd.expectingCommand = false
                 cmd.justClosedFuncHeader = false
                 cmd.inDeclarationCmd = false
@@ -736,6 +774,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.LPAREN -> {
+                cmd.atWordBoundary = true
                 cmd.justClosedFuncHeader = false
                 if (cmd.inPrefixAssignRhs) {
                     cmd.assignParenDepth++
@@ -751,16 +790,19 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
 
             ShellTokens.RPAREN -> {
                 if (cmd.assignParenDepth > 0) {
+                    cmd.atWordBoundary = true
                     cmd.assignParenDepth--
                     if (cmd.assignParenDepth == 0) {
                         cmd.inPrefixAssignRhs = false
                         cmd.expectingCommand = !cmd.inDeclarationCmd
                     }
                 } else if (cmd.caseStack.lastOrNull() == CaseStage.IN_PATTERN && cmd.innerParenDepth <= 1) {
+                    cmd.atWordBoundary = true
                     if (cmd.innerParenDepth > 0) cmd.innerParenDepth--
                     cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.IN_ARM
                     cmd.expectingCommand = true
                 } else if (cmd.innerParenDepth > 0) {
+                    cmd.atWordBoundary = true
                     cmd.innerParenDepth--
                     cmd.expectingCommand = false
                     if (cmd.sawFuncDeclParen) {
@@ -770,10 +812,16 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                 } else if (cmd.openedByType == ShellTokens.CMD_SUB_START && cmdStack.size > 1) {
                     cmdStack.removeAt(cmdStack.lastIndex)
                     if (activeSubMode.lastOrNull() == MODE_CMD) activeSubMode.removeAt(activeSubMode.lastIndex)
+                    if ((activeSubMode.lastOrNull() ?: MODE_CMD) == MODE_CMD) {
+                        currentCmd().atWordBoundary = false
+                    }
+                } else {
+                    cmd.atWordBoundary = true
                 }
             }
 
             ShellTokens.LBRACK -> {
+                cmd.atWordBoundary = false
                 if (cmd.expectingCommand && cmd.testBracket == null) {
                     cmd.testBracket = TestBracketKind.SINGLE
                     cmd.expectingCommand = false
@@ -783,6 +831,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.RBRACK -> {
+                cmd.atWordBoundary = false
                 if (cmd.assignSubscriptDepth > 0) {
                     cmd.assignSubscriptDepth--
                 } else if (cmd.testBracket == TestBracketKind.SINGLE) {
@@ -791,11 +840,13 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.LBRACK_LBRACK -> {
+                cmd.atWordBoundary = false
                 cmd.testBracket = TestBracketKind.DOUBLE
                 cmd.expectingCommand = false
             }
 
             ShellTokens.RBRACK_RBRACK -> {
+                cmd.atWordBoundary = false
                 if (cmd.testBracket == TestBracketKind.DOUBLE) {
                     cmd.testBracket = null
                 }
@@ -804,6 +855,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             SYNTHETIC_FD_PREFIX,
             SYNTHETIC_FD_NAME,
             -> {
+                cmd.atWordBoundary = false
                 cmd.justClosedFuncHeader = false
             }
 
@@ -811,6 +863,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.HEREDOC_STRIP_OP,
             ShellTokens.HEREDOC_OP,
             -> {
+                cmd.atWordBoundary = true
                 cmd.justClosedFuncHeader = false
                 // Next token on line (if HD_DELIM) is handled by its own rule; HERE_STRING consumes next arg.
                 if (type == ShellTokens.HERE_STRING) {
@@ -829,6 +882,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.HEREDOC_DELIM_END,
             -> {
                 // Heredoc delimiters and body tokens must not disturb surrounding command/case state.
+                cmd.atWordBoundary = false
                 cmd.justClosedFuncHeader = false
             }
 
@@ -843,6 +897,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.LT,
             SYNTHETIC_REDIR_OP,
             -> {
+                cmd.atWordBoundary = true
                 if (cmd.testBracket == null) {
                     cmd.redirWasAtCommandPos = cmd.expectingCommand
                     if (type != SYNTHETIC_REDIR_OP) {
@@ -855,6 +910,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.BANG -> {
+                cmd.atWordBoundary = false
                 if (cmd.expectingCommand) {
                     // Pipeline negation `! grep foo` keeps command position for `grep`.
                     cmd.expectingCommand = true
@@ -862,6 +918,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.FLAG -> {
+                cmd.atWordBoundary = false
                 if (cmd.testBracket != null && text in TEST_OPERATORS) {
                     tok.kind = SyntaxTokenKind.Operator
                 } else {
@@ -871,6 +928,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.DOT -> {
+                cmd.atWordBoundary = false
                 if (cmd.expectingCommand) {
                     val nxtIdx = nextVisibleIndex(i)
                     val nxt = if (nxtIdx < raw.size) raw[nxtIdx] else null
@@ -887,6 +945,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.MINUS -> {
+                cmd.atWordBoundary = false
                 if (cmd.testBracket != null) {
                     tok.kind = SyntaxTokenKind.Operator
                 } else {
@@ -898,6 +957,7 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.EQ,
             ShellTokens.PLUS_EQ,
             -> {
+                cmd.atWordBoundary = false
                 if (cmd.assignSubscriptDepth == 0 && i > 0) {
                     val prev = raw[i - 1]
                     if (prev.kind == SyntaxTokenKind.Property && isAdjacent(prev, tok)) {
@@ -916,9 +976,11 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                     text = text,
                     cmd = cmd,
                 )
+                cmd.atWordBoundary = false
             }
 
             else -> {
+                cmd.atWordBoundary = false
                 if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
                     cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
                 }
@@ -940,6 +1002,8 @@ private fun classifyWordToken(
     text: String,
     cmd: CommandScopeFrame,
 ) {
+    val isCompleteWord = isCompleteUnquotedWord(source, raw, index, cmd)
+
     // 1. Check `case` header / `esac`
     val topCase = cmd.caseStack.lastOrNull()
     if (topCase != null) {
@@ -950,7 +1014,7 @@ private fun classifyWordToken(
                 return
             }
             CaseStage.AWAITING_IN -> {
-                if (text == "in") {
+                if (isCompleteWord && text == "in") {
                     tok.kind = SyntaxTokenKind.Keyword
                     cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.IN_PATTERN
                 } else {
@@ -959,7 +1023,7 @@ private fun classifyWordToken(
                 return
             }
             CaseStage.IN_PATTERN -> {
-                if (text == "esac") {
+                if (isCompleteWord && text == "esac") {
                     tok.kind = SyntaxTokenKind.Keyword
                     cmd.caseStack.removeAt(cmd.caseStack.lastIndex)
                 } else {
@@ -968,7 +1032,7 @@ private fun classifyWordToken(
                 return
             }
             CaseStage.IN_ARM -> {
-                if (text == "esac" && cmd.expectingCommand) {
+                if (isCompleteWord && text == "esac" && cmd.expectingCommand) {
                     tok.kind = SyntaxTokenKind.Keyword
                     cmd.caseStack.removeAt(cmd.caseStack.lastIndex)
                     cmd.expectingCommand = false
@@ -986,12 +1050,12 @@ private fun classifyWordToken(
             return
         }
         ForStage.AWAITING_IN_OR_DO -> {
-            if (text == "in") {
+            if (isCompleteWord && text == "in") {
                 tok.kind = SyntaxTokenKind.Keyword
                 cmd.forStage = ForStage.IN_LIST
                 return
             }
-            if (text == "do") {
+            if (isCompleteWord && text == "do") {
                 tok.kind = SyntaxTokenKind.Keyword
                 cmd.forStage = ForStage.NONE
                 cmd.expectingCommand = true
@@ -1000,7 +1064,7 @@ private fun classifyWordToken(
             cmd.forStage = ForStage.NONE
         }
         ForStage.IN_LIST -> {
-            if (text == "do" && cmd.expectingCommand) {
+            if (isCompleteWord && text == "do" && cmd.expectingCommand) {
                 tok.kind = SyntaxTokenKind.Keyword
                 cmd.forStage = ForStage.NONE
                 cmd.expectingCommand = true
@@ -1048,6 +1112,12 @@ private fun classifyWordToken(
 
     // 5. Check command-position keywords, function definitions `foo()`, and builtins/commands
     if (cmd.expectingCommand) {
+        if (!isCompleteWord) {
+            tok.kind = SyntaxTokenKind.Function
+            cmd.expectingCommand = false
+            return
+        }
+
         // Function definition: `foo()`
         if (isFunctionDeclLookahead(raw, index)) {
             tok.kind = SyntaxTokenKind.Function
@@ -1146,21 +1216,43 @@ private fun isFunctionDeclLookahead(raw: List<RawShellToken>, index: Int): Boole
     return j < raw.size && raw[j].type == ShellTokens.RPAREN
 }
 
-private fun isGroupOpenPredecessor(type: Int): Boolean =
-    type == ShellTokens.SEMI ||
-        type == ShellTokens.AMP ||
-        type == ShellTokens.PIPE ||
-        type == ShellTokens.PIPE_AMP ||
-        type == ShellTokens.AND_AND ||
-        type == ShellTokens.OR_OR ||
-        type == ShellTokens.LPAREN ||
-        type == ShellTokens.RPAREN ||
-        type == ShellTokens.LBRACE ||
-        type == ShellTokens.CMD_SUB_START ||
-        type == ShellTokens.PROC_SUB_IN ||
-        type == ShellTokens.PROC_SUB_OUT ||
-        type == ShellTokens.BACKTICK ||
-        type == ShellTokens.ESCAPED_BACKTICK
+private fun isCompleteUnquotedWord(
+    source: String,
+    raw: List<RawShellToken>,
+    index: Int,
+    cmd: CommandScopeFrame,
+): Boolean {
+    if (!cmd.atWordBoundary) return false
+    var nextIdx = index + 1
+    while (nextIdx < raw.size && raw[nextIdx].type == ShellTokens.LINE_CONTINUATION) {
+        nextIdx++
+    }
+    if (nextIdx >= raw.size) return true
+    val nextTok = raw[nextIdx]
+    if (nextTok.type == ShellTokens.BACKTICK) {
+        return cmd.openedByType == ShellTokens.BACKTICK
+    }
+    if (nextTok.type == ShellTokens.ESCAPED_BACKTICK) {
+        return cmd.openedByType == ShellTokens.ESCAPED_BACKTICK
+    }
+    val nextStart = nextTok.start
+    return nextStart >= source.length || isWordEndDelimiterChar(source[nextStart])
+}
+
+private fun isWordEndDelimiterChar(ch: Char): Boolean =
+    ch == ' ' ||
+        ch == '\t' ||
+        ch == '\r' ||
+        ch == '\n' ||
+        ch == '\u000C' ||
+        ch == '\uFEFF' ||
+        ch == ';' ||
+        ch == '&' ||
+        ch == '|' ||
+        ch == '(' ||
+        ch == ')' ||
+        ch == '<' ||
+        ch == '>'
 
 private fun isShellWhitespaceOrNewline(ch: Char): Boolean =
     ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '\u000C' || ch == '\uFEFF'
