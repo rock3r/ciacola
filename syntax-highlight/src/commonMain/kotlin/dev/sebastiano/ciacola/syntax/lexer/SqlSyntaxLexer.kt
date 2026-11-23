@@ -65,17 +65,14 @@ internal object SqlSyntaxLexer : SyntaxLexer {
                 SqlTokens.PG_ESCAPE_STRING,
                 SqlTokens.UNTERMINATED_PG_ESCAPE_STRING,
                 SqlTokens.NATIONAL_STRING,
-                SqlTokens.UNTERMINATED_NATIONAL_STRING,
                 SqlTokens.BIT_STRING,
                 SqlTokens.UNTERMINATED_BIT_STRING,
                 SqlTokens.HEX_STRING,
                 SqlTokens.UNTERMINATED_HEX_STRING,
                 SqlTokens.STRING,
-                SqlTokens.UNTERMINATED_STRING,
                 -> SyntaxTokenKind.String
 
                 SqlTokens.DOUBLE_QUOTED_IDENT,
-                SqlTokens.UNTERMINATED_DOUBLE_QUOTED_IDENT,
                 SqlTokens.BACKTICK_IDENT,
                 SqlTokens.UNTERMINATED_BACKTICK_IDENT,
                 -> if (prevNonHiddenWasDot && !isFollowedByOpenParen(rawTypes, i + 1)) {

@@ -143,6 +143,23 @@ internal object SqlKeywords {
         "TRUNCATE",
         "UPDATE",
     )
+
+    /**
+     * SQL clause, operator, and statement keywords that validly follow a closed string literal
+     * after whitespace. Used to distinguish standard SQL strings ending in a literal backslash
+     * (e.g. `'C:\Backup\' FROM t`) from MySQL backslash-escaped quotes (e.g. `'users\' name'`).
+     */
+    val postStringKeywords: Set<String> = hashSetOf(
+        "ALTER", "AND", "AS", "ASC", "BEGIN", "BETWEEN", "BY", "CASE", "CHECK", "COLLATE",
+        "COMMIT", "CONFLICT", "CREATE", "CROSS", "DEFAULT", "DELETE", "DESC", "DO", "DROP",
+        "ELSE", "ELSEIF", "ELSIF", "END", "ESCAPE", "EXCEPT", "FALSE", "FETCH", "FILTER",
+        "FIRST", "FOR", "FROM", "FULL", "GROUP", "GROUPS", "HAVING", "ILIKE", "IN", "INNER",
+        "INSERT", "INTERSECT", "INTO", "IS", "JOIN", "LAST", "LEFT", "LIKE", "LIMIT", "LOOP",
+        "NATURAL", "NEXT", "NOT", "NULL", "NULLS", "OFFSET", "ON", "ONLY", "OR", "ORDER",
+        "OUTER", "OVER", "PARTITION", "RANGE", "RETURNING", "RIGHT", "ROLLBACK", "ROW", "ROWS",
+        "SELECT", "SET", "SIMILAR", "THEN", "TO", "TRUE", "UNION", "UPDATE", "USING", "VALUES",
+        "WHEN", "WHERE", "WINDOW", "WITH", "XOR",
+    )
 }
 
 /**
@@ -272,6 +289,141 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
     protected fun isNonLineStartHashComment(): Boolean = !inValuePosition && !isTempTableIdentAhead()
 
     protected fun isNotRangeDotFloat(): Boolean = _input.LA(1) != '.'.code
+
+    /**
+     * Scans the body and closing delimiter of a single-quoted (`'...'`, `N'...'`) or double-quoted
+     * (`"..."`) SQL literal in strictly O(N) time.
+     *
+     * Supports both ANSI doubled-quote escaping (`''` / `""`) and MySQL backslash-escaped quotes
+     * (`\'` / `\"`), while closing on a trailing literal backslash when the quote sits at a clear
+     * SQL token boundary (e.g. `REPLACE(path, '\', '/')`, `'C:\';`, `'C:\Backup\' FROM t`).
+     */
+    protected fun consumeSqlQuoted(quote: Int) {
+        var sawBackslashQuoteEscape = false
+        while (true) {
+            val ch = _input.LA(1)
+            if (ch == IntStream.EOF) return
+            if (ch == quote) {
+                _input.consume()
+                if (_input.LA(1) == quote) {
+                    _input.consume()
+                    continue
+                }
+                return
+            }
+            if (ch == '\\'.code) {
+                val next = _input.LA(2)
+                if (next == IntStream.EOF) {
+                    _input.consume()
+                    return
+                }
+                if (next == '\\'.code) {
+                    _input.consume()
+                    _input.consume()
+                    continue
+                }
+                if (next == quote) {
+                    if (_input.LA(3) == quote) {
+                        if (sawBackslashQuoteEscape || isSqlStringBoundaryAfterQuote(4)) {
+                            // MySQL escaped quote right before the closing quote: 'foo\'';
+                            sawBackslashQuoteEscape = true
+                            _input.consume()
+                            _input.consume()
+                        } else {
+                            // Standard SQL literal backslash before a doubled quote: 'a\''b'
+                            _input.consume()
+                        }
+                        continue
+                    }
+                    if (!sawBackslashQuoteEscape && isSqlStringBoundaryAfterQuote(3)) {
+                        // Standard SQL string ending with a literal backslash: '\', 'C:\';
+                        _input.consume()
+                        _input.consume()
+                        return
+                    }
+                    // MySQL backslash-escaped quote: lock this literal into MySQL-escape mode.
+                    sawBackslashQuoteEscape = true
+                    _input.consume()
+                    _input.consume()
+                    continue
+                }
+                _input.consume()
+                _input.consume()
+                continue
+            }
+            _input.consume()
+        }
+    }
+
+    private fun isSqlStringBoundaryAfterQuote(startOffset: Int): Boolean {
+        val c = _input.LA(startOffset)
+        if (isSqlImmediateDelimiterOrOperator(startOffset, c)) return true
+        if (c != ' '.code && c != '\t'.code) return false
+
+        var offset = startOffset + 1
+        while (true) {
+            val ch = _input.LA(offset)
+            if (ch == ' '.code || ch == '\t'.code) {
+                offset++
+            } else {
+                break
+            }
+        }
+        val afterWs = _input.LA(offset)
+        if (isSqlImmediateDelimiterOrOperator(offset, afterWs)) return true
+        if (afterWs == '-'.code || afterWs == '/'.code || afterWs == '*'.code || afterWs == '%'.code ||
+            afterWs == '&'.code || afterWs == '^'.code || afterWs == '~'.code || afterWs == '?'.code
+        ) {
+            return true
+        }
+        if (afterWs == '#'.code) {
+            val next = _input.LA(offset + 1)
+            if (next == ' '.code || next == '\t'.code) return true
+        }
+
+        if (afterWs !in 'A'.code..'Z'.code && afterWs !in 'a'.code..'z'.code) return false
+        val sb = StringBuilder(16)
+        var k = 0
+        while (k < 16) {
+            val ch = _input.LA(offset + k)
+            if (ch in 'A'.code..'Z'.code || ch in 'a'.code..'z'.code || ch == '_'.code) {
+                sb.append(ch.toChar().uppercaseChar())
+                k++
+            } else {
+                break
+            }
+        }
+        val trailing = _input.LA(offset + k)
+        if (trailing in 'A'.code..'Z'.code ||
+            trailing in 'a'.code..'z'.code ||
+            trailing in '0'.code..'9'.code ||
+            trailing == '_'.code ||
+            trailing == '$'.code ||
+            trailing >= 0x80
+        ) {
+            return false
+        }
+        return sb.toString() in SqlKeywords.postStringKeywords
+    }
+
+    private fun isSqlImmediateDelimiterOrOperator(offset: Int, c: Int): Boolean {
+        if (c == IntStream.EOF ||
+            c == '\r'.code || c == '\n'.code ||
+            c == ','.code || c == ')'.code || c == ';'.code || c == ']'.code
+        ) {
+            return true
+        }
+        if (c == '='.code || c == '+'.code || c == '<'.code || c == '>'.code ||
+            c == '!'.code || c == '|'.code
+        ) {
+            return true
+        }
+        if (c == ':'.code && _input.LA(offset + 1) == ':'.code) return true
+        if (c == '-'.code && (_input.LA(offset + 1) == '-'.code || _input.LA(offset + 1) == '>'.code)) return true
+        if (c == '/'.code && _input.LA(offset + 1) == '*'.code) return true
+        if (c == '#'.code && (_input.LA(offset + 1) == '>'.code || _input.LA(offset + 1) == '-'.code)) return true
+        return false
+    }
 
     protected fun consumeNestedBlockComment() {
         var depth = 1

@@ -68,11 +68,7 @@ UNTERMINATED_PG_ESCAPE_STRING
     ;
 
 NATIONAL_STRING
-    : [nN] '\'' ( '\'\'' | ~['] )* '\'' { onValueToken(); }
-    ;
-
-UNTERMINATED_NATIONAL_STRING
-    : [nN] '\'' ( '\'\'' | ~['] )* { onValueToken(); }
+    : [nN] '\'' { consumeSqlQuoted('\''.code); onValueToken(); }
     ;
 
 BIT_STRING
@@ -92,19 +88,11 @@ UNTERMINATED_HEX_STRING
     ;
 
 STRING
-    : '\'' ( '\'\'' | ~['] )* '\'' { onValueToken(); }
-    ;
-
-UNTERMINATED_STRING
-    : '\'' ( '\'\'' | ~['] )* { onValueToken(); }
+    : '\'' { consumeSqlQuoted('\''.code); onValueToken(); }
     ;
 
 DOUBLE_QUOTED_IDENT
-    : '"' ( '""' | ~["] )* '"' { onValueToken(); }
-    ;
-
-UNTERMINATED_DOUBLE_QUOTED_IDENT
-    : '"' ( '""' | ~["] )* { onValueToken(); }
+    : '"' { consumeSqlQuoted('"'.code); onValueToken(); }
     ;
 
 BACKTICK_IDENT
@@ -124,11 +112,11 @@ HEX_NUMBER
     ;
 
 FLOAT_NUMBER
-    : ( Digits '.' Digits? Exponent?
+    : ( Digits '.' Digits Exponent?
       | '.' Digits Exponent?
       | Digits Exponent
       ) { onValueToken(); }
-    | Digits '.' { isNotRangeDotFloat() }? { onValueToken(); }
+    | Digits '.' { isNotRangeDotFloat() }? Exponent? { onValueToken(); }
     ;
 
 INT_NUMBER

@@ -237,6 +237,271 @@ class SqlSyntaxLexerTest {
     }
 
     @Test
+    fun handlesMysqlBackslashEscapedQuotesAndPlSqlRanges() {
+        val escapedStatements = """
+            SELECT 'it\'s'; SELECT 1;
+            SELECT N'it\'s'; SELECT 2;
+            SELECT "it\"s"; SELECT 3;
+            SELECT 'a\'b''c\\'; SELECT 4;
+            SELECT 'users\' name'; SELECT 5;
+            SELECT 'foo\''; SELECT 6;
+            SELECT 'a\''b'; SELECT 7;
+            SELECT 'f(\'x\')' AS a, 1;
+            SELECT 'say \'yes\', ok' AS msg, 2;
+            SELECT '<a href=\'/x\'>' AS html, 3;
+            SELECT 'it\'s\'' AS quoted, 4;
+        """.trimIndent()
+        val escapedTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, escapedStatements, "sql-mysql-escapes")
+        val nonWsEscaped = escapedTokens
+            .filter { it.kind != SyntaxTokenKind.Whitespace }
+            .map { it.kind to it.slice(escapedStatements) }
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'it\\'s'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "N'it\\'s'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "2",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "\"it\\\"s\"",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "3",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'a\\'b''c\\\\'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "4",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'users\\' name'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "5",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'foo\\''",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "6",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'a\\''b'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "7",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'f(\\'x\\')'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "a",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'say \\'yes\\', ok'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "msg",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "2",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'<a href=\\'/x\\'>'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "html",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "3",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'it\\'s\\''",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "quoted",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "4",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            nonWsEscaped,
+        )
+
+        val multiLineMysqlEscape = "SELECT 'run \\'echo\\'\\nnext' AS s, 5;\nSELECT 'run \\'echo\\'\nnext' AS s2, 6;"
+        val multiLineTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, multiLineMysqlEscape, "sql-multiline-mysql")
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'run \\'echo\\'\\nnext'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "s",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "5",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'run \\'echo\\'\nnext'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "s2",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "6",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            multiLineTokens.filter { it.kind != SyntaxTokenKind.Whitespace }.map { it.kind to it.slice(multiLineMysqlEscape) },
+        )
+
+        val standardSqlTrailingBackslashes = """
+            SELECT REPLACE(path, '\', '/') FROM t WHERE x = 'y';
+            SELECT 'C:\Backup\' FROM t WHERE x = 'y';
+            SELECT 'C:\', 'D:\' || 'file.txt', 'C:\'::text;
+            SET @path = 'C:\Backup\'+@db+'.bak';
+            SET @npath = N'C:\'+@x;
+            SELECT * FROM t ORDER BY '\' DESC;
+            SELECT "col\", "other" FROM t;
+        """.trimIndent()
+        val trailingBsTokens = assertValidSnippetHasNoInvalidTokens(
+            SqlSyntaxLexer,
+            standardSqlTrailingBackslashes,
+            "sql-standard-trailing-backslash",
+        )
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Function to "REPLACE",
+                SyntaxTokenKind.Punctuation to "(",
+                SyntaxTokenKind.Plain to "path",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'\\'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'/'",
+                SyntaxTokenKind.Punctuation to ")",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Keyword to "WHERE",
+                SyntaxTokenKind.Plain to "x",
+                SyntaxTokenKind.Operator to "=",
+                SyntaxTokenKind.String to "'y'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\Backup\\'",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Keyword to "WHERE",
+                SyntaxTokenKind.Plain to "x",
+                SyntaxTokenKind.Operator to "=",
+                SyntaxTokenKind.String to "'y'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'D:\\'",
+                SyntaxTokenKind.Operator to "||",
+                SyntaxTokenKind.String to "'file.txt'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Operator to "::",
+                SyntaxTokenKind.Type to "text",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SET",
+                SyntaxTokenKind.Plain to "@path",
+                SyntaxTokenKind.Operator to "=",
+                SyntaxTokenKind.String to "'C:\\Backup\\'",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Plain to "@db",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.String to "'.bak'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SET",
+                SyntaxTokenKind.Plain to "@npath",
+                SyntaxTokenKind.Operator to "=",
+                SyntaxTokenKind.String to "N'C:\\'",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Plain to "@x",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Operator to "*",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Keyword to "ORDER",
+                SyntaxTokenKind.Keyword to "BY",
+                SyntaxTokenKind.String to "'\\'",
+                SyntaxTokenKind.Keyword to "DESC",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "\"col\\\"",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "\"other\"",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            trailingBsTokens
+                .filter { it.kind != SyntaxTokenKind.Whitespace }
+                .map { it.kind to it.slice(standardSqlTrailingBackslashes) },
+        )
+
+        for (unterminated in listOf("SELECT 'unterminated\\", "SELECT N'unterminated\\", "SELECT \"unterminated\\")) {
+            val tokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, unterminated, "sql-unterminated-bs")
+            assertEquals(SyntaxTokenKind.String, tokens.last().kind)
+        }
+
+        val rangesAndFloats = "FOR i IN 1..10 LOOP SELECT 1. + 1.e5 + 1.E-3 + 1.5 + .5 + 1.5..10 + 1..10e2 + 1.;"
+        val rangeTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, rangesAndFloats, "sql-plsql-ranges")
+        val nonWsRanges = rangeTokens
+            .filter { it.kind != SyntaxTokenKind.Whitespace }
+            .map { it.kind to it.slice(rangesAndFloats) }
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "FOR",
+                SyntaxTokenKind.Plain to "i",
+                SyntaxTokenKind.Keyword to "IN",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Operator to "..",
+                SyntaxTokenKind.Number to "10",
+                SyntaxTokenKind.Keyword to "LOOP",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "1.",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to "1.e5",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to "1.E-3",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to "1.5",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to ".5",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to "1.5",
+                SyntaxTokenKind.Operator to "..",
+                SyntaxTokenKind.Number to "10",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Operator to "..",
+                SyntaxTokenKind.Number to "10e2",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Number to "1.",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            nonWsRanges,
+        )
+
+        val malformedFloat = "SELECT 1.e+;"
+        val malformedTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, malformedFloat, "sql-malformed-exp")
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "1.",
+                SyntaxTokenKind.Plain to "e",
+                SyntaxTokenKind.Operator to "+",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            malformedTokens.filter { it.kind != SyntaxTokenKind.Whitespace }.map { it.kind to it.slice(malformedFloat) },
+        )
+    }
+
+    @Test
     fun handlesUnterminatedContainersBomAndSupplementaryUnicodeLosslessly() {
         val unterminatedDollar = "SELECT ${'$'}tag${'$'}unclosed body"
         val tokens1 = assertLosslessInvariants(SqlSyntaxLexer, unterminatedDollar, "sql-unclosed-dollar")
@@ -275,6 +540,9 @@ class SqlSyntaxLexerTest {
         val deepNestedComment = "/* ".repeat(500) + "body" + " */".repeat(500) + " SELECT 1;"
         val unbalancedBrackets = "SELECT " + "[".repeat(16_000)
         val nestedArrayBrackets = "SELECT " + "arr[".repeat(8_000) + "1]"
+        val manyRanges = "SELECT " + "1..2,".repeat(8_000) + "3;"
+        val manyBackslashQuotes = "SELECT '" + "\\'   ".repeat(8_000) + "';"
+        val wideSpaceAfterBackslashQuote = "SELECT '\\'" + " ".repeat(16_000) + "x';"
 
         assertLinearPerformance(
             lexer = SqlSyntaxLexer,
@@ -284,6 +552,9 @@ class SqlSyntaxLexerTest {
                 "deep-nested-comment" to deepNestedComment,
                 "unbalanced-brackets" to unbalancedBrackets,
                 "nested-array-brackets" to nestedArrayBrackets,
+                "many-ranges" to manyRanges,
+                "many-backslash-quotes" to manyBackslashQuotes,
+                "wide-space-after-backslash-quote" to wideSpaceAfterBackslashQuote,
             ),
         )
     }
