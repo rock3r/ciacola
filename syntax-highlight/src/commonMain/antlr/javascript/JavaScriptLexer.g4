@@ -3,7 +3,7 @@
  */
 lexer grammar JavaScriptLexer;
 
-import UnicodeIdent;
+import UnicodeJsIdent;
 
 options {
     superClass = JsTsLexerBase;
@@ -384,12 +384,12 @@ fragment DECIMAL_DIGITS
     ;
 
 fragment IDENT_START
-    : UNICODE_XID_START
+    : UNICODE_ID_START
     | [_$]
     ;
 
 fragment IDENT_PART
-    : UNICODE_XID_CONTINUE
+    : UNICODE_ID_CONTINUE
     | '$'
     ;
 

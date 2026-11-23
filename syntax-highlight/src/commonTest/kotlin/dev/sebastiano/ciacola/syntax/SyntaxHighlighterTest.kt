@@ -459,15 +459,30 @@ class SyntaxHighlighterTest {
 
         // 1. UAX #31 XID_Start / XID_Continue languages: Rust, Python, C23, C++23.
         val xidIdents = listOf("人々", "a\u302Ab", "a\uFF10\uFF3Fb", "𠮷", "𝐀")
-        val xidNonIdentChars = listOf('\u060C', '\u1680', '\u2E00', '\uFFE0')
+        val xidNonIdentChars = listOf('\u037A', '\u060C', '\u1680', '\u2E00', '\uFFE0')
         for (language in listOf(SyntaxLanguage.Rust, SyntaxLanguage.Python, SyntaxLanguage.C, SyntaxLanguage.Cpp)) {
             for (ident in xidIdents) assertSingleIdent(language, ident)
             assertRejectedAtStart(language, '\u302A')
+            assertRejectedAtStart(language, '\u037A')
             for (bad in xidNonIdentChars) assertSplitBy(language, bad, SyntaxTokenKind.Invalid)
         }
 
-        // 2. ECMAScript (JS / TS): XID + '$' + ZWNJ/ZWJ, and Unicode Zs (e.g. U+1680, U+3000) is WhiteSpace.
-        val jsIdents = listOf("人々", "a\u302Ab", "a\uFF10\uFF3Fb", "𠮷", "𝐀", "\$foo", "a\u200Cb", "a\u200Db")
+        // 2. ECMAScript (JS / TS): ID_Start / ID_Continue (includes U+037A, U+309B, U+FDFA) + '$' + ZWNJ/ZWJ,
+        // and Unicode Zs (e.g. U+00A0, U+1680, U+3000) is WhiteSpace.
+        val jsIdents = listOf(
+            "人々",
+            "a\u302Ab",
+            "a\uFF10\uFF3Fb",
+            "𠮷",
+            "𝐀",
+            "\$foo",
+            "a\u200Cb",
+            "a\u200Db",
+            "\u037Avalue",
+            "foo\u037Abar",
+            "\u309Btag",
+            "\uFDFAname",
+        )
         for (language in listOf(SyntaxLanguage.JavaScript, SyntaxLanguage.TypeScript)) {
             for (ident in jsIdents) assertSingleIdent(language, ident)
             assertRejectedAtStart(language, '\u302A')
@@ -475,14 +490,31 @@ class SyntaxHighlighterTest {
             for (ws in listOf('\u00A0', '\u1680', '\u3000')) assertSplitBy(language, ws, SyntaxTokenKind.Whitespace)
         }
 
-        // 3. Java (JLS §3.8): allows Unicode currency symbols (Sc, e.g. U+FFE0, £, €) and connector punctuation (Pc, e.g. U+FF3F) as start and part.
-        val javaIdents = listOf("人々", "a\u302Ab", "a\uFF10\uFF3Fb", "𠮷", "𝐀", "foo\uFFE0bar", "\uFFE0price", "€amount", "\uFF3Fstart")
+        // 3. Java (JLS §3.8): Lu|Ll|Lt|Lm|Lo|Nl|Sc|Pc for start (includes U+037A, U+FFE0, €, U+FF3F;
+        // excludes U+2118), plus Nd|Mc|Mn|Cf for part (includes U+00AD, U+200B; excludes U+00B7).
+        val javaIdents = listOf(
+            "人々",
+            "a\u302Ab",
+            "a\uFF10\uFF3Fb",
+            "𠮷",
+            "𝐀",
+            "\u037Avalue",
+            "foo\u037Abar",
+            "foo\uFFE0bar",
+            "\uFFE0price",
+            "€amount",
+            "\uFF3Fstart",
+            "a\u00ADb",
+            "a\u200Bb",
+        )
         for (ident in javaIdents) assertSingleIdent(SyntaxLanguage.Java, ident)
         assertRejectedAtStart(SyntaxLanguage.Java, '\u302A')
-        for (bad in listOf('\u060C', '\u1680', '\u2E00')) assertSplitBy(SyntaxLanguage.Java, bad, SyntaxTokenKind.Invalid)
+        assertRejectedAtStart(SyntaxLanguage.Java, '\u2118')
+        for (bad in listOf('\u00B7', '\u060C', '\u1680', '\u2E00')) assertSplitBy(SyntaxLanguage.Java, bad, SyntaxTokenKind.Invalid)
 
-        // 4. Go: unicode_letter (L) | '_' for start, L | Nd | '_' for continuation; rejects Mn (U+302A) and non-ASCII Pc (U+FF3F).
-        val goIdents = listOf("人々", "a\uFF10b", "𠮷", "𝐀", "_ident")
+        // 4. Go: unicode_letter (L, includes U+037A Lm) | '_' for start, L | Nd | '_' for continuation;
+        // rejects Mn (U+302A) and non-ASCII Pc (U+FF3F).
+        val goIdents = listOf("人々", "a\uFF10b", "𠮷", "𝐀", "_ident", "\u037Avalue")
         for (ident in goIdents) assertSingleIdent(SyntaxLanguage.Go, ident)
         assertRejectedAtStart(SyntaxLanguage.Go, '\u302A')
         for (bad in listOf('\u302A', '\uFF3F', '\u060C', '\u1680', '\u2E00', '\uFFE0')) {

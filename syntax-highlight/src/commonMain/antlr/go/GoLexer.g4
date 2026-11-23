@@ -3,7 +3,7 @@
  */
 lexer grammar GoLexer;
 
-import UnicodeIdent;
+import UnicodeGoIdent;
 
 WS
     : [ \t\r\n\uFEFF]+

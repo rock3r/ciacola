@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Generates syntax-highlight/src/commonMain/antlr/shared/UnicodeIdent.g4
-from official Unicode Character Database files:
-  - DerivedCoreProperties.txt (XID_Start, XID_Continue)
-  - UnicodeData.txt (General Category L, Nd, Sc, Pc)
+Generates per-spec shared Unicode ANTLR4 lexer fragments under
+syntax-highlight/src/commonMain/antlr/shared/ from official Unicode Character Database files:
+  - UnicodeIdent.g4:     UNICODE_XID_START, UNICODE_XID_CONTINUE (UAX #31; Rust, Python, C/C++, HTML)
+  - UnicodeJsIdent.g4:   UNICODE_ID_START, UNICODE_ID_CONTINUE (ECMA-262; JavaScript, TypeScript)
+  - UnicodeJavaIdent.g4: UNICODE_JAVA_IDENT_START, UNICODE_JAVA_IDENT_PART (JLS 3.8; Java)
+  - UnicodeGoIdent.g4:   UNICODE_LETTER, UNICODE_DIGIT (Go spec L / Nd; Go)
 
 Usage:
     python3 syntax-highlight/scripts/generate_unicode_ident.py \\
@@ -159,6 +161,32 @@ def append_fragment(
     out_lines.append("")
 
 
+def write_grammar_file(
+    out_dir: pathlib.Path,
+    grammar_name: str,
+    version: str,
+    derived_sha: str,
+    unicode_data_sha: str,
+    fragments: list[tuple[str, list[tuple[int, int]], str | None]],
+) -> pathlib.Path:
+    out_lines: list[str] = [
+        f"// Generated from Unicode {version} DerivedCoreProperties.txt and UnicodeData.txt.",
+        f"// DerivedCoreProperties-{version}.txt SHA-256: {derived_sha}",
+        f"// UnicodeData-{version}.txt SHA-256: {unicode_data_sha}",
+        "// Do not edit by hand; regenerate via syntax-highlight/scripts/generate_unicode_ident.py.",
+        "//",
+        *UNICODE_LICENSE_HEADER.splitlines(),
+        f"lexer grammar {grammar_name};",
+        "",
+    ]
+    for frag_name, ranges, prefix_alt in fragments:
+        append_fragment(out_lines, frag_name, ranges, prefix_alt=prefix_alt)
+
+    out_path = out_dir / f"{grammar_name}.g4"
+    out_path.write_text("\n".join(out_lines), encoding="utf-8")
+    return out_path
+
+
 def detect_unicode_version(path: pathlib.Path) -> str:
     first_line = path.read_text(encoding="utf-8").splitlines()[0]
     m = re.search(r"DerivedCoreProperties-([0-9.]+)\.txt", first_line)
@@ -203,53 +231,78 @@ def main(argv: list[str]) -> int:
 
     xid_start = parse_property(derived_path, "XID_Start")
     xid_continue = parse_property(derived_path, "XID_Continue")
+    id_start = parse_property(derived_path, "ID_Start")
+    id_continue = parse_property(derived_path, "ID_Continue")
     if not xid_start or not xid_start.issubset(xid_continue):
         raise SystemExit("Invalid DerivedCoreProperties.txt: XID_Start must be a non-empty subset of XID_Continue")
+    if not id_start or not id_start.issubset(id_continue):
+        raise SystemExit("Invalid DerivedCoreProperties.txt: ID_Start must be a non-empty subset of ID_Continue")
 
     categories = parse_unicode_data_categories(unicode_data_path)
     unicode_letter = set().union(*(categories.get(c, set()) for c in ("Lu", "Ll", "Lt", "Lm", "Lo")))
     unicode_digit = categories.get("Nd", set())
-    unicode_currency = categories.get("Sc", set())
-    unicode_connector = categories.get("Pc", set())
-    if not unicode_letter or not unicode_digit or not unicode_currency or not unicode_connector:
-        raise SystemExit("Invalid UnicodeData.txt: missing expected L, Nd, Sc, or Pc categories")
+    java_start = set().union(*(categories.get(c, set()) for c in ("Lu", "Ll", "Lt", "Lm", "Lo", "Nl", "Sc", "Pc")))
+    # JLS 3.8 Character.isJavaIdentifierPart (excluding U+FEFF BOM which JavaLexer matches as WS,
+    # and excluding non-printing ISO control chars 0x00..0x1F / 0x7F..0x9F).
+    java_part = java_start | unicode_digit | categories.get("Mc", set()) | categories.get("Mn", set()) | (
+        categories.get("Cf", set()) - {0xFEFF}
+    )
+    if not unicode_letter or not unicode_digit or not java_start or not java_start.issubset(java_part):
+        raise SystemExit("Invalid UnicodeData.txt: missing expected General Category sets")
 
-    xid_continue_extra = xid_continue - xid_start
-    start_ranges = to_merged_ranges(xid_start)
-    extra_ranges = to_merged_ranges(xid_continue_extra)
-    letter_ranges = to_merged_ranges(unicode_letter)
-    digit_ranges = to_merged_ranges(unicode_digit)
-    currency_ranges = to_merged_ranges(unicode_currency)
-    connector_ranges = to_merged_ranges(unicode_connector)
+    out_dir = pathlib.Path(__file__).resolve().parent.parent / "src/commonMain/antlr/shared"
 
-    out_path = pathlib.Path(__file__).resolve().parent.parent / "src/commonMain/antlr/shared/UnicodeIdent.g4"
-    out_lines: list[str] = [
-        f"// Generated from Unicode {version} DerivedCoreProperties.txt and UnicodeData.txt.",
-        f"// DerivedCoreProperties-{version}.txt SHA-256: {derived_sha}",
-        f"// UnicodeData-{version}.txt SHA-256: {unicode_data_sha}",
-        "// Do not edit by hand; regenerate via syntax-highlight/scripts/generate_unicode_ident.py.",
-        "//",
-        *UNICODE_LICENSE_HEADER.splitlines(),
-        "lexer grammar UnicodeIdent;",
-        "",
-    ]
+    write_grammar_file(
+        out_dir=out_dir,
+        grammar_name="UnicodeIdent",
+        version=version,
+        derived_sha=derived_sha,
+        unicode_data_sha=unicode_data_sha,
+        fragments=[
+            ("UNICODE_XID_START", to_merged_ranges(xid_start), None),
+            ("UNICODE_XID_CONTINUE", to_merged_ranges(xid_continue - xid_start), "UNICODE_XID_START"),
+        ],
+    )
+    write_grammar_file(
+        out_dir=out_dir,
+        grammar_name="UnicodeJsIdent",
+        version=version,
+        derived_sha=derived_sha,
+        unicode_data_sha=unicode_data_sha,
+        fragments=[
+            ("UNICODE_ID_START", to_merged_ranges(id_start), None),
+            ("UNICODE_ID_CONTINUE", to_merged_ranges(id_continue - id_start), "UNICODE_ID_START"),
+        ],
+    )
+    write_grammar_file(
+        out_dir=out_dir,
+        grammar_name="UnicodeJavaIdent",
+        version=version,
+        derived_sha=derived_sha,
+        unicode_data_sha=unicode_data_sha,
+        fragments=[
+            ("UNICODE_JAVA_IDENT_START", to_merged_ranges(java_start), None),
+            ("UNICODE_JAVA_IDENT_PART", to_merged_ranges(java_part - java_start), "UNICODE_JAVA_IDENT_START"),
+        ],
+    )
+    write_grammar_file(
+        out_dir=out_dir,
+        grammar_name="UnicodeGoIdent",
+        version=version,
+        derived_sha=derived_sha,
+        unicode_data_sha=unicode_data_sha,
+        fragments=[
+            ("UNICODE_LETTER", to_merged_ranges(unicode_letter), None),
+            ("UNICODE_DIGIT", to_merged_ranges(unicode_digit), None),
+        ],
+    )
 
-    append_fragment(out_lines, "UNICODE_XID_START", start_ranges)
-    append_fragment(out_lines, "UNICODE_XID_CONTINUE", extra_ranges, prefix_alt="UNICODE_XID_START")
-    append_fragment(out_lines, "UNICODE_LETTER", letter_ranges)
-    append_fragment(out_lines, "UNICODE_DIGIT", digit_ranges)
-    append_fragment(out_lines, "UNICODE_CURRENCY_SYMBOL", currency_ranges)
-    append_fragment(out_lines, "UNICODE_CONNECTOR_PUNCTUATION", connector_ranges)
-
-    out_path.write_text("\n".join(out_lines), encoding="utf-8")
     print(
-        f"Wrote {out_path.name} (Unicode {version}): "
-        f"XID_Start={len(xid_start)} ({len(start_ranges)}r), "
-        f"XID_Continue_Extra={len(xid_continue_extra)} ({len(extra_ranges)}r), "
-        f"L={len(unicode_letter)} ({len(letter_ranges)}r), "
-        f"Nd={len(unicode_digit)} ({len(digit_ranges)}r), "
-        f"Sc={len(unicode_currency)} ({len(currency_ranges)}r), "
-        f"Pc={len(unicode_connector)} ({len(connector_ranges)}r)"
+        f"Generated Unicode {version} shared grammars: "
+        f"XID=({len(xid_start)}/{len(xid_continue)}), "
+        f"JS ID=({len(id_start)}/{len(id_continue)}), "
+        f"Java=({len(java_start)}/{len(java_part)}), "
+        f"Go=(L:{len(unicode_letter)}/Nd:{len(unicode_digit)})"
     )
     return 0
 

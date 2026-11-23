@@ -129,14 +129,23 @@ class SyntaxHighlightPackagingTest {
             "NOTICE.txt must contain the Unicode License v3 permission notice",
         )
 
-        val unicodeIdentFile = File(moduleDir, "src/commonMain/antlr/shared/UnicodeIdent.g4")
-        assertTrue(unicodeIdentFile.isFile, "Expected UnicodeIdent.g4 at ${unicodeIdentFile.path}")
-        val unicodeIdentText = unicodeIdentFile.readText()
-        assertTrue(unicodeIdentText.contains("UNICODE LICENSE V3"), "UnicodeIdent.g4 must carry Unicode License v3 header")
-        assertTrue(
-            unicodeIdentText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
-            "UnicodeIdent.g4 must carry the Unicode License v3 permission notice",
+        val expectedUnicodeGrammars = listOf(
+            "UnicodeIdent.g4",
+            "UnicodeJsIdent.g4",
+            "UnicodeJavaIdent.g4",
+            "UnicodeGoIdent.g4",
         )
+        for (name in expectedUnicodeGrammars) {
+            assertTrue(noticeText.contains(name), "NOTICE.txt must cite $name")
+            val grammarFile = File(moduleDir, "src/commonMain/antlr/shared/$name")
+            assertTrue(grammarFile.isFile, "Expected $name at ${grammarFile.path}")
+            val grammarText = grammarFile.readText()
+            assertTrue(grammarText.contains("UNICODE LICENSE V3"), "$name must carry Unicode License v3 header")
+            assertTrue(
+                grammarText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
+                "$name must carry the Unicode License v3 permission notice",
+            )
+        }
 
         for (root in activeGeneratedRoots) {
             val sidecars = root.walkTopDown()

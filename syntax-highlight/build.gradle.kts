@@ -163,9 +163,10 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
         allMetadataJarTask.flatMap { it.archiveFile },
     )
     val sourcesJarProvider = sourcesJarTask.flatMap { it.archiveFile }
-    val unicodeIdentFile = layout.projectDirectory.file("src/commonMain/antlr/shared/UnicodeIdent.g4")
+    val sharedUnicodeDir = layout.projectDirectory.dir("src/commonMain/antlr/shared")
+    val sharedUnicodeFiles = fileTree(sharedUnicodeDir) { include("Unicode*.g4") }
     jarProviders.forEach { inputs.file(it) }
-    inputs.file(unicodeIdentFile)
+    inputs.files(sharedUnicodeFiles).withPathSensitivity(PathSensitivity.RELATIVE)
 
     doLast {
         val violations = mutableListOf<String>()
@@ -177,11 +178,19 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             "Permission is hereby granted, free of charge, to any person obtaining",
         )
 
-        val unicodeIdentText = unicodeIdentFile.asFile.readText()
-        if (!unicodeIdentText.contains("UNICODE LICENSE V3") ||
-            !unicodeIdentText.contains("Permission is hereby granted, free of charge, to any person obtaining")
-        ) {
-            violations += "UnicodeIdent.g4 is missing the Unicode License v3 copyright and permission notice header"
+        val unicodeGrammars = sharedUnicodeDir.asFile.listFiles { file ->
+            file.isFile && file.name.startsWith("Unicode") && file.extension == "g4"
+        }?.sortedBy { it.name }.orEmpty()
+        if (unicodeGrammars.size < 4) {
+            violations += "Expected at least 4 generated Unicode*.g4 grammars in ${sharedUnicodeDir.asFile.name}, found ${unicodeGrammars.map { it.name }}"
+        }
+        for (grammarFile in unicodeGrammars) {
+            val grammarText = grammarFile.readText()
+            if (!grammarText.contains("UNICODE LICENSE V3") ||
+                !grammarText.contains("Permission is hereby granted, free of charge, to any person obtaining")
+            ) {
+                violations += "${grammarFile.name} is missing the Unicode License v3 copyright and permission notice header"
+            }
         }
 
         for (jarProvider in jarProviders) {

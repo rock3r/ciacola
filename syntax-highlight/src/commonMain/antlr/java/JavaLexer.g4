@@ -3,7 +3,7 @@
  */
 lexer grammar JavaLexer;
 
-import UnicodeIdent;
+import UnicodeJavaIdent;
 
 WS
     : [ \t\r\n\f\uFEFF]+
@@ -220,15 +220,11 @@ IDENTIFIER
     ;
 
 fragment ID_START
-    : UNICODE_XID_START
-    | UNICODE_CURRENCY_SYMBOL
-    | UNICODE_CONNECTOR_PUNCTUATION
+    : UNICODE_JAVA_IDENT_START
     ;
 
 fragment ID_CONTINUE
-    : UNICODE_XID_CONTINUE
-    | UNICODE_CURRENCY_SYMBOL
-    | UNICODE_CONNECTOR_PUNCTUATION
+    : UNICODE_JAVA_IDENT_PART
     ;
 
 ERROR_CHAR
