@@ -273,6 +273,29 @@ class PhpSyntaxLexerTest {
     }
 
     @Test
+    fun closesHeredocAfterTrailingBackslashLineAndResumesPhpLexing() {
+        val lfCode = "<?php\n\$a = <<<EOT\nline ending with \\\nEOT;\necho \$a;\n\$b = <<<EOT\ndouble backslash \\\\\nEOT;\nreturn 42;\n"
+        val lfTokens = assertValidSnippetHasNoInvalidTokens(PhpSyntaxLexer, lfCode, "php-heredoc-trailing-bs-lf")
+        assertEquals(SyntaxTokenKind.Keyword, lfTokens.first { it.slice(lfCode) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, lfTokens.first { it.slice(lfCode) == "\$a" && it.startIndex > lfCode.indexOf("echo") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, lfTokens.first { it.slice(lfCode) == "return" }.kind)
+        assertEquals(SyntaxTokenKind.Number, lfTokens.first { it.slice(lfCode) == "42" }.kind)
+
+        val crlfCode = "<?php\r\n\$a = <<<EOT\r\nline ending with \\\r\nEOT;\r\necho \$a;\r\n"
+        val crlfTokens = assertValidSnippetHasNoInvalidTokens(PhpSyntaxLexer, crlfCode, "php-heredoc-trailing-bs-crlf")
+        assertEquals(SyntaxTokenKind.Keyword, crlfTokens.first { it.slice(crlfCode) == "echo" }.kind)
+
+        val crCode = "<?php\r\$a = <<<EOT\rline ending with \\\rEOT;\recho \$a;\r"
+        val crTokens = assertValidSnippetHasNoInvalidTokens(PhpSyntaxLexer, crCode, "php-heredoc-trailing-bs-cr")
+        assertEquals(SyntaxTokenKind.Keyword, crTokens.first { it.slice(crCode) == "echo" }.kind)
+
+        val escapedDollarCode = "<?php\n\$a = <<<EOT\nliteral \\\$var and \\\nEOT;\nreturn \$a;\n"
+        val escapedDollarTokens = assertValidSnippetHasNoInvalidTokens(PhpSyntaxLexer, escapedDollarCode, "php-heredoc-escaped-dollar")
+        assertTrue(escapedDollarTokens.none { it.slice(escapedDollarCode) == "\$var" && it.kind == SyntaxTokenKind.Plain })
+        assertEquals(SyntaxTokenKind.Keyword, escapedDollarTokens.first { it.slice(escapedDollarCode) == "return" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixture() {
         assertMatchesOracleFixture(PhpOracleFixtures.modernClassesAttributesAndStrings)
     }

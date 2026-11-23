@@ -33,6 +33,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         var afterFuncHeader: Boolean = false,
         var sawFuncDeclCommand: Boolean = false,
         val caseStack: ArrayList<CaseFrame> = ArrayList(),
+        val pendingHeredocs: ArrayList<HeredocSpec> = ArrayList(),
     )
 
     private class HeredocSpec(
@@ -64,7 +65,6 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
     private val paramExpBraceDepthStack = ArrayList<Int>()
     private val arithParenDepthStack = ArrayList<Int>()
     private val arithBalanceCache = HashMap<Int, Boolean>()
-    private val pendingHeredocs = ArrayList<HeredocSpec>()
     private val heredocStack = ArrayList<HeredocFrame>()
     private var pendingStripTabs: Boolean = false
 
@@ -702,7 +702,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         val delimiter = unquoted.toString()
-        pendingHeredocs.add(
+        currentScope().pendingHeredocs.add(
             HeredocSpec(
                 delimiter = delimiter,
                 delimiterCodePoints = toCodePoints(delimiter),
@@ -719,8 +719,9 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
-        if (pendingHeredocs.isNotEmpty()) {
-            val nextSpec = pendingHeredocs.removeAt(0)
+        val pending = scope.pendingHeredocs
+        if (pending.isNotEmpty()) {
+            val nextSpec = pending.removeAt(0)
             heredocStack.add(HeredocFrame(spec = nextSpec))
             val targetMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
                 heredocLiteralMode
@@ -820,8 +821,9 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         if (heredocStack.isNotEmpty()) {
             heredocStack.removeAt(heredocStack.lastIndex)
         }
-        if (pendingHeredocs.isNotEmpty()) {
-            val nextSpec = pendingHeredocs.removeAt(0)
+        val pending = currentScope().pendingHeredocs
+        if (pending.isNotEmpty()) {
+            val nextSpec = pending.removeAt(0)
             heredocStack.add(HeredocFrame(spec = nextSpec))
             val nextMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
                 heredocLiteralMode
@@ -833,6 +835,11 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             }
         } else if (!_modeStack.isEmpty) {
             popMode()
+            val scope = currentScope()
+            scope.atCommandPosition = true
+            scope.expectingFuncHeaderName = false
+            scope.afterFuncHeader = false
+            scope.sawFuncDeclCommand = false
         }
     }
 
@@ -846,7 +853,6 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         paramExpBraceDepthStack.clear()
         arithParenDepthStack.clear()
         arithBalanceCache.clear()
-        pendingHeredocs.clear()
         heredocStack.clear()
         pendingStripTabs = false
     }

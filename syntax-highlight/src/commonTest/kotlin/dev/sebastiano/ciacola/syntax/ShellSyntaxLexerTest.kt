@@ -345,6 +345,47 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun scopesPendingHeredocsPerCommandSubstitutionAndResetsCommandPositionAfterNestedCmdSub() {
+        val code1 = ": <<OUT \"\$(\nprintf inner\n)\"\nouter\nOUT\necho done\n"
+        val t1 = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, code1, "shell-heredoc-multiline-cmdsub")
+        assertEquals(SyntaxTokenKind.Function, t1.first { it.slice(code1) == "printf" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t1.first { it.slice(code1) == "inner" }.kind)
+        assertEquals(SyntaxTokenKind.String, t1.first { it.slice(code1) == "outer" }.kind)
+        assertEquals(SyntaxTokenKind.String, t1.last { it.slice(code1) == "OUT" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t1.first { it.slice(code1) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t1.first { it.slice(code1) == "done" }.kind)
+
+        val code2 = "cat <<OUT \"\$(cat <<IN\ninner body\nIN\n)\"\nouter body\nOUT\nexport OK=1\n"
+        val t2 = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, code2, "shell-nested-heredocs-in-cmdsub")
+        assertEquals(SyntaxTokenKind.String, t2.first { it.slice(code2) == "inner body" }.kind)
+        assertEquals(SyntaxTokenKind.String, t2.first { it.slice(code2) == "outer body" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t2.first { it.slice(code2) == "export" }.kind)
+        assertEquals(SyntaxTokenKind.Property, t2.first { it.slice(code2) == "OK" }.kind)
+        assertEquals(SyntaxTokenKind.Number, t2.first { it.slice(code2) == "1" }.kind)
+
+        val code3 = ": <<OUT1 <<OUT2 \"\$(\nprintf mid\n)\"\nbody1\nOUT1\nbody2\nOUT2\necho fin\n"
+        val t3 = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, code3, "shell-multi-heredoc-multiline-cmdsub")
+        assertEquals(SyntaxTokenKind.Function, t3.first { it.slice(code3) == "printf" }.kind)
+        assertEquals(SyntaxTokenKind.String, t3.first { it.slice(code3) == "body1" }.kind)
+        assertEquals(SyntaxTokenKind.String, t3.first { it.slice(code3) == "body2" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t3.first { it.slice(code3) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t3.first { it.slice(code3) == "fin" }.kind)
+
+        val code4 = "cat <<OUT\n\$(cat <<IN\ninner\nIN\n)\nOUT\necho after\n"
+        val t4 = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, code4, "shell-cmdsub-heredoc-inside-heredoc")
+        assertEquals(SyntaxTokenKind.String, t4.first { it.slice(code4) == "inner" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t4.first { it.slice(code4) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t4.first { it.slice(code4) == "after" }.kind)
+
+        val code5 = ": <<OUT `printf\ninner`\nouter\nOUT\necho bt_done\n"
+        val t5 = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, code5, "shell-heredoc-multiline-backtick")
+        assertEquals(SyntaxTokenKind.Function, t5.first { it.slice(code5) == "printf" }.kind)
+        assertEquals(SyntaxTokenKind.String, t5.first { it.slice(code5) == "outer" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t5.first { it.slice(code5) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t5.first { it.slice(code5) == "bt_done" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }

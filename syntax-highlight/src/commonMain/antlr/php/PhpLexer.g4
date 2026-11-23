@@ -306,7 +306,7 @@ HEREDOC_NL
     ;
 
 HEREDOC_ESCAPE
-    : '\\' . { afterSimpleVar = false; }
+    : '\\' ~[\r\n] { afterSimpleVar = false; }
     ;
 
 HEREDOC_CURLY_OPEN
