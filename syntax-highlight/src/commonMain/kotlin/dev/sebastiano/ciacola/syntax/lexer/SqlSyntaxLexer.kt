@@ -64,6 +64,7 @@ internal object SqlSyntaxLexer : SyntaxLexer {
                 SqlTokens.DOLLAR_STRING,
                 SqlTokens.PG_ESCAPE_STRING,
                 SqlTokens.UNTERMINATED_PG_ESCAPE_STRING,
+                SqlTokens.ORACLE_QUOTE_STRING,
                 SqlTokens.NATIONAL_STRING,
                 SqlTokens.BIT_STRING,
                 SqlTokens.UNTERMINATED_BIT_STRING,

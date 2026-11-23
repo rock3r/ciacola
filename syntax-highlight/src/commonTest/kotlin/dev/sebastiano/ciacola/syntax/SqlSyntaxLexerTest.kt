@@ -731,6 +731,55 @@ class SqlSyntaxLexerTest {
             ),
             malformedTokens.filter { it.kind != SyntaxTokenKind.Whitespace }.map { it.kind to it.slice(malformedFloat) },
         )
+
+        val oracleQStrings = """
+            SELECT q'[it's]' FROM dual; SELECT 1;
+            SELECT Q'(a (b) c)', q'{x'y}', q'<a'b>', q'!it's!', nq'[n'q]' FROM dual;
+            SELECT 'C:\' AS dir, q'[it's]', nq'[n'q]' FROM dual;
+        """.trimIndent()
+        val oracleQTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, oracleQStrings, "sql-oracle-q-strings")
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "q'[it's]'",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "dual",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "Q'(a (b) c)'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "q'{x'y}'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "q'<a'b>'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "q'!it's!'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "nq'[n'q]'",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "dual",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "dir",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "q'[it's]'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "nq'[n'q]'",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "dual",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            oracleQTokens.filter { it.kind != SyntaxTokenKind.Whitespace }.map { it.kind to it.slice(oracleQStrings) },
+        )
+
+        for (unterminatedQ in listOf("SELECT q'[unterminated", "SELECT q'", "SELECT q' ")) {
+            val tokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, unterminatedQ, "sql-unterminated-q")
+            assertEquals(SyntaxTokenKind.String, tokens.last().kind)
+        }
     }
 
     @Test

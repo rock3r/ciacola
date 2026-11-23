@@ -67,6 +67,10 @@ UNTERMINATED_PG_ESCAPE_STRING
     : [eE] '\'' ( '\\' . | '\'\'' | ~['\\] )* '\\'? { onValueToken(); }
     ;
 
+ORACLE_QUOTE_STRING
+    : [nN]? [qQ] '\'' { consumeOracleQuoteString(); onValueToken(); }
+    ;
+
 NATIONAL_STRING
     : [nN] '\'' { consumeSqlQuoted('\''.code); onValueToken(); }
     ;

@@ -304,6 +304,41 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
     protected fun isNotRangeDotFloat(): Boolean = _input.LA(1) != '.'.code
 
     /**
+     * Scans the body and closing delimiter of an Oracle / PL/SQL alternative-quoted string
+     * (`q'[...]'`, `q'(...)'`, `q'{...}'`, `q'<...>'`, `q'!...!'`, and `nq'...'`) in O(N) time.
+     * Falls back to standard single-quote scanning if the opening quote is immediately followed
+     * by whitespace or EOF.
+     */
+    protected fun consumeOracleQuoteString() {
+        val openDelim = _input.LA(1)
+        if (openDelim == IntStream.EOF ||
+            openDelim == ' '.code || openDelim == '\t'.code ||
+            openDelim == '\r'.code || openDelim == '\n'.code
+        ) {
+            consumeSqlQuoted('\''.code)
+            return
+        }
+        _input.consume()
+        val closeDelim = when (openDelim) {
+            '['.code -> ']'.code
+            '('.code -> ')'.code
+            '{'.code -> '}'.code
+            '<'.code -> '>'.code
+            else -> openDelim
+        }
+        while (true) {
+            val ch = _input.LA(1)
+            if (ch == IntStream.EOF) return
+            if (ch == closeDelim && _input.LA(2) == '\''.code) {
+                _input.consume()
+                _input.consume()
+                return
+            }
+            _input.consume()
+        }
+    }
+
+    /**
      * Scans the body and closing delimiter of a single-quoted (`'...'`, `N'...'`) or double-quoted
      * (`"..."`) SQL literal in strictly O(N) time.
      *
@@ -480,8 +515,18 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
 
         val prev = _input.LA(qOffset - 1)
         if (isSqlStringOpenerPredecessor(prev)) return true
-        if (quote == '\''.code && qOffset >= 3 && isSqlStringOpenerPredecessor(_input.LA(qOffset - 2))) {
-            return isSqlStringPrefixOpener(prev, next)
+        if (quote == '\''.code && qOffset >= 3) {
+            val prev2 = _input.LA(qOffset - 2)
+            if (isSqlStringOpenerPredecessor(prev2)) {
+                return isSqlStringPrefixOpener(prev, next)
+            }
+            if ((prev == 'q'.code || prev == 'Q'.code) &&
+                (prev2 == 'n'.code || prev2 == 'N'.code) &&
+                qOffset >= 4 &&
+                isSqlStringOpenerPredecessor(_input.LA(qOffset - 3))
+            ) {
+                return isSqlStringPrefixOpener(prev, next)
+            }
         }
         return false
     }
