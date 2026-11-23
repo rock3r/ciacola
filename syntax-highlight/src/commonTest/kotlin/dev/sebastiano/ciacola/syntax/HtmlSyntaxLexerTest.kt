@@ -188,4 +188,15 @@ class HtmlSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.String, firstKind("\"<\\/script>\""))
         assertEquals(SyntaxTokenKind.Function, firstKind("log"))
     }
+
+    @Test
+    fun handlesModernTemplateBindingAttributes() {
+        val code = """<button @click="onSave" #btn ?disabled="isOff" *ngIf="show" [title]="t" (focus)="onFocus()" [(ngModel)]="val">Save</button>"""
+        val tokens = assertLosslessInvariants(HtmlSyntaxLexer, code, "html-template-attrs")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+
+        for (attr in listOf("@click", "#btn", "?disabled", "*ngIf", "[title]", "(focus)", "[(ngModel)]")) {
+            assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == attr }.kind, "Template attr $attr")
+        }
+    }
 }

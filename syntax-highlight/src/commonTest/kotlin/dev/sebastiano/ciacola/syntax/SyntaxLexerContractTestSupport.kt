@@ -16,9 +16,22 @@ fun assertLosslessInvariants(
     lexer: SyntaxLexer,
     code: String,
     label: String = "",
+): List<SyntaxToken> = assertLosslessInvariants(
+    code = code,
+    tokens = lexer.lex(code),
+    label = label,
+)
+
+/**
+ * Verifies that pre-lexed [tokens] form lossless, strictly contiguous, non-overlapping
+ * [SyntaxToken] spans covering `[0, code.length)` whose concatenated slices equal [code].
+ */
+fun assertLosslessInvariants(
+    code: String,
+    tokens: List<SyntaxToken>,
+    label: String = "",
 ): List<SyntaxToken> {
     val prefix = if (label.isNotEmpty()) "[$label] " else ""
-    val tokens = lexer.lex(code)
     if (code.isEmpty()) {
         assertTrue(tokens.isEmpty(), "${prefix}Empty input must produce zero tokens, got $tokens")
         return tokens
@@ -151,7 +164,7 @@ fun assertLinearPerformance(
         val mark = TimeSource.Monotonic.markNow()
         val tokens = lexer.lex(input)
         val elapsedMs = mark.elapsedNow().inWholeMilliseconds
-        assertLosslessInvariants(lexer, input, label = "${lexer.language.id}:perf:$label")
+        assertLosslessInvariants(code = input, tokens = tokens, label = "${lexer.language.id}:perf:$label")
         assertTrue(
             tokens.isNotEmpty() || input.isEmpty(),
             "[${lexer.language.id}:perf:$label] Expected tokens for non-empty input",

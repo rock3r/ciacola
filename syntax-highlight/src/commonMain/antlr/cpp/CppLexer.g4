@@ -30,7 +30,16 @@ PP_HASH
     ;
 
 RAW_STRING
-    : { enableCppFeatures }? ('u8' | 'u' | 'U' | 'L')? 'R"' ~[()\\ \t\r\n\u000B\u000C]* '(' { consumeCppRawString(); }
+    : ('u8' | 'u' | 'U' | 'L')? 'R"' { enableCppFeatures }? RawDelim '(' { consumeCppRawString(); }
+    ;
+
+fragment DChar
+    : ~[()\\ \t\r\n\u000B\u000C]
+    ;
+
+fragment RawDelim
+    : (DChar (DChar (DChar (DChar (DChar (DChar (DChar (DChar
+      (DChar (DChar (DChar (DChar (DChar (DChar (DChar DChar?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
     ;
 
 STRING
@@ -50,27 +59,27 @@ UNTERMINATED_CHAR
     ;
 
 HEX_FLOAT
-    : '0' [xX] ( HexDigits ( '.' HexDigits? )? | '.' HexDigits ) [pP] [+-]? Digits NumSuffix?
+    : '0' [xX] ( HexDigits ( '.' HexDigits? )? | '.' HexDigits ) [pP] [+-]? Digits FloatSuffix?
     ;
 
 HEX_INT
-    : '0' [xX] HexDigits NumSuffix?
+    : '0' [xX] HexDigits IntSuffix?
     ;
 
 BIN_INT
-    : '0' [bB] BinDigits NumSuffix?
+    : '0' [bB] BinDigits IntSuffix?
     ;
 
 OCT_INT
-    : '0' ( '\''? [0-7] )+ NumSuffix?
+    : '0' ( '\''? [0-7] )+ IntSuffix?
     ;
 
 FLOAT
-    : ( Digits '.' Digits? Exponent? | '.' Digits Exponent? | Digits Exponent ) NumSuffix?
+    : ( Digits '.' Digits? Exponent? | '.' Digits Exponent? | Digits Exponent ) FloatSuffix?
     ;
 
 DEC_INT
-    : Digits NumSuffix?
+    : Digits IntSuffix?
     ;
 
 fragment Digits
@@ -89,8 +98,15 @@ fragment Exponent
     : [eE] [+-]? Digits
     ;
 
-fragment NumSuffix
-    : [uUlLzZfF]+
+fragment IntSuffix
+    : [uU] ( 'll' | 'LL' | [lLzZ] | 'wb' | 'WB' )?
+    | ( 'll' | 'LL' | [lLzZ] | 'wb' | 'WB' ) [uU]?
+    ;
+
+fragment FloatSuffix
+    : [fFlL]
+    | [fF] ( '16' | '32' | '64' | '128' )
+    | ( 'bf16' | 'BF16' )
     ;
 
 // Multi-char operators & punctuation
@@ -148,7 +164,18 @@ LT       : '<';
 GT       : '>';
 
 IDENT
-    : [a-zA-Z_] [a-zA-Z0-9_]*
+    : IDENT_START IDENT_CONTINUE*
+    ;
+
+fragment IDENT_START
+    : [a-zA-Z_]
+    | [\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02AF\u0370-\u1FFF\u2100-\u218F\u2C00-\uD7FF\uF900-\uFFEF]
+    | [\u{10000}-\u{1EFFF}\u{20000}-\u{323AF}]
+    ;
+
+fragment IDENT_CONTINUE
+    : IDENT_START
+    | [0-9\u0300-\u036F]
     ;
 
 ERROR_CHAR

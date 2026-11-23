@@ -67,9 +67,11 @@ class CSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Property, tokens.last { it.slice(code) == "value" }.kind)
 
         // C mode must NOT parse C++ R"(...)" as raw string
-        val cNonRaw = """const char *x = R"(not raw)";"""
+        val cNonRaw = """const char *x = R"(foo)";"""
         val cNonRawTokens = assertLosslessInvariants(CSyntaxLexer, cNonRaw, "c-not-raw-string")
+        assertEquals(0, cNonRawTokens.count { it.kind == SyntaxTokenKind.Invalid })
         assertTrue(cNonRawTokens.any { it.slice(cNonRaw) == "R" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(cNonRawTokens.any { it.slice(cNonRaw) == "\"(foo)\"" && it.kind == SyntaxTokenKind.String })
     }
 
     @Test
@@ -126,6 +128,26 @@ class CSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "_Bool" }.kind)
         assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "_Complex" }.kind)
         assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0b1010" }.kind)
+    }
+
+    @Test
+    fun supportsUnicodeIdentifiersAndStrictC23NumericSuffixes() {
+        val unicodeCode = "double Δt = 0.1; int café = 1; int e\u0301 = 2; int 𠮷 = 3; int 𝐀 = 4;"
+        val uniTokens = assertLosslessInvariants(CSyntaxLexer, unicodeCode, "c-unicode")
+        assertEquals(0, uniTokens.count { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "Δt" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "e\u0301" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𝐀" }.kind)
+
+        val suffixCode = "unsigned _BitInt(8) b = 42uwb; float f = 1.0f32; double d = 1.0bf16; int bad = 42ffuuzzll;"
+        val suffixTokens = assertLosslessInvariants(CSyntaxLexer, suffixCode, "c-suffixes")
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "42uwb" }.kind)
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "1.0f32" }.kind)
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "1.0bf16" }.kind)
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "42" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, suffixTokens.first { it.slice(suffixCode) == "ffuuzzll" }.kind)
     }
 
     @Test

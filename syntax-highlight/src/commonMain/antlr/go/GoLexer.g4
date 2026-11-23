@@ -141,7 +141,18 @@ GT       : '>';
 TILDE    : '~';
 
 IDENT
-    : [a-zA-Z_] [a-zA-Z0-9_]*
+    : IDENT_START IDENT_CONTINUE*
+    ;
+
+fragment IDENT_START
+    : [a-zA-Z_]
+    | [\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02AF\u0370-\u1FFF\u2100-\u218F\u2C00-\uD7FF\uF900-\uFFEF]
+    | [\u{10000}-\u{1EFFF}\u{20000}-\u{323AF}]
+    ;
+
+fragment IDENT_CONTINUE
+    : IDENT_START
+    | [0-9\u0300-\u036F]
     ;
 
 ERROR_CHAR

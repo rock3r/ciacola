@@ -7,7 +7,7 @@ import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.xml.XMLLexer
 import dev.sebastiano.ciacola.syntax.antlr.xml.XMLLexer.Tokens as XmlTokens
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
-import dev.sebastiano.ciacola.syntax.internal.isAsciiWhitespace
+import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
@@ -26,7 +26,11 @@ object XmlSyntaxLexer : SyntaxLexer {
         driveAntlrLexer(
             source = source,
             lexer = lexer,
-            onGap = { start, end -> emitXmlGap(source, start, end, out) },
+            onGap = { start, end ->
+                emitDefaultGap(source, start, end) { kind, s, e ->
+                    out += SyntaxToken(kind, s, e)
+                }
+            },
             onToken = { type, start, end ->
                 when (type) {
                     XmlTokens.OPEN -> {
@@ -59,10 +63,19 @@ object XmlSyntaxLexer : SyntaxLexer {
                         out += SyntaxToken(kind, start, end)
                         expectingTagName = false
                     }
-                    XmlTokens.STRING -> out += SyntaxToken(SyntaxTokenKind.String, start, end)
-                    XmlTokens.COMMENT -> out += SyntaxToken(SyntaxTokenKind.Comment, start, end)
-                    XmlTokens.CDATA -> out += SyntaxToken(SyntaxTokenKind.String, start, end)
-                    XmlTokens.PI -> out += SyntaxToken(SyntaxTokenKind.Keyword, start, end)
+                    XmlTokens.STRING,
+                    XmlTokens.UNTERMINATED_STRING,
+                    -> out += SyntaxToken(SyntaxTokenKind.String, start, end)
+                    XmlTokens.COMMENT,
+                    XmlTokens.UNTERMINATED_COMMENT,
+                    -> out += SyntaxToken(SyntaxTokenKind.Comment, start, end)
+                    XmlTokens.CDATA,
+                    XmlTokens.UNTERMINATED_CDATA,
+                    -> out += SyntaxToken(SyntaxTokenKind.String, start, end)
+                    XmlTokens.PI,
+                    XmlTokens.UNTERMINATED_PI,
+                    XmlTokens.DTD,
+                    -> out += SyntaxToken(SyntaxTokenKind.Keyword, start, end)
                     XmlTokens.EntityRef,
                     XmlTokens.CharRef,
                     -> out += SyntaxToken(SyntaxTokenKind.Constant, start, end)
@@ -70,60 +83,11 @@ object XmlSyntaxLexer : SyntaxLexer {
                     XmlTokens.S,
                     -> out += SyntaxToken(SyntaxTokenKind.Whitespace, start, end)
                     XmlTokens.TEXT -> out += SyntaxToken(SyntaxTokenKind.Plain, start, end)
-                    XmlTokens.DTD -> out += SyntaxToken(SyntaxTokenKind.Keyword, start, end)
                     else -> out += SyntaxToken(SyntaxTokenKind.Invalid, start, end)
                 }
             },
         )
 
         return out
-    }
-}
-
-private fun emitXmlGap(code: String, start: Int, end: Int, out: MutableList<SyntaxToken>) {
-    var i = start
-    while (i < end) {
-        val ch = code[i]
-        if (isAsciiWhitespace(ch)) {
-            val wsStart = i
-            i++
-            while (i < end && isAsciiWhitespace(code[i])) i++
-            out += SyntaxToken(SyntaxTokenKind.Whitespace, wsStart, i)
-        } else if (ch == '<' && i + 1 < end && code[i + 1] == '!') {
-            val dtdStart = i
-            var j = i + 2
-            var inSubset = false
-            var quote: Char? = null
-            while (j < end) {
-                val c = code[j]
-                if (quote != null) {
-                    if (c == quote) quote = null
-                } else if (inSubset) {
-                    when (c) {
-                        '"', '\'' -> quote = c
-                        ']' -> inSubset = false
-                    }
-                } else {
-                    when (c) {
-                        '[' -> inSubset = true
-                        '>' -> break
-                    }
-                }
-                j++
-            }
-            i = if (j < end) j + 1 else end
-            out += SyntaxToken(SyntaxTokenKind.Keyword, dtdStart, i)
-        } else {
-            val badStart = i
-            i++
-            while (
-                i < end &&
-                !isAsciiWhitespace(code[i]) &&
-                !(code[i] == '<' && i + 1 < end && code[i + 1] == '!')
-            ) {
-                i++
-            }
-            out += SyntaxToken(SyntaxTokenKind.Invalid, badStart, i)
-        }
     }
 }

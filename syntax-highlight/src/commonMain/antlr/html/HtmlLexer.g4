@@ -100,7 +100,9 @@ TAG_NAME
     ;
 
 ATTR_SPECIAL_NAME
-    : '@' [a-zA-Z0-9_.:-]+
+    : ( '@' | '#' | '?' | '*' ) [a-zA-Z0-9_.:-]+
+    | '[' ~[\] \t\r\n=<>]+ ']'
+    | '(' ~[) \t\r\n=<>]+ ')'
     ;
 
 INSIDE_STRING

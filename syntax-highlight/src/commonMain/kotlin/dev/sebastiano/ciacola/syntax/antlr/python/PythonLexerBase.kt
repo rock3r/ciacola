@@ -5,9 +5,9 @@ import org.antlr.v4.kotlinruntime.Lexer
 
 /**
  * Pure Kotlin Multiplatform base lexer for [PythonLexer] tracking nested f-string
- * interpolations, conversion/format-spec scopes, and brace/paren nesting in O(N).
+ * interpolations, conversion/format-spec scopes, lambda expressions, and brace/paren nesting in O(N).
  */
-public abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
+internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
 
     private enum class FStringKind(val isSingleLine: Boolean) {
         SINGLE(true),
@@ -21,6 +21,9 @@ public abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         var braceDepth: Int = 0,
         var parenDepth: Int = 0,
         var inFormatSpec: Boolean = false,
+        var lambdaDepth: Int = -1,
+        var atInterpLineStart: Boolean = false,
+        var inStatementHeader: Boolean = false,
     )
 
     private val fstringKindStack = ArrayList<FStringKind>()
@@ -59,13 +62,17 @@ public abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         val top = interpStack.lastOrNull() ?: return
         if (!top.inFormatSpec) {
             top.parenDepth++
+            top.atInterpLineStart = false
         }
     }
 
     protected fun onCloseParenOrBracket() {
         val top = interpStack.lastOrNull() ?: return
-        if (!top.inFormatSpec && top.parenDepth > 0) {
-            top.parenDepth--
+        if (!top.inFormatSpec) {
+            if (top.parenDepth > 0) {
+                top.parenDepth--
+            }
+            top.atInterpLineStart = false
         }
     }
 
@@ -73,6 +80,7 @@ public abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         val top = interpStack.lastOrNull() ?: return
         if (!top.inFormatSpec) {
             top.braceDepth++
+            top.atInterpLineStart = false
         }
     }
 
@@ -80,6 +88,7 @@ public abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         val top = interpStack.lastOrNull() ?: return
         if (top.braceDepth > 0) {
             top.braceDepth--
+            top.atInterpLineStart = false
             return
         }
         interpStack.removeAt(interpStack.lastIndex)
@@ -89,9 +98,76 @@ public abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         }
     }
 
+    protected fun onLambda() {
+        val top = interpStack.lastOrNull() ?: return
+        if (!top.inFormatSpec && top.lambdaDepth < 0) {
+            top.lambdaDepth = top.parenDepth + top.braceDepth
+        }
+        top.atInterpLineStart = false
+    }
+
+    protected fun onStatementHeaderKeyword() {
+        val top = interpStack.lastOrNull() ?: return
+        if (!top.inFormatSpec && top.atInterpLineStart && top.parenDepth == 0 && top.braceDepth == 0) {
+            top.inStatementHeader = true
+        }
+        top.atInterpLineStart = false
+    }
+
+    protected fun onName(lexeme: String) {
+        val top = interpStack.lastOrNull() ?: return
+        if (
+            !top.inFormatSpec &&
+            (lexeme == "match" || lexeme == "case") &&
+            top.atInterpLineStart &&
+            top.parenDepth == 0 &&
+            top.braceDepth == 0
+        ) {
+            top.inStatementHeader = true
+        }
+        top.atInterpLineStart = false
+    }
+
+    protected fun onNonHeaderToken() {
+        val top = interpStack.lastOrNull() ?: return
+        top.atInterpLineStart = false
+    }
+
+    protected fun onSemicolon() {
+        val top = interpStack.lastOrNull() ?: return
+        if (top.parenDepth == 0 && top.braceDepth == 0) {
+            top.atInterpLineStart = true
+            top.inStatementHeader = false
+            top.lambdaDepth = -1
+        }
+    }
+
+    protected fun onDefaultNewline() {
+        val top = interpStack.lastOrNull() ?: return
+        top.atInterpLineStart = true
+        if (top.parenDepth == 0 && top.braceDepth == 0) {
+            top.inStatementHeader = false
+            top.lambdaDepth = -1
+            if (fstringKindStack.lastOrNull()?.isSingleLine == true) {
+                unwindSingleLineFStrings()
+            }
+        }
+    }
+
     protected fun onColon(formatSpecMode: Int, formatColonTokenType: Int) {
         val top = interpStack.lastOrNull() ?: return
-        if (!top.inFormatSpec && top.braceDepth == 0 && top.parenDepth == 0) {
+        if (top.inFormatSpec) return
+        top.atInterpLineStart = false
+        val currentDepth = top.parenDepth + top.braceDepth
+        if (top.lambdaDepth == currentDepth) {
+            top.lambdaDepth = -1
+            return
+        }
+        if (top.inStatementHeader && currentDepth == 0) {
+            top.inStatementHeader = false
+            return
+        }
+        if (currentDepth == 0) {
             top.inFormatSpec = true
             type = formatColonTokenType
             pushMode(formatSpecMode)

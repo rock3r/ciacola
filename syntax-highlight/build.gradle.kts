@@ -1,4 +1,5 @@
 import com.strumenta.antlrkotlin.gradle.AntlrKotlinTask
+import java.util.zip.ZipFile
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
@@ -47,7 +48,8 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
     val taskSuffix = dirName.replaceFirstChar { it.uppercase() }
     val pkgName = "dev.sebastiano.ciacola.syntax.antlr.$packageSuffix"
     val antlrDir = layout.projectDirectory.dir("src/commonMain/antlr/$dirName")
-    val outDir = layout.buildDirectory.dir("generatedAntlr/commonMain/kotlin/dev/sebastiano/ciacola/syntax/antlr/$packageSuffix")
+    val genRoot = layout.buildDirectory.dir("generatedAntlr/$dirName/kotlin")
+    val outDir = genRoot.map { it.dir("dev/sebastiano/ciacola/syntax/antlr/$packageSuffix") }
 
     val task = tasks.register("generate${taskSuffix}GrammarSource", AntlrKotlinTask::class.java) {
         group = "antlr"
@@ -62,6 +64,32 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
         }
         packageName = pkgName
         outputDirectory = outDir.get().asFile
+
+        doLast {
+            val outDirFile = outDir.get().asFile
+            outDirFile.walkTopDown()
+                .filter { it.isFile && (it.extension == "interp" || it.extension == "tokens") }
+                .forEach { it.delete() }
+
+            val generatedFromRegex = Regex("""^// Generated from .*""")
+            val topLevelPublicRegex = Regex(
+                """(?m)^public\s+(?:(open|abstract|final|sealed)\s+)?(class|object|interface)\b""",
+            )
+            outDirFile.walkTopDown()
+                .filter { it.isFile && it.extension == "kt" }
+                .forEach { ktFile ->
+                    val original = ktFile.readText()
+                    var rewritten = generatedFromRegex.replaceFirst(original, "// Generated from $dirName by ANTLR")
+                    rewritten = topLevelPublicRegex.replace(rewritten) { match ->
+                        val modifier = match.groupValues[1]
+                        val kind = match.groupValues[2]
+                        if (modifier.isNotEmpty()) "internal $modifier $kind" else "internal $kind"
+                    }
+                    if (rewritten != original) {
+                        ktFile.writeText(rewritten)
+                    }
+                }
+        }
     }
 
     generateAntlrGrammars.configure {
@@ -69,7 +97,7 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
     }
 
     kotlin.sourceSets.named("commonMain") {
-        kotlin.srcDir(task)
+        kotlin.srcDir(task.map { genRoot.get() })
     }
 }
 
@@ -96,6 +124,61 @@ tasks.matching {
         it.name.contains("dokka", ignoreCase = true)
 }.configureEach {
     dependsOn(generateAntlrGrammars)
+}
+
+val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourcesJar") {
+    group = "verification"
+    description = "Verifies jvmSourcesJar layout, hygiene, and internal visibility of ANTLR lexers."
+    val sourcesJarTask = tasks.named("jvmSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
+    dependsOn(sourcesJarTask)
+    val jarFileProvider = sourcesJarTask.flatMap { it.archiveFile }
+    inputs.file(jarFileProvider)
+
+    doLast {
+        val jarFile = jarFileProvider.get().asFile
+        val violations = mutableListOf<String>()
+        ZipFile(jarFile).use { zip ->
+            val entries = zip.entries().asSequence().toList()
+            val ktEntries = entries.filter { !it.isDirectory && it.name.endsWith(".kt") }
+            if (ktEntries.none { it.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") }) {
+                violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${jarFile.name}"
+            }
+            val topLevelNonInternal = Regex(
+                """(?m)^(?!internal\b|private\b)(?:public\s+)?(?:(?:open|abstract|final|sealed)\s+)?(?:class|object|interface)\b""",
+            )
+            val windowsDriveHeader = Regex("""^// Generated from [A-Za-z]:""")
+            for (entry in entries) {
+                if (entry.isDirectory) continue
+                if (entry.name.endsWith(".tokens") || entry.name.endsWith(".interp")) {
+                    violations += "Forbidden ANTLR sidecar file in ${jarFile.name}: ${entry.name}"
+                }
+                if (entry.name.startsWith("commonMain/") && entry.name.endsWith(".kt") &&
+                    !entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/")
+                ) {
+                    violations += "Improperly rooted Kotlin source in ${jarFile.name}: ${entry.name}"
+                }
+                if (entry.name.endsWith(".kt")) {
+                    val text = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                    val firstLine = text.lineSequence().firstOrNull().orEmpty()
+                    if (firstLine.startsWith("// Generated from /") || windowsDriveHeader.containsMatchIn(firstLine)) {
+                        violations += "Absolute local path leaked in ${entry.name}: $firstLine"
+                    }
+                    if (entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") &&
+                        topLevelNonInternal.containsMatchIn(text)
+                    ) {
+                        violations += "Public top-level declaration in ${entry.name}"
+                    }
+                }
+            }
+        }
+        if (violations.isNotEmpty()) {
+            throw GradleException("SourcesJar verification failed:\n" + violations.joinToString("\n") { " - $it" })
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifySyntaxHighlightSourcesJar)
 }
 
 mavenPublishing {

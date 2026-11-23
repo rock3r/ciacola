@@ -169,7 +169,7 @@ private fun classifyCssSegment(
 
     val firstTok = raw[visible[segStart]]
     if (firstTok.type == CssTokens.AT_KEYWORD) {
-        classifyAtRuleSegment(raw, visible, segStart, segEnd, kinds)
+        classifyAtRuleSegment(source, raw, visible, segStart, segEnd, kinds)
         return
     }
 
@@ -207,6 +207,7 @@ private fun hasTopLevelColon(
 }
 
 private fun classifyAtRuleSegment(
+    source: String,
     raw: List<RawCssToken>,
     visible: List<Int>,
     segStart: Int,
@@ -227,7 +228,9 @@ private fun classifyAtRuleSegment(
                 kinds[rawIdx] = SyntaxTokenKind.Attribute
             }
             CssTokens.IDENT -> {
+                val identText = source.substring(tok.start, tok.end)
                 kinds[rawIdx] = when {
+                    identText.startsWith("--") -> SyntaxTokenKind.Property
                     prev.type == CssTokens.DOT -> SyntaxTokenKind.Attribute
                     prev.type == CssTokens.COLON || prev.type == CssTokens.DOUBLE_COLON -> SyntaxTokenKind.Annotation
                     next?.type == CssTokens.LPAREN -> SyntaxTokenKind.Function
@@ -312,6 +315,7 @@ private fun classifySelectorSegment(
         val rawIdx = visible[idx]
         val tok = raw[rawIdx]
         val prev = if (idx > segStart) raw[visible[idx - 1]] else null
+        val next = if (idx + 1 < segEnd) raw[visible[idx + 1]] else null
         when (tok.type) {
             CssTokens.LBRACK -> bracketDepth++
             CssTokens.RBRACK -> if (bracketDepth > 0) bracketDepth--
@@ -338,7 +342,14 @@ private fun classifySelectorSegment(
                     bracketDepth > 0 && (prev?.type == CssTokens.LBRACK || prev?.type == CssTokens.IDENT) -> {
                         SyntaxTokenKind.Attribute
                     }
-                    bracketDepth > 0 -> SyntaxTokenKind.Plain
+                    bracketDepth > 0 -> {
+                        val flag = source.substring(tok.start, tok.end).lowercase()
+                        if ((flag == "i" || flag == "s") && next?.type == CssTokens.RBRACK) {
+                            SyntaxTokenKind.Keyword
+                        } else {
+                            SyntaxTokenKind.Plain
+                        }
+                    }
                     prev?.type == CssTokens.DOT -> SyntaxTokenKind.Attribute
                     prev?.type == CssTokens.COLON || prev?.type == CssTokens.DOUBLE_COLON -> SyntaxTokenKind.Annotation
                     activeParenMode == 1 -> SyntaxTokenKind.Tag

@@ -196,5 +196,19 @@ class CssSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Number, firstKind("200ms"))
         assertEquals(SyntaxTokenKind.Number, firstKind("2dppx"))
         assertEquals(SyntaxTokenKind.Tag, firstKind("&"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("i", after = code.indexOf("href^=")))
+    }
+
+    @Test
+    fun handlesPropertyAtRuleAndSupplementaryUnicodeIdentifiers() {
+        val code = """
+            @property --accent-hue { syntax: "<number>"; }
+            :root { --🚀-gap: 8px; --café-accent: #fff; }
+        """.trimIndent()
+        val tokens = assertLosslessInvariants(CssSyntaxLexer, code, "css-unicode-ident")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "--accent-hue" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "--🚀-gap" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "--café-accent" }.kind)
     }
 }

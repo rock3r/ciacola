@@ -8,7 +8,7 @@ import org.antlr.v4.kotlinruntime.Token
  * Pure Kotlin Multiplatform base lexer for CSS, entering unquoted `url(...)` argument mode
  * when `(` immediately follows a `url` identifier.
  */
-abstract class CssLexerBase(input: CharStream) : Lexer(input) {
+internal abstract class CssLexerBase(input: CharStream) : Lexer(input) {
     private var lastWasUrlIdent: Boolean = false
 
     protected abstract fun isIdentType(type: Int): Boolean

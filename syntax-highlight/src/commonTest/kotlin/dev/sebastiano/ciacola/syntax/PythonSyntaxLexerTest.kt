@@ -256,4 +256,35 @@ class PythonSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(pepCode) == "\"key\"" }.kind)
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(pepCode) == "'nested'" }.kind)
     }
+
+    @Test
+    fun handlesFStringLambdaUnclosedNewlineRecoveryAndUnicodeSmpIdentifiers() {
+        val lambdaCode = """s = f"{x if cond else lambda y: y + 1}""""
+        val lambdaTokens = assertLosslessInvariants(PythonSyntaxLexer, lambdaCode, "python-fstr-lambda")
+        assertEquals(SyntaxTokenKind.Keyword, lambdaTokens.first { it.slice(lambdaCode) == "lambda" }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, lambdaTokens.first { it.slice(lambdaCode) == ":" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, lambdaTokens.first { it.slice(lambdaCode) == "+" }.kind)
+        assertEquals(SyntaxTokenKind.Number, lambdaTokens.first { it.slice(lambdaCode) == "1" }.kind)
+
+        val unclosedSingle = "x = f\"hello {name\nif ok:\n    return 1"
+        val singleTokens = assertLosslessInvariants(PythonSyntaxLexer, unclosedSingle, "python-fstr-unclosed-nl")
+        assertEquals(SyntaxTokenKind.Keyword, singleTokens.first { it.slice(unclosedSingle) == "if" }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, singleTokens.first { it.slice(unclosedSingle) == ":" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, singleTokens.first { it.slice(unclosedSingle) == "return" }.kind)
+        assertEquals(SyntaxTokenKind.Number, singleTokens.first { it.slice(unclosedSingle) == "1" }.kind)
+
+        val unclosedTriple = "x = f\"\"\"hello {name\nif ok:\n    return 1\"\"\""
+        val tripleTokens = assertLosslessInvariants(PythonSyntaxLexer, unclosedTriple, "python-fstr-triple-stmt")
+        assertEquals(SyntaxTokenKind.Keyword, tripleTokens.first { it.slice(unclosedTriple) == "if" }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, tripleTokens.first { it.slice(unclosedTriple) == ":" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tripleTokens.first { it.slice(unclosedTriple) == "return" }.kind)
+
+        val unicodeCode = "café = 1\nΔt = 0.5\n𠮷 = 2\n𝐀 = café + 𠮷\n"
+        val unicodeTokens = assertLosslessInvariants(PythonSyntaxLexer, unicodeCode, "python-unicode-smp")
+        assertTrue(unicodeTokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Plain, unicodeTokens.first { it.slice(unicodeCode) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, unicodeTokens.first { it.slice(unicodeCode) == "Δt" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, unicodeTokens.first { it.slice(unicodeCode) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, unicodeTokens.first { it.slice(unicodeCode) == "𝐀" }.kind)
+    }
 }

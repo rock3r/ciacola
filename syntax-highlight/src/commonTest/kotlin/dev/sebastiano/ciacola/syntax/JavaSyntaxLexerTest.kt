@@ -232,4 +232,31 @@ class JavaSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "var" && it.startIndex > code.indexOf("Point(") }.kind)
         assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "when" }.kind)
     }
+
+    @Test
+    fun handlesNestedGenericsComparisonAngleResetAndUnicodeSmpIdentifiers() {
+        val code = """
+            class GenericAndUnicode<T> {
+                Map<String, List<T>> table;
+                void check(int x) {
+                    if (x < 0) {
+                        int X = 1;
+                        int café = 2;
+                        double Δt = 0.5;
+                        int 𠮷 = 3;
+                        int 𝐀 = X + café + 𠮷;
+                    }
+                }
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(JavaSyntaxLexer, code, "java-angle-and-unicode")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "T" && it.startIndex > code.indexOf("List<") }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "X" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "Δt" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𝐀" }.kind)
+    }
 }

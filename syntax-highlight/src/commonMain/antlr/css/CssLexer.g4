@@ -98,13 +98,13 @@ fragment ESCAPE
 
 fragment IDENT_START
     : [a-zA-Z_]
-    | [\u0080-\uFFFF]
+    | [\u0080-\uD7FF\uE000-\u{10FFFF}]
     | ESCAPE
     ;
 
 fragment IDENT_CHAR
     : [a-zA-Z0-9_-]
-    | [\u0080-\uFFFF]
+    | [\u0080-\uD7FF\uE000-\u{10FFFF}]
     | ESCAPE
     ;
 

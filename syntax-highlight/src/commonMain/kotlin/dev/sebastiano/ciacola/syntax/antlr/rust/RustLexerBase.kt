@@ -8,7 +8,7 @@ import org.antlr.v4.kotlinruntime.Lexer
  * Pure Kotlin ANTLR4 lexer base for Rust, providing linear-time raw string delimiter matching
  * and lookahead helpers for trailing-dot float literals.
  */
-public abstract class RustLexerBase(input: CharStream) : Lexer(input) {
+internal abstract class RustLexerBase(input: CharStream) : Lexer(input) {
     /**
      * Consumes the body and closing `"###` delimiter of a Rust raw string (`r#"..."#`, `br#"..."#`,
      * `cr#"..."#`) whose opening prefix of length [prefixLen] (`1` for `r`, `2` for `br`/`cr`),
@@ -39,8 +39,12 @@ public abstract class RustLexerBase(input: CharStream) : Lexer(input) {
      */
     protected fun isRustTrailingDotFloat(): Boolean {
         val next = _input.LA(1)
+        if (next == IntStream.EOF) return true
         if (next == '.'.code || next == '_'.code) return false
         if (next in 'a'.code..'z'.code || next in 'A'.code..'Z'.code) return false
+        if (next >= 0x10000) {
+            return next in 0x1F000..0x1FFFF || next > 0x323AF
+        }
         return next < 0x80 || !next.toChar().isLetter()
     }
 }

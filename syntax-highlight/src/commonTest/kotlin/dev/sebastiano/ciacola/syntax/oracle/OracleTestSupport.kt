@@ -53,6 +53,21 @@ fun assertMatchesOracleFixture(fixture: OracleFixture) {
 
     for ((idx, exp) in fixture.expectations.withIndex()) {
         assertTrue(
+            exp.allowedKinds.isNotEmpty(),
+            "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') must have non-empty allowedKinds",
+        )
+        assertTrue(
+            exp.allowedKinds.size <= 3,
+            "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') has allowedKinds.size=${exp.allowedKinds.size} (> 3): ${exp.allowedKinds}",
+        )
+        val extendsBeyondOracles = !exp.allowedKinds.all { it == exp.shikiKind || it == exp.pygmentsKind }
+        if (extendsBeyondOracles) {
+            assertTrue(
+                exp.note.isNotBlank(),
+                "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') extends allowedKinds beyond {shiki=${exp.shikiKind}, pygments=${exp.pygmentsKind}} to ${exp.allowedKinds} without an explanatory note",
+            )
+        }
+        assertTrue(
             exp.startIndex >= 0 && exp.endIndex > exp.startIndex && exp.endIndex <= fixture.code.length,
             "Oracle fixture '${fixture.name}' expectation #$idx has invalid span ${exp.startIndex}..${exp.endIndex} (len=${fixture.code.length})",
         )

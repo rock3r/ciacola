@@ -184,4 +184,20 @@ class KotlinSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0xFF_00u" }.kind)
         assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "42UL" }.kind)
     }
+
+    @Test
+    fun comparisonAngleBracketDoesNotLeakIntoSubsequentOutOrSingleCapIdentifiers() {
+        val code = """
+            fun check(n: Int, out: Int): Int {
+                if (n < 0) return 0
+                val res = out * 2
+                val X = 1
+                return res + X
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(KotlinSyntaxLexer, code, "kotlin-angle-reset")
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "out" && it.startIndex > code.indexOf("val res") }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "X" }.kind)
+    }
 }

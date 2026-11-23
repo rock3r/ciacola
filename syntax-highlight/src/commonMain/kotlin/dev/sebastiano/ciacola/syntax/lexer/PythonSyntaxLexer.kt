@@ -425,6 +425,15 @@ private fun classifyPythonName(
     ) {
         return SyntaxTokenKind.Type
     }
+    if (
+        bracketDepth == 0 &&
+        prevType != PythonTokens.COLON &&
+        prevType != PythonTokens.PIPE &&
+        nextType != null &&
+        isAssignmentToken(nextType)
+    ) {
+        return SyntaxTokenKind.Plain
+    }
     if (looksLikeTypeName(text)) {
         return SyntaxTokenKind.Type
     }

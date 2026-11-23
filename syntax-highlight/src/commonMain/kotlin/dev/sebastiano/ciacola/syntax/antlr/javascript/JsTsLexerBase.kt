@@ -12,7 +12,7 @@ import org.antlr.v4.kotlinruntime.Token
  * disambiguated between division and regex literals, and `<` can be disambiguated between
  * comparison/generics and JSX elements.
  */
-abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
+internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
     private var lastNonHiddenType: Int = Token.INVALID_TYPE
     private var lastNonHiddenText: String? = null
     private var lastParenWasCondition: Boolean = false
@@ -108,7 +108,40 @@ abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
             }
         }
 
-        val next = _input.LA(pos)
+        var next = _input.LA(pos)
+        if (next == '<'.code) {
+            var angle = 1
+            pos++
+            while (pos < maxScan && angle > 0) {
+                val ch = _input.LA(pos)
+                if (ch == IntStream.EOF || ch == ';'.code) return false
+                if (ch == '<'.code) {
+                    angle++
+                } else if (ch == '>'.code && _input.LA(pos - 1) != '='.code) {
+                    angle--
+                }
+                pos++
+            }
+            if (angle > 0) return false
+            while (pos < maxScan) {
+                val ch = _input.LA(pos)
+                if (ch == ' '.code || ch == '\t'.code || ch == '\r'.code || ch == '\n'.code) {
+                    pos++
+                } else {
+                    break
+                }
+            }
+            next = _input.LA(pos)
+            return when {
+                next == '('.code -> false
+                next == '/'.code && _input.LA(pos + 1) == '>'.code -> true
+                next == '>'.code -> true
+                next == '{'.code -> true
+                isJsIdentStartCodePoint(next) -> true
+                else -> false
+            }
+        }
+
         return when {
             next == ','.code || next == '='.code || next == ':'.code -> false
             next == 'e'.code && matchesExtendsAt(pos) -> false
@@ -149,5 +182,9 @@ abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private fun isJsIdentPartCodePoint(cp: Int): Boolean =
-        isJsIdentStartCodePoint(cp) || (cp in '0'.code..'9'.code)
+        isJsIdentStartCodePoint(cp) ||
+            (cp in '0'.code..'9'.code) ||
+            (cp in 0x0300..0x036F) ||
+            cp == 0x200C ||
+            cp == 0x200D
 }

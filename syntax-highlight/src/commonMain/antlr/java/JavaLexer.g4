@@ -219,12 +219,13 @@ IDENTIFIER
 
 fragment ID_START
     : [a-zA-Z_$]
-    | [\u00C0-\u02AF\u0370-\u1FFF\u2100-\u2FFF\u3040-\uD7FF\uF900-\uFFEF]
+    | [\u00C0-\u02AF\u0370-\u1FFF\u2100-\u2FFF\u3040-\uD7FF\uF900-\uFFEF\u{10000}-\u{1EFFF}\u{20000}-\u{2FA1F}]
     ;
 
 fragment ID_CONTINUE
     : ID_START
     | [0-9]
+    | [\u0300-\u036F\u200C\u200D]
     ;
 
 ERROR_CHAR

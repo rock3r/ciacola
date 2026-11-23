@@ -19,8 +19,9 @@ WS
     ;
 
 NEWLINE
-    : '\r'? '\n'
-    | '\r'
+    : ( '\r'? '\n'
+      | '\r'
+      ) { onDefaultNewline(); }
     ;
 
 LINE_CONTINUATION
@@ -108,69 +109,71 @@ fragment NON_F_PREFIX
     ;
 
 // Hard keywords
-AND      : 'and';
-AS       : 'as';
-ASSERT   : 'assert';
+AND      : 'and' { onNonHeaderToken(); };
+AS       : 'as' { onNonHeaderToken(); };
+ASSERT   : 'assert' { onNonHeaderToken(); };
 ASYNC    : 'async';
-AWAIT    : 'await';
-BREAK    : 'break';
-CLASS    : 'class';
-CONTINUE : 'continue';
-DEF      : 'def';
-DEL      : 'del';
-ELIF     : 'elif';
-ELSE     : 'else';
-EXCEPT   : 'except';
-FINALLY  : 'finally';
-FOR      : 'for';
-FROM     : 'from';
-GLOBAL   : 'global';
-IF       : 'if';
-IMPORT   : 'import';
-IN       : 'in';
-IS       : 'is';
-LAMBDA   : 'lambda';
-NONLOCAL : 'nonlocal';
-NOT      : 'not';
-OR       : 'or';
-PASS     : 'pass';
-RAISE    : 'raise';
-RETURN   : 'return';
-TRY      : 'try';
-WHILE    : 'while';
-WITH     : 'with';
-YIELD    : 'yield';
+AWAIT    : 'await' { onNonHeaderToken(); };
+BREAK    : 'break' { onNonHeaderToken(); };
+CLASS    : 'class' { onStatementHeaderKeyword(); };
+CONTINUE : 'continue' { onNonHeaderToken(); };
+DEF      : 'def' { onStatementHeaderKeyword(); };
+DEL      : 'del' { onNonHeaderToken(); };
+ELIF     : 'elif' { onStatementHeaderKeyword(); };
+ELSE     : 'else' { onStatementHeaderKeyword(); };
+EXCEPT   : 'except' { onStatementHeaderKeyword(); };
+FINALLY  : 'finally' { onStatementHeaderKeyword(); };
+FOR      : 'for' { onStatementHeaderKeyword(); };
+FROM     : 'from' { onNonHeaderToken(); };
+GLOBAL   : 'global' { onNonHeaderToken(); };
+IF       : 'if' { onStatementHeaderKeyword(); };
+IMPORT   : 'import' { onNonHeaderToken(); };
+IN       : 'in' { onNonHeaderToken(); };
+IS       : 'is' { onNonHeaderToken(); };
+LAMBDA   : 'lambda' { onLambda(); };
+NONLOCAL : 'nonlocal' { onNonHeaderToken(); };
+NOT      : 'not' { onNonHeaderToken(); };
+OR       : 'or' { onNonHeaderToken(); };
+PASS     : 'pass' { onNonHeaderToken(); };
+RAISE    : 'raise' { onNonHeaderToken(); };
+RETURN   : 'return' { onNonHeaderToken(); };
+TRY      : 'try' { onStatementHeaderKeyword(); };
+WHILE    : 'while' { onStatementHeaderKeyword(); };
+WITH     : 'with' { onStatementHeaderKeyword(); };
+YIELD    : 'yield' { onNonHeaderToken(); };
 
 // Constants
-TRUE  : 'True';
-FALSE : 'False';
-NONE  : 'None';
+TRUE  : 'True' { onNonHeaderToken(); };
+FALSE : 'False' { onNonHeaderToken(); };
+NONE  : 'None' { onNonHeaderToken(); };
 
 // Numeric literals
 IMAG_NUMBER
-    : ( FLOAT_NUMBER | DIGIT_PART ) [jJ]
+    : ( FLOAT_NUMBER | DIGIT_PART ) [jJ] { onNonHeaderToken(); }
     ;
 
 FLOAT_NUMBER
-    : POINT_FLOAT
-    | EXPONENT_FLOAT
+    : ( POINT_FLOAT
+      | EXPONENT_FLOAT
+      ) { onNonHeaderToken(); }
     ;
 
 HEX_INTEGER
-    : '0' [xX] ( '_'? [0-9a-fA-F] )+
+    : '0' [xX] ( '_'? [0-9a-fA-F] )+ { onNonHeaderToken(); }
     ;
 
 BIN_INTEGER
-    : '0' [bB] ( '_'? [01] )+
+    : '0' [bB] ( '_'? [01] )+ { onNonHeaderToken(); }
     ;
 
 OCT_INTEGER
-    : '0' [oO] ( '_'? [0-7] )+
+    : '0' [oO] ( '_'? [0-7] )+ { onNonHeaderToken(); }
     ;
 
 DEC_INTEGER
-    : [1-9] ( '_'? [0-9] )*
-    | '0'+ ( '_'? '0' )*
+    : ( [1-9] ( '_'? [0-9] )*
+      | '0'+ ( '_'? '0' )*
+      ) { onNonHeaderToken(); }
     ;
 
 fragment DIGIT_PART
@@ -221,7 +224,7 @@ LBRACE : '{' { onLBrace(); };
 RBRACE : '}' { onRBrace(Tokens.FSTR_INTERP_CLOSE); };
 COLON  : ':' { onColon(Modes.FSTRING_FORMAT_SPEC, Tokens.FSTR_FORMAT_COLON); };
 COMMA  : ',';
-SEMI   : ';';
+SEMI   : ';' { onSemicolon(); };
 DOT    : '.';
 AT     : '@';
 ASSIGN : '=';
@@ -238,19 +241,20 @@ LT     : '<';
 GT     : '>';
 BANG   : '!';
 
-// Identifiers (including soft keywords match, case, type and Unicode letters)
+// Identifiers (including soft keywords match, case, type and Unicode BMP + SMP letters/marks)
 NAME
-    : ID_START ID_CONTINUE*
+    : ID_START ID_CONTINUE* { onName(text); }
     ;
 
 fragment ID_START
     : [a-zA-Z_]
-    | [\u00C0-\u02AF\u0370-\u1FFF\u2100-\u2FFF\u3040-\uD7FF\uF900-\uFFEF]
+    | [\u00C0-\u02AF\u0370-\u1FFF\u2100-\u2FFF\u3040-\uD7FF\uF900-\uFFEF\u{10000}-\u{1EFFF}\u{20000}-\u{2FA1F}]
     ;
 
 fragment ID_CONTINUE
     : ID_START
     | [0-9]
+    | [\u0300-\u036F\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]
     ;
 
 ERROR_CHAR

@@ -40,13 +40,13 @@ object RustSyntaxLexer : SyntaxLexer {
             onToken = { type, start, end -> emitRustRawToken(type, start, end, raw) },
         )
 
-        classifyRustRawTokens(source, raw)
-        return raw.map { SyntaxToken(kind = it.kind, startIndex = it.start, endIndex = it.end) }
+        val classified = classifyRustRawTokens(source, raw)
+        return classified.map { SyntaxToken(kind = it.kind, startIndex = it.start, endIndex = it.end) }
     }
 }
 
 private class RawRustToken(
-    var type: Int,
+    val type: Int,
     val start: Int,
     var end: Int,
     var kind: SyntaxTokenKind,
@@ -99,43 +99,43 @@ private fun emitRustRawToken(
     }
 }
 
-private fun classifyRustRawTokens(code: String, raw: MutableList<RawRustToken>) {
-    // Merge `ident` + `!` (when adjacent and not `!=`) into a single Function macro token (`println!`, `vec!`, `macro_rules!`).
-    // Also split chained tuple field access like `tuple.0.1` where `.` is followed by a simple decimal `a.b` float token.
+private fun classifyRustRawTokens(code: String, raw: List<RawRustToken>): List<RawRustToken> {
+    // Single-pass O(N) normalization:
+    // 1. Merge `ident` + `!` (when adjacent and not `!=`) into a single Function macro token (`println!`, `vec!`, `macro_rules!`).
+    // 2. Split chained tuple field access like `tuple.0.1` where `.` is followed by a simple decimal `a.b` float token.
+    val normalized = ArrayList<RawRustToken>(raw.size)
     var mergeIdx = 0
     while (mergeIdx < raw.size) {
         val cur = raw[mergeIdx]
-        if (mergeIdx + 1 < raw.size) {
-            val nxt = raw[mergeIdx + 1]
-            if (cur.type == RustTokens.IDENT && nxt.type == RustTokens.BANG && cur.end == nxt.start) {
-                cur.end = nxt.end
-                cur.kind = SyntaxTokenKind.Function
-                cur.type = MACRO_SYNTHETIC_TYPE
-                raw.removeAt(mergeIdx + 1)
-                mergeIdx++
+        val nxt = if (mergeIdx + 1 < raw.size) raw[mergeIdx + 1] else null
+        if (nxt != null && cur.type == RustTokens.IDENT && nxt.type == RustTokens.BANG && cur.end == nxt.start) {
+            normalized += RawRustToken(MACRO_SYNTHETIC_TYPE, cur.start, nxt.end, SyntaxTokenKind.Function, isHidden = false)
+            mergeIdx += 2
+            continue
+        }
+        normalized += cur
+        if (nxt != null && cur.type == RustTokens.DOT && nxt.type == RustTokens.FLOAT_LITERAL && cur.end == nxt.start) {
+            val floatText = code.substring(nxt.start, nxt.end)
+            val dotOffset = floatText.indexOf('.')
+            if (
+                dotOffset > 0 &&
+                dotOffset < floatText.length - 1 &&
+                floatText.all { it.isDigit() || it == '_' || it == '.' }
+            ) {
+                val splitAt = nxt.start + dotOffset
+                normalized += RawRustToken(RustTokens.INT_LITERAL, nxt.start, splitAt, SyntaxTokenKind.Number, isHidden = false)
+                normalized += RawRustToken(RustTokens.DOT, splitAt, splitAt + 1, SyntaxTokenKind.Punctuation, isHidden = false)
+                normalized += RawRustToken(RustTokens.INT_LITERAL, splitAt + 1, nxt.end, SyntaxTokenKind.Number, isHidden = false)
+                mergeIdx += 2
                 continue
-            }
-            if (cur.type == RustTokens.DOT && nxt.type == RustTokens.FLOAT_LITERAL && cur.end == nxt.start) {
-                val floatText = code.substring(nxt.start, nxt.end)
-                val dotOffset = floatText.indexOf('.')
-                if (
-                    dotOffset > 0 &&
-                    dotOffset < floatText.length - 1 &&
-                    floatText.all { it.isDigit() || it == '_' || it == '.' }
-                ) {
-                    val splitAt = nxt.start + dotOffset
-                    raw[mergeIdx + 1] = RawRustToken(RustTokens.INT_LITERAL, nxt.start, splitAt, SyntaxTokenKind.Number, isHidden = false)
-                    raw.add(mergeIdx + 2, RawRustToken(RustTokens.DOT, splitAt, splitAt + 1, SyntaxTokenKind.Punctuation, isHidden = false))
-                    raw.add(mergeIdx + 3, RawRustToken(RustTokens.INT_LITERAL, splitAt + 1, nxt.end, SyntaxTokenKind.Number, isHidden = false))
-                }
             }
         }
         mergeIdx++
     }
 
-    val visible = ArrayList<Int>(raw.size)
-    for (idx in raw.indices) {
-        if (!raw[idx].isHidden) visible += idx
+    val visible = ArrayList<Int>(normalized.size)
+    for (idx in normalized.indices) {
+        if (!normalized[idx].isHidden) visible += idx
     }
 
     // Track Rust attributes: `#[...]` and `#![...]`
@@ -143,9 +143,9 @@ private fun classifyRustRawTokens(code: String, raw: MutableList<RawRustToken>) 
     var angleDepth = 0
     var i = 0
     while (i < visible.size) {
-        val tok = raw[visible[i]]
-        val prev = if (i > 0) raw[visible[i - 1]] else null
-        val next = if (i + 1 < visible.size) raw[visible[i + 1]] else null
+        val tok = normalized[visible[i]]
+        val prev = if (i > 0) normalized[visible[i - 1]] else null
+        val next = if (i + 1 < visible.size) normalized[visible[i + 1]] else null
 
         if (attrBracketDepth > 0) {
             when (tok.type) {
@@ -181,7 +181,7 @@ private fun classifyRustRawTokens(code: String, raw: MutableList<RawRustToken>) 
                 i += 2
                 continue
             }
-            val next2 = if (i + 2 < visible.size) raw[visible[i + 2]] else null
+            val next2 = if (i + 2 < visible.size) normalized[visible[i + 2]] else null
             if (next != null && next.type == RustTokens.BANG && next2 != null && next2.type == RustTokens.LBRACK) {
                 tok.kind = SyntaxTokenKind.Annotation
                 next.kind = SyntaxTokenKind.Annotation
@@ -193,9 +193,13 @@ private fun classifyRustRawTokens(code: String, raw: MutableList<RawRustToken>) 
         }
 
         when (tok.type) {
-            RustTokens.LT -> angleDepth++
+            RustTokens.LT -> if (hasMatchingGenericClose(normalized, visible, i)) angleDepth++
             RustTokens.GT -> if (angleDepth > 0) angleDepth--
             RustTokens.SHR -> angleDepth = (angleDepth - 2).coerceAtLeast(0)
+            RustTokens.SEMI,
+            RustTokens.LBRACE,
+            RustTokens.RBRACE,
+            -> angleDepth = 0
         }
 
         if ((tok.type == RustTokens.IDENT || tok.type == RustTokens.RAW_IDENT) && tok.kind == SyntaxTokenKind.Plain) {
@@ -212,6 +216,47 @@ private fun classifyRustRawTokens(code: String, raw: MutableList<RawRustToken>) 
 
         i++
     }
+    return normalized
+}
+
+private fun hasMatchingGenericClose(
+    raw: List<RawRustToken>,
+    visible: List<Int>,
+    openVisibleIdx: Int,
+): Boolean {
+    var depth = 1
+    var parenDepth = 0
+    var bracketDepth = 0
+    val limit = (openVisibleIdx + 1 + 128).coerceAtMost(visible.size)
+    for (j in (openVisibleIdx + 1) until limit) {
+        when (raw[visible[j]].type) {
+            RustTokens.LPAREN -> parenDepth++
+            RustTokens.RPAREN -> if (parenDepth > 0) parenDepth-- else return false
+            RustTokens.LBRACK -> bracketDepth++
+            RustTokens.RBRACK -> if (bracketDepth > 0) bracketDepth-- else return false
+            RustTokens.LBRACE,
+            RustTokens.RBRACE,
+            -> return false
+            RustTokens.SEMI -> if (bracketDepth == 0) return false
+            RustTokens.ANDAND,
+            RustTokens.OROR,
+            RustTokens.EQEQ,
+            RustTokens.NE,
+            RustTokens.LE,
+            RustTokens.GE,
+            -> if (parenDepth == 0 && bracketDepth == 0) return false
+            RustTokens.LT -> depth++
+            RustTokens.GT -> {
+                depth--
+                if (depth == 0) return true
+            }
+            RustTokens.SHR -> {
+                depth -= 2
+                if (depth <= 0) return true
+            }
+        }
+    }
+    return false
 }
 
 private fun classifyRustIdentifier(

@@ -159,4 +159,45 @@ class TypeScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Keyword, firstKind("override"))
         assertEquals(SyntaxTokenKind.Keyword, firstKind("accessor"))
     }
+
+    @Test
+    fun resetsAngleDepthAfterComparisonsAndSupportsGenericTsxAndUnicodeIdents() {
+        val code = """
+            if (a < b) { void f(); const B = A; }
+            const view = <Select<string> value="a" />;
+            const nested = <Select<Map<string, Array<number>>> value="b">ok</Select>;
+            const arrow = <T,>(x: T): T => x;
+            const café: number = 1;
+            const 𠮷: string = "hi";
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-comparison-generic-tsx-unicode")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+
+        fun firstKind(text: String, after: Int = 0): SyntaxTokenKind =
+            tokens.first { it.startIndex >= after && it.slice(code) == text }.kind
+
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("void"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("B"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("A"))
+
+        val viewIdx = code.indexOf("view =")
+        assertEquals(SyntaxTokenKind.Tag, firstKind("Select", after = viewIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("string", after = viewIdx))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("value", after = viewIdx))
+        assertEquals(SyntaxTokenKind.String, firstKind("\"a\"", after = viewIdx))
+
+        val nestedIdx = code.indexOf("nested =")
+        assertEquals(SyntaxTokenKind.Tag, firstKind("Select", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("Map", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("Array", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Type, firstKind("number", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Attribute, firstKind("value", after = nestedIdx))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("ok", after = nestedIdx))
+
+        val arrowIdx = code.indexOf("arrow =")
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("=>", after = arrowIdx))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("café"))
+        assertEquals(SyntaxTokenKind.Plain, firstKind("𠮷"))
+    }
 }

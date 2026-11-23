@@ -108,4 +108,19 @@ class XmlSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).startsWith("<![CDATA[") && it.slice(code).contains("]] inside") }.kind)
         assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "app:item" }.kind)
     }
+
+    @Test
+    fun handlesUnterminatedCommentCdataAndProcessingInstructionCleanly() {
+        val unclosedComment = "<!-- unclosed <item/>"
+        val commentTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedComment, "xml-unclosed-comment")
+        assertEquals(listOf(SyntaxToken(SyntaxTokenKind.Comment, 0, unclosedComment.length)), commentTokens)
+
+        val unclosedCdata = "<![CDATA[ unclosed"
+        val cdataTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedCdata, "xml-unclosed-cdata")
+        assertEquals(listOf(SyntaxToken(SyntaxTokenKind.String, 0, unclosedCdata.length)), cdataTokens)
+
+        val unclosedPi = "<?target unclosed"
+        val piTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedPi, "xml-unclosed-pi")
+        assertEquals(listOf(SyntaxToken(SyntaxTokenKind.Keyword, 0, unclosedPi.length)), piTokens)
+    }
 }

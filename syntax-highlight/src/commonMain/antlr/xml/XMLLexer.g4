@@ -35,19 +35,48 @@
 lexer grammar XMLLexer;
 
 // Default "mode": Everything OUTSIDE of a tag
-COMMENT : '<!--' .*? '-->';
-CDATA   : '<![CDATA[' .*? ']]>';
-/** Scarf all DTD stuff, Entity Declarations like <!ENTITY ...>,
- *  and Notation Declarations <!NOTATION ...>
- */
-DTD       : '<!' ( '[' ( '"' ~["]* '"' | '\'' ~[']* '\'' | ~[\]'"] )* ']' | ~[>[] )* '>' -> skip;
+COMMENT
+    : '<!--' ( ~'-' | '-' ~'-' | '-' '-'+ ~[->] )* '-'* '-->'
+    ;
+
+UNTERMINATED_COMMENT
+    : '<!--' ( ~'-' | '-' ~'-' | '-' '-'+ ~[->] )* '-'*
+    ;
+
+CDATA
+    : '<![CDATA[' ( ~']' | ']' ~']' | ']'+ ~[\]>] )* ']'* ']]>'
+    ;
+
+UNTERMINATED_CDATA
+    : '<![CDATA[' ( ~']' | ']' ~']' | ']'+ ~[\]>] )* ']'*
+    ;
+
+/** DTD declarations and internal subsets such as <!DOCTYPE ... [...]> */
+DTD
+    : '<!' ( '[' ( '"' ~["]* '"' | '\'' ~[']* '\'' | ~[\]'"] )* ']'? | ~[>[] )* '>'?
+    ;
+
 EntityRef : '&' Name ';';
 CharRef   : '&#' DIGIT+ ';' | '&#x' HEXDIGIT+ ';';
 SEA_WS    : (' ' | '\t' | '\r'? '\n')+;
 
-OPEN         : '<'       -> pushMode(INSIDE);
-XMLDeclOpen  : '<?xml' S -> pushMode(INSIDE);
-SPECIAL_OPEN : '<?' Name -> more, pushMode(PROC_INSTR);
+OPEN        : '<'       -> pushMode(INSIDE);
+XMLDeclOpen : '<?xml' S -> pushMode(INSIDE);
+
+PI
+    : '<?' ( '?>' | PI_BODY_START ( ~'?' | '?'+ ~[?>] )* '?'* '?>' )
+    ;
+
+UNTERMINATED_PI
+    : '<?' ( PI_BODY_START ( ~'?' | '?'+ ~[?>] )* '?'* | 'xml' | 'xm' | 'x' )?
+    ;
+
+fragment PI_BODY_START
+    : ~[x?\r\n\t ]
+    | 'x' ~[m?\r\n\t ]
+    | 'xm' ~[l?\r\n\t ]
+    | 'xml' ~[ \t\r\n?]
+    ;
 
 TEXT: ~[<&]+; // match any 16 bit char other than < and &
 
@@ -59,9 +88,10 @@ SPECIAL_CLOSE : '?>' -> popMode; // close <?xml...?>
 SLASH_CLOSE   : '/>' -> popMode;
 SLASH         : '/';
 EQUALS        : '=';
-STRING        : '"' ~[<"]* '"' | '\'' ~[<']* '\'';
+STRING              : '"' ~[<"]* '"' | '\'' ~[<']* '\'';
+UNTERMINATED_STRING : '"' ~[<"]* | '\'' ~[<']*;
 Name          : NameStartChar NameChar*;
-S             : [ \t\r\n] -> skip;
+S             : [ \t\r\n]+;
 
 fragment HEXDIGIT: [a-fA-F0-9];
 
@@ -85,9 +115,3 @@ fragment NameStartChar:
     | '\uF900' ..'\uFDCF'
     | '\uFDF0' ..'\uFFFD'
 ;
-
-// ----------------- Handle <? ... ?> ---------------------
-mode PROC_INSTR;
-
-PI     : '?>' -> popMode; // close <?...?>
-IGNORE : .    -> more;

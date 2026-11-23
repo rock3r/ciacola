@@ -149,6 +149,7 @@ private fun classifyAndEmitJavaTokens(code: String, raw: MutableList<RawJavaToke
             inTypeHeader = false
             expectingDeclaredTypeName = false
             inSwitchCaseLabel = false
+            angleDepth = 0
         }
 
         when (tok.type) {
@@ -168,6 +169,7 @@ private fun classifyAndEmitJavaTokens(code: String, raw: MutableList<RawJavaToke
 
             JavaTokens.LBRACE -> {
                 braceDepth++
+                angleDepth = 0
                 inTypeHeader = false
                 inSwitchCaseLabel = false
                 if (inModuleHeader) {
@@ -178,6 +180,7 @@ private fun classifyAndEmitJavaTokens(code: String, raw: MutableList<RawJavaToke
 
             JavaTokens.RBRACE -> {
                 if (braceDepth > 0) braceDepth--
+                angleDepth = 0
                 if (braceDepth == 0) inModuleBody = false
                 inSwitchCaseLabel = false
             }
@@ -196,8 +199,10 @@ private fun classifyAndEmitJavaTokens(code: String, raw: MutableList<RawJavaToke
                 }
             }
 
-            JavaTokens.LT -> angleDepth++
+            JavaTokens.LT -> if (hasMatchingJavaAngleClose(raw, visible, i)) angleDepth++
             JavaTokens.GT -> if (angleDepth > 0) angleDepth--
+            JavaTokens.RSHIFT -> angleDepth = (angleDepth - 2).coerceAtLeast(0)
+            JavaTokens.URSHIFT -> angleDepth = (angleDepth - 3).coerceAtLeast(0)
             JavaTokens.CASE -> {
                 inSwitchCaseLabel = true
                 caseLabelDepth = 0
@@ -329,6 +334,62 @@ private fun classifyAndEmitJavaTokens(code: String, raw: MutableList<RawJavaToke
         out += SyntaxToken(kind = t.kind, startIndex = t.start, endIndex = t.end)
     }
     return out
+}
+
+private fun hasMatchingJavaAngleClose(
+    raw: List<RawJavaToken>,
+    visible: List<Int>,
+    openIndex: Int,
+): Boolean {
+    var depth = 1
+    var nestedParens = 0
+    val limit = minOf(visible.size, openIndex + 65)
+    for (j in openIndex + 1 until limit) {
+        when (raw[visible[j]].type) {
+            JavaTokens.LPAREN,
+            JavaTokens.LBRACK,
+            -> nestedParens++
+
+            JavaTokens.RPAREN,
+            JavaTokens.RBRACK,
+            -> {
+                if (nestedParens == 0) return false
+                nestedParens--
+            }
+
+            JavaTokens.SEMI,
+            JavaTokens.LBRACE,
+            JavaTokens.RBRACE,
+            -> return false
+
+            JavaTokens.ASSIGN,
+            JavaTokens.EQ,
+            JavaTokens.NE,
+            JavaTokens.AND,
+            JavaTokens.OR,
+            JavaTokens.RETURN,
+            JavaTokens.IF,
+            JavaTokens.FOR,
+            JavaTokens.WHILE,
+            JavaTokens.SWITCH,
+            -> if (nestedParens == 0) return false
+
+            JavaTokens.LT -> if (nestedParens == 0) depth++
+            JavaTokens.GT -> if (nestedParens == 0) {
+                depth--
+                if (depth <= 0) return true
+            }
+            JavaTokens.RSHIFT -> if (nestedParens == 0) {
+                depth -= 2
+                if (depth <= 0) return true
+            }
+            JavaTokens.URSHIFT -> if (nestedParens == 0) {
+                depth -= 3
+                if (depth <= 0) return true
+            }
+        }
+    }
+    return false
 }
 
 private fun isJavaContextualKeyword(
@@ -562,6 +623,10 @@ private fun classifyJavaIdentifier(
         } else {
             SyntaxTokenKind.Property
         }
+    }
+
+    if (prev?.kind == SyntaxTokenKind.Type) {
+        return SyntaxTokenKind.Plain
     }
 
     if (

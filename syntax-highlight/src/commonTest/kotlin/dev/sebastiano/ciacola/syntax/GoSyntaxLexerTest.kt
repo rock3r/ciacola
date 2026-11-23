@@ -177,6 +177,19 @@ class GoSyntaxLexerTest {
     }
 
     @Test
+    fun supportsBmpAndSupplementaryUnicodeIdentifiers() {
+        val code = "package main\nfunc привет(α float64, café string, e\u0301 int, 𠮷 int, 𝐀 bool) {}"
+        val tokens = assertLosslessInvariants(GoSyntaxLexer, code, "go-unicode")
+        assertEquals(0, tokens.count { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Function, tokens.first { it.slice(code) == "привет" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "α" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "e\u0301" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𝐀" }.kind)
+    }
+
+    @Test
     fun matchesShikiAndPygmentsOracles() {
         assertAllOracleFixtures(goOracleFixtures)
     }

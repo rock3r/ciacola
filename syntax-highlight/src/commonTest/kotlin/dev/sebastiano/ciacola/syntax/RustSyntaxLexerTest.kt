@@ -133,6 +133,7 @@ class RustSyntaxLexerTest {
         val deeplyNestedClosed = "/* ".repeat(2_000) + "inner" + " */".repeat(2_000)
         val longRawString = "r#####\"" + "a \"#### b ".repeat(3_000) + "\"#####"
         val unclosedRawString = "r#####\"" + "x \"#### ".repeat(3_000)
+        val denseMacrosAndTuples = "vec![1]; t.0.1;\n".repeat(3_500)
 
         assertLinearPerformance(
             lexer = RustSyntaxLexer,
@@ -141,6 +142,7 @@ class RustSyntaxLexerTest {
                 "closed-nested-comments" to deeplyNestedClosed,
                 "long-raw-string" to longRawString,
                 "unclosed-raw-string" to unclosedRawString,
+                "dense-macros-and-tuples" to denseMacrosAndTuples,
             ),
         )
     }
@@ -201,6 +203,43 @@ class RustSyntaxLexerTest {
                 SyntaxTokenKind.Number to "1",
             ),
             tupTokens.map { it.kind to it.slice(code) },
+        )
+    }
+
+    @Test
+    fun resetsAngleDepthAfterComparisonsAndSupportsSupplementaryUnicodeIdentifiers() {
+        val comparisonCode = """
+            fn f(x: i32) {
+                if x < 0 { return; }
+                let y = X + 1;
+                let _ = Vec::<Result<T, E>>::new();
+                let Z = 2;
+            }
+        """.trimIndent()
+        val cmpTokens = assertLosslessInvariants(RustSyntaxLexer, comparisonCode, "rust-angle-reset")
+        assertEquals(SyntaxTokenKind.Plain, cmpTokens.first { it.slice(comparisonCode) == "X" }.kind)
+        assertEquals(SyntaxTokenKind.Type, cmpTokens.first { it.slice(comparisonCode) == "T" }.kind)
+        assertEquals(SyntaxTokenKind.Type, cmpTokens.first { it.slice(comparisonCode) == "E" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, cmpTokens.first { it.slice(comparisonCode) == "Z" }.kind)
+
+        val unicodeCode = "let café = 1; let e\u0301 = 2; let 𠮷 = 3; let 𝐀 = 4; let call = 1.𠀡();"
+        val uniTokens = assertLosslessInvariants(RustSyntaxLexer, unicodeCode, "rust-unicode")
+        assertEquals(0, uniTokens.count { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "e\u0301" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𝐀" }.kind)
+        val dotCallStart = unicodeCode.indexOf("1.𠀡()")
+        val dotCallTokens = uniTokens.filter { it.startIndex >= dotCallStart && it.endIndex <= dotCallStart + "1.𠀡()".length }
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Punctuation to ".",
+                SyntaxTokenKind.Function to "𠀡",
+                SyntaxTokenKind.Punctuation to "(",
+                SyntaxTokenKind.Punctuation to ")",
+            ),
+            dotCallTokens.map { it.kind to it.slice(unicodeCode) },
         )
     }
 

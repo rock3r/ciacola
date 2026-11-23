@@ -85,6 +85,7 @@ class CppSyntaxLexerTest {
         val longRaw = "R\"delim(" + "a ) b )de ".repeat(3_000) + ")delim\""
         val unclosedRaw = "R\"delim(" + "a ) b )de ".repeat(3_000)
         val hugeDefine = "#define M(x) \\\n" + "    ((x) + 1) \\\n".repeat(2_000) + "    (x)\n"
+        val denseUdls = "\"x\"sv, 100ms, 0xFF_u8,\n".repeat(2_500)
 
         assertLinearPerformance(
             lexer = CppSyntaxLexer,
@@ -92,6 +93,7 @@ class CppSyntaxLexerTest {
                 "long-cpp-raw-string" to longRaw,
                 "unclosed-cpp-raw-string" to unclosedRaw,
                 "huge-define-continuations" to hugeDefine,
+                "dense-udls" to denseUdls,
             ),
         )
     }
@@ -152,6 +154,27 @@ class CppSyntaxLexerTest {
         for (kw in listOf("not", "and", "or", "consteval", "constinit", "co_await", "co_yield", "co_return")) {
             assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == kw }.kind)
         }
+    }
+
+    @Test
+    fun handlesSurrogatePairRawStringDelimitersAndUnicodeIdentifiers() {
+        val rawEmojiCode = "auto s = R\"🚀(hello)🚀\"; int after = 1;"
+        val rawTokens = assertLosslessInvariants(CppSyntaxLexer, rawEmojiCode, "cpp-emoji-raw")
+        assertEquals(SyntaxTokenKind.String, rawTokens.first { it.slice(rawEmojiCode) == "R\"🚀(hello)🚀\"" }.kind)
+        assertEquals(SyntaxTokenKind.Type, rawTokens.first { it.slice(rawEmojiCode) == "int" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, rawTokens.first { it.slice(rawEmojiCode) == "after" }.kind)
+        assertEquals(SyntaxTokenKind.Number, rawTokens.first { it.slice(rawEmojiCode) == "1" }.kind)
+
+        val unicodeCode = "double Δt = 0.1; int café = 1; int e\u0301 = 2; int 𠮷 = 3; int 𝐀 = 4; auto f = 1.0f64 + 1.0bf16;"
+        val uniTokens = assertLosslessInvariants(CppSyntaxLexer, unicodeCode, "cpp-unicode")
+        assertEquals(0, uniTokens.count { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "Δt" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "e\u0301" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𝐀" }.kind)
+        assertEquals(SyntaxTokenKind.Number, uniTokens.first { it.slice(unicodeCode) == "1.0f64" }.kind)
+        assertEquals(SyntaxTokenKind.Number, uniTokens.first { it.slice(unicodeCode) == "1.0bf16" }.kind)
     }
 
     @Test

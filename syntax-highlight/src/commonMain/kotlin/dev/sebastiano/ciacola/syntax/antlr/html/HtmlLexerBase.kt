@@ -8,7 +8,7 @@ import org.antlr.v4.kotlinruntime.Lexer
  * Pure Kotlin Multiplatform base lexer for HTML5, tracking `<script>` and `<style>` opening tags
  * to switch into raw text modes until the matching closing tag.
  */
-abstract class HtmlLexerBase(input: CharStream) : Lexer(input) {
+internal abstract class HtmlLexerBase(input: CharStream) : Lexer(input) {
     protected enum class RawTagKind {
         NONE,
         SCRIPT,

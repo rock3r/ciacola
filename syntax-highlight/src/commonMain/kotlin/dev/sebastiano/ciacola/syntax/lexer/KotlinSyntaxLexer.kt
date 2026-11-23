@@ -228,7 +228,8 @@ private fun classifyKotlinRawTokens(code: String, raw: List<RawKotlinToken>) {
         when (tok.type) {
             KotlinTokens.PACKAGE, KotlinTokens.IMPORT -> inPackageOrImport = true
             KotlinTokens.AS -> inPackageOrImport = false
-            KotlinTokens.LANGLE -> angleDepth++
+            KotlinTokens.SEMICOLON, KotlinTokens.LCURL, KotlinTokens.RCURL -> angleDepth = 0
+            KotlinTokens.LANGLE -> if (hasMatchingKotlinAngleClose(raw, visible, i)) angleDepth++
             KotlinTokens.RANGLE -> if (angleDepth > 0) angleDepth--
         }
 
@@ -310,6 +311,62 @@ private fun classifyKotlinRawTokens(code: String, raw: List<RawKotlinToken>) {
 
         i++
     }
+}
+
+private fun hasMatchingKotlinAngleClose(
+    raw: List<RawKotlinToken>,
+    visible: List<Int>,
+    openIndex: Int,
+): Boolean {
+    var depth = 1
+    var nestedParens = 0
+    val limit = minOf(visible.size, openIndex + 65)
+    for (j in openIndex + 1 until limit) {
+        when (raw[visible[j]].type) {
+            KotlinTokens.LPAREN,
+            KotlinTokens.LSQUARE,
+            -> nestedParens++
+
+            KotlinTokens.RPAREN,
+            KotlinTokens.RSQUARE,
+            -> {
+                if (nestedParens == 0) return false
+                nestedParens--
+            }
+
+            KotlinTokens.SEMICOLON,
+            KotlinTokens.LCURL,
+            KotlinTokens.RCURL,
+            -> return false
+
+            KotlinTokens.ASSIGNMENT,
+            KotlinTokens.EQEQ,
+            KotlinTokens.EQEQEQ,
+            KotlinTokens.EXCL_EQ,
+            KotlinTokens.EXCL_EQEQ,
+            KotlinTokens.CONJ,
+            KotlinTokens.DISJ,
+            KotlinTokens.RETURN,
+            KotlinTokens.IF,
+            KotlinTokens.FOR,
+            KotlinTokens.WHILE,
+            KotlinTokens.WHEN,
+            KotlinTokens.VAL,
+            KotlinTokens.VAR,
+            KotlinTokens.FUN,
+            KotlinTokens.CLASS,
+            KotlinTokens.INTERFACE,
+            KotlinTokens.OBJECT,
+            -> if (nestedParens == 0) return false
+
+            KotlinTokens.LANGLE -> if (nestedParens == 0) depth++
+            KotlinTokens.RANGLE -> if (nestedParens == 0) {
+                depth--
+                if (depth == 0) return true
+            }
+        }
+    }
+    return false
 }
 
 private fun isSoftKeywordActingAsKeyword(

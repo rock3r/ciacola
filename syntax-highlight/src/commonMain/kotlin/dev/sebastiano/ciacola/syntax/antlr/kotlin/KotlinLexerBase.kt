@@ -7,7 +7,7 @@ import org.antlr.v4.kotlinruntime.Lexer
  * Pure Kotlin Multiplatform base lexer for [KotlinLexer] supporting Kotlin 2.1+
  * multi-dollar string interpolation (`$$"..."`, `$$$"""..."""`) with nested templates.
  */
-public abstract class KotlinLexerBase(input: CharStream) : Lexer(input) {
+internal abstract class KotlinLexerBase(input: CharStream) : Lexer(input) {
 
     private val multiDollarStack = ArrayList<Int>()
 

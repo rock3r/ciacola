@@ -21,6 +21,7 @@ tokens {
             type == Tokens.JSX_TAG_LINE_COMMENT ||
             type == Tokens.JSX_TAG_BLOCK_COMMENT ||
             type == Tokens.JSX_TAG_UNTERMINATED_BLOCK_COMMENT ||
+            type == Tokens.JSX_TYPE_WS ||
             type == Tokens.JSX_CLOSING_WS
 
     override fun isIdentTokenType(type: Int): Boolean = type == Tokens.IDENT
@@ -277,12 +278,13 @@ fragment DECIMAL_DIGITS
 
 fragment IDENT_START
     : [a-zA-Z_$]
-    | [\u00C0-\u02AF\u0370-\u1FFF\u2C00-\uD7FF\uF900-\uFFFF]
+    | [\u00C0-\u02AF\u0370-\u1FFF\u2C00-\uD7FF\uF900-\uFFEF\u{10000}-\u{1EFFF}\u{20000}-\u{2FA1F}]
     ;
 
 fragment IDENT_PART
     : IDENT_START
     | [0-9]
+    | [\u0300-\u036F\u200C\u200D]
     ;
 
 // ---------------- Template literal mode ----------------
@@ -337,6 +339,10 @@ JSX_TAG_CLOSE
 
 JSX_TAG_EXPR_START
     : '{' -> pushMode(DEFAULT_MODE)
+    ;
+
+JSX_TAG_TYPE_OPEN
+    : '<' -> pushMode(JSX_TYPE_ARGS)
     ;
 
 JSX_TAG_STRING
@@ -424,5 +430,49 @@ JSX_CLOSING_NAME
     ;
 
 JSX_CLOSING_ERROR
+    : .
+    ;
+
+// ---------------- TSX generic type argument mode inside JSX tag ----------------
+mode JSX_TYPE_ARGS;
+
+JSX_TYPE_WS
+    : [ \t\r\n]+
+    ;
+
+JSX_TYPE_OPEN
+    : '<' -> pushMode(JSX_TYPE_ARGS)
+    ;
+
+JSX_TYPE_CLOSE
+    : '>' -> popMode
+    ;
+
+JSX_TYPE_STRING
+    : '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
+    | '\'' ( '\\' ~[\r\n] | ~['\\\r\n] )* '\''
+    ;
+
+JSX_TYPE_NUMBER
+    : DECIMAL_DIGITS ( '.' DECIMAL_DIGITS? )?
+    ;
+
+JSX_TYPE_ARROW
+    : '=>'
+    ;
+
+JSX_TYPE_PUNCT
+    : [(){}[\],.;]
+    ;
+
+JSX_TYPE_OP
+    : [|&?:=]
+    ;
+
+JSX_TYPE_IDENT
+    : IDENT_START IDENT_PART*
+    ;
+
+JSX_TYPE_ERROR
     : .
     ;

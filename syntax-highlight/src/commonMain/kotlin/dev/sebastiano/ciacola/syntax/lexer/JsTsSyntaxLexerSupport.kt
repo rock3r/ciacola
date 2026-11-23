@@ -71,6 +71,7 @@ private fun isHiddenJsToken(type: Int): Boolean = when (type) {
     JsTokens.JSX_TAG_LINE_COMMENT,
     JsTokens.JSX_TAG_BLOCK_COMMENT,
     JsTokens.JSX_TAG_UNTERMINATED_BLOCK_COMMENT,
+    JsTokens.JSX_TYPE_WS,
     JsTokens.JSX_CLOSING_WS,
     JsTokens.JSX_CHILDREN_WS,
     -> true
@@ -150,6 +151,7 @@ private fun classifyJsTokens(
             JsTokens.JSX_TAG_EXPR_START,
             JsTokens.JSX_CHILDREN_EXPR_START,
             -> {
+                angleDepth = 0
                 containerStack.add(JsTokens.LBRACE)
                 if (pendingEnumBlock) {
                     enumBraceDepth = containerStack.size
@@ -159,12 +161,13 @@ private fun classifyJsTokens(
             JsTokens.RBRACE,
             JsTokens.TEMPLATE_EXPR_END,
             -> {
+                angleDepth = 0
                 if (containerStack.size == enumBraceDepth) {
                     enumBraceDepth = -1
                 }
                 if (containerStack.isNotEmpty()) containerStack.removeAt(containerStack.size - 1)
             }
-            JsTokens.LT -> if (isTypeScript && isGenericOpenContext(prev, prevText)) angleDepth++
+            JsTokens.LT -> if (isTypeScript && isGenericOpenContext(prev, prevText) && hasMatchingClosingAngle(raw, visible, i)) angleDepth++
             JsTokens.GT -> if (angleDepth > 0) angleDepth--
             JsTokens.RSHIFT -> if (angleDepth >= 2) angleDepth -= 2 else angleDepth = 0
             JsTokens.URSHIFT -> if (angleDepth >= 3) angleDepth -= 3 else angleDepth = 0
@@ -203,8 +206,15 @@ private fun classifyJsTokens(
             JsTokens.JSX_TAG_SELF_CLOSE,
             JsTokens.JSX_TAG_CLOSE,
             JsTokens.JSX_TAG_EXPR_START,
+            JsTokens.JSX_TAG_TYPE_OPEN,
             -> {
                 expectingJsxTagName = false
+                i++
+                continue
+            }
+            JsTokens.JSX_TYPE_IDENT -> {
+                val text = source.substring(tok.start, tok.end)
+                kinds[rawIdx] = classifyJsxTypeIdent(text, next?.type)
                 i++
                 continue
             }
@@ -273,6 +283,60 @@ private fun classifyJsTokens(
     return raw.mapIndexed { idx, tok ->
         SyntaxToken(kind = kinds[idx], startIndex = tok.start, endIndex = tok.end)
     }
+}
+
+private fun hasMatchingClosingAngle(
+    raw: List<RawJsToken>,
+    visible: List<Int>,
+    ltVisibleIndex: Int,
+): Boolean {
+    var subAngle = 1
+    var paren = 0
+    var brace = 0
+    var bracket = 0
+    val maxLookahead = (ltVisibleIndex + 128).coerceAtMost(visible.size)
+    for (idx in (ltVisibleIndex + 1) until maxLookahead) {
+        when (raw[visible[idx]].type) {
+            JsTokens.LPAREN -> paren++
+            JsTokens.RPAREN -> if (--paren < 0) return false
+            JsTokens.LBRACE -> brace++
+            JsTokens.RBRACE -> if (--brace < 0) return false
+            JsTokens.LBRACK -> bracket++
+            JsTokens.RBRACK -> if (--bracket < 0) return false
+            JsTokens.SEMI -> return false
+            JsTokens.LOGICAL_AND,
+            JsTokens.LOGICAL_OR,
+            JsTokens.NULLISH,
+            JsTokens.EQ,
+            JsTokens.NEQ,
+            JsTokens.STRICT_EQ,
+            JsTokens.STRICT_NEQ,
+            -> if (paren == 0 && brace == 0 && bracket == 0) return false
+            JsTokens.LT -> if (paren == 0 && brace == 0 && bracket == 0) subAngle++
+            JsTokens.GT -> if (paren == 0 && brace == 0 && bracket == 0) {
+                if (--subAngle <= 0) return true
+            }
+            JsTokens.RSHIFT -> if (paren == 0 && brace == 0 && bracket == 0) {
+                subAngle -= 2
+                if (subAngle <= 0) return true
+            }
+            JsTokens.URSHIFT -> if (paren == 0 && brace == 0 && bracket == 0) {
+                subAngle -= 3
+                if (subAngle <= 0) return true
+            }
+        }
+    }
+    return false
+}
+
+private fun classifyJsxTypeIdent(text: String, nextType: Int?): SyntaxTokenKind = when {
+    text in JS_CONSTANTS -> SyntaxTokenKind.Constant
+    text in TS_PRIMITIVE_TYPES || text == "void" -> SyntaxTokenKind.Type
+    text in TS_BUILTIN_TYPES -> SyntaxTokenKind.Type
+    text == "readonly" || text == "keyof" || text == "typeof" || text == "extends" || text == "infer" || text == "is" || text == "as" -> SyntaxTokenKind.Keyword
+    nextType == JsTokens.JSX_TYPE_OP && text != "true" && text != "false" -> SyntaxTokenKind.Plain
+    text[0].isUpperCase() -> SyntaxTokenKind.Type
+    else -> SyntaxTokenKind.Plain
 }
 
 private fun isGenericOpenContext(prev: RawJsToken?, prevText: String?): Boolean {
@@ -474,6 +538,7 @@ private fun defaultJsKind(type: Int): SyntaxTokenKind = when (type) {
     JsTokens.TEMPLATE_LONE_DOLLAR,
     JsTokens.JSX_TAG_STRING,
     JsTokens.JSX_TAG_UNTERMINATED_STRING,
+    JsTokens.JSX_TYPE_STRING,
     -> SyntaxTokenKind.String
 
     JsTokens.BIGINT_LITERAL,
@@ -481,9 +546,12 @@ private fun defaultJsKind(type: Int): SyntaxTokenKind = when (type) {
     JsTokens.BIN_LITERAL,
     JsTokens.OCT_LITERAL,
     JsTokens.DECIMAL_LITERAL,
+    JsTokens.JSX_TYPE_NUMBER,
     -> SyntaxTokenKind.Number
 
-    JsTokens.ARROW -> SyntaxTokenKind.Keyword
+    JsTokens.ARROW,
+    JsTokens.JSX_TYPE_ARROW,
+    -> SyntaxTokenKind.Keyword
 
     JsTokens.LPAREN,
     JsTokens.RPAREN,
@@ -501,8 +569,10 @@ private fun defaultJsKind(type: Int): SyntaxTokenKind = when (type) {
     JsTokens.JSX_TAG_SELF_CLOSE,
     JsTokens.JSX_TAG_CLOSE,
     JsTokens.JSX_TAG_EXPR_START,
+    JsTokens.JSX_TAG_TYPE_OPEN,
     JsTokens.JSX_TAG_DOT,
     JsTokens.JSX_TAG_COLON,
+    JsTokens.JSX_TYPE_PUNCT,
     JsTokens.JSX_CLOSING_OPEN,
     JsTokens.JSX_CLOSING_END,
     JsTokens.JSX_CLOSING_DOT,
@@ -560,6 +630,9 @@ private fun defaultJsKind(type: Int): SyntaxTokenKind = when (type) {
     JsTokens.QUESTION,
     JsTokens.COLON,
     JsTokens.JSX_TAG_EQ,
+    JsTokens.JSX_TYPE_OPEN,
+    JsTokens.JSX_TYPE_CLOSE,
+    JsTokens.JSX_TYPE_OP,
     -> SyntaxTokenKind.Operator
 
     JsTokens.AT -> SyntaxTokenKind.Annotation
@@ -570,6 +643,7 @@ private fun defaultJsKind(type: Int): SyntaxTokenKind = when (type) {
 
     JsTokens.ERROR_CHAR,
     JsTokens.JSX_TAG_ERROR,
+    JsTokens.JSX_TYPE_ERROR,
     JsTokens.JSX_CLOSING_ERROR,
     -> SyntaxTokenKind.Invalid
 
