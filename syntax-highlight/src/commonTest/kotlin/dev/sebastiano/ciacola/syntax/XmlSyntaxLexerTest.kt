@@ -151,7 +151,7 @@ class XmlSyntaxLexerTest {
     }
 
     @Test
-    fun r2_p2_xml_doctypeInternalSubsetCommentWithApostropheDoesNotSwallowDocument() {
+    fun handlesDoctypeInternalSubsetCommentWithApostrophe() {
         val code = "<!DOCTYPE r [\n<!-- don't remove -->\n<!ELEMENT r ANY>\n]>\n<r a='1'>x</r>\n"
         val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-dtd-comment-apostrophe")
         assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })

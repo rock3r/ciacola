@@ -128,7 +128,7 @@ class DualOracleSuiteTest {
     }
 
     @Test
-    fun r2_p2_oracle_fixtureWithoutExpectationsIsRejected() {
+    fun rejectsFixtureWithoutExpectations() {
         assertFailsWith<AssertionError> {
             assertMatchesOracleFixture(
                 OracleFixture(
@@ -142,13 +142,14 @@ class DualOracleSuiteTest {
     }
 
     @Test
-    fun r2_p2_oracle_wideningOverrideIsRejected() {
-        assertFailsWith<AssertionError> {
+    fun rejectsWideningAndMultiKindOverrides() {
+        val wideningError = assertFailsWith<AssertionError> {
             assertMatchesOracleFixture(
                 OracleFixture(
                     name = "widening-override",
                     language = SyntaxLanguage.Kotlin,
                     code = "val x = 1",
+                    maxOverrideShare = 1.0,
                     expectations = listOf(
                         OracleTokenExpectation(
                             text = "val",
@@ -170,5 +171,42 @@ class DualOracleSuiteTest {
                 ),
             )
         }
+        assertTrue(
+            wideningError.message.orEmpty().contains("widening override"),
+            "Expected widening override rejection message, got: ${wideningError.message}",
+        )
+
+        val multiKindError = assertFailsWith<AssertionError> {
+            assertMatchesOracleFixture(
+                OracleFixture(
+                    name = "multi-kind-override",
+                    language = SyntaxLanguage.Kotlin,
+                    code = "val x = 1",
+                    maxOverrideShare = 1.0,
+                    expectations = listOf(
+                        OracleTokenExpectation(
+                            text = "val",
+                            startIndex = 0,
+                            endIndex = 3,
+                            shikiKind = SyntaxTokenKind.Keyword,
+                            pygmentsKind = SyntaxTokenKind.Keyword,
+                        ),
+                        OracleTokenExpectation(
+                            text = "x",
+                            startIndex = 4,
+                            endIndex = 5,
+                            shikiKind = SyntaxTokenKind.Plain,
+                            pygmentsKind = SyntaxTokenKind.Plain,
+                            allowedKinds = setOf(SyntaxTokenKind.Property, SyntaxTokenKind.Tag),
+                            note = "Multi-kind non-oracle override",
+                        ),
+                    ),
+                ),
+            )
+        }
+        assertTrue(
+            multiKindError.message.orEmpty().contains("single intended kind"),
+            "Expected single intended kind rejection message, got: ${multiKindError.message}",
+        )
     }
 }

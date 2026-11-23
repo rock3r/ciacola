@@ -305,7 +305,7 @@ class PythonSyntaxLexerTest {
     }
 
     @Test
-    fun r2_p2_python_pep701MultilineInterpolationWithGeneratorLine() {
+    fun handlesPep701MultilineInterpolationWithGeneratorLine() {
         val code = "s = f\"items: {\n  ', '.join(\n    str(i)\n    for i in items\n  )\n}\"\n"
         val tokens = assertLosslessInvariants(PythonSyntaxLexer, code, "python-pep701-generator")
         assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
@@ -316,7 +316,7 @@ class PythonSyntaxLexerTest {
     }
 
     @Test
-    fun r2_p2_python_pep701MultilineInterpolationWithConditionalExpressionLine() {
+    fun handlesPep701MultilineInterpolationWithConditionalExpressionLine() {
         val code = "s = f\"val={\n  a\n  if cond else b\n}\"\n"
         val tokens = assertLosslessInvariants(PythonSyntaxLexer, code, "python-pep701-ternary")
         assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })

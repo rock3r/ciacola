@@ -9,6 +9,7 @@ internal object XmlOracleFixtures {
         language = SyntaxLanguage.Xml,
         code = "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<?xml-stylesheet type=\"text/xsl\" href=\"style.xsl\"?>\n<!DOCTYPE layout [\n  <!ELEMENT layout (LinearLayout*)>\n]>\n<LinearLayout\n    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    xmlns:app=\"http://schemas.android.com/apk/res-auto\"\n    android:layout_width=\"match_parent\"\n    android:orientation='vertical'>\n    <!-- multi-line\n         comment -->\n    <TextView\n        android:id=\"@+id/title\"\n        app:layout_constraintTop_toTopOf=\"parent\"\n        text=\"Hello &amp; &#10; &#x20; world\" />\n    <p>Entities &lt;ok&gt; &#65; &#x42;</p>\n    <![CDATA[raw <text> ]] inside &stuff;]]>\n</LinearLayout>\n",
         minAgreementRatio = 0.95,
+        // XML prolog/PI keywords, tag-attribute '=' punctuation, and entity/char refs follow Ciacola's XML taxonomy.
         maxOverrideShare = 0.30,
         expectations = listOf(
             OracleTokenExpectation("<?", 0, 2, SyntaxTokenKind.Punctuation, SyntaxTokenKind.Preprocessor, allowedKinds = setOf(SyntaxTokenKind.Keyword), note = "XML prolog <?xml classified as Keyword"),

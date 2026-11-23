@@ -9,7 +9,8 @@ internal object TomlOracleFixtures {
         language = SyntaxLanguage.Toml,
         code = "# Service configuration\ntitle = \"Ciacola Deck\"\n\"\" = \"empty\"\n1234 = \"num-key\"\nenabled = true\n\n[server]\nhost = \"localhost\"\nport = 8080\nhex_id = 0xdead_beef\noct_mode = 0o755\nbin_mask = 0b1101_0110\nratio = 3.1415\nsci = 6.626e-34\ninf_limit = inf\npos_inf = +inf\nneg_inf = -inf\nnan_val = nan\ncreated_at = 2026-11-23T10:45:00Z\nspace_dt = 2026-11-23 10:45:00z\nlocal_dt = 2026-11-23T10:45:00.123\nlocal_date = 2026-11-23\nlocal_time = 10:45:00.5\n\n[dependencies.\"serde.core\"]\nversion = \"1.0\"\nescapes = \"\\b\\t\\n\\f\\r\\\"\\\\\\u00E9\\U0001F600\"\n\"quoted.key\" = 'literal \\n string'\nsite.\"google.com\".ok = false\ninline = { x = 1, y = { z = \"two\" } }\nports = [\n  8000, # primary\n  8001,\n]\nmulti_basic = \"\"\"\nhello \\\n  world \"\"two\"\"\"\"\"\nmulti_lit = '''\nraw \\n ''two'''''\n\n[[bin]]\nname = \"runner\"\n[[products.items]]\nid = 1_000\n",
         minAgreementRatio = 0.95,
-        maxOverrideShare = 0.40,
+        // TOML keys, section table names, and RFC 3339 datetimes intentionally map to Property, Tag, and Constant.
+        maxOverrideShare = 0.35,
         expectations = listOf(
             OracleTokenExpectation("# Service configuration", 0, 23, SyntaxTokenKind.Comment, SyntaxTokenKind.Comment, note = "STRICT: comment"),
             OracleTokenExpectation("title", 24, 29, SyntaxTokenKind.Plain, SyntaxTokenKind.Plain, allowedKinds = setOf(SyntaxTokenKind.Property), note = "TOML key classified as Property"),

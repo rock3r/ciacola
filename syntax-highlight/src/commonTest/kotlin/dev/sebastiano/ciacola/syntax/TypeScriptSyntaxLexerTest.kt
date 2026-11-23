@@ -254,4 +254,14 @@ class TypeScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Tag, tParenColon.first { it.slice(parenColonTsx) == "span" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tParenColon.first { it.slice(parenColonTsx) == "(c):" }.kind)
     }
+
+    @Test
+    fun handlesCjkIterationMarkIdentifiers() {
+        val code = "const 時々: number = 1;"
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-cjk-iteration-mark")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "時々" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "number" }.kind)
+    }
 }

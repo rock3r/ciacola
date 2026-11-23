@@ -275,4 +275,12 @@ class JavaSyntaxLexerTest {
             tokens.first { it.slice(code) == "module" && it.startIndex > code.indexOf("int ") }.kind,
         )
     }
+
+    @Test
+    fun supportsCjkIterationMarkIdentifiers() {
+        val code = "class A { int 佐々木 = 1; }"
+        val tokens = assertLosslessInvariants(JavaSyntaxLexer, code, "java-cjk-iteration-mark")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Plain, tokens.single { it.slice(code) == "佐々木" }.kind)
+    }
 }

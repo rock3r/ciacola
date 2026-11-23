@@ -216,7 +216,7 @@ class KotlinSyntaxLexerTest {
     }
 
     @Test
-    fun r2_p2_kotlin_cjkIdeographAndHangulIdentifiersAreNotInvalid() {
+    fun recognizesBmpCjkIdeographAndHangulIdentifiers() {
         val code = "val 名前 = 1\nval 변수 = 2\n"
         val tokens = assertLosslessInvariants(KotlinSyntaxLexer, code, "kotlin-cjk-hangul-idents")
         assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
