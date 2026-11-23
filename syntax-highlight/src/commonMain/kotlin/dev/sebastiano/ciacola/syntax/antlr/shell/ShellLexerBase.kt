@@ -660,6 +660,29 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         var i = 0
         while (i < rawDelimiter.length) {
             when (val ch = rawDelimiter[i]) {
+                '$' -> {
+                    val next = if (i + 1 < rawDelimiter.length) rawDelimiter[i + 1] else '\u0000'
+                    if (next == '\'') {
+                        isQuoted = true
+                        i += 2
+                        while (i < rawDelimiter.length && rawDelimiter[i] != '\'') {
+                            if (rawDelimiter[i] == '\\' && i + 1 < rawDelimiter.length) {
+                                i = decodeAnsiCEscape(rawDelimiter, i + 1, unquoted)
+                            } else {
+                                unquoted.append(rawDelimiter[i])
+                                i++
+                            }
+                        }
+                        if (i < rawDelimiter.length && rawDelimiter[i] == '\'') i++
+                    } else if (next == '"') {
+                        isQuoted = true
+                        i += 2
+                        i = appendDoubleQuotedSegment(rawDelimiter, i, unquoted)
+                    } else {
+                        unquoted.append(ch)
+                        i++
+                    }
+                }
                 '\'' -> {
                     isQuoted = true
                     i++
@@ -672,19 +695,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 '"' -> {
                     isQuoted = true
                     i++
-                    while (i < rawDelimiter.length && rawDelimiter[i] != '"') {
-                        if (rawDelimiter[i] == '\\' && i + 1 < rawDelimiter.length) {
-                            val next = rawDelimiter[i + 1]
-                            if (next == '"' || next == '\\' || next == '$' || next == '`') {
-                                unquoted.append(next)
-                                i += 2
-                                continue
-                            }
-                        }
-                        unquoted.append(rawDelimiter[i])
-                        i++
-                    }
-                    if (i < rawDelimiter.length && rawDelimiter[i] == '"') i++
+                    i = appendDoubleQuotedSegment(rawDelimiter, i, unquoted)
                 }
                 '\\' -> {
                     isQuoted = true
@@ -711,6 +722,136 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             ),
         )
         pendingStripTabs = false
+    }
+
+    private fun appendDoubleQuotedSegment(raw: String, startIndex: Int, out: StringBuilder): Int {
+        var i = startIndex
+        while (i < raw.length && raw[i] != '"') {
+            if (raw[i] == '\\' && i + 1 < raw.length) {
+                val next = raw[i + 1]
+                if (next == '"' || next == '\\' || next == '$' || next == '`') {
+                    out.append(next)
+                    i += 2
+                    continue
+                }
+            }
+            out.append(raw[i])
+            i++
+        }
+        if (i < raw.length && raw[i] == '"') i++
+        return i
+    }
+
+    private fun decodeAnsiCEscape(raw: String, index: Int, out: StringBuilder): Int {
+        val esc = raw[index]
+        return when (esc) {
+            'a' -> {
+                out.append('\u0007')
+                index + 1
+            }
+            'b' -> {
+                out.append('\b')
+                index + 1
+            }
+            'e', 'E' -> {
+                out.append('\u001B')
+                index + 1
+            }
+            'f' -> {
+                out.append('\u000C')
+                index + 1
+            }
+            'n' -> {
+                out.append('\n')
+                index + 1
+            }
+            'r' -> {
+                out.append('\r')
+                index + 1
+            }
+            't' -> {
+                out.append('\t')
+                index + 1
+            }
+            'v' -> {
+                out.append('\u000B')
+                index + 1
+            }
+            '\\', '\'', '"', '?' -> {
+                out.append(esc)
+                index + 1
+            }
+            in '0'..'7' -> {
+                var value = 0
+                var j = index
+                val limit = minOf(raw.length, index + 3)
+                while (j < limit && raw[j] in '0'..'7') {
+                    value = (value shl 3) or (raw[j] - '0')
+                    j++
+                }
+                out.append((value and 0xFF).toChar())
+                j
+            }
+            'x' -> decodeHexAnsiCEscape(raw, index, maxDigits = 2, out = out, allowUnicode = false)
+            'u' -> decodeHexAnsiCEscape(raw, index, maxDigits = 4, out = out, allowUnicode = true)
+            'U' -> decodeHexAnsiCEscape(raw, index, maxDigits = 8, out = out, allowUnicode = true)
+            'c' -> {
+                if (index + 1 < raw.length && raw[index + 1] != '\'') {
+                    out.append((raw[index + 1].code and 0x1F).toChar())
+                    index + 2
+                } else {
+                    out.append("\\c")
+                    index + 1
+                }
+            }
+            else -> {
+                out.append('\\').append(esc)
+                index + 1
+            }
+        }
+    }
+
+    private fun decodeHexAnsiCEscape(
+        raw: String,
+        escIndex: Int,
+        maxDigits: Int,
+        out: StringBuilder,
+        allowUnicode: Boolean,
+    ): Int {
+        var value = 0
+        var j = escIndex + 1
+        val limit = minOf(raw.length, j + maxDigits)
+        var digits = 0
+        while (j < limit) {
+            val d = hexDigitValue(raw[j])
+            if (d < 0) break
+            value = (value shl 4) or d
+            digits++
+            j++
+        }
+        if (digits == 0) {
+            out.append('\\').append(raw[escIndex])
+            return escIndex + 1
+        }
+        if (!allowUnicode) {
+            out.append((value and 0xFF).toChar())
+        } else if (value in 0..0xFFFF && value !in 0xD800..0xDFFF) {
+            out.append(value.toChar())
+        } else if (value in 0x10000..0x10FFFF) {
+            val cp = value - 0x10000
+            out.append(((cp ushr 10) + 0xD800).toChar())
+            out.append(((cp and 0x3FF) + 0xDC00).toChar())
+        } else {
+            out.append('\\').append(raw, escIndex, j)
+        }
+        return j
+    }
+
+    private fun hexDigitValue(ch: Char): Int = when (ch) {
+        in '0'..'9' -> ch - '0'
+        in 'a'..'f' -> ch - 'a' + 10
+        in 'A'..'F' -> ch - 'A' + 10
+        else -> -1
     }
 
     protected fun onDefaultNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {

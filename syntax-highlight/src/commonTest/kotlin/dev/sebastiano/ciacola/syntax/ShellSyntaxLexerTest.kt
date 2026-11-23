@@ -386,6 +386,41 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun handlesInternalHashAndAnsiCOrLocaleQuotedHeredocDelimiters() {
+        val hashDelim = "cat <<EOF#tag\nbody \$VAR\nEOF#tag\necho after_hash\n"
+        val tHash = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, hashDelim, "shell-heredoc-internal-hash")
+        assertEquals(SyntaxTokenKind.Property, tHash.first { it.slice(hashDelim) == "\$VAR" }.kind)
+        assertEquals(SyntaxTokenKind.String, tHash.last { it.slice(hashDelim) == "EOF#tag" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tHash.first { it.slice(hashDelim) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tHash.first { it.slice(hashDelim) == "after_hash" }.kind)
+
+        val leadingHashComment = "cat << # not a delimiter\necho next\n"
+        val tComment = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, leadingHashComment, "shell-heredoc-leading-hash")
+        assertEquals(SyntaxTokenKind.Comment, tComment.first { it.slice(leadingHashComment) == "# not a delimiter" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tComment.first { it.slice(leadingHashComment) == "echo" }.kind)
+
+        val ansiCSimple = "cat <<\$'EOF'\nbody \$USER\nEOF\necho after_ansic\n"
+        val tAnsiC = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, ansiCSimple, "shell-heredoc-ansic-simple")
+        assertTrue(tAnsiC.none { it.slice(ansiCSimple) == "\$USER" && it.kind == SyntaxTokenKind.Property })
+        assertEquals(SyntaxTokenKind.String, tAnsiC.last { it.slice(ansiCSimple) == "EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tAnsiC.first { it.slice(ansiCSimple) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tAnsiC.first { it.slice(ansiCSimple) == "after_ansic" }.kind)
+
+        val ansiCEscaped = "cat <<\$'EO\\'\\x46'\nhello\nEO'F\necho after_esc\n"
+        val tAnsiCEsc = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, ansiCEscaped, "shell-heredoc-ansic-escaped")
+        assertEquals(SyntaxTokenKind.String, tAnsiCEsc.last { it.slice(ansiCEscaped) == "EO'F" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tAnsiCEsc.first { it.slice(ansiCEscaped) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tAnsiCEsc.first { it.slice(ansiCEscaped) == "after_esc" }.kind)
+
+        val localeDelim = "cat <<\$\"EOF\"\nbody \$USER\nEOF\necho after_locale\n"
+        val tLocale = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, localeDelim, "shell-heredoc-locale")
+        assertTrue(tLocale.none { it.slice(localeDelim) == "\$USER" && it.kind == SyntaxTokenKind.Property })
+        assertEquals(SyntaxTokenKind.String, tLocale.last { it.slice(localeDelim) == "EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tLocale.first { it.slice(localeDelim) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tLocale.first { it.slice(localeDelim) == "after_locale" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }

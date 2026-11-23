@@ -305,21 +305,34 @@ HD_WS
     ;
 
 HD_DELIM
-    : ( '\'' ~[\u0027\r\n]* '\''
-      | '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
-      | '\\' ~[\r\n]
-      | ~[ \t\r\n;&|()<>'"\\#]
-      )+ { enqueueHeredoc(text); popMode(); }
+    : HD_DELIM_START HD_DELIM_CONT* { enqueueHeredoc(text); popMode(); }
     ;
 
 HD_UNCLOSED_DELIM
-    : ( '\'' ~[\u0027\r\n]*
-      | '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '\\'?
+    : ( '$' '\'' ( '\\' ~[\r\n] | ~['\\\r\n] )* '\\'?
+      | '\'' ~[\u0027\r\n]*
+      | '$'? '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '\\'?
       ) { enqueueHeredoc(text); popMode(); }
     ;
 
 HD_FALLBACK
     : . { popMode(); }
+    ;
+
+fragment HD_DELIM_START
+    : '$' '\'' ( '\\' ~[\r\n] | ~['\\\r\n] )* '\''
+    | '\'' ~[\u0027\r\n]* '\''
+    | '$'? '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
+    | '\\' ~[\r\n]
+    | ~[ \t\r\n;&|()<>'"\\#]
+    ;
+
+fragment HD_DELIM_CONT
+    : '$' '\'' ( '\\' ~[\r\n] | ~['\\\r\n] )* '\''
+    | '\'' ~[\u0027\r\n]* '\''
+    | '$'? '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
+    | '\\' ~[\r\n]
+    | ~[ \t\r\n;&|()<>'"\\]
     ;
 
 // ---------------- Heredoc Literal Body (Quoted Delimiter) ----------------
