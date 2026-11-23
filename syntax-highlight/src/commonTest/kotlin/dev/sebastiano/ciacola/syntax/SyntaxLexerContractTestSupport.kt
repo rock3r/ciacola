@@ -1,8 +1,11 @@
 package dev.sebastiano.ciacola.syntax
 
+import dev.sebastiano.ciacola.syntax.oracle.OracleFixture
+import dev.sebastiano.ciacola.syntax.oracle.assertMatchesOracleFixture
 import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.fail
 import kotlin.time.TimeSource
 
 /**
@@ -157,5 +160,22 @@ fun assertLinearPerformance(
             elapsedMs <= maxMillisPerInput,
             "[${lexer.language.id}:perf:$label] Lexing ${input.length} chars took ${elapsedMs}ms (limit: ${maxMillisPerInput}ms)",
         )
+    }
+}
+
+/**
+ * Runs [assertMatchesOracleFixture] on every fixture in [fixtures] and reports all failures together.
+ */
+fun assertAllOracleFixtures(fixtures: List<OracleFixture>) {
+    val failures = mutableListOf<String>()
+    for (fixture in fixtures) {
+        try {
+            assertMatchesOracleFixture(fixture)
+        } catch (e: AssertionError) {
+            failures += (e.message ?: "Fixture ${fixture.name} failed")
+        }
+    }
+    if (failures.isNotEmpty()) {
+        fail(failures.joinToString("\n\n"))
     }
 }

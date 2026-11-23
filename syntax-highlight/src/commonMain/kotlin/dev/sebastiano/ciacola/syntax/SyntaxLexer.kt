@@ -1,7 +1,14 @@
 package dev.sebastiano.ciacola.syntax
 
+import dev.sebastiano.ciacola.syntax.lexer.AgslSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.CSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.CppSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.GlslSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.GoSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JsonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.KotlinSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.RustSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.SkslSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.XmlSyntaxLexer
 
 /**
@@ -24,6 +31,13 @@ object SyntaxHighlighter {
         SyntaxLanguage.Kotlin to KotlinSyntaxLexer,
         SyntaxLanguage.Xml to XmlSyntaxLexer,
         SyntaxLanguage.Json to JsonSyntaxLexer,
+        SyntaxLanguage.Rust to RustSyntaxLexer,
+        SyntaxLanguage.Go to GoSyntaxLexer,
+        SyntaxLanguage.C to CSyntaxLexer,
+        SyntaxLanguage.Cpp to CppSyntaxLexer,
+        SyntaxLanguage.Glsl to GlslSyntaxLexer,
+        SyntaxLanguage.Sksl to SkslSyntaxLexer,
+        SyntaxLanguage.Agsl to AgslSyntaxLexer,
     )
 
     /** Languages that currently have a registered [SyntaxLexer]. */
