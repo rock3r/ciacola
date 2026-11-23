@@ -247,9 +247,99 @@ class ShellSyntaxLexerTest {
                     }
                 },
                 "deep-cmdsub" to ("\$(".repeat(150) + "echo hi" + ")".repeat(150)),
+                "deep-double-paren" to ("(".repeat(1_000) + "echo a) && (echo b" + ")".repeat(1_000)),
                 "unterminated-heredoc" to ("cat <<EOF\n" + "line \$x \${y:-1}\n".repeat(1_000)),
             ),
         )
+    }
+
+    @Test
+    fun braceExpansionDoesNotCorruptCommandOrCaseState() {
+        val code = """
+            mkdir -p src/{main,test}/kotlin
+            echo {case,for}/dir
+            export FOO=1
+            if true; then echo hi; fi
+            { echo grouped; }
+            foo() { echo body; }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(ShellSyntaxLexer, code, "shell-brace-expansion")
+
+        assertTrue(tokens.any { it.slice(code) == "main" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(code) == "test" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(code) == "case" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(code) == "for" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(code) == "export" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tokens.any { it.slice(code) == "FOO" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(tokens.any { it.slice(code) == "if" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tokens.any { it.slice(code) == "true" && it.kind == SyntaxTokenKind.Function })
+        assertTrue(tokens.any { it.slice(code) == "then" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tokens.any { it.slice(code) == "grouped" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(code) == "foo" && it.kind == SyntaxTokenKind.Function })
+        assertTrue(tokens.any { it.slice(code) == "body" && it.kind == SyntaxTokenKind.Plain })
+        val echoKinds = tokens.filter { it.slice(code) == "echo" }.map { it.kind }
+        assertEquals(listOf(SyntaxTokenKind.Function, SyntaxTokenKind.Function, SyntaxTokenKind.Function, SyntaxTokenKind.Function), echoKinds)
+        assertFalse(tokens.any { it.kind == SyntaxTokenKind.Invalid })
+    }
+
+    @Test
+    fun nestedSubshellsStartingWithDoubleParenDoNotLeakArithMode() {
+        val code = """
+            ((echo a) && (echo b))
+            echo after_cmd
+            x=$((echo a) && (echo b))
+            echo "${'$'}x"
+            y=$(( (1 + 2) * 3 ))
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(ShellSyntaxLexer, code, "shell-nested-subshells")
+
+        val echoKinds = tokens.filter { it.slice(code) == "echo" }.map { it.kind }
+        assertEquals(6, echoKinds.size)
+        assertTrue(echoKinds.all { it == SyntaxTokenKind.Function }, "Expected all echo commands to be Function, got $echoKinds")
+        assertTrue(tokens.any { it.slice(code) == "after_cmd" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(code) == "\$x" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(tokens.any { it.slice(code) == "1" && it.kind == SyntaxTokenKind.Number })
+        assertTrue(tokens.any { it.slice(code) == "3" && it.kind == SyntaxTokenKind.Number })
+        assertFalse(tokens.any { it.kind == SyntaxTokenKind.Invalid })
+    }
+
+    @Test
+    fun heredocClosingResetsCommandPositionOnImmediatelyFollowingLine() {
+        val code1 = "cat <<'EOF'\nhello\nEOF\necho ok\n"
+        val t1 = assertLosslessInvariants(ShellSyntaxLexer, code1, "shell-heredoc-nextline-1")
+        assertTrue(t1.any { it.slice(code1) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertTrue(t1.any { it.slice(code1) == "ok" && it.kind == SyntaxTokenKind.Plain })
+
+        val code2 = "if cat <<EOF\nhi\nEOF\nthen\n  echo yes\nfi\n"
+        val t2 = assertLosslessInvariants(ShellSyntaxLexer, code2, "shell-heredoc-nextline-2")
+        assertTrue(t2.any { it.slice(code2) == "then" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(t2.any { it.slice(code2) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertTrue(t2.any { it.slice(code2) == "fi" && it.kind == SyntaxTokenKind.Keyword })
+
+        val code3 = "cat <<EOF\nhi\nEOF\nexport X=1\n"
+        val t3 = assertLosslessInvariants(ShellSyntaxLexer, code3, "shell-heredoc-nextline-3")
+        assertTrue(t3.any { it.slice(code3) == "export" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(t3.any { it.slice(code3) == "X" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(t3.any { it.slice(code3) == "1" && it.kind == SyntaxTokenKind.Number })
+    }
+
+    @Test
+    fun unquotedHeredocDelimitersContainingDollarOrBacktickCloseCleanly() {
+        val code1 = "cat <<\$EOF\nhello \$USER\n\$EOF\necho after\n"
+        val t1 = assertLosslessInvariants(ShellSyntaxLexer, code1, "shell-heredoc-dollar-delim")
+        assertTrue(t1.any { it.slice(code1) == "\$USER" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(t1.any { it.slice(code1) == "\$EOF" && it.kind == SyntaxTokenKind.String })
+        assertTrue(t1.any { it.slice(code1) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertTrue(t1.any { it.slice(code1) == "after" && it.kind == SyntaxTokenKind.Plain })
+
+        val code2 = "cat <<a\$b\nval=\$HOME\na\$b\nexport OK=1\n"
+        val t2 = assertLosslessInvariants(ShellSyntaxLexer, code2, "shell-heredoc-mixed-dollar-delim")
+        assertTrue(t2.any { it.slice(code2) == "\$HOME" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(t2.any { it.slice(code2) == "a\$b" && it.kind == SyntaxTokenKind.String })
+        assertTrue(t2.any { it.slice(code2) == "export" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(t2.any { it.slice(code2) == "OK" && it.kind == SyntaxTokenKind.Property })
     }
 
     @Test

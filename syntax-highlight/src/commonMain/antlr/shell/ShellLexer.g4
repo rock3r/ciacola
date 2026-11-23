@@ -54,7 +54,7 @@ SINGLE_STRING
 
 // Expansions, substitutions, and arithmetic
 ARITH_EXP_START
-    : '$((' { pushArith(Modes.ARITH); }
+    : '$((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH); }
     ;
 
 CMD_SUB_START
@@ -74,7 +74,7 @@ PROC_SUB_OUT
     ;
 
 ARITH_CMD_START
-    : '((' { pushArith(Modes.ARITH); }
+    : '((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH); }
     ;
 
 BACKTICK
@@ -138,7 +138,7 @@ RBRACK_RBRACK : ']]';
 
 LPAREN : '(' { onLParen(); };
 RPAREN : ')' { onRParen(); };
-LBRACE : '{' { onCommandSeparator(); };
+LBRACE : '{' { onLBrace(); };
 RBRACE : '}';
 LBRACK : '[';
 RBRACK : ']';
@@ -218,7 +218,7 @@ ERROR_CHAR
 mode DQUOTE;
 
 DQ_CLOSE            : '"' { popMode(); } ;
-DQ_ARITH_START      : '$((' { pushArith(Modes.ARITH); } ;
+DQ_ARITH_START      : '$((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH); } ;
 DQ_CMD_SUB_START    : '$(' { pushCmdSub(); } ;
 DQ_PARAM_EXP_START  : '${' { pushParamExp(Modes.PARAM_EXP); } ;
 DQ_SIMPLE_VAR       : '$' [a-zA-Z_][a-zA-Z0-9_]* ;
@@ -235,7 +235,7 @@ DQ_TEXT             : ~["\\$`]+ ;
 mode PARAM_EXP;
 
 PE_WS                  : [ \t\r\n\f]+ ;
-PE_ARITH_START         : '$((' { pushArith(Modes.ARITH); } ;
+PE_ARITH_START         : '$((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH); } ;
 PE_CMD_SUB_START       : '$(' { pushCmdSub(); } ;
 PE_PARAM_EXP_START     : '${' { pushParamExp(Modes.PARAM_EXP); } ;
 PE_SIMPLE_VAR          : '$' [a-zA-Z_][a-zA-Z0-9_]* ;
@@ -267,7 +267,7 @@ mode ARITH;
 AR_WS               : [ \t\r\n\f]+ ;
 AR_LINE_CONT        : '\\' ( '\r'? '\n' | '\r' ) ;
 AR_END              : '))' { canCloseArith() }? { popArith(); } ;
-AR_ARITH_EXP_START  : '$((' { pushArith(Modes.ARITH); } ;
+AR_ARITH_EXP_START  : '$((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH); } ;
 AR_CMD_SUB_START    : '$(' { pushCmdSub(); } ;
 AR_PARAM_EXP_START  : '${' { pushParamExp(Modes.PARAM_EXP); } ;
 AR_SIMPLE_VAR       : '$' [a-zA-Z_][a-zA-Z0-9_]* ;
@@ -342,6 +342,11 @@ HE_NEWLINE
     : ( '\r'? '\n' | '\r' ) { onHeredocNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
     ;
 
+HE_DELIM_CLOSE
+    : ~[\r\n]+ { isHeredocExpandClosingLine() }?
+      { finishHeredocExpandClosingLine(Tokens.HEREDOC_DELIM_END, Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
+    ;
+
 HE_LINE_CONT
     : '\\' ( '\r'? '\n' | '\r' ) { markHeredocLineBody(); }
     ;
@@ -355,7 +360,7 @@ HE_BACKSLASH
     ;
 
 HE_ARITH_START
-    : '$((' { markHeredocLineBody(); pushArith(Modes.ARITH); }
+    : '$((' { hasBalancedDoubleParenClose() }? { markHeredocLineBody(); pushArith(Modes.ARITH); }
     ;
 
 HE_CMD_SUB_START

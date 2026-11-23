@@ -296,6 +296,8 @@ private class CommandScopeFrame(
     val caseStack: ArrayList<CaseStage> = ArrayList(),
     var testBracket: TestBracketKind? = null,
     var innerParenDepth: Int = 0,
+    var sawFuncDeclParen: Boolean = false,
+    var justClosedFuncHeader: Boolean = false,
 )
 
 private class ParamExpFrame(
@@ -311,8 +313,9 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
         add(CommandScopeFrame(openedByType = 0))
     }
     val paramExpStack = ArrayList<ParamExpFrame>()
+    val arithParenDepthStack = ArrayList<Int>()
     // Mode stack mirrors ShellLexer's mode transitions for PARAM_EXP / ARITH / DQUOTE vs command contexts.
-    val activeSubMode = ArrayList<Int>() // 0 = command/default, 1 = DQUOTE, 2 = PARAM_EXP, 3 = ARITH, 4 = HEREDOC
+    val activeSubMode = ArrayList<Int>() // 0 = command/default, 1 = DQUOTE, 2 = PARAM_EXP, 3 = ARITH
 
     fun currentCmd(): CommandScopeFrame {
         if (cmdStack.isEmpty()) cmdStack.add(CommandScopeFrame(openedByType = 0))
@@ -414,12 +417,16 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                     cmd.expectingCommand = false
                     cmd.expectingRedirTarget = false
                 }
+                arithParenDepthStack.add(0)
                 activeSubMode.add(MODE_ARITH)
                 i++
                 continue
             }
 
             ShellTokens.AR_END -> {
+                if (arithParenDepthStack.isNotEmpty()) {
+                    arithParenDepthStack.removeAt(arithParenDepthStack.lastIndex)
+                }
                 if (activeSubMode.lastOrNull() == MODE_ARITH) {
                     activeSubMode.removeAt(activeSubMode.lastIndex)
                 }
@@ -567,6 +574,35 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             continue
         }
 
+        if (curMode == MODE_ARITH) {
+            when (type) {
+                ShellTokens.AR_LPAREN -> {
+                    if (arithParenDepthStack.isNotEmpty()) {
+                        val idx = arithParenDepthStack.lastIndex
+                        arithParenDepthStack[idx] = arithParenDepthStack[idx] + 1
+                    }
+                }
+                ShellTokens.AR_RPAREN -> {
+                    if (arithParenDepthStack.isNotEmpty()) {
+                        val idx = arithParenDepthStack.lastIndex
+                        val depth = arithParenDepthStack[idx]
+                        if (depth > 0) {
+                            arithParenDepthStack[idx] = depth - 1
+                        } else {
+                            arithParenDepthStack.removeAt(idx)
+                            if (activeSubMode.lastOrNull() == MODE_ARITH) {
+                                activeSubMode.removeAt(activeSubMode.lastIndex)
+                            }
+                        }
+                    } else if (activeSubMode.lastOrNull() == MODE_ARITH) {
+                        activeSubMode.removeAt(activeSubMode.lastIndex)
+                    }
+                }
+            }
+            i++
+            continue
+        }
+
         if (curMode != MODE_CMD) {
             i++
             continue
@@ -577,13 +613,15 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
 
         // Hidden tokens (Whitespace / Newline / Comment)
         if (tok.isHidden) {
-            if (type == ShellTokens.NEWLINE) {
+            if (type == ShellTokens.NEWLINE || type == ShellTokens.HL_NEWLINE || type == ShellTokens.HE_NEWLINE) {
                 if (cmd.inPrefixAssignRhs && cmd.assignParenDepth == 0) {
                     cmd.inPrefixAssignRhs = false
                 }
                 if (cmd.assignParenDepth == 0) {
                     cmd.expectingCommand = true
                     cmd.expectingFuncName = false
+                    cmd.justClosedFuncHeader = false
+                    cmd.sawFuncDeclParen = false
                     cmd.inDeclarationCmd = false
                     cmd.expectingRedirTarget = false
                     cmd.redirWasAtCommandPos = false
@@ -657,25 +695,40 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.LBRACE -> {
-                cmd.expectingCommand = true
-                cmd.inDeclarationCmd = false
-                cmd.inPrefixAssignRhs = false
+                val canOpenGroup = cmd.expectingCommand || cmd.justClosedFuncHeader
+                val prevOk = i == 0 || raw[i - 1].isHidden || isGroupOpenPredecessor(raw[i - 1].type)
+                val nextOk = tok.end == source.length || isShellWhitespaceOrNewline(source[tok.end])
+                if (canOpenGroup && prevOk && nextOk) {
+                    cmd.expectingCommand = true
+                    cmd.inDeclarationCmd = false
+                    cmd.inPrefixAssignRhs = false
+                } else {
+                    if (cmd.caseStack.lastOrNull() == CaseStage.AWAITING_WORD) {
+                        cmd.caseStack[cmd.caseStack.lastIndex] = CaseStage.AWAITING_IN
+                    }
+                    cmd.expectingCommand = false
+                }
+                cmd.justClosedFuncHeader = false
             }
 
             ShellTokens.RBRACE -> {
                 cmd.expectingCommand = false
+                cmd.justClosedFuncHeader = false
                 cmd.inDeclarationCmd = false
                 cmd.inPrefixAssignRhs = false
             }
 
             ShellTokens.LPAREN -> {
+                cmd.justClosedFuncHeader = false
                 if (cmd.inPrefixAssignRhs) {
                     cmd.assignParenDepth++
                 } else if (cmd.caseStack.lastOrNull() == CaseStage.IN_PATTERN) {
                     cmd.innerParenDepth++
                 } else {
                     cmd.innerParenDepth++
-                    cmd.expectingCommand = true
+                    if (!cmd.sawFuncDeclParen) {
+                        cmd.expectingCommand = true
+                    }
                 }
             }
 
@@ -693,6 +746,10 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                 } else if (cmd.innerParenDepth > 0) {
                     cmd.innerParenDepth--
                     cmd.expectingCommand = false
+                    if (cmd.sawFuncDeclParen) {
+                        cmd.sawFuncDeclParen = false
+                        cmd.justClosedFuncHeader = true
+                    }
                 } else if (cmd.openedByType == ShellTokens.CMD_SUB_START && cmdStack.size > 1) {
                     cmdStack.removeAt(cmdStack.lastIndex)
                     if (activeSubMode.lastOrNull() == MODE_CMD) activeSubMode.removeAt(activeSubMode.lastIndex)
@@ -731,10 +788,26 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             ShellTokens.HEREDOC_STRIP_OP,
             ShellTokens.HEREDOC_OP,
             -> {
+                cmd.justClosedFuncHeader = false
                 // Next token on line (if HD_DELIM) is handled by its own rule; HERE_STRING consumes next arg.
                 if (type == ShellTokens.HERE_STRING) {
                     cmd.expectingCommand = false
                 }
+            }
+
+            ShellTokens.HD_DELIM,
+            ShellTokens.HD_UNCLOSED_DELIM,
+            ShellTokens.HL_TEXT,
+            ShellTokens.HE_TEXT,
+            ShellTokens.HE_ESCAPE,
+            ShellTokens.HE_BACKSLASH,
+            ShellTokens.HE_DOLLAR,
+            ShellTokens.HE_SIMPLE_VAR,
+            ShellTokens.HE_SPECIAL_VAR,
+            ShellTokens.HEREDOC_DELIM_END,
+            -> {
+                // Heredoc delimiters and body tokens must not disturb surrounding command/case state.
+                cmd.justClosedFuncHeader = false
             }
 
             ShellTokens.AMP_GT_APPEND,
@@ -922,8 +995,10 @@ private fun classifyWordToken(
         tok.kind = SyntaxTokenKind.Function
         cmd.expectingFuncName = false
         cmd.expectingCommand = false
+        cmd.justClosedFuncHeader = true
         return
     }
+    cmd.justClosedFuncHeader = false
 
     // 4. Check variable assignment `FOO=...` / `arr+=(...)` / `map[k]=v`
     val nextTok = if (index + 1 < raw.size) raw[index + 1] else null
@@ -955,6 +1030,7 @@ private fun classifyWordToken(
         if (isFunctionDeclLookahead(raw, index)) {
             tok.kind = SyntaxTokenKind.Function
             cmd.expectingCommand = false
+            cmd.sawFuncDeclParen = true
             return
         }
 
@@ -970,11 +1046,11 @@ private fun classifyWordToken(
                         cmd.forStage = ForStage.AWAITING_VAR
                         cmd.expectingCommand = false
                     }
-                    "function" -> {
+                    "function", "coproc" -> {
                         cmd.expectingFuncName = true
                         cmd.expectingCommand = false
                     }
-                    "if", "then", "elif", "else", "while", "until", "do", "time", "coproc" -> {
+                    "if", "then", "elif", "else", "while", "until", "do", "time" -> {
                         cmd.expectingCommand = true
                     }
                     else -> {
@@ -1047,6 +1123,25 @@ private fun isFunctionDeclLookahead(raw: List<RawShellToken>, index: Int): Boole
     while (j < raw.size && raw[j].type == ShellTokens.WS) j++
     return j < raw.size && raw[j].type == ShellTokens.RPAREN
 }
+
+private fun isGroupOpenPredecessor(type: Int): Boolean =
+    type == ShellTokens.SEMI ||
+        type == ShellTokens.AMP ||
+        type == ShellTokens.PIPE ||
+        type == ShellTokens.PIPE_AMP ||
+        type == ShellTokens.AND_AND ||
+        type == ShellTokens.OR_OR ||
+        type == ShellTokens.LPAREN ||
+        type == ShellTokens.RPAREN ||
+        type == ShellTokens.LBRACE ||
+        type == ShellTokens.CMD_SUB_START ||
+        type == ShellTokens.PROC_SUB_IN ||
+        type == ShellTokens.PROC_SUB_OUT ||
+        type == ShellTokens.BACKTICK ||
+        type == ShellTokens.ESCAPED_BACKTICK
+
+private fun isShellWhitespaceOrNewline(ch: Char): Boolean =
+    ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '\u000C' || ch == '\uFEFF'
 
 private fun isShellIdentifier(text: String): Boolean {
     if (text.isEmpty()) return false
