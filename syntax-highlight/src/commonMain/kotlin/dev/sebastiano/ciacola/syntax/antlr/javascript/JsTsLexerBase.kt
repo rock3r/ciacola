@@ -18,22 +18,59 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
     private var lastNonHiddenType: Int = Token.INVALID_TYPE
     private var lastNonHiddenText: String? = null
     private var lastParenWasCondition: Boolean = false
+    private var lastBraceAllowedRegex: Boolean = true
+    private var lastColonWasTernary: Boolean = false
+    private var ternaryDepth: Int = 0
     private val parenConditionStack = ArrayList<Boolean>()
+    private val braceAllowsRegexStack = ArrayList<Boolean>()
+    private val savedBraceTernaryDepthStack = ArrayList<Int>()
+    private val savedParenTernaryDepthStack = ArrayList<Int>()
+    private val savedBrackTernaryDepthStack = ArrayList<Int>()
+    private val savedTemplateTernaryDepthStack = ArrayList<Int>()
     private var lastClosingTagOffsetByName: HashMap<String, Int>? = null
 
     protected abstract fun isHiddenTokenType(type: Int): Boolean
     protected abstract fun isIdentTokenType(type: Int): Boolean
     protected abstract fun isLparenTokenType(type: Int): Boolean
     protected abstract fun isRparenTokenType(type: Int): Boolean
+    protected abstract fun isLbrackTokenType(type: Int): Boolean
+    protected abstract fun isRbrackTokenType(type: Int): Boolean
+    protected abstract fun isLbraceTokenType(type: Int): Boolean
+    protected abstract fun isJsxExprStartTokenType(type: Int): Boolean
+    protected abstract fun isRbraceTokenType(type: Int): Boolean
+    protected abstract fun isTemplateExprStartTokenType(type: Int): Boolean
+    protected abstract fun isTemplateExprEndTokenType(type: Int): Boolean
+    protected abstract fun isQuestionTokenType(type: Int): Boolean
+    protected abstract fun isColonTokenType(type: Int): Boolean
+    protected abstract fun isSemiTokenType(type: Int): Boolean
     protected abstract fun isConditionKeywordText(text: String?): Boolean
-    protected abstract fun allowsRegexAfterToken(type: Int, text: String?, lastParenWasCond: Boolean): Boolean
+    protected abstract fun opensBlockBraceAfterToken(
+        type: Int,
+        text: String?,
+        enclosingBraceAllowsRegex: Boolean,
+        lastColonWasTernary: Boolean,
+    ): Boolean
+    protected abstract fun allowsRegexAfterToken(
+        type: Int,
+        text: String?,
+        lastParenWasCond: Boolean,
+        lastBraceAllowedRegex: Boolean,
+    ): Boolean
 
     override fun reset() {
         super.reset()
         lastNonHiddenType = Token.INVALID_TYPE
         lastNonHiddenText = null
         lastParenWasCondition = false
+        lastBraceAllowedRegex = true
+        lastColonWasTernary = false
+        ternaryDepth = 0
         parenConditionStack.clear()
+        braceAllowsRegexStack.clear()
+        savedBraceTernaryDepthStack.clear()
+        savedParenTernaryDepthStack.clear()
+        savedBrackTernaryDepthStack.clear()
+        savedTemplateTernaryDepthStack.clear()
         lastClosingTagOffsetByName = null
     }
 
@@ -44,15 +81,112 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
             val text = if (isIdentTokenType(type)) tok.text else null
             if (isLparenTokenType(type)) {
                 parenConditionStack.add(isConditionKeywordText(lastNonHiddenText))
+                savedParenTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
                 lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
             } else if (isRparenTokenType(type)) {
                 lastParenWasCondition = if (parenConditionStack.isNotEmpty()) {
                     parenConditionStack.removeAt(parenConditionStack.size - 1)
                 } else {
                     false
                 }
-            } else {
+                ternaryDepth = if (savedParenTernaryDepthStack.isNotEmpty()) {
+                    savedParenTernaryDepthStack.removeAt(savedParenTernaryDepthStack.size - 1)
+                } else {
+                    0
+                }
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else if (isLbrackTokenType(type)) {
+                savedBrackTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
                 lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else if (isRbrackTokenType(type)) {
+                ternaryDepth = if (savedBrackTernaryDepthStack.isNotEmpty()) {
+                    savedBrackTernaryDepthStack.removeAt(savedBrackTernaryDepthStack.size - 1)
+                } else {
+                    0
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else if (isLbraceTokenType(type)) {
+                val enclosingAllowsRegex = if (braceAllowsRegexStack.isNotEmpty()) {
+                    braceAllowsRegexStack[braceAllowsRegexStack.size - 1]
+                } else {
+                    true
+                }
+                val opensBlock = opensBlockBraceAfterToken(
+                    type = lastNonHiddenType,
+                    text = lastNonHiddenText,
+                    enclosingBraceAllowsRegex = enclosingAllowsRegex,
+                    lastColonWasTernary = lastColonWasTernary,
+                )
+                braceAllowsRegexStack.add(opensBlock)
+                savedBraceTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else if (isJsxExprStartTokenType(type)) {
+                // JSX expression container `{...}` is an expression context.
+                braceAllowsRegexStack.add(false)
+                savedBraceTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else if (isRbraceTokenType(type)) {
+                lastBraceAllowedRegex = if (braceAllowsRegexStack.isNotEmpty()) {
+                    braceAllowsRegexStack.removeAt(braceAllowsRegexStack.size - 1)
+                } else {
+                    true
+                }
+                ternaryDepth = if (savedBraceTernaryDepthStack.isNotEmpty()) {
+                    savedBraceTernaryDepthStack.removeAt(savedBraceTernaryDepthStack.size - 1)
+                } else {
+                    0
+                }
+                lastParenWasCondition = false
+                lastColonWasTernary = false
+            } else if (isTemplateExprStartTokenType(type)) {
+                savedTemplateTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else if (isTemplateExprEndTokenType(type)) {
+                ternaryDepth = if (savedTemplateTernaryDepthStack.isNotEmpty()) {
+                    savedTemplateTernaryDepthStack.removeAt(savedTemplateTernaryDepthStack.size - 1)
+                } else {
+                    0
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedRegex = false
+                lastColonWasTernary = false
+            } else {
+                if (isQuestionTokenType(type)) {
+                    ternaryDepth++
+                    lastColonWasTernary = false
+                } else if (isColonTokenType(type)) {
+                    if (ternaryDepth > 0) {
+                        ternaryDepth--
+                        lastColonWasTernary = true
+                    } else {
+                        lastColonWasTernary = false
+                    }
+                } else {
+                    if (isSemiTokenType(type)) {
+                        ternaryDepth = 0
+                    }
+                    lastColonWasTernary = false
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedRegex = false
             }
             lastNonHiddenType = type
             lastNonHiddenText = text
@@ -64,7 +198,12 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun isRegexAllowed(): Boolean {
         if (lastNonHiddenType == Token.INVALID_TYPE) return true
-        return allowsRegexAfterToken(lastNonHiddenType, lastNonHiddenText, lastParenWasCondition)
+        return allowsRegexAfterToken(
+            type = lastNonHiddenType,
+            text = lastNonHiddenText,
+            lastParenWasCond = lastParenWasCondition,
+            lastBraceAllowedRegex = lastBraceAllowedRegex,
+        )
     }
 
     protected fun isJsxFragmentStartAfterAngle(): Boolean = isRegexAllowed()

@@ -32,16 +32,121 @@ tokens {
 
     override fun isRparenTokenType(type: Int): Boolean = type == Tokens.RPAREN
 
+    override fun isLbrackTokenType(type: Int): Boolean = type == Tokens.LBRACK
+
+    override fun isRbrackTokenType(type: Int): Boolean = type == Tokens.RBRACK
+
+    override fun isLbraceTokenType(type: Int): Boolean = type == Tokens.LBRACE
+
+    override fun isJsxExprStartTokenType(type: Int): Boolean =
+        type == Tokens.JSX_TAG_EXPR_START || type == Tokens.JSX_CHILDREN_EXPR_START
+
+    override fun isRbraceTokenType(type: Int): Boolean = type == Tokens.RBRACE
+
+    override fun isTemplateExprStartTokenType(type: Int): Boolean = type == Tokens.TEMPLATE_EXPR_START
+
+    override fun isTemplateExprEndTokenType(type: Int): Boolean = type == Tokens.TEMPLATE_EXPR_END
+
+    override fun isQuestionTokenType(type: Int): Boolean = type == Tokens.QUESTION
+
+    override fun isColonTokenType(type: Int): Boolean = type == Tokens.COLON
+
+    override fun isSemiTokenType(type: Int): Boolean = type == Tokens.SEMI
+
     override fun isConditionKeywordText(text: String?): Boolean =
         text == "if" || text == "while" || text == "for" || text == "with"
 
-    override fun allowsRegexAfterToken(type: Int, text: String?, lastParenWasCond: Boolean): Boolean {
+    override fun opensBlockBraceAfterToken(
+        type: Int,
+        text: String?,
+        enclosingBraceAllowsRegex: Boolean,
+        lastColonWasTernary: Boolean,
+    ): Boolean = when (type) {
+        // Closed set of expression-introducing tokens where `{` opens an object literal rather than a block.
+        Tokens.ASSIGN,
+        Tokens.PLUS_ASSIGN,
+        Tokens.MINUS_ASSIGN,
+        Tokens.STAR_ASSIGN,
+        Tokens.SLASH_ASSIGN,
+        Tokens.PERCENT_ASSIGN,
+        Tokens.STAR_STAR_ASSIGN,
+        Tokens.LSHIFT_ASSIGN,
+        Tokens.RSHIFT_ASSIGN,
+        Tokens.URSHIFT_ASSIGN,
+        Tokens.AND_ASSIGN,
+        Tokens.OR_ASSIGN,
+        Tokens.XOR_ASSIGN,
+        Tokens.LOGICAL_AND_ASSIGN,
+        Tokens.LOGICAL_OR_ASSIGN,
+        Tokens.NULLISH_ASSIGN,
+        Tokens.LPAREN,
+        Tokens.LBRACK,
+        Tokens.COMMA,
+        Tokens.QUESTION,
+        Tokens.ELLIPSIS,
+        Tokens.PLUS,
+        Tokens.MINUS,
+        Tokens.STAR,
+        Tokens.SLASH,
+        Tokens.PERCENT,
+        Tokens.STAR_STAR,
+        Tokens.BANG,
+        Tokens.TILDE,
+        Tokens.BIT_AND,
+        Tokens.BIT_OR,
+        Tokens.BIT_XOR,
+        Tokens.LOGICAL_AND,
+        Tokens.LOGICAL_OR,
+        Tokens.NULLISH,
+        Tokens.LT,
+        Tokens.LE,
+        Tokens.GE,
+        Tokens.EQ,
+        Tokens.NEQ,
+        Tokens.STRICT_EQ,
+        Tokens.STRICT_NEQ,
+        Tokens.LSHIFT,
+        Tokens.TEMPLATE_EXPR_START,
+        Tokens.JSX_TAG_EXPR_START,
+        Tokens.JSX_CHILDREN_EXPR_START,
+        -> false
+
+        Tokens.LBRACE -> enclosingBraceAllowsRegex
+        Tokens.COLON -> enclosingBraceAllowsRegex && !lastColonWasTernary
+
+        Tokens.IDENT -> !(
+            text == "return" ||
+                text == "throw" ||
+                text == "typeof" ||
+                text == "delete" ||
+                text == "await" ||
+                text == "yield" ||
+                text == "in" ||
+                text == "of" ||
+                text == "instanceof" ||
+                text == "new" ||
+                text == "default" ||
+                text == "as" ||
+                text == "satisfies"
+            )
+
+        // All statement/type-ending tokens (SEMI, RPAREN, RBRACK, RBRACE, GT, RSHIFT, URSHIFT,
+        // ARROW, STRING, TEMPLATE_END, numeric literals, INVALID_TYPE, etc.) precede a block `{`.
+        else -> true
+    }
+
+    override fun allowsRegexAfterToken(
+        type: Int,
+        text: String?,
+        lastParenWasCond: Boolean,
+        lastBraceAllowedRegex: Boolean,
+    ): Boolean {
         if (type == Tokens.RPAREN) return lastParenWasCond
+        if (type == Tokens.RBRACE) return lastBraceAllowedRegex
         return when (type) {
             Tokens.LPAREN,
             Tokens.LBRACK,
             Tokens.LBRACE,
-            Tokens.RBRACE,
             Tokens.COMMA,
             Tokens.SEMI,
             Tokens.COLON,

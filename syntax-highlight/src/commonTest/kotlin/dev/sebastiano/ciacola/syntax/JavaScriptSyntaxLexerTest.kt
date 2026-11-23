@@ -238,4 +238,64 @@ class JavaScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Tag, tParen.first { it.slice(parenColonText) == "label" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tParen.first { it.slice(parenColonText) == "(optional):" }.kind)
     }
+
+    @Test
+    fun distinguishesExpressionBracesFromBlockBracesBeforeSlash() {
+        val objDiv = "const n = { valueOf: () => 12 } / 2 / 3;"
+        val objTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, objDiv, "js-obj-literal-div")
+        assertTrue(objTokens.none { it.kind == SyntaxTokenKind.String })
+        assertEquals(2, objTokens.count { it.slice(objDiv) == "/" && it.kind == SyntaxTokenKind.Operator })
+        assertEquals(SyntaxTokenKind.Number, objTokens.first { it.slice(objDiv) == "2" }.kind)
+        assertEquals(SyntaxTokenKind.Number, objTokens.first { it.slice(objDiv) == "3" }.kind)
+
+        val nestedAndTernary = """
+            function calc(ok) {
+                const nested = { a: { valueOf: () => 12 } / 2 / 3 };
+                const picked = ok ? { a: 1 } : { valueOf: () => 12 } / 2 / 3;
+                return { valueOf: () => 12 } / 2 / 3;
+            }
+        """.trimIndent()
+        val exprTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, nestedAndTernary, "js-nested-ternary-obj-div")
+        assertTrue(exprTokens.none { it.kind == SyntaxTokenKind.String })
+        assertEquals(6, exprTokens.count { it.slice(nestedAndTernary) == "/" && it.kind == SyntaxTokenKind.Operator })
+
+        val blockRegex = """
+            if (ok) { run() }
+            /foo/g.test(s);
+            function f() { return 1 }
+            /bar/i.test(s);
+            switch (x) { case 1: { break } /baz/m.test(s); }
+            outer: { break outer }
+            /lbl/.test(s);
+            try { x() } catch { y() } finally { z() }
+            /tryre/.test(s);
+            do { i++ } while (i < 3)
+            /dore/.test(s);
+            const { a } = obj; /destr/g.test(s);
+        """.trimIndent()
+        val blockTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, blockRegex, "js-block-brace-regex")
+        for (re in listOf("/foo/g", "/bar/i", "/baz/m", "/lbl/", "/tryre/", "/dore/", "/destr/g")) {
+            assertEquals(SyntaxTokenKind.String, blockTokens.first { it.slice(blockRegex) == re }.kind, re)
+        }
+
+        val tplObjDiv = "const s = `\${ { valueOf: () => 12 } / 2 / 3 }`;"
+        val tplTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, tplObjDiv, "js-tpl-obj-div")
+        assertEquals(2, tplTokens.count { it.slice(tplObjDiv) == "/" && it.kind == SyntaxTokenKind.Operator })
+
+        val jsxObjDiv = "const el = <Comp prop={{ valueOf: () => 1 } / 2 / 3}>{ { valueOf: () => 2 } / 2 / 3 }</Comp>;"
+        val jsxTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, jsxObjDiv, "js-jsx-obj-div")
+        assertEquals(4, jsxTokens.count { it.slice(jsxObjDiv) == "/" && it.kind == SyntaxTokenKind.Operator })
+
+        val exportDefaultDiv = "export default { valueOf: () => 12 } / 2 / 3;"
+        val exportTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, exportDefaultDiv, "js-export-default-div")
+        assertTrue(exportTokens.none { it.kind == SyntaxTokenKind.String })
+
+        val shorthandDiv = "const m = { valueOf() { return 12 } } / 2 / 3;"
+        val shorthandTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, shorthandDiv, "js-method-shorthand-div")
+        assertTrue(shorthandTokens.none { it.kind == SyntaxTokenKind.String })
+
+        val voidDiv = "const z = void 0 / 2;"
+        val voidTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, voidDiv, "js-void-div")
+        assertEquals(SyntaxTokenKind.Operator, voidTokens.first { it.slice(voidDiv) == "/" }.kind)
+    }
 }

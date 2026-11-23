@@ -264,4 +264,63 @@ class TypeScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "時々" }.kind)
         assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "number" }.kind)
     }
+
+    @Test
+    fun distinguishesObjectLiteralDivisionFromBlockFollowedByRegex() {
+        val code = "const n: number = { valueOf: () => 12 } / 2 / 3;\nif (n > 0) { log(n) }\n/ok/i.test(s);"
+        val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-obj-div-vs-block-regex")
+        assertEquals(2, tokens.count { it.slice(code) == "/" && it.kind == SyntaxTokenKind.Operator })
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "2" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "3" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "/ok/i" }.kind)
+
+        val genericFn = "function f(): Promise<void> { }\n/re/.test(s);"
+        val gtFnTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, genericFn, "ts-gt-fn-regex")
+        assertEquals(SyntaxTokenKind.String, gtFnTokens.first { it.slice(genericFn) == "/re/" }.kind)
+
+        val genericClass = "class Box<T> { v?: T }\n/re/.test(s);"
+        val gtClassTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, genericClass, "ts-gt-class-regex")
+        assertEquals(SyntaxTokenKind.String, gtClassTokens.first { it.slice(genericClass) == "/re/" }.kind)
+
+        val arrayReturn = "function g(): string[] { return [] }\n/re/.test(s);"
+        val rbrackTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, arrayReturn, "ts-rbrack-fn-regex")
+        assertEquals(SyntaxTokenKind.String, rbrackTokens.first { it.slice(arrayReturn) == "/re/" }.kind)
+
+        val ambientMod = "declare module \"x\" { }\n/re/.test(s);"
+        val modTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, ambientMod, "ts-ambient-mod-regex")
+        assertEquals(SyntaxTokenKind.String, modTokens.first { it.slice(ambientMod) == "/re/" }.kind)
+
+        val classThenTsx = "class Box<T> { }\n<div className=\"a\" />;"
+        val classTsxTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, classThenTsx, "ts-gt-class-tsx")
+        assertEquals(SyntaxTokenKind.Tag, classTsxTokens.first { it.slice(classThenTsx) == "div" }.kind)
+
+        val ternaryTypedArrow = "const v = ok ? (e: number) => e : { valueOf: () => 12 } / 2 / 3;"
+        val ternTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, ternaryTypedArrow, "ts-ternary-paren-colon")
+        assertTrue(ternTokens.none { it.kind == SyntaxTokenKind.String })
+        assertEquals(2, ternTokens.count { it.slice(ternaryTypedArrow) == "/" && it.kind == SyntaxTokenKind.Operator })
+
+        val voidFnRegex = "function f(): void { }\n/re/.test(s);"
+        val voidRegexTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, voidFnRegex, "ts-void-fn-regex")
+        assertEquals(SyntaxTokenKind.String, voidRegexTokens.first { it.slice(voidFnRegex) == "/re/" }.kind)
+
+        val voidFnTsx = "function f(): void { }\n<div className=\"a\" />;"
+        val voidTsxTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, voidFnTsx, "ts-void-fn-tsx")
+        assertEquals(SyntaxTokenKind.Tag, voidTsxTokens.first { it.slice(voidFnTsx) == "div" }.kind)
+
+        val rshiftGeneric = "function f(): Promise<Array<number>> { }\n/re/.test(s);"
+        val rshiftTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, rshiftGeneric, "ts-rshift-fn-regex")
+        assertEquals(SyntaxTokenKind.String, rshiftTokens.first { it.slice(rshiftGeneric) == "/re/" }.kind)
+
+        val urshiftGeneric = "class A implements B<C<D<E>>> { }\n/re/.test(s);"
+        val urshiftTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, urshiftGeneric, "ts-urshift-class-regex")
+        assertEquals(SyntaxTokenKind.String, urshiftTokens.first { it.slice(urshiftGeneric) == "/re/" }.kind)
+
+        val literalReturn = "function bit(): 0 | 1 { return 1 }\n/re/.test(s);"
+        val litRetTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, literalReturn, "ts-literal-return-regex")
+        assertEquals(SyntaxTokenKind.String, litRetTokens.first { it.slice(literalReturn) == "/re/" }.kind)
+
+        val unionObjectReturn = "function mk(): A | { x: number } { return { x: 1 } }\n/re/.test(s);"
+        val unionObjTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, unionObjectReturn, "ts-union-obj-return-regex")
+        assertEquals(SyntaxTokenKind.String, unionObjTokens.first { it.slice(unionObjectReturn) == "/re/" }.kind)
+    }
 }
