@@ -148,6 +148,18 @@ class CSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "1.0bf16" }.kind)
         assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "42" }.kind)
         assertEquals(SyntaxTokenKind.Plain, suffixTokens.first { it.slice(suffixCode) == "ffuuzzll" }.kind)
+
+        val bomCode = "\uFEFFint x = 1;"
+        val bomTokens = assertLosslessInvariants(CSyntaxLexer, bomCode, "c-bom")
+        assertEquals(SyntaxTokenKind.Whitespace, bomTokens.first { it.slice(bomCode) == "\uFEFF" }.kind)
+        assertEquals(SyntaxTokenKind.Type, bomTokens.first { it.slice(bomCode) == "int" }.kind)
+
+        val bareCrCode = "#define A 1\rint x = 0;\r"
+        val crTokens = assertLosslessInvariants(CSyntaxLexer, bareCrCode, "c-bare-cr-pp")
+        assertEquals(SyntaxTokenKind.Preprocessor, crTokens.first { it.slice(bareCrCode) == "define" }.kind)
+        assertEquals(SyntaxTokenKind.Type, crTokens.first { it.slice(bareCrCode) == "int" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, crTokens.first { it.slice(bareCrCode) == "x" }.kind)
+        assertEquals(SyntaxTokenKind.Number, crTokens.first { it.slice(bareCrCode) == "0" }.kind)
     }
 
     @Test

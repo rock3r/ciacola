@@ -3,6 +3,8 @@
  */
 lexer grammar HtmlLexer;
 
+import UnicodeIdent;
+
 options {
     superClass = HtmlLexerBase;
 }
@@ -53,7 +55,7 @@ CHAR_REF
     ;
 
 SEA_WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 OPEN
@@ -61,7 +63,7 @@ OPEN
     ;
 
 TEXT
-    : ~[<& \t\r\n]+
+    : ~[<& \t\r\n\uFEFF]+
     ;
 
 LONE_AMP
@@ -72,7 +74,7 @@ LONE_AMP
 mode INSIDE;
 
 TAG_WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 SPECIAL_CLOSE
@@ -96,7 +98,7 @@ EQUALS
     ;
 
 TAG_NAME
-    : [a-zA-Z_:][a-zA-Z0-9_.:-]* { onTagName(text) }
+    : ( UNICODE_XID_START | [_:] ) ( UNICODE_XID_CONTINUE | [.:-] )* { onTagName(text) }
     ;
 
 ATTR_SPECIAL_NAME

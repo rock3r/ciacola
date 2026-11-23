@@ -6,6 +6,7 @@ import dev.sebastiano.ciacola.syntax.oracle.OracleTokenExpectation
 import dev.sebastiano.ciacola.syntax.oracle.assertMatchesOracleFixture
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class KotlinSyntaxLexerTest {
 
@@ -199,5 +200,18 @@ class KotlinSyntaxLexerTest {
         val tokens = assertLosslessInvariants(KotlinSyntaxLexer, code, "kotlin-angle-reset")
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "out" && it.startIndex > code.indexOf("val res") }.kind)
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "X" }.kind)
+    }
+
+    @Test
+    fun supportsThisAtInParensVisibilitySettersSmpIdentifiersAndLeadingBom() {
+        val code = "\uFEFFclass A {\n    var n = 0\n        private set\n    val 𠮷 = 1\n    fun f() {\n        g(this@A)\n    }\n}\n"
+        val tokens = assertLosslessInvariants(KotlinSyntaxLexer, code, "kotlin-this-at-setter-bom")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first().kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "private" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "set" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𠮷" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "this" }.kind)
+        assertEquals(SyntaxTokenKind.Annotation, tokens.first { it.slice(code) == "@A" }.kind)
     }
 }

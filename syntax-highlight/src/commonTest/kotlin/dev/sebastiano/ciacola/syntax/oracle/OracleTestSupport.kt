@@ -25,6 +25,7 @@ data class OracleFixture(
     val code: String,
     val expectations: List<OracleTokenExpectation>,
     val minAgreementRatio: Double = 0.92,
+    val maxOverrideShare: Double = 0.40,
 )
 
 private data class OracleMismatch(
@@ -32,15 +33,18 @@ private data class OracleMismatch(
     val expectation: OracleTokenExpectation,
     val actualKind: SyntaxTokenKind?,
     val overlapping: List<SyntaxToken>,
+    val isOverride: Boolean,
 )
 
 /**
  * Verifies [fixture] against [SyntaxHighlighter.lex]:
  * 1. Confirms lossless invariants on [OracleFixture.code].
- * 2. Matches each [OracleTokenExpectation] span against the dominant overlapping non-whitespace
+ * 2. Enforces `allowedKinds.size in 1..3`, explanatory notes on overrides beyond `{shikiKind, pygmentsKind}`,
+ *    non-zero raw-oracle coverage, and `overrideShare <= maxOverrideShare`.
+ * 3. Matches each [OracleTokenExpectation] span against the dominant overlapping non-whitespace
  *    emitted token kind.
- * 3. Fails with a detailed diff if any expectation with `note.startsWith("STRICT:")` mismatches or
- *    if overall agreement falls below [OracleFixture.minAgreementRatio].
+ * 4. Fails with a detailed diff if any `STRICT:` or override expectation mismatches, or if either
+ *    raw-oracle agreement or overall agreement falls below [OracleFixture.minAgreementRatio].
  */
 fun assertMatchesOracleFixture(fixture: OracleFixture) {
     val lexer = SyntaxHighlighter.lexer(fixture.language)
@@ -49,7 +53,11 @@ fun assertMatchesOracleFixture(fixture: OracleFixture) {
 
     val mismatches = mutableListOf<OracleMismatch>()
     val strictMismatches = mutableListOf<OracleMismatch>()
+    val overrideMismatches = mutableListOf<OracleMismatch>()
     var matchedCount = 0
+    var rawTotal = 0
+    var rawMatched = 0
+    var overrideTotal = 0
 
     for ((idx, exp) in fixture.expectations.withIndex()) {
         assertTrue(
@@ -62,10 +70,13 @@ fun assertMatchesOracleFixture(fixture: OracleFixture) {
         )
         val extendsBeyondOracles = !exp.allowedKinds.all { it == exp.shikiKind || it == exp.pygmentsKind }
         if (extendsBeyondOracles) {
+            overrideTotal++
             assertTrue(
                 exp.note.isNotBlank(),
                 "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') extends allowedKinds beyond {shiki=${exp.shikiKind}, pygments=${exp.pygmentsKind}} to ${exp.allowedKinds} without an explanatory note",
             )
+        } else {
+            rawTotal++
         }
         assertTrue(
             exp.startIndex >= 0 && exp.endIndex > exp.startIndex && exp.endIndex <= fixture.code.length,
@@ -81,37 +92,66 @@ fun assertMatchesOracleFixture(fixture: OracleFixture) {
         val dominant = dominantKindForSpan(overlapping, exp.startIndex, exp.endIndex)
         if (dominant != null && dominant in exp.allowedKinds) {
             matchedCount++
+            if (!extendsBeyondOracles) {
+                rawMatched++
+            }
         } else {
             val mismatch = OracleMismatch(
                 index = idx,
                 expectation = exp,
                 actualKind = dominant,
                 overlapping = overlapping,
+                isOverride = extendsBeyondOracles,
             )
             mismatches += mismatch
+            if (extendsBeyondOracles) {
+                overrideMismatches += mismatch
+            }
             if (exp.note.startsWith("STRICT:")) {
                 strictMismatches += mismatch
             }
         }
     }
 
-    val agreementRatio = matchedCount.toDouble() / fixture.expectations.size.toDouble()
-    if (strictMismatches.isNotEmpty() || agreementRatio < fixture.minAgreementRatio) {
+    assertTrue(
+        rawTotal > 0,
+        "Oracle fixture '${fixture.name}' (${fixture.language.id}) has zero raw-oracle expectations",
+    )
+    val overrideShare = overrideTotal.toDouble() / fixture.expectations.size.toDouble()
+    assertTrue(
+        overrideShare <= fixture.maxOverrideShare,
+        "Oracle fixture '${fixture.name}' (${fixture.language.id}) override share " +
+            "$overrideTotal/${fixture.expectations.size} (${formatRatio(overrideShare)}) " +
+            "exceeds maxOverrideShare (${formatRatio(fixture.maxOverrideShare)})",
+    )
+
+    val rawAgreementRatio = rawMatched.toDouble() / rawTotal.toDouble()
+    val overallAgreementRatio = matchedCount.toDouble() / fixture.expectations.size.toDouble()
+    if (strictMismatches.isNotEmpty() ||
+        overrideMismatches.isNotEmpty() ||
+        rawAgreementRatio < fixture.minAgreementRatio ||
+        overallAgreementRatio < fixture.minAgreementRatio
+    ) {
         val report = buildString {
             appendLine(
                 "Oracle fixture '${fixture.name}' (${fixture.language.id}) failed: " +
-                    "agreement $matchedCount/${fixture.expectations.size} (${formatRatio(agreementRatio)}) " +
-                    "< required ${formatRatio(fixture.minAgreementRatio)}, " +
-                    "strictMismatches=${strictMismatches.size}",
+                    "raw=$rawMatched/$rawTotal (${formatRatio(rawAgreementRatio)}), " +
+                    "overall=$matchedCount/${fixture.expectations.size} (${formatRatio(overallAgreementRatio)}), " +
+                    "required=${formatRatio(fixture.minAgreementRatio)}, " +
+                    "strictMismatches=${strictMismatches.size}, " +
+                    "overrideMismatches=${overrideMismatches.size}",
             )
             for (m in mismatches) {
                 val exp = m.expectation
                 val overlapDesc = m.overlapping.joinToString(", ") { tok ->
                     "${tok.kind}@${tok.startIndex}..${tok.endIndex}(${tok.slice(fixture.code).replace("\n", "\\n")})"
                 }
-                val strictTag = if (exp.note.startsWith("STRICT:")) " [STRICT]" else ""
+                val tags = buildString {
+                    if (exp.note.startsWith("STRICT:")) append(" [STRICT]")
+                    if (m.isOverride) append(" [OVERRIDE]")
+                }
                 appendLine(
-                    "  #${m.index}$strictTag ${exp.startIndex}..${exp.endIndex} '${exp.text}': " +
+                    "  #${m.index}$tags ${exp.startIndex}..${exp.endIndex} '${exp.text}': " +
                         "expected=${exp.allowedKinds} (shiki=${exp.shikiKind}, pygments=${exp.pygmentsKind}), " +
                         "actual=${m.actualKind}, tokens=[$overlapDesc]" +
                         if (exp.note.isNotEmpty()) " note='${exp.note}'" else "",

@@ -300,7 +300,7 @@ private fun classifyAndEmitJavaTokens(code: String, raw: MutableList<RawJavaToke
                         inTypeHeader = true
                         expectingDeclaredTypeName = true
                     }
-                    "module" -> inModuleHeader = true
+                    "module" -> if (prev?.type != JavaTokens.IMPORT) inModuleHeader = true
                 }
                 i++
                 continue
@@ -460,7 +460,12 @@ private fun isJavaContextualKeyword(
 
         "module" -> {
             braceDepth == 0 &&
-                (prev == null || prev.type == JavaTokens.SEMI || (prev.type == JavaTokens.IDENTIFIER && code.substring(prev.start, prev.end) == "open")) &&
+                (
+                    prev == null ||
+                        prev.type == JavaTokens.SEMI ||
+                        prev.type == JavaTokens.IMPORT ||
+                        (prev.type == JavaTokens.IDENTIFIER && code.substring(prev.start, prev.end) == "open")
+                    ) &&
                 next?.type == JavaTokens.IDENTIFIER
         }
 

@@ -3,8 +3,10 @@
  */
 lexer grammar JavaLexer;
 
+import UnicodeIdent;
+
 WS
-    : [ \t\r\n\f]+
+    : [ \t\r\n\f\uFEFF]+
     ;
 
 LINE_COMMENT
@@ -218,14 +220,15 @@ IDENTIFIER
     ;
 
 fragment ID_START
-    : [a-zA-Z_$]
-    | [\u00C0-\u02AF\u0370-\u1FFF\u2100-\u2FFF\u3040-\uD7FF\uF900-\uFFEF\u{10000}-\u{1EFFF}\u{20000}-\u{2FA1F}]
+    : UNICODE_XID_START
+    | '$'
+    | '_'
     ;
 
 fragment ID_CONTINUE
-    : ID_START
-    | [0-9]
-    | [\u0300-\u036F\u200C\u200D]
+    : UNICODE_XID_CONTINUE
+    | '$'
+    | '_'
     ;
 
 ERROR_CHAR

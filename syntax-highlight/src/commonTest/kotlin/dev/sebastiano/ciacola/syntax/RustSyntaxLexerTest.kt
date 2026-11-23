@@ -241,6 +241,18 @@ class RustSyntaxLexerTest {
             ),
             dotCallTokens.map { it.kind to it.slice(unicodeCode) },
         )
+
+        val suffixCode = "let a = 1f32 + 2f64 + 1u32 as f64 + 1i64 as f64;"
+        val suffixTokens = assertLosslessInvariants(RustSyntaxLexer, suffixCode, "rust-int-float-suffixes")
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "1f32" }.kind)
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "2f64" }.kind)
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "1u32" }.kind)
+        assertEquals(SyntaxTokenKind.Number, suffixTokens.first { it.slice(suffixCode) == "1i64" }.kind)
+
+        val bomCode = "\uFEFFfn main() {}"
+        val bomTokens = assertLosslessInvariants(RustSyntaxLexer, bomCode, "rust-bom")
+        assertEquals(SyntaxTokenKind.Whitespace, bomTokens.first { it.slice(bomCode) == "\uFEFF" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, bomTokens.first { it.slice(bomCode) == "fn" }.kind)
     }
 
     @Test

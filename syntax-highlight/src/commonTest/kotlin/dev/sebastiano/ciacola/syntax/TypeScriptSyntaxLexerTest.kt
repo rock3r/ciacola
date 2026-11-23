@@ -112,6 +112,7 @@ class TypeScriptSyntaxLexerTest {
         }
         val alternatingComparisons = "const ok = " + (1..3_000).joinToString(" && ") { "a$it < b$it" } + ";"
         val largeTsx = "export const List: FC = () => (<ul>" + "<li data-id=\"1\">item</li>".repeat(800) + "</ul>);"
+        val repeatedAngles = "<T>".repeat(3_000)
 
         assertLinearPerformance(
             lexer = TypeScriptSyntaxLexer,
@@ -120,6 +121,7 @@ class TypeScriptSyntaxLexerTest {
                 "many-interfaces" to manyInterfaces,
                 "alternating-comparisons" to alternatingComparisons,
                 "large-tsx" to largeTsx,
+                "repeated-angles" to repeatedAngles,
             ),
         )
     }
@@ -199,5 +201,37 @@ class TypeScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Keyword, firstKind("=>", after = arrowIdx))
         assertEquals(SyntaxTokenKind.Plain, firstKind("café"))
         assertEquals(SyntaxTokenKind.Plain, firstKind("𠮷"))
+    }
+
+    @Test
+    fun distinguishesGenericArrowsAndAngleAssertionsFromBareJsxTags() {
+        val code1 = "const id = <T>(x: T): T => x;\nexport function next() { return 1; }"
+        val t1 = assertLosslessInvariants(TypeScriptSyntaxLexer, code1, "ts-generic-arrow-no-comma")
+        assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "export" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "function" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t1.first { it.slice(code1) == "next" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "return" }.kind)
+
+        val code2 = "register(<T>(value: T) => value);\nconst after = 1;"
+        val t2 = assertLosslessInvariants(TypeScriptSyntaxLexer, code2, "ts-generic-arrow-arg")
+        assertEquals(SyntaxTokenKind.Keyword, t2.first { it.slice(code2) == "=>" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t2.first { it.slice(code2) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t2.first { it.slice(code2) == "after" }.kind)
+
+        val code3 = "const el = <HTMLElement>document.body;\nconst n = 1;"
+        val t3 = assertLosslessInvariants(TypeScriptSyntaxLexer, code3, "ts-angle-cast")
+        assertEquals(SyntaxTokenKind.Keyword, t3.last { it.slice(code3) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Property, t3.first { it.slice(code3) == "body" }.kind)
+
+        val jsxParen = "const ui = <div>(hello)</div>;"
+        val t4 = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxParen, "tsx-paren-children")
+        assertEquals(SyntaxTokenKind.Tag, t4.first { it.slice(jsxParen) == "div" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, t4.first { it.slice(jsxParen) == "(hello)" }.kind)
+
+        val jsxGeneric = "const sel = <Select<string>><Option /></Select>;"
+        val t5 = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxGeneric, "tsx-generic-bare")
+        assertEquals(SyntaxTokenKind.Tag, t5.first { it.slice(jsxGeneric) == "Select" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t5.first { it.slice(jsxGeneric) == "string" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, t5.first { it.slice(jsxGeneric) == "Option" }.kind)
     }
 }

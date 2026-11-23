@@ -4,7 +4,7 @@
 lexer grammar GlslLexer;
 
 WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 LINE_COMMENT
@@ -111,7 +111,7 @@ PP_WS
     ;
 
 PP_LINE_CONT
-    : '\\' '\r'? '\n'
+    : '\\' ( '\r'? '\n' | '\r' )
     ;
 
 PP_LINE_COMMENT
@@ -123,7 +123,7 @@ PP_BLOCK_COMMENT
     ;
 
 PP_NL
-    : '\r'? '\n' -> popMode
+    : ( '\r'? '\n' | '\r' ) -> popMode
     ;
 
 PP_TEXT

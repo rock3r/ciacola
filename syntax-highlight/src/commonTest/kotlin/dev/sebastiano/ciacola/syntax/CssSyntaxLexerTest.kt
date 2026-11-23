@@ -211,4 +211,20 @@ class CssSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "--🚀-gap" }.kind)
         assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "--café-accent" }.kind)
     }
+
+    @Test
+    fun handlesRangeMediaOperatorsPipesAndLeadingBom() {
+        val code = "\uFEFF@media (400px <= width <= 700px) { a { color: red; } }\n" +
+            "@container card (width < 30em) { .t { gap: 1px; } }\n" +
+            "svg|rect, *|a { fill: red; }\n" +
+            "col.a || td { color: red; }"
+        val tokens = assertLosslessInvariants(CssSyntaxLexer, code, "css-operators-bom")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first().kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "@media" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "<=" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "<" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "|" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "||" }.kind)
+    }
 }

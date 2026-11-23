@@ -383,8 +383,22 @@ private fun isSoftKeywordActingAsKeyword(
     return when (type) {
         KotlinTokens.GET,
         KotlinTokens.SET,
-        -> (lineStart || prev == null || prev.kind == SyntaxTokenKind.Keyword || prev.type == KotlinTokens.SEMICOLON || prev.type == KotlinTokens.RCURL) &&
-            (next?.type == KotlinTokens.LPAREN || next?.type == KotlinTokens.ASSIGNMENT)
+        -> {
+            val isAccessorStart = lineStart || prev == null || prev.kind == SyntaxTokenKind.Keyword || prev.type == KotlinTokens.SEMICOLON || prev.type == KotlinTokens.RCURL
+            val isAccessorModifierPredecessor = prev?.type in KOTLIN_ACCESSOR_MODIFIERS
+            isAccessorStart && (
+                next?.type == KotlinTokens.LPAREN ||
+                    next?.type == KotlinTokens.ASSIGNMENT ||
+                    (
+                        isAccessorModifierPredecessor && (
+                            next == null ||
+                                nextOnNewLine ||
+                                next.type == KotlinTokens.SEMICOLON ||
+                                next.type == KotlinTokens.RCURL
+                            )
+                        )
+                )
+        }
 
         KotlinTokens.INIT -> next?.type == KotlinTokens.LCURL
         KotlinTokens.CONSTRUCTOR -> next?.type == KotlinTokens.LPAREN
@@ -675,6 +689,16 @@ private fun isKotlinUseSiteTarget(type: Int): Boolean = when (type) {
     -> true
     else -> false
 }
+
+private val KOTLIN_ACCESSOR_MODIFIERS = setOf(
+    KotlinTokens.PRIVATE,
+    KotlinTokens.PROTECTED,
+    KotlinTokens.INTERNAL,
+    KotlinTokens.PUBLIC,
+    KotlinTokens.FINAL,
+    KotlinTokens.INLINE,
+    KotlinTokens.EXTERNAL,
+)
 
 private fun isKotlinIdentifierLike(type: Int): Boolean =
     type == KotlinTokens.Identifier || type == KotlinTokens.IdentifierOrSoftKey || isKotlinSoftKeyword(type)

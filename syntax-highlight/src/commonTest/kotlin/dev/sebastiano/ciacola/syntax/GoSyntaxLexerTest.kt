@@ -190,6 +190,24 @@ class GoSyntaxLexerTest {
     }
 
     @Test
+    fun distinguishesTopLevelFuncTypesFromMethodReceiversAndHandlesBom() {
+        val handlerCode = "type HandlerFunc func(w Writer, r *Request)\n\nfunc (f HandlerFunc) Serve() {}\n\ntype Mapper func(int) string"
+        val handlerTokens = assertLosslessInvariants(GoSyntaxLexer, handlerCode, "go-func-type-vs-receiver")
+        assertEquals(SyntaxTokenKind.Keyword, handlerTokens.first { it.slice(handlerCode) == "func" }.kind)
+        assertEquals(SyntaxTokenKind.Function, handlerTokens.first { it.slice(handlerCode) == "Serve" }.kind)
+        assertEquals(SyntaxTokenKind.Type, handlerTokens.first { it.slice(handlerCode) == "string" }.kind)
+
+        val callbackCode = "type Callback func(code int)\n\nvar registry = 1"
+        val callbackTokens = assertLosslessInvariants(GoSyntaxLexer, callbackCode, "go-callback-var")
+        assertEquals(SyntaxTokenKind.Keyword, callbackTokens.first { it.slice(callbackCode) == "var" }.kind)
+
+        val bomCode = "\uFEFFpackage main\n"
+        val bomTokens = assertLosslessInvariants(GoSyntaxLexer, bomCode, "go-bom")
+        assertEquals(SyntaxTokenKind.Whitespace, bomTokens.first { it.slice(bomCode) == "\uFEFF" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, bomTokens.first { it.slice(bomCode) == "package" }.kind)
+    }
+
+    @Test
     fun matchesShikiAndPygmentsOracles() {
         assertAllOracleFixtures(goOracleFixtures)
     }

@@ -9,11 +9,11 @@ import org.antlr.v4.kotlinruntime.Lexer
  */
 internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
 
-    private enum class FStringKind(val isSingleLine: Boolean) {
-        SINGLE(true),
-        DOUBLE(true),
-        TRIPLE_SINGLE(false),
-        TRIPLE_DOUBLE(false),
+    private enum class FStringKind(val isSingleLine: Boolean, val isDoubleQuote: Boolean) {
+        SINGLE(isSingleLine = true, isDoubleQuote = false),
+        DOUBLE(isSingleLine = true, isDoubleQuote = true),
+        TRIPLE_SINGLE(isSingleLine = false, isDoubleQuote = false),
+        TRIPLE_DOUBLE(isSingleLine = false, isDoubleQuote = true),
     }
 
     private class InterpFrame(
@@ -148,10 +148,214 @@ internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         if (top.parenDepth == 0 && top.braceDepth == 0) {
             top.inStatementHeader = false
             top.lambdaDepth = -1
-            if (fstringKindStack.lastOrNull()?.isSingleLine == true) {
+            val currentKind = fstringKindStack.lastOrNull()
+            if (currentKind != null && currentKind.isSingleLine && !hasBalancedSingleLineFStringClosing(currentKind)) {
                 unwindSingleLineFStrings()
             }
         }
+    }
+
+    private fun hasBalancedSingleLineFStringClosing(kind: FStringKind): Boolean {
+        val quoteChar = if (kind.isDoubleQuote) '"'.code else '\''.code
+        var offset = 1
+        var inInterpolation = true
+        var braceDepth = 1
+        var atLineStart = true
+
+        while (offset <= SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) {
+            if (inInterpolation) {
+                if (atLineStart) {
+                    offset = skipHorizontalWs(offset)
+                    if (offset > SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) return false
+                    val lineFirst = _input.LA(offset)
+                    if (lineFirst == -1) return false
+                    if (lineFirst == '\n'.code) {
+                        offset++
+                        continue
+                    }
+                    if (lineFirst == '\r'.code) {
+                        offset += if (_input.LA(offset + 1) == '\n'.code) 2 else 1
+                        continue
+                    }
+                    if (lineFirst == '#'.code) {
+                        offset = skipToLineEnd(offset + 1)
+                        continue
+                    }
+                    if (braceDepth == 1 && startsStatementKeyword(offset)) {
+                        return false
+                    }
+                    atLineStart = false
+                }
+
+                val ch = _input.LA(offset)
+                when {
+                    ch == -1 -> return false
+                    ch == '\n'.code -> {
+                        offset++
+                        atLineStart = true
+                    }
+                    ch == '\r'.code -> {
+                        offset += if (_input.LA(offset + 1) == '\n'.code) 2 else 1
+                        atLineStart = true
+                    }
+                    ch == '#'.code -> {
+                        offset = skipToLineEnd(offset + 1)
+                    }
+                    ch == '{'.code -> {
+                        braceDepth++
+                        offset++
+                    }
+                    ch == '}'.code -> {
+                        braceDepth--
+                        offset++
+                        if (braceDepth == 0) {
+                            inInterpolation = false
+                        }
+                    }
+                    ch == '\''.code || ch == '"'.code -> {
+                        offset = skipQuotedLiteralInLookahead(offset, ch)
+                        if (offset < 0) return false
+                    }
+                    else -> offset++
+                }
+            } else {
+                val ch = _input.LA(offset)
+                when {
+                    ch == -1 || ch == '\n'.code || ch == '\r'.code -> return false
+                    ch == quoteChar -> return true
+                    ch == '\\'.code -> {
+                        val next = _input.LA(offset + 1)
+                        offset += when {
+                            next == -1 -> 1
+                            next == '\r'.code && _input.LA(offset + 2) == '\n'.code -> 3
+                            else -> 2
+                        }
+                    }
+                    ch == '{'.code -> {
+                        if (_input.LA(offset + 1) == '{'.code) {
+                            offset += 2
+                        } else {
+                            inInterpolation = true
+                            braceDepth = 1
+                            atLineStart = false
+                            offset++
+                        }
+                    }
+                    else -> offset++
+                }
+            }
+        }
+        return false
+    }
+
+    private fun skipHorizontalWs(startOffset: Int): Int {
+        var offset = startOffset
+        while (offset <= SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) {
+            val ch = _input.LA(offset)
+            if (ch == ' '.code || ch == '\t'.code || ch == '\u000C'.code || ch == '\uFEFF'.code) {
+                offset++
+            } else {
+                break
+            }
+        }
+        return offset
+    }
+
+    private fun skipToLineEnd(startOffset: Int): Int {
+        var offset = startOffset
+        while (offset <= SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) {
+            val ch = _input.LA(offset)
+            if (ch == -1 || ch == '\n'.code || ch == '\r'.code) break
+            offset++
+        }
+        return offset
+    }
+
+    private fun skipQuotedLiteralInLookahead(startOffset: Int, quote: Int): Int {
+        val isTriple = _input.LA(startOffset + 1) == quote && _input.LA(startOffset + 2) == quote
+        var offset = startOffset + if (isTriple) 3 else 1
+        while (offset <= SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) {
+            val ch = _input.LA(offset)
+            when {
+                ch == -1 -> return -1
+                !isTriple && (ch == '\n'.code || ch == '\r'.code) -> return offset
+                ch == '\\'.code -> {
+                    val next = _input.LA(offset + 1)
+                    offset += when {
+                        next == -1 -> return -1
+                        next == '\r'.code && _input.LA(offset + 2) == '\n'.code -> 3
+                        else -> 2
+                    }
+                }
+                ch == quote -> {
+                    if (!isTriple) return offset + 1
+                    if (_input.LA(offset + 1) == quote && _input.LA(offset + 2) == quote) {
+                        return offset + 3
+                    }
+                    offset++
+                }
+                else -> offset++
+            }
+        }
+        return -1
+    }
+
+    private fun startsStatementKeyword(offset: Int): Boolean {
+        for (keyword in STATEMENT_STARTER_KEYWORDS) {
+            if (matchesKeywordAt(offset, keyword)) {
+                val after = _input.LA(offset + keyword.length)
+                val validBoundary = when (keyword) {
+                    "else", "try", "finally" -> {
+                        val afterWs = skipHorizontalWs(offset + keyword.length)
+                        _input.LA(afterWs) == ':'.code
+                    }
+                    "return" -> {
+                        after == -1 ||
+                            after == ' '.code ||
+                            after == '\t'.code ||
+                            after == '('.code ||
+                            after == ';'.code ||
+                            after == '\r'.code ||
+                            after == '\n'.code
+                    }
+                    "if", "elif", "while", "with", "match" -> {
+                        after == ' '.code || after == '\t'.code || after == '('.code
+                    }
+                    else -> after == ' '.code || after == '\t'.code
+                }
+                if (validBoundary) return true
+            }
+        }
+        return false
+    }
+
+    private fun matchesKeywordAt(offset: Int, keyword: String): Boolean {
+        for (i in keyword.indices) {
+            if (_input.LA(offset + i) != keyword[i].code) return false
+        }
+        return true
+    }
+
+    private companion object {
+        const val SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT = 512
+        val STATEMENT_STARTER_KEYWORDS = arrayOf(
+            "def",
+            "class",
+            "if",
+            "elif",
+            "else",
+            "for",
+            "while",
+            "return",
+            "import",
+            "from",
+            "try",
+            "except",
+            "finally",
+            "with",
+            "match",
+            "async",
+        )
     }
 
     protected fun onColon(formatSpecMode: Int, formatColonTokenType: Int) {

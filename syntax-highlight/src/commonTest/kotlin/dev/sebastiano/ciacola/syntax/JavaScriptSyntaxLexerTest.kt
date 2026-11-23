@@ -201,9 +201,11 @@ class JavaScriptSyntaxLexerTest {
 
     @Test
     fun handlesBmpAndSupplementaryUnicodeIdentifiers() {
-        val code = "const café = 1; const Δt = 0.5; const 𠮷 = 2; const 𝐀 = 3; const e\u0301 = 4;"
+        val code = "\uFEFFconst café = 1; const Δt = 0.5; const 𠮷 = 2; const 𝐀 = 3; const e\u0301 = 4;"
         val tokens = assertLosslessInvariants(JavaScriptSyntaxLexer, code, "js-unicode-ident")
         assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first().kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "const" }.kind)
         for (ident in listOf("café", "Δt", "𠮷", "𝐀", "e\u0301")) {
             assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == ident }.kind, "Unicode ident $ident")
         }

@@ -199,4 +199,15 @@ class HtmlSyntaxLexerTest {
             assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == attr }.kind, "Template attr $attr")
         }
     }
+
+    @Test
+    fun handlesBomAndUnicodeTagAndAttributeNames() {
+        val code = "\uFEFF<café prix=\"1\"><größe/></café>"
+        val tokens = assertLosslessInvariants(HtmlSyntaxLexer, code, "html-unicode-bom")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first().kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "prix" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "größe" }.kind)
+    }
 }

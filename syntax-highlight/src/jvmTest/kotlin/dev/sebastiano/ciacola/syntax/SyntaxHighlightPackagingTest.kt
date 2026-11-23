@@ -70,8 +70,10 @@ class SyntaxHighlightPackagingTest {
         val handWrittenAntlrDir = File(moduleDir, "src/commonMain/kotlin/dev/sebastiano/ciacola/syntax/antlr")
         val generatedAntlrRoot = File(moduleDir, "build/generatedAntlr")
 
+        val modifierWord =
+            """(?:public|open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
         val topLevelNonInternal = Regex(
-            """(?m)^(?!internal\b|private\b)(?:public\s+)?(?:(?:open|abstract|final|sealed)\s+)?(?:class|object|interface)\b""",
+            """(?m)^(?!internal\b|private\b)(?:$modifierWord\s+)*(?:class|object|interface|fun|val|var|typealias)\b""",
         )
         val windowsDriveHeader = Regex("""^// Generated from [A-Za-z]:""")
 

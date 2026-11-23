@@ -67,10 +67,13 @@ private fun emitGoRawToken(
             val hasNl = (start until end).any { code[it] == '\n' || code[it] == '\r' }
             out += RawGoToken(type, start, end, SyntaxTokenKind.Whitespace, isHidden = true, hasNewline = hasNl)
         }
-        GoTokens.LINE_COMMENT,
+        GoTokens.LINE_COMMENT -> out += RawGoToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true)
         GoTokens.BLOCK_COMMENT,
         GoTokens.UNTERMINATED_BLOCK_COMMENT,
-        -> out += RawGoToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true)
+        -> {
+            val hasNl = (start until end).any { code[it] == '\n' || code[it] == '\r' }
+            out += RawGoToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true, hasNewline = hasNl)
+        }
 
         GoTokens.RAW_STRING,
         GoTokens.UNTERMINATED_RAW_STRING,
@@ -117,6 +120,7 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
     }
 
     var afterFuncKeyword = false
+    var afterFuncCanBeReceiver = false
     var receiverParenDepth = 0
     var expectingMethodNameAfterReceiver = false
     var pendingStructOrInterface = false
@@ -175,8 +179,10 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
                 }
             }
         } else if (afterFuncKeyword) {
+            val canBeReceiver = afterFuncCanBeReceiver
             afterFuncKeyword = false
-            if (tok.type == GoTokens.LPAREN && braceDepth == 0 && parenDepthBefore == 0) {
+            afterFuncCanBeReceiver = false
+            if (tok.type == GoTokens.LPAREN && canBeReceiver) {
                 receiverParenDepth = 1
             } else if (tok.type == GoTokens.IDENT) {
                 tok.kind = SyntaxTokenKind.Function
@@ -189,11 +195,19 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
         } else if (expectingMethodNameAfterReceiver) {
             expectingMethodNameAfterReceiver = false
             if (tok.type == GoTokens.IDENT) {
-                tok.kind = SyntaxTokenKind.Function
-                if (next?.type == GoTokens.LBRACK) {
-                    expectingTypeParamBracket = true
+                val candidate = code.substring(tok.start, tok.end)
+                if (
+                    candidate !in GO_KEYWORDS &&
+                    candidate !in GO_CONSTANTS &&
+                    candidate !in GO_PREDECLARED_TYPES &&
+                    (next?.type == GoTokens.LPAREN || next?.type == GoTokens.LBRACK)
+                ) {
+                    tok.kind = SyntaxTokenKind.Function
+                    if (next.type == GoTokens.LBRACK) {
+                        expectingTypeParamBracket = true
+                    }
+                    continue
                 }
-                continue
             }
         }
 
@@ -211,7 +225,15 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
         }
         if (text in GO_KEYWORDS) {
             tok.kind = SyntaxTokenKind.Keyword
-            if (text == "func") afterFuncKeyword = true
+            if (text == "func") {
+                afterFuncKeyword = true
+                afterFuncCanBeReceiver = braceDepth == 0 && parenDepthBefore == 0 && (
+                    prev == null ||
+                        prev.type == GoTokens.SEMI ||
+                        prev.type == GoTokens.RBRACE ||
+                        (lineStart && !isGoNonReceiverPredecessor(prev.type))
+                    )
+            }
             if (text == "struct" || text == "interface") pendingStructOrInterface = true
             continue
         }
@@ -274,6 +296,20 @@ private fun classifyGoRawTokens(code: String, raw: List<RawGoToken>) {
             continue
         }
     }
+}
+
+private fun isGoNonReceiverPredecessor(type: Int): Boolean = when (type) {
+    GoTokens.IDENT,
+    GoTokens.EQ,
+    GoTokens.COLONEQ,
+    GoTokens.RBRACK,
+    GoTokens.COMMA,
+    GoTokens.LPAREN,
+    GoTokens.LBRACE,
+    GoTokens.COLON,
+    GoTokens.LARROW,
+    -> true
+    else -> false
 }
 
 private val GO_KEYWORDS = setOf(

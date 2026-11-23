@@ -4,7 +4,7 @@
 lexer grammar TomlLexer;
 
 WS
-    : [ \t]+
+    : [ \t\uFEFF]+
     ;
 
 NEWLINE

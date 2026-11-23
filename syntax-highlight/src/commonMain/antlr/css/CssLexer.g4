@@ -13,7 +13,7 @@ options {
 }
 
 WS
-    : [ \t\r\n\f]+
+    : [ \t\r\n\f\uFEFF]+
     ;
 
 BLOCK_COMMENT
@@ -74,9 +74,14 @@ DASHMATCH    : '|=';
 PREFIXMATCH  : '^=';
 SUFFIXMATCH  : '$=';
 SUBSTRINGMATCH : '*=';
+LTE          : '<=';
+GTE          : '>=';
+COLUMN       : '||';
 
 DOT          : '.';
+LT           : '<';
 GT           : '>';
+PIPE         : '|';
 PLUS         : '+';
 MINUS        : '-';
 TILDE        : '~';
@@ -98,20 +103,20 @@ fragment ESCAPE
 
 fragment IDENT_START
     : [a-zA-Z_]
-    | [\u0080-\uD7FF\uE000-\u{10FFFF}]
+    | [\u0080-\uD7FF\uE000-\uFDCF\uFDF0-\uFEFE\uFF00-\u{10FFFF}]
     | ESCAPE
     ;
 
 fragment IDENT_CHAR
     : [a-zA-Z0-9_-]
-    | [\u0080-\uD7FF\uE000-\u{10FFFF}]
+    | [\u0080-\uD7FF\uE000-\uFDCF\uFDF0-\uFEFE\uFF00-\u{10FFFF}]
     | ESCAPE
     ;
 
 mode URL_BODY;
 
 URL_WS
-    : [ \t\r\n\f]+
+    : [ \t\r\n\f\uFEFF]+
     ;
 
 URL_RPAREN

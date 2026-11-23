@@ -17,6 +17,7 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
     private var lastNonHiddenText: String? = null
     private var lastParenWasCondition: Boolean = false
     private val parenConditionStack = ArrayList<Boolean>()
+    private val failedClosingTagRanges = HashMap<String, Long>()
 
     protected abstract fun isHiddenTokenType(type: Int): Boolean
     protected abstract fun isIdentTokenType(type: Int): Boolean
@@ -31,6 +32,7 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
         lastNonHiddenText = null
         lastParenWasCondition = false
         parenConditionStack.clear()
+        failedClosingTagRanges.clear()
     }
 
     override fun nextToken(): Token {
@@ -86,7 +88,8 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
                 break
             }
         }
-        val nameLen = pos - nameStart
+        val tagEnd = pos
+        val nameLen = tagEnd - nameStart
         if (nameLen == 5 &&
             _input.LA(1) == 'c'.code &&
             _input.LA(2) == 'o'.code &&
@@ -109,7 +112,9 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
         }
 
         var next = _input.LA(pos)
+        var hadTypeArgs = false
         if (next == '<'.code) {
+            hadTypeArgs = true
             var angle = 1
             pos++
             while (pos < maxScan && angle > 0) {
@@ -132,24 +137,124 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
                 }
             }
             next = _input.LA(pos)
-            return when {
-                next == '('.code -> false
-                next == '/'.code && _input.LA(pos + 1) == '>'.code -> true
-                next == '>'.code -> true
-                next == '{'.code -> true
-                isJsIdentStartCodePoint(next) -> true
-                else -> false
-            }
         }
 
         return when {
-            next == ','.code || next == '='.code || next == ':'.code -> false
-            next == 'e'.code && matchesExtendsAt(pos) -> false
+            !hadTypeArgs && (next == ','.code || next == '='.code || next == ':'.code) -> false
+            !hadTypeArgs && next == 'e'.code && matchesExtendsAt(pos) -> false
             next == '/'.code && _input.LA(pos + 1) == '>'.code -> true
-            next == '>'.code -> true
-            next == '{'.code -> true
-            isJsIdentStartCodePoint(next) -> true
+            next == '{'.code || isJsIdentStartCodePoint(next) -> true
+            next == '>'.code -> isBareOpeningTagJsx(nameStart, tagEnd, pos + 1)
             else -> false
+        }
+    }
+
+    private fun isBareOpeningTagJsx(tagStart: Int, tagEnd: Int, afterGtOffset: Int): Boolean {
+        val scanLimit = 1024
+        var p = afterGtOffset
+        while (p < afterGtOffset + scanLimit) {
+            val ch = _input.LA(p)
+            if (ch == ' '.code || ch == '\t'.code || ch == '\r'.code || ch == '\n'.code) {
+                p++
+            } else {
+                break
+            }
+        }
+        if (_input.LA(p) == '('.code && looksLikeGenericArrowParams(p, afterGtOffset + scanLimit)) {
+            return false
+        }
+        return hasMatchingClosingTag(tagStart, tagEnd, afterGtOffset, scanLimit)
+    }
+
+    private fun looksLikeGenericArrowParams(openParenOffset: Int, maxOffset: Int): Boolean {
+        var paren = 1
+        var p = openParenOffset + 1
+        while (p < maxOffset && paren > 0) {
+            val ch = _input.LA(p)
+            if (ch == IntStream.EOF) return false
+            if (ch == '('.code) {
+                paren++
+            } else if (ch == ')'.code) {
+                paren--
+            }
+            p++
+        }
+        if (paren > 0) return false
+        while (p < maxOffset) {
+            val ch = _input.LA(p)
+            if (ch == ' '.code || ch == '\t'.code || ch == '\r'.code || ch == '\n'.code) {
+                p++
+            } else {
+                break
+            }
+        }
+        val after = _input.LA(p)
+        return after == ':'.code || (after == '='.code && _input.LA(p + 1) == '>'.code)
+    }
+
+    private fun hasMatchingClosingTag(
+        tagStart: Int,
+        tagEnd: Int,
+        scanFromOffset: Int,
+        scanLimit: Int,
+    ): Boolean {
+        val tagLen = tagEnd - tagStart
+        val tagName = buildString(tagLen) {
+            for (k in tagStart until tagEnd) {
+                appendCodePoint(_input.LA(k))
+            }
+        }
+        val baseIndex = _input.index()
+        val absStart = baseIndex + scanFromOffset - 1
+        val absEndLimit = absStart + scanLimit
+
+        val cached = failedClosingTagRanges[tagName]
+        var scanAbs = absStart
+        if (cached != null) {
+            val cachedStart = (cached ushr 32).toInt()
+            val cachedEnd = cached.toInt()
+            if (absStart in cachedStart..cachedEnd) {
+                if (cachedEnd >= absEndLimit) return false
+                scanAbs = (cachedEnd - tagLen - 2).coerceAtLeast(absStart)
+            }
+        }
+
+        var offset = scanAbs - baseIndex + 1
+        val maxOffset = scanFromOffset + scanLimit
+        while (offset < maxOffset) {
+            val ch = _input.LA(offset)
+            if (ch == IntStream.EOF) {
+                failedClosingTagRanges[tagName] = (absStart.toLong() shl 32) or (absEndLimit.toLong() and 0xFFFFFFFFL)
+                return false
+            }
+            if (ch == '<'.code && _input.LA(offset + 1) == '/'.code) {
+                var matched = true
+                for (i in 0 until tagLen) {
+                    if (_input.LA(offset + 2 + i) != _input.LA(tagStart + i)) {
+                        matched = false
+                        break
+                    }
+                }
+                if (matched) {
+                    val after = _input.LA(offset + 2 + tagLen)
+                    if (after == '>'.code || after == ' '.code || after == '\t'.code || after == '\r'.code || after == '\n'.code) {
+                        return true
+                    }
+                }
+            }
+            offset++
+        }
+        failedClosingTagRanges[tagName] = (absStart.toLong() shl 32) or (absEndLimit.toLong() and 0xFFFFFFFFL)
+        return false
+    }
+
+    private fun StringBuilder.appendCodePoint(cp: Int) {
+        if (cp <= 0xFFFF) {
+            append(cp.toChar())
+        } else {
+            val u = cp - 0x10000
+            append(((u ushr 10) + 0xD800).toChar())
+            append(((u and 0x3FF) + 0xDC00).toChar())
         }
     }
 

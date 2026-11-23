@@ -48,21 +48,25 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
     val taskSuffix = dirName.replaceFirstChar { it.uppercase() }
     val pkgName = "dev.sebastiano.ciacola.syntax.antlr.$packageSuffix"
     val antlrDir = layout.projectDirectory.dir("src/commonMain/antlr/$dirName")
+    val sharedAntlrDir = layout.projectDirectory.dir("src/commonMain/antlr/shared")
     val genRoot = layout.buildDirectory.dir("generatedAntlr/$dirName/kotlin")
     val outDir = genRoot.map { it.dir("dev/sebastiano/ciacola/syntax/antlr/$packageSuffix") }
 
     val task = tasks.register("generate${taskSuffix}GrammarSource", AntlrKotlinTask::class.java) {
         group = "antlr"
         description = "Generates ANTLR4 Kotlin lexer sources for $dirName."
-        inputs.files(fileTree(antlrDir) { include("**/*.g4", "**/*.tokens") })
-            .withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.files(
+            fileTree(antlrDir) { include("**/*.g4", "**/*.tokens") },
+            fileTree(sharedAntlrDir) { include("**/*.g4", "**/*.tokens") },
+        ).withPathSensitivity(PathSensitivity.RELATIVE)
         outputs.dir(outDir)
-        doFirst { delete(outDir) }
+        doFirst { outDir.get().asFile.deleteRecursively() }
 
         source = fileTree(antlrDir) {
             include("**/*.g4")
         }
         packageName = pkgName
+        arguments = listOf("-lib", sharedAntlrDir.asFile.absolutePath)
         outputDirectory = outDir.get().asFile
 
         doLast {
@@ -72,8 +76,10 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
                 .forEach { it.delete() }
 
             val generatedFromRegex = Regex("""^// Generated from .*""")
+            val nonVisibilityModifier =
+                """(?:open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
             val topLevelPublicRegex = Regex(
-                """(?m)^public\s+(?:(open|abstract|final|sealed)\s+)?(class|object|interface)\b""",
+                """(?m)^public\s+((?:$nonVisibilityModifier\s+)*)(class|object|interface|fun|val|var|typealias)\b""",
             )
             outDirFile.walkTopDown()
                 .filter { it.isFile && it.extension == "kt" }
@@ -81,9 +87,9 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
                     val original = ktFile.readText()
                     var rewritten = generatedFromRegex.replaceFirst(original, "// Generated from $dirName by ANTLR")
                     rewritten = topLevelPublicRegex.replace(rewritten) { match ->
-                        val modifier = match.groupValues[1]
+                        val modifiers = match.groupValues[1]
                         val kind = match.groupValues[2]
-                        if (modifier.isNotEmpty()) "internal $modifier $kind" else "internal $kind"
+                        "internal $modifiers$kind"
                     }
                     if (rewritten != original) {
                         ktFile.writeText(rewritten)
@@ -143,8 +149,10 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             if (ktEntries.none { it.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") }) {
                 violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${jarFile.name}"
             }
+            val modifierWord =
+                """(?:public|open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
             val topLevelNonInternal = Regex(
-                """(?m)^(?!internal\b|private\b)(?:public\s+)?(?:(?:open|abstract|final|sealed)\s+)?(?:class|object|interface)\b""",
+                """(?m)^(?!internal\b|private\b)(?:$modifierWord\s+)*(?:class|object|interface|fun|val|var|typealias)\b""",
             )
             val windowsDriveHeader = Regex("""^// Generated from [A-Za-z]:""")
             for (entry in entries) {
@@ -182,6 +190,7 @@ tasks.named("check") {
 }
 
 mavenPublishing {
+    publishToMavenCentral()
     signAllPublications()
     pom {
         name = "Ciacola Syntax Highlight"

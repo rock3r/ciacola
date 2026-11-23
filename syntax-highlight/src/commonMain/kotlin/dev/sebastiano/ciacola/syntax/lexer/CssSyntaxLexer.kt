@@ -238,7 +238,17 @@ private fun classifyAtRuleSegment(
                     else -> SyntaxTokenKind.Plain
                 }
             }
-            CssTokens.SLASH, CssTokens.PLUS, CssTokens.MINUS, CssTokens.STAR -> {
+            CssTokens.SLASH,
+            CssTokens.PLUS,
+            CssTokens.MINUS,
+            CssTokens.STAR,
+            CssTokens.LT,
+            CssTokens.GT,
+            CssTokens.LTE,
+            CssTokens.GTE,
+            CssTokens.PIPE,
+            CssTokens.COLUMN,
+            -> {
                 kinds[rawIdx] = SyntaxTokenKind.Operator
             }
         }
@@ -293,7 +303,17 @@ private fun classifyDeclarationSegment(
                 val hexDigits = source.substring(tok.start + 1, tok.end)
                 kinds[rawIdx] = if (isHexColorDigits(hexDigits)) SyntaxTokenKind.Number else SyntaxTokenKind.Plain
             }
-            CssTokens.SLASH, CssTokens.PLUS, CssTokens.MINUS, CssTokens.STAR -> {
+            CssTokens.SLASH,
+            CssTokens.PLUS,
+            CssTokens.MINUS,
+            CssTokens.STAR,
+            CssTokens.LT,
+            CssTokens.GT,
+            CssTokens.LTE,
+            CssTokens.GTE,
+            CssTokens.PIPE,
+            CssTokens.COLUMN,
+            -> {
                 kinds[rawIdx] = SyntaxTokenKind.Operator
             }
         }
@@ -364,7 +384,12 @@ private fun classifySelectorSegment(
             CssTokens.AMP -> {
                 kinds[rawIdx] = SyntaxTokenKind.Tag
             }
+            CssTokens.LT,
             CssTokens.GT,
+            CssTokens.LTE,
+            CssTokens.GTE,
+            CssTokens.PIPE,
+            CssTokens.COLUMN,
             CssTokens.PLUS,
             CssTokens.TILDE,
             CssTokens.STAR,
@@ -427,7 +452,12 @@ private fun defaultCssKind(type: Int): SyntaxTokenKind = when (type) {
     CssTokens.PREFIXMATCH,
     CssTokens.SUFFIXMATCH,
     CssTokens.SUBSTRINGMATCH,
+    CssTokens.LTE,
+    CssTokens.GTE,
+    CssTokens.LT,
     CssTokens.GT,
+    CssTokens.COLUMN,
+    CssTokens.PIPE,
     CssTokens.PLUS,
     CssTokens.MINUS,
     CssTokens.TILDE,

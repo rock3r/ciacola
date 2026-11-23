@@ -8,6 +8,8 @@ options {
     superClass = PythonLexerBase;
 }
 
+import UnicodeIdent;
+
 tokens {
     FSTR_INTERP_CLOSE,
     FSTR_FORMAT_COLON
@@ -15,7 +17,7 @@ tokens {
 
 // Whitespace, comments, and line continuations
 WS
-    : [ \t\f]+
+    : [ \t\f\uFEFF]+
     ;
 
 NEWLINE
@@ -95,11 +97,11 @@ TRIPLE_SINGLE_STRING
     ;
 
 DOUBLE_STRING
-    : NON_F_PREFIX? '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* ( '"' | '\\' )?
+    : NON_F_PREFIX? '"' ( '\\' ( '\r'? '\n' | '\r' | ~[\r\n] ) | ~["\\\r\n] )* ( '"' | '\\' )?
     ;
 
 SINGLE_STRING
-    : NON_F_PREFIX? '\'' ( '\\' ~[\r\n] | ~['\\\r\n] )* ( '\'' | '\\' )?
+    : NON_F_PREFIX? '\'' ( '\\' ( '\r'? '\n' | '\r' | ~[\r\n] ) | ~['\\\r\n] )* ( '\'' | '\\' )?
     ;
 
 fragment NON_F_PREFIX
@@ -247,14 +249,13 @@ NAME
     ;
 
 fragment ID_START
-    : [a-zA-Z_]
-    | [\u00C0-\u02AF\u0370-\u1FFF\u2100-\u2FFF\u3040-\uD7FF\uF900-\uFFEF\u{10000}-\u{1EFFF}\u{20000}-\u{2FA1F}]
+    : UNICODE_XID_START
+    | '_'
     ;
 
 fragment ID_CONTINUE
-    : ID_START
-    | [0-9]
-    | [\u0300-\u036F\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]
+    : UNICODE_XID_CONTINUE
+    | '_'
     ;
 
 ERROR_CHAR

@@ -9,12 +9,14 @@ options {
     superClass = CppLexerBase;
 }
 
+import UnicodeIdent;
+
 WS
-    : [ \t\r\n\u000B\u000C]+
+    : [ \t\r\n\u000B\u000C\uFEFF]+
     ;
 
 LINE_COMMENT
-    : '//' ( '\\' '\r'? '\n' | ~[\r\n] )*
+    : '//' ( '\\' ( '\r'? '\n' | '\r' ) | ~[\r\n] )*
     ;
 
 BLOCK_COMMENT
@@ -168,14 +170,12 @@ IDENT
     ;
 
 fragment IDENT_START
-    : [a-zA-Z_]
-    | [\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02AF\u0370-\u1FFF\u2100-\u218F\u2C00-\uD7FF\uF900-\uFFEF]
-    | [\u{10000}-\u{1EFFF}\u{20000}-\u{323AF}]
+    : UNICODE_XID_START
+    | '_'
     ;
 
 fragment IDENT_CONTINUE
-    : IDENT_START
-    | [0-9\u0300-\u036F]
+    : UNICODE_XID_CONTINUE
     ;
 
 ERROR_CHAR
@@ -189,7 +189,7 @@ PP_HDR_WS
     ;
 
 PP_HDR_LINE_CONT
-    : '\\' '\r'? '\n'
+    : '\\' ( '\r'? '\n' | '\r' )
     ;
 
 PP_HDR_LINE_COMMENT
@@ -209,7 +209,7 @@ PP_HDR_DIRECTIVE
     ;
 
 PP_HDR_NL
-    : '\r'? '\n' -> popMode
+    : ( '\r'? '\n' | '\r' ) -> popMode
     ;
 
 PP_HDR_OTHER
@@ -223,7 +223,7 @@ PP_INC_WS
     ;
 
 PP_INC_LINE_CONT
-    : '\\' '\r'? '\n'
+    : '\\' ( '\r'? '\n' | '\r' )
     ;
 
 PP_INC_LINE_COMMENT
@@ -243,7 +243,7 @@ PP_INC_STR_HEADER
     ;
 
 PP_INC_NL
-    : '\r'? '\n' -> popMode
+    : ( '\r'? '\n' | '\r' ) -> popMode
     ;
 
 PP_INC_OTHER
@@ -261,7 +261,7 @@ PP_BODY_WS
     ;
 
 PP_BODY_LINE_CONT
-    : '\\' '\r'? '\n'
+    : '\\' ( '\r'? '\n' | '\r' )
     ;
 
 PP_BODY_LINE_COMMENT
@@ -281,7 +281,7 @@ PP_BODY_CHAR
     ;
 
 PP_BODY_NL
-    : '\r'? '\n' -> popMode
+    : ( '\r'? '\n' | '\r' ) -> popMode
     ;
 
 PP_BODY_TEXT

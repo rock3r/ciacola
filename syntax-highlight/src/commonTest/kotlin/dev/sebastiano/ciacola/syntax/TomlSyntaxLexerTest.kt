@@ -182,4 +182,14 @@ class TomlSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "y" }.kind)
         assertEquals(SyntaxTokenKind.Comment, tokens.first { it.slice(code) == "# comment" }.kind)
     }
+
+    @Test
+    fun acceptsLeadingUtf8BomAsWhitespace() {
+        val code = "\uFEFF[package]\nname = \"ciacola\"\n"
+        val tokens = assertLosslessInvariants(TomlSyntaxLexer, code, "toml-bom")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first().kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "package" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "name" }.kind)
+    }
 }

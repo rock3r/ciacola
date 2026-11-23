@@ -259,4 +259,20 @@ class JavaSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𠮷" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "𝐀" }.kind)
     }
+
+    @Test
+    fun supportsJava25ImportModuleAndLeadingBom() {
+        val code = "\uFEFFimport module java.base;\nclass App {\n    int module = 1;\n}\n"
+        val tokens = assertLosslessInvariants(JavaSyntaxLexer, code, "java-import-module-bom")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first().kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "import" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "module" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "java" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "base" }.kind)
+        assertEquals(
+            SyntaxTokenKind.Plain,
+            tokens.first { it.slice(code) == "module" && it.startIndex > code.indexOf("int ") }.kind,
+        )
+    }
 }

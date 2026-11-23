@@ -123,4 +123,27 @@ class XmlSyntaxLexerTest {
         val piTokens = assertLosslessInvariants(XmlSyntaxLexer, unclosedPi, "xml-unclosed-pi")
         assertEquals(listOf(SyntaxToken(SyntaxTokenKind.Keyword, 0, unclosedPi.length)), piTokens)
     }
+
+    @Test
+    fun dtdDoesNotSwallowCommentsOrMultipleCdataSectionsAndSupportsXmlUnicodeNames() {
+        val commentBeforeRoot = "<!-- TODO [wip -->\n<root>\n  <child/>\n</root>\n"
+        val commentTokens = assertLosslessInvariants(XmlSyntaxLexer, commentBeforeRoot, "xml-comment-bracket")
+        assertEquals(SyntaxTokenKind.Comment, commentTokens.first { it.slice(commentBeforeRoot) == "<!-- TODO [wip -->" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, commentTokens.first { it.slice(commentBeforeRoot) == "root" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, commentTokens.first { it.slice(commentBeforeRoot) == "child" }.kind)
+
+        val multiCdata = "<r><a><![CDATA[Don't]]></a><b name=\"x\">text</b><c><![CDATA[Can't]]></c></r>"
+        val cdataTokens = assertLosslessInvariants(XmlSyntaxLexer, multiCdata, "xml-multi-cdata")
+        assertEquals(SyntaxTokenKind.String, cdataTokens.first { it.slice(multiCdata) == "<![CDATA[Don't]]>" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, cdataTokens.first { it.slice(multiCdata) == "name" }.kind)
+        assertEquals(SyntaxTokenKind.String, cdataTokens.first { it.slice(multiCdata) == "<![CDATA[Can't]]>" }.kind)
+
+        val unicodeNames = "\uFEFF<café prix=\"1\"><größe/></café>"
+        val unicodeTokens = assertLosslessInvariants(XmlSyntaxLexer, unicodeNames, "xml-unicode-names-bom")
+        assertTrue(unicodeTokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, unicodeTokens.first().kind)
+        assertEquals(SyntaxTokenKind.Tag, unicodeTokens.first { it.slice(unicodeNames) == "café" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, unicodeTokens.first { it.slice(unicodeNames) == "prix" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, unicodeTokens.first { it.slice(unicodeNames) == "größe" }.kind)
+    }
 }

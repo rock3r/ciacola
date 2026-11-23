@@ -3,6 +3,8 @@
  */
 lexer grammar JavaScriptLexer;
 
+import UnicodeIdent;
+
 options {
     superClass = JsTsLexerBase;
 }
@@ -117,7 +119,7 @@ SHEBANG
     ;
 
 WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 LINE_COMMENT
@@ -277,14 +279,13 @@ fragment DECIMAL_DIGITS
     ;
 
 fragment IDENT_START
-    : [a-zA-Z_$]
-    | [\u00C0-\u02AF\u0370-\u1FFF\u2C00-\uD7FF\uF900-\uFFEF\u{10000}-\u{1EFFF}\u{20000}-\u{2FA1F}]
+    : UNICODE_XID_START
+    | [_$]
     ;
 
 fragment IDENT_PART
-    : IDENT_START
-    | [0-9]
-    | [\u0300-\u036F\u200C\u200D]
+    : UNICODE_XID_CONTINUE
+    | '$'
     ;
 
 // ---------------- Template literal mode ----------------
@@ -314,7 +315,7 @@ TEMPLATE_LONE_DOLLAR
 mode JSX_TAG;
 
 JSX_TAG_WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 JSX_TAG_LINE_COMMENT
@@ -391,7 +392,7 @@ JSX_CHILDREN_EXPR_START
     ;
 
 JSX_CHILDREN_WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 JSX_TEXT
@@ -410,7 +411,7 @@ JSX_CHILDREN_RBRACE
 mode JSX_CLOSING_TAG;
 
 JSX_CLOSING_WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 JSX_CLOSING_END
@@ -437,7 +438,7 @@ JSX_CLOSING_ERROR
 mode JSX_TYPE_ARGS;
 
 JSX_TYPE_WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 JSX_TYPE_OPEN

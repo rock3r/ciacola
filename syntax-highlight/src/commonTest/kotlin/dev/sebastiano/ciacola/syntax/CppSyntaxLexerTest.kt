@@ -175,6 +175,18 @@ class CppSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Plain, uniTokens.first { it.slice(unicodeCode) == "𝐀" }.kind)
         assertEquals(SyntaxTokenKind.Number, uniTokens.first { it.slice(unicodeCode) == "1.0f64" }.kind)
         assertEquals(SyntaxTokenKind.Number, uniTokens.first { it.slice(unicodeCode) == "1.0bf16" }.kind)
+
+        val bomCode = "\uFEFFauto x = 1;"
+        val bomTokens = assertLosslessInvariants(CppSyntaxLexer, bomCode, "cpp-bom")
+        assertEquals(SyntaxTokenKind.Whitespace, bomTokens.first { it.slice(bomCode) == "\uFEFF" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, bomTokens.first { it.slice(bomCode) == "auto" }.kind)
+
+        val bareCrCode = "#define A 1\rint x = 0;\r"
+        val crTokens = assertLosslessInvariants(CppSyntaxLexer, bareCrCode, "cpp-bare-cr-pp")
+        assertEquals(SyntaxTokenKind.Preprocessor, crTokens.first { it.slice(bareCrCode) == "define" }.kind)
+        assertEquals(SyntaxTokenKind.Type, crTokens.first { it.slice(bareCrCode) == "int" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, crTokens.first { it.slice(bareCrCode) == "x" }.kind)
+        assertEquals(SyntaxTokenKind.Number, crTokens.first { it.slice(bareCrCode) == "0" }.kind)
     }
 
     @Test

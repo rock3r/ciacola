@@ -26,7 +26,7 @@ LineComment
     ;
 
 WS
-    : [\u0020\u0009\u000C]
+    : [\u0020\u0009\u000C\uFEFF]
       -> channel(HIDDEN)
     ;
 
@@ -331,6 +331,7 @@ fragment Letter
     | UNICODE_CLASS_LT
     | UNICODE_CLASS_LM
     | UNICODE_CLASS_LO
+    | [\u{10000}-\u{1EFFF}\u{20000}-\u{323AF}]
     ;
 
 // SECTION: strings
@@ -503,6 +504,9 @@ Inside_VAL: VAL -> type(VAL);
 Inside_VAR: VAR -> type(VAR);
 Inside_FUN: FUN -> type(FUN);
 Inside_OBJECT: OBJECT -> type(OBJECT);
+Inside_THIS_AT: THIS_AT -> type(THIS_AT);
+Inside_SUPER_AT: SUPER_AT -> type(SUPER_AT);
+Inside_THIS: THIS -> type(THIS);
 Inside_SUPER: SUPER -> type(SUPER);
 Inside_IN: IN -> type(IN);
 Inside_OUT: OUT -> type(OUT);

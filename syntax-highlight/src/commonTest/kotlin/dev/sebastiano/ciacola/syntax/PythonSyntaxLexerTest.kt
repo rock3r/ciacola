@@ -287,4 +287,20 @@ class PythonSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Plain, unicodeTokens.first { it.slice(unicodeCode) == "𠮷" }.kind)
         assertEquals(SyntaxTokenKind.Plain, unicodeTokens.first { it.slice(unicodeCode) == "𝐀" }.kind)
     }
+
+    @Test
+    fun backslashNewlineInStringPep701MultilineFStringAndLeadingBomAreHandledCleanly() {
+        val lineContinuationInString = "s = \"abc\\\ndef = 1\"\nx = 2\n"
+        val strTokens = assertLosslessInvariants(PythonSyntaxLexer, lineContinuationInString, "python-str-line-cont")
+        assertEquals(SyntaxTokenKind.String, strTokens.first { it.slice(lineContinuationInString).contains("def = 1") }.kind)
+        assertTrue(strTokens.none { it.kind == SyntaxTokenKind.Keyword })
+
+        val pep701Multiline = "\uFEFFx = f\"___ {\n    value\n}___\"\n"
+        val pepTokens = assertLosslessInvariants(PythonSyntaxLexer, pep701Multiline, "python-pep701-bom")
+        assertTrue(pepTokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Whitespace, pepTokens.first().kind)
+        assertEquals(SyntaxTokenKind.Plain, pepTokens.first { it.slice(pep701Multiline) == "value" }.kind)
+        assertEquals(SyntaxTokenKind.String, pepTokens.first { it.slice(pep701Multiline) == "}" }.kind)
+        assertEquals(SyntaxTokenKind.String, pepTokens.first { it.slice(pep701Multiline) == "___" && it.startIndex > pep701Multiline.indexOf("}") }.kind)
+    }
 }

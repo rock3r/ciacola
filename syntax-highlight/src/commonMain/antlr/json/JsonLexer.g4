@@ -4,7 +4,7 @@
 lexer grammar JsonLexer;
 
 WS
-    : [ \t\r\n]+
+    : [ \t\r\n\uFEFF]+
     ;
 
 LINE_COMMENT

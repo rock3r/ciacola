@@ -174,6 +174,19 @@ class ShaderSyntaxLexerTest {
         for (swizzle in listOf("xyzw", "rgba", "stpq")) {
             assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == swizzle }.kind)
         }
+
+        val bomCode = "\uFEFFvoid main() {}"
+        val bomTokens = assertLosslessInvariants(GlslSyntaxLexer, bomCode, "glsl-bom")
+        assertEquals(SyntaxTokenKind.Whitespace, bomTokens.first { it.slice(bomCode) == "\uFEFF" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, bomTokens.first { it.slice(bomCode) == "void" }.kind)
+
+        val bareCrCode = "#version 450\rvoid main() {}\r"
+        val crTokens = assertLosslessInvariants(GlslSyntaxLexer, bareCrCode, "glsl-bare-cr-pp")
+        assertEquals(SyntaxTokenKind.Preprocessor, crTokens.first { it.slice(bareCrCode) == "#" }.kind)
+        assertEquals(SyntaxTokenKind.Preprocessor, crTokens.first { it.slice(bareCrCode) == "version" }.kind)
+        assertEquals(SyntaxTokenKind.Preprocessor, crTokens.first { it.slice(bareCrCode) == "450" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, crTokens.first { it.slice(bareCrCode) == "void" }.kind)
+        assertEquals(SyntaxTokenKind.Function, crTokens.first { it.slice(bareCrCode) == "main" }.kind)
     }
 
     @Test
