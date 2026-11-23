@@ -116,7 +116,7 @@ UNTERMINATED_BACKTICK_IDENT
     ;
 
 BRACKET_IDENT
-    : '[' { isBracketIdentAllowed() }? ( ']]' | ~[\]\r\n] )* ']' { onValueToken(); }
+    : '[' { isBracketIdentWithClosingAhead() }? { consumeBracketIdent(); onValueToken(); }
     ;
 
 HEX_NUMBER

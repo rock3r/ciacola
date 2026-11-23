@@ -156,6 +156,8 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
     private var inValuePosition: Boolean = false
     private var allowTempTableAtLineStart: Boolean = false
     private var afterTypeOrArray: Boolean = false
+    private var noClosingBracketUpToCp: Int = -1
+    private var pendingBracketIdentEndCp: Int = -1
 
     override fun reset() {
         super.reset()
@@ -163,6 +165,8 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
         inValuePosition = false
         allowTempTableAtLineStart = false
         afterTypeOrArray = false
+        noClosingBracketUpToCp = -1
+        pendingBracketIdentEndCp = -1
     }
 
     protected fun isInValuePosition(): Boolean = inValuePosition
@@ -193,12 +197,67 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
         afterTypeOrArray = isType
     }
 
-    protected fun isBracketIdentAllowed(): Boolean {
-        if (_input.LA(1) == ']'.code) return false
-        if (allowBracketIdent) return true
-        if (afterTypeOrArray) return false
-        if (!isPrecededByHorizontalWs() && !bracketBodyHasSpaceOrBackslash()) return false
-        return isValidBracketAliasBody()
+    protected fun isBracketIdentWithClosingAhead(): Boolean {
+        val startCp = _tokenStartCharIndex
+        if (startCp < noClosingBracketUpToCp) return false
+        if (!allowBracketIdent && afterTypeOrArray) return false
+
+        val precededByWs = isPrecededByHorizontalWs()
+        var offset = 1
+        var bodyLen = 0
+        var hasSpaceOrBackslash = false
+        var hasDisallowedAliasChar = false
+        var allDigits = true
+
+        while (true) {
+            val ch = _input.LA(offset)
+            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) {
+                noClosingBracketUpToCp = _input.index() + offset - 1
+                pendingBracketIdentEndCp = -1
+                return false
+            }
+            if (ch == ']'.code) {
+                if (_input.LA(offset + 1) == ']'.code) {
+                    allDigits = false
+                    bodyLen += 2
+                    offset += 2
+                    continue
+                }
+                val endCp = _input.index() + offset
+                val allowed = bodyLen > 0 && (
+                    allowBracketIdent || (
+                        (precededByWs || hasSpaceOrBackslash) &&
+                            !hasDisallowedAliasChar &&
+                            !allDigits
+                        )
+                    )
+                pendingBracketIdentEndCp = if (allowed) endCp else -1
+                return allowed
+            }
+            if (ch == ' '.code || ch == '\t'.code || ch == '\\'.code) {
+                hasSpaceOrBackslash = true
+            }
+            if (ch == ','.code || ch == '\''.code || ch == '['.code) {
+                if (!allowBracketIdent) {
+                    pendingBracketIdentEndCp = -1
+                    return false
+                }
+                hasDisallowedAliasChar = true
+            }
+            if (ch !in '0'.code..'9'.code) {
+                allDigits = false
+            }
+            bodyLen++
+            offset++
+        }
+    }
+
+    protected fun consumeBracketIdent() {
+        val target = pendingBracketIdentEndCp
+        pendingBracketIdentEndCp = -1
+        while (_input.index() < target && _input.LA(1) != IntStream.EOF) {
+            _input.consume()
+        }
     }
 
     protected fun isNotDoubleDashAfterHash(): Boolean = _input.LA(1) != '-'.code
@@ -291,46 +350,6 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
         val dist = _input.index() - _tokenStartCharIndex + 1
         val prev = _input.LA(-dist)
         return prev == ' '.code || prev == '\t'.code || prev == '\r'.code || prev == '\n'.code || prev == BOM_CODE_POINT
-    }
-
-    private fun bracketBodyHasSpaceOrBackslash(): Boolean {
-        var offset = 1
-        while (true) {
-            val ch = _input.LA(offset)
-            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) return false
-            if (ch == ']'.code) {
-                if (_input.LA(offset + 1) == ']'.code) {
-                    offset += 2
-                    continue
-                }
-                return false
-            }
-            if (ch == ' '.code || ch == '\t'.code || ch == '\\'.code) return true
-            offset++
-        }
-    }
-
-    private fun isValidBracketAliasBody(): Boolean {
-        var offset = 1
-        var len = 0
-        var allDigits = true
-        while (true) {
-            val ch = _input.LA(offset)
-            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) return false
-            if (ch == ']'.code) {
-                if (_input.LA(offset + 1) == ']'.code) {
-                    allDigits = false
-                    len += 2
-                    offset += 2
-                    continue
-                }
-                return len > 0 && !allDigits
-            }
-            if (ch == ','.code || ch == '\''.code || ch == '['.code) return false
-            if (ch !in '0'.code..'9'.code) allDigits = false
-            len++
-            offset++
-        }
     }
 
     private fun toCodePoints(str: String): IntArray {

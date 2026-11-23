@@ -78,7 +78,7 @@ ALIAS_SIGIL
     ;
 
 VERBATIM_TAG
-    : '!<' ~[ \t\r\n>]+ '>' { markQuoted(false); }
+    : '!<' ~[ \t\r\n><[\]{}]+ '>' { markQuoted(false); }
     ;
 
 TAG

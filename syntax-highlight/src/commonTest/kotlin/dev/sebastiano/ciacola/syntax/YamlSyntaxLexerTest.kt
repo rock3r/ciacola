@@ -241,6 +241,8 @@ class YamlSyntaxLexerTest {
         }
         val deepFlow = "flow: " + "[".repeat(4_000) + "1" + "]".repeat(4_000)
         val hugeBlock = "block: |\n" + "  line of block text with : and # not-comment\n".repeat(3_000) + "after: true\n"
+        val flowUnterminatedTags = "[" + "!<x,".repeat(8_000) + "]"
+        val repeatedUnterminatedTags = "!<".repeat(8_000)
 
         assertLinearPerformance(
             lexer = YamlSyntaxLexer,
@@ -248,6 +250,8 @@ class YamlSyntaxLexerTest {
                 "many-keys" to manyKeys,
                 "deep-flow" to deepFlow,
                 "huge-block" to hugeBlock,
+                "flow-unterminated-tags" to flowUnterminatedTags,
+                "repeated-unterminated-tags" to repeatedUnterminatedTags,
             ),
         )
     }

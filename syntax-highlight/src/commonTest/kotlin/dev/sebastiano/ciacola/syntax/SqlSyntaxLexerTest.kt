@@ -273,6 +273,8 @@ class SqlSyntaxLexerTest {
         }
         val hugeDollar = "SELECT ${'$'}longtag${'$'}" + "abc${'$'}other${'$'}def".repeat(4_000) + "${'$'}longtag${'$'};"
         val deepNestedComment = "/* ".repeat(500) + "body" + " */".repeat(500) + " SELECT 1;"
+        val unbalancedBrackets = "SELECT " + "[".repeat(16_000)
+        val nestedArrayBrackets = "SELECT " + "arr[".repeat(8_000) + "1]"
 
         assertLinearPerformance(
             lexer = SqlSyntaxLexer,
@@ -280,6 +282,8 @@ class SqlSyntaxLexerTest {
                 "many-statements" to manyStatements,
                 "huge-dollar-string" to hugeDollar,
                 "deep-nested-comment" to deepNestedComment,
+                "unbalanced-brackets" to unbalancedBrackets,
+                "nested-array-brackets" to nestedArrayBrackets,
             ),
         )
     }
