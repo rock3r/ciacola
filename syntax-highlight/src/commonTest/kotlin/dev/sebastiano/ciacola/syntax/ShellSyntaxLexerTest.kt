@@ -470,6 +470,63 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun handlesSubstitutionShapedAndLineContinuedHeredocDelimiters() {
+        val cmdSubDelim = "cat <<\$(echo EOF)\nbody \$USER\n\$(echo EOF)\necho after_cmdsub_delim\n"
+        val tCmdSub = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, cmdSubDelim, "shell-heredoc-cmdsub-delim")
+        assertEquals(SyntaxTokenKind.Property, tCmdSub.first { it.slice(cmdSubDelim) == "\$USER" }.kind)
+        assertEquals(SyntaxTokenKind.String, tCmdSub.last { it.slice(cmdSubDelim) == "\$(echo EOF)" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tCmdSub.first { it.slice(cmdSubDelim) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tCmdSub.first { it.slice(cmdSubDelim) == "after_cmdsub_delim" }.kind)
+
+        val cmdSubSemi = "cat <<\$(echo a; echo b); echo same_line\nbody\n\$(echo a; echo b)\necho after_semi\n"
+        val tSemi = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, cmdSubSemi, "shell-heredoc-cmdsub-semi")
+        assertEquals(SyntaxTokenKind.Function, tSemi.first { it.slice(cmdSubSemi) == "echo" && it.startIndex > cmdSubSemi.indexOf(";") }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tSemi.first { it.slice(cmdSubSemi) == "same_line" }.kind)
+        assertEquals(SyntaxTokenKind.String, tSemi.last { it.slice(cmdSubSemi) == "\$(echo a; echo b)" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tSemi.first { it.slice(cmdSubSemi) == "after_semi" }.kind)
+
+        val arithDelim = "cat <<\$((1 + 2))\nbody\n\$((1 + 2))\necho after_arith_delim\n"
+        val tArith = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, arithDelim, "shell-heredoc-arith-delim")
+        assertEquals(SyntaxTokenKind.String, tArith.last { it.slice(arithDelim) == "\$((1 + 2))" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tArith.first { it.slice(arithDelim) == "echo" }.kind)
+
+        val paramDelim = "cat <<\${foo:-a b}\nbody\n\${foo:-a b}\necho after_param_delim\n"
+        val tParam = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, paramDelim, "shell-heredoc-param-delim")
+        assertEquals(SyntaxTokenKind.String, tParam.last { it.slice(paramDelim) == "\${foo:-a b}" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tParam.first { it.slice(paramDelim) == "echo" }.kind)
+
+        val backtickDelim = "cat <<`echo EOF`\nbody \$USER\n`echo EOF`\necho after_bt_delim\n"
+        val tBt = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, backtickDelim, "shell-heredoc-bt-delim")
+        assertEquals(SyntaxTokenKind.Property, tBt.first { it.slice(backtickDelim) == "\$USER" }.kind)
+        assertEquals(SyntaxTokenKind.String, tBt.last { it.slice(backtickDelim) == "`echo EOF`" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tBt.first { it.slice(backtickDelim) == "echo" }.kind)
+
+        val heredocInsideBacktick = "x=`cat <<EOF`; echo hi\ny=`cat <<`; echo ok\n"
+        val tInsideBt = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, heredocInsideBacktick, "shell-heredoc-in-bt")
+        assertEquals(SyntaxTokenKind.Function, tInsideBt.first { it.slice(heredocInsideBacktick) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tInsideBt.first { it.slice(heredocInsideBacktick) == "hi" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tInsideBt.first { it.slice(heredocInsideBacktick) == "ok" }.kind)
+
+        val unclosedCmdSubDelim = "cat <<\$(echo"
+        assertLosslessInvariants(ShellSyntaxLexer, unclosedCmdSubDelim, "shell-unclosed-cmdsub-delim")
+
+        val contDelim = "cat <<E\\\nOF\nbody\nEOF\necho after_cont_delim\n"
+        val tContDelim = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, contDelim, "shell-heredoc-cont-delim")
+        assertEquals(SyntaxTokenKind.String, tContDelim.last { it.slice(contDelim) == "EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tContDelim.first { it.slice(contDelim) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tContDelim.first { it.slice(contDelim) == "after_cont_delim" }.kind)
+
+        val crContDelim = "cat <<E\\\rOF\rbody\rEOF\recho after_cr_cont\r"
+        val tCrCont = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, crContDelim, "shell-heredoc-cr-cont-delim")
+        assertEquals(SyntaxTokenKind.Function, tCrCont.first { it.slice(crContDelim) == "echo" }.kind)
+
+        val emojiDelim = "cat <<🎉EOF\nbody\n🎉EOF\necho after_emoji\n"
+        val tEmoji = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, emojiDelim, "shell-heredoc-emoji-delim")
+        assertEquals(SyntaxTokenKind.String, tEmoji.last { it.slice(emojiDelim) == "🎉EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tEmoji.first { it.slice(emojiDelim) == "echo" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }

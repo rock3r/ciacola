@@ -650,68 +650,122 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 ch != ')'.code &&
                 ch != '<'.code &&
                 ch != '>'.code &&
-                ch != '#'.code
+                ch != '#'.code &&
+                !(ch == '`'.code && currentScope().kind == ScopeKind.BACKTICK)
         }
     }
 
-    protected fun enqueueHeredoc(rawDelimiter: String) {
+    protected fun consumeHeredocDelimiter() {
+        _input.seek(_tokenStartCharIndex)
         var isQuoted = false
-        val unquoted = StringBuilder(rawDelimiter.length)
-        var i = 0
-        while (i < rawDelimiter.length) {
-            when (val ch = rawDelimiter[i]) {
-                '$' -> {
-                    val next = if (i + 1 < rawDelimiter.length) rawDelimiter[i + 1] else '\u0000'
-                    if (next == '\'') {
+        val unquoted = StringBuilder()
+
+        while (true) {
+            val ch = _input.LA(1)
+            if (ch == IntStream.EOF ||
+                ch == ' '.code || ch == '\t'.code || ch == '\r'.code || ch == '\n'.code ||
+                ch == ';'.code || ch == '&'.code || ch == '|'.code ||
+                ch == '('.code || ch == ')'.code || ch == '<'.code || ch == '>'.code
+            ) {
+                break
+            }
+            when (ch) {
+                '\\'.code -> {
+                    val next = _input.LA(2)
+                    if (next == '\n'.code) {
+                        _input.consume()
+                        _input.consume()
+                    } else if (next == '\r'.code) {
+                        _input.consume()
+                        _input.consume()
+                        if (_input.LA(1) == '\n'.code) _input.consume()
+                    } else if (next != IntStream.EOF) {
                         isQuoted = true
-                        i += 2
-                        while (i < rawDelimiter.length && rawDelimiter[i] != '\'') {
-                            if (rawDelimiter[i] == '\\' && i + 1 < rawDelimiter.length) {
-                                i = decodeAnsiCEscape(rawDelimiter, i + 1, unquoted)
-                            } else {
-                                unquoted.append(rawDelimiter[i])
-                                i++
-                            }
+                        _input.consume()
+                        appendCodePoint(unquoted, _input.LA(1))
+                        _input.consume()
+                    } else {
+                        isQuoted = true
+                        _input.consume()
+                        break
+                    }
+                }
+                '\''.code -> {
+                    isQuoted = true
+                    _input.consume()
+                    while (true) {
+                        val c = _input.LA(1)
+                        if (c == IntStream.EOF || c == '\''.code || c == '\r'.code || c == '\n'.code) break
+                        appendCodePoint(unquoted, c)
+                        _input.consume()
+                    }
+                    if (_input.LA(1) == '\''.code) _input.consume()
+                }
+                '"'.code -> {
+                    isQuoted = true
+                    _input.consume()
+                    consumeDoubleQuotedInDelim(unquoted)
+                }
+                '`'.code -> {
+                    if (currentScope().kind == ScopeKind.BACKTICK) {
+                        if (_input.index() == _tokenStartCharIndex) {
+                            _input.consume()
                         }
-                        if (i < rawDelimiter.length && rawDelimiter[i] == '\'') i++
-                    } else if (next == '"') {
-                        isQuoted = true
-                        i += 2
-                        i = appendDoubleQuotedSegment(rawDelimiter, i, unquoted)
-                    } else {
-                        unquoted.append(ch)
-                        i++
+                        break
                     }
+                    consumeBacktickInDelim(unquoted)
                 }
-                '\'' -> {
-                    isQuoted = true
-                    i++
-                    while (i < rawDelimiter.length && rawDelimiter[i] != '\'') {
-                        unquoted.append(rawDelimiter[i])
-                        i++
-                    }
-                    if (i < rawDelimiter.length && rawDelimiter[i] == '\'') i++
-                }
-                '"' -> {
-                    isQuoted = true
-                    i++
-                    i = appendDoubleQuotedSegment(rawDelimiter, i, unquoted)
-                }
-                '\\' -> {
-                    isQuoted = true
-                    if (i + 1 < rawDelimiter.length) {
-                        unquoted.append(rawDelimiter[i + 1])
-                        i += 2
-                    } else {
-                        i++
+                '$'.code -> {
+                    when (_input.LA(2)) {
+                        '\''.code -> {
+                            isQuoted = true
+                            _input.consume()
+                            _input.consume()
+                            val rawAnsiC = StringBuilder()
+                            while (true) {
+                                val c = _input.LA(1)
+                                if (c == IntStream.EOF || c == '\''.code || c == '\r'.code || c == '\n'.code) break
+                                if (c == '\\'.code) {
+                                    rawAnsiC.append('\\')
+                                    _input.consume()
+                                    val esc = _input.LA(1)
+                                    if (esc != IntStream.EOF && esc != '\r'.code && esc != '\n'.code) {
+                                        appendCodePoint(rawAnsiC, esc)
+                                        _input.consume()
+                                    }
+                                } else {
+                                    appendCodePoint(rawAnsiC, c)
+                                    _input.consume()
+                                }
+                            }
+                            if (_input.LA(1) == '\''.code) _input.consume()
+                            decodeAnsiCContent(rawAnsiC.toString(), unquoted)
+                        }
+                        '"'.code -> {
+                            isQuoted = true
+                            _input.consume()
+                            _input.consume()
+                            consumeDoubleQuotedInDelim(unquoted)
+                        }
+                        '('.code -> {
+                            consumeBalancedDelimGroup('('.code, ')'.code, unquoted)
+                        }
+                        '{'.code -> {
+                            consumeBalancedDelimGroup('{'.code, '}'.code, unquoted)
+                        }
+                        else -> {
+                            unquoted.append('$')
+                            _input.consume()
+                        }
                     }
                 }
                 else -> {
-                    unquoted.append(ch)
-                    i++
+                    appendCodePoint(unquoted, ch)
+                    _input.consume()
                 }
             }
         }
+
         val delimiter = unquoted.toString()
         currentScope().pendingHeredocs.add(
             HeredocSpec(
@@ -724,22 +778,153 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         pendingStripTabs = false
     }
 
-    private fun appendDoubleQuotedSegment(raw: String, startIndex: Int, out: StringBuilder): Int {
-        var i = startIndex
-        while (i < raw.length && raw[i] != '"') {
-            if (raw[i] == '\\' && i + 1 < raw.length) {
-                val next = raw[i + 1]
-                if (next == '"' || next == '\\' || next == '$' || next == '`') {
-                    out.append(next)
-                    i += 2
+    private fun consumeDoubleQuotedInDelim(out: StringBuilder) {
+        while (true) {
+            val c = _input.LA(1)
+            if (c == IntStream.EOF || c == '"'.code || c == '\r'.code || c == '\n'.code) break
+            if (c == '\\'.code) {
+                val next = _input.LA(2)
+                if (next == '\n'.code) {
+                    _input.consume()
+                    _input.consume()
+                    continue
+                }
+                if (next == '\r'.code) {
+                    _input.consume()
+                    _input.consume()
+                    if (_input.LA(1) == '\n'.code) _input.consume()
+                    continue
+                }
+                if (next == '"'.code || next == '\\'.code || next == '$'.code || next == '`'.code) {
+                    _input.consume()
+                    appendCodePoint(out, _input.LA(1))
+                    _input.consume()
                     continue
                 }
             }
-            out.append(raw[i])
-            i++
+            appendCodePoint(out, c)
+            _input.consume()
         }
-        if (i < raw.length && raw[i] == '"') i++
-        return i
+        if (_input.LA(1) == '"'.code) _input.consume()
+    }
+
+    private fun consumeBacktickInDelim(out: StringBuilder) {
+        out.append('`')
+        _input.consume()
+        while (true) {
+            val c = _input.LA(1)
+            if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) break
+            if (c == '`'.code) {
+                out.append('`')
+                _input.consume()
+                break
+            }
+            if (c == '\\'.code) {
+                out.append('\\')
+                _input.consume()
+                val next = _input.LA(1)
+                if (next != IntStream.EOF && next != '\r'.code && next != '\n'.code) {
+                    appendCodePoint(out, next)
+                    _input.consume()
+                }
+            } else {
+                appendCodePoint(out, c)
+                _input.consume()
+            }
+        }
+    }
+
+    private fun consumeBalancedDelimGroup(openCp: Int, closeCp: Int, out: StringBuilder) {
+        // Consume leading '$' and opening '(' or '{'.
+        out.append('$')
+        _input.consume()
+        appendCodePoint(out, openCp)
+        _input.consume()
+        var depth = 1
+        while (depth > 0) {
+            val c = _input.LA(1)
+            if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) break
+            when (c) {
+                '\\'.code -> {
+                    out.append('\\')
+                    _input.consume()
+                    val next = _input.LA(1)
+                    if (next != IntStream.EOF && next != '\r'.code && next != '\n'.code) {
+                        appendCodePoint(out, next)
+                        _input.consume()
+                    }
+                }
+                '\''.code -> {
+                    out.append('\'')
+                    _input.consume()
+                    while (true) {
+                        val q = _input.LA(1)
+                        if (q == IntStream.EOF || q == '\r'.code || q == '\n'.code) break
+                        appendCodePoint(out, q)
+                        _input.consume()
+                        if (q == '\''.code) break
+                    }
+                }
+                '"'.code -> {
+                    out.append('"')
+                    _input.consume()
+                    while (true) {
+                        val q = _input.LA(1)
+                        if (q == IntStream.EOF || q == '\r'.code || q == '\n'.code) break
+                        if (q == '\\'.code) {
+                            out.append('\\')
+                            _input.consume()
+                            val esc = _input.LA(1)
+                            if (esc != IntStream.EOF && esc != '\r'.code && esc != '\n'.code) {
+                                appendCodePoint(out, esc)
+                                _input.consume()
+                            }
+                        } else {
+                            appendCodePoint(out, q)
+                            _input.consume()
+                            if (q == '"'.code) break
+                        }
+                    }
+                }
+                '`'.code -> consumeBacktickInDelim(out)
+                openCp -> {
+                    depth++
+                    appendCodePoint(out, c)
+                    _input.consume()
+                }
+                closeCp -> {
+                    depth--
+                    appendCodePoint(out, c)
+                    _input.consume()
+                }
+                else -> {
+                    appendCodePoint(out, c)
+                    _input.consume()
+                }
+            }
+        }
+    }
+
+    private fun decodeAnsiCContent(raw: String, out: StringBuilder) {
+        var i = 0
+        while (i < raw.length) {
+            if (raw[i] == '\\' && i + 1 < raw.length) {
+                i = decodeAnsiCEscape(raw, i + 1, out)
+            } else {
+                out.append(raw[i])
+                i++
+            }
+        }
+    }
+
+    private fun appendCodePoint(out: StringBuilder, cp: Int) {
+        if (cp <= 0xFFFF) {
+            out.append(cp.toChar())
+        } else {
+            val adj = cp - 0x10000
+            out.append(((adj ushr 10) + 0xD800).toChar())
+            out.append(((adj and 0x3FF) + 0xDC00).toChar())
+        }
     }
 
     private fun decodeAnsiCEscape(raw: String, index: Int, out: StringBuilder): Int {

@@ -129,7 +129,6 @@ private fun emitRawShellToken(
         ShellTokens.AR_DQUOTE_START,
         ShellTokens.AR_SINGLE_STRING,
         ShellTokens.HD_DELIM,
-        ShellTokens.HD_UNCLOSED_DELIM,
         ShellTokens.HL_TEXT,
         ShellTokens.HE_ESCAPE,
         ShellTokens.HE_BACKSLASH,
@@ -827,7 +826,6 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.HD_DELIM,
-            ShellTokens.HD_UNCLOSED_DELIM,
             ShellTokens.HL_TEXT,
             ShellTokens.HE_TEXT,
             ShellTokens.HE_ESCAPE,
