@@ -92,7 +92,25 @@ private fun emitXmlGap(code: String, start: Int, end: Int, out: MutableList<Synt
         } else if (ch == '<' && i + 1 < end && code[i + 1] == '!') {
             val dtdStart = i
             var j = i + 2
-            while (j < end && code[j] != '>') j++
+            var inSubset = false
+            var quote: Char? = null
+            while (j < end) {
+                val c = code[j]
+                if (quote != null) {
+                    if (c == quote) quote = null
+                } else if (inSubset) {
+                    when (c) {
+                        '"', '\'' -> quote = c
+                        ']' -> inSubset = false
+                    }
+                } else {
+                    when (c) {
+                        '[' -> inSubset = true
+                        '>' -> break
+                    }
+                }
+                j++
+            }
             i = if (j < end) j + 1 else end
             out += SyntaxToken(SyntaxTokenKind.Keyword, dtdStart, i)
         } else {

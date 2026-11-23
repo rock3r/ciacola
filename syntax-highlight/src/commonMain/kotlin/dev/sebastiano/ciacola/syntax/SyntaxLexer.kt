@@ -8,10 +8,13 @@ import dev.sebastiano.ciacola.syntax.lexer.GlslSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GoSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.HtmlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JavaScriptSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.JavaSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JsonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.KotlinSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.PythonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.RustSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.SkslSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.TomlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.TypeScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.XmlSyntaxLexer
 
@@ -41,6 +44,9 @@ object SyntaxHighlighter {
         SyntaxLanguage.TypeScript to TypeScriptSyntaxLexer,
         SyntaxLanguage.Rust to RustSyntaxLexer,
         SyntaxLanguage.Go to GoSyntaxLexer,
+        SyntaxLanguage.Python to PythonSyntaxLexer,
+        SyntaxLanguage.Toml to TomlSyntaxLexer,
+        SyntaxLanguage.Java to JavaSyntaxLexer,
         SyntaxLanguage.C to CSyntaxLexer,
         SyntaxLanguage.Cpp to CppSyntaxLexer,
         SyntaxLanguage.Glsl to GlslSyntaxLexer,

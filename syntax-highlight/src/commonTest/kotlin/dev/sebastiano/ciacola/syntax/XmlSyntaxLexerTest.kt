@@ -85,4 +85,27 @@ class XmlSyntaxLexerTest {
             ),
         )
     }
+
+    @Test
+    fun handlesStandalonePrologDtdInternalSubsetAndCdataWithDoubleBrackets() {
+        val code = """
+            <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+            <?xml-stylesheet type="text/xsl" href="style.xsl"?>
+            <!DOCTYPE note [
+              <!ELEMENT note (to,from)>
+              <!ENTITY app "Ciacola">
+            ]>
+            <note xmlns:app="http://example.com/ns">
+                <![CDATA[value ]] inside &amp; <notATag>]]>
+                <app:item id="1" />
+            </note>
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-backfill")
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "standalone" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code).startsWith("<!DOCTYPE") && it.slice(code).endsWith("]>") }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "xmlns:app" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).startsWith("<![CDATA[") && it.slice(code).contains("]] inside") }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "app:item" }.kind)
+    }
 }

@@ -31,61 +31,39 @@ class SyntaxHighlighterTest {
     }
 
     @Test
-    fun registryProvidesSupportedLanguagesAndHandlesUnsupportedCleanly() {
+    fun registryProvidesAllSeventeenSupportedLanguagesAndHandlesUnknownCleanly() {
         assertEquals(
-            setOf(
-                SyntaxLanguage.Kotlin,
-                SyntaxLanguage.Xml,
-                SyntaxLanguage.Json,
-                SyntaxLanguage.Html,
-                SyntaxLanguage.Css,
-                SyntaxLanguage.JavaScript,
-                SyntaxLanguage.TypeScript,
-                SyntaxLanguage.Rust,
-                SyntaxLanguage.Go,
-                SyntaxLanguage.C,
-                SyntaxLanguage.Cpp,
-                SyntaxLanguage.Glsl,
-                SyntaxLanguage.Sksl,
-                SyntaxLanguage.Agsl,
-            ),
+            SyntaxLanguage.entries.toSet(),
             SyntaxHighlighter.supportedLanguages,
         )
 
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Kotlin))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Xml))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Json))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Html))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Css))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.JavaScript))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.TypeScript))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Rust))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Go))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.C))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Cpp))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Glsl))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Sksl))
-        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Agsl))
-        assertNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Python))
-
-        assertFailsWith<IllegalArgumentException> {
-            SyntaxHighlighter.lexer(SyntaxLanguage.Python)
+        for (language in SyntaxLanguage.entries) {
+            val lexer = SyntaxHighlighter.lexerOrNull(language)
+            assertNotNull(lexer, "Expected registered lexer for $language")
+            assertEquals(language, lexer.language)
+            assertEquals(lexer, SyntaxHighlighter.lexer(language))
         }
 
-        val ktTokens = SyntaxHighlighter.lex("val x = 1", "kt")
-        assertNotNull(ktTokens)
-        assertTrue(ktTokens.isNotEmpty())
-        assertEquals("val x = 1", ktTokens.joinToString("") { it.slice("val x = 1") })
-
         val aliasSamples = mapOf(
+            "kt" to "val x = 1",
+            "svg" to "<svg viewBox=\"0 0 10 10\"/>",
+            "jsonc" to "{ // comment\n  \"a\": 1\n}",
+            "htm" to "<div class=\"hero\">Hi</div>",
+            "css" to ".hero { color: #ff0; }",
+            "jsx" to "export const App = () => <div/>;",
+            "tsx" to "type Id = string; const el = <Box/>;",
             "rs" to "fn main() {}",
             "golang" to "func main() {}",
+            "py" to "print(1)",
+            "tml" to "title = \"Ciacola\"",
+            "java" to "record Point(int x, int y) {}",
             "h" to "int x = 1;",
             "c++" to "auto x = 0uz;",
             "vert" to "vec4 p = vec4(1.0);",
             "sksl" to "half4 main(float2 p) { return half4(1.0); }",
             "agsl" to "uniform float2 iResolution;",
         )
+        assertEquals(17, aliasSamples.size)
         for ((alias, snippet) in aliasSamples) {
             val aliasTokens = SyntaxHighlighter.lex(snippet, alias)
             assertNotNull(aliasTokens, "Expected lexer for alias '$alias'")
@@ -93,8 +71,8 @@ class SyntaxHighlighterTest {
             assertEquals(snippet, aliasTokens.joinToString("") { it.slice(snippet) })
         }
 
-        assertNull(SyntaxHighlighter.lex("print(1)", "py"))
         assertNull(SyntaxHighlighter.lex("foo", "unknown-lang"))
+        assertNull(SyntaxHighlighter.lex("foo", "   "))
     }
 
     @Test

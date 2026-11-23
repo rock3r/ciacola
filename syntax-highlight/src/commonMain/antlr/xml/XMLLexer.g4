@@ -40,7 +40,7 @@ CDATA   : '<![CDATA[' .*? ']]>';
 /** Scarf all DTD stuff, Entity Declarations like <!ENTITY ...>,
  *  and Notation Declarations <!NOTATION ...>
  */
-DTD       : '<!' .*? '>' -> skip;
+DTD       : '<!' ( '[' ( '"' ~["]* '"' | '\'' ~[']* '\'' | ~[\]'"] )* ']' | ~[>[] )* '>' -> skip;
 EntityRef : '&' Name ';';
 CharRef   : '&#' DIGIT+ ';' | '&#x' HEXDIGIT+ ';';
 SEA_WS    : (' ' | '\t' | '\r'? '\n')+;

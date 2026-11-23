@@ -4,6 +4,10 @@
 
 lexer grammar KotlinLexer;
 
+options {
+    superClass = KotlinLexerBase;
+}
+
 import UnicodeClasses;
 
 // SECTION: lexicalGeneral
@@ -331,6 +335,14 @@ fragment Letter
 
 // SECTION: strings
 
+MULTI_DOLLAR_TRIPLE_QUOTE_OPEN
+    : '$'+ '"""' { enterMultiDollar(text.length - 3, Modes.MULTIDOLLARMULTILINESTRING); }
+    ;
+
+MULTI_DOLLAR_QUOTE_OPEN
+    : '$'+ '"' { enterMultiDollar(text.length - 1, Modes.MULTIDOLLARLINESTRING); }
+    ;
+
 QUOTE_OPEN: '"' -> pushMode(LineString);
 
 TRIPLE_QUOTE_OPEN: '"""' -> pushMode(MultiLineString);
@@ -378,6 +390,50 @@ MultiLineStrText
 
 MultiLineStrExprStart
     : '${' -> pushMode(DEFAULT_MODE)
+    ;
+
+mode MultiDollarLineString;
+
+MultiDollarLine_QUOTE_CLOSE
+    : '"' { exitMultiDollar(); } -> type(QUOTE_CLOSE)
+    ;
+
+MultiDollarLine_StrRef
+    : '$'+ IdentifierOrSoftKey { onMultiDollarRef(Tokens.LineStrRef, Tokens.LineStrText); }
+    ;
+
+MultiDollarLine_StrExprStart
+    : '$'+ '{' { onMultiDollarExprStart(Modes.DEFAULT_MODE, Tokens.LineStrExprStart, Tokens.LineStrText); }
+    ;
+
+MultiDollarLine_StrEscapedChar
+    : (EscapedIdentifier | UniCharacterLiteral) -> type(LineStrEscapedChar)
+    ;
+
+MultiDollarLine_StrText
+    : (~('\\' | '"' | '$')+ | '$'+) -> type(LineStrText)
+    ;
+
+mode MultiDollarMultiLineString;
+
+MultiDollarMulti_TRIPLE_QUOTE_CLOSE
+    : MultiLineStringQuote? '"""' { exitMultiDollar(); } -> type(TRIPLE_QUOTE_CLOSE)
+    ;
+
+MultiDollarMulti_Quote
+    : '"'+ -> type(MultiLineStringQuote)
+    ;
+
+MultiDollarMulti_StrRef
+    : '$'+ IdentifierOrSoftKey { onMultiDollarRef(Tokens.MultiLineStrRef, Tokens.MultiLineStrText); }
+    ;
+
+MultiDollarMulti_StrExprStart
+    : '$'+ '{' { onMultiDollarExprStart(Modes.DEFAULT_MODE, Tokens.MultiLineStrExprStart, Tokens.MultiLineStrText); }
+    ;
+
+MultiDollarMulti_StrText
+    : (~('"' | '$')+ | '$'+) -> type(MultiLineStrText)
     ;
 
 // SECTION: inside
@@ -438,6 +494,8 @@ Inside_EQEQ: EQEQ  -> type(EQEQ);
 Inside_EQEQEQ: EQEQEQ  -> type(EQEQEQ);
 Inside_SINGLE_QUOTE: SINGLE_QUOTE  -> type(SINGLE_QUOTE);
 Inside_AMP: AMP  -> type(AMP);
+Inside_MULTI_DOLLAR_TRIPLE_QUOTE_OPEN: '$'+ '"""' { enterMultiDollar(text.length - 3, Modes.MULTIDOLLARMULTILINESTRING); } -> type(MULTI_DOLLAR_TRIPLE_QUOTE_OPEN);
+Inside_MULTI_DOLLAR_QUOTE_OPEN: '$'+ '"' { enterMultiDollar(text.length - 1, Modes.MULTIDOLLARLINESTRING); } -> type(MULTI_DOLLAR_QUOTE_OPEN);
 Inside_QUOTE_OPEN: QUOTE_OPEN -> pushMode(LineString), type(QUOTE_OPEN);
 Inside_TRIPLE_QUOTE_OPEN: TRIPLE_QUOTE_OPEN -> pushMode(MultiLineString), type(TRIPLE_QUOTE_OPEN);
 
