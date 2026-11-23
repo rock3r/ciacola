@@ -79,13 +79,15 @@ private fun emitRawCSharpToken(
         CSharpTokens.PP_HASH,
         CSharpTokens.PP_DIRECTIVE,
         CSharpTokens.PP_TEXT,
-        -> out += RawCSharpToken(type, start, end, SyntaxTokenKind.Preprocessor, isHidden = false)
+        -> out += RawCSharpToken(type, start, end, SyntaxTokenKind.Preprocessor, isHidden = true)
+
+        CSharpTokens.PP_STRING,
+        -> out += RawCSharpToken(type, start, end, SyntaxTokenKind.String, isHidden = true)
 
         CSharpTokens.INTERP_OPEN,
         CSharpTokens.INTERP_CLOSE,
         -> out += RawCSharpToken(type, start, end, SyntaxTokenKind.Punctuation, isHidden = false)
 
-        CSharpTokens.PP_STRING,
         CSharpTokens.RAW_INTERP_START,
         CSharpTokens.VERBATIM_INTERP_START,
         CSharpTokens.REGULAR_INTERP_START,

@@ -341,6 +341,55 @@ class CSharpSyntaxLexerTest {
     }
 
     @Test
+    fun preprocessorDirectivesDoNotPolluteSubsequentAttributesOrContextualKeywords() {
+        val code1 = """
+            #region X
+            [Serializable]
+            class Foo {}
+            #endregion
+        """.trimIndent()
+        val t1 = assertValidSnippetHasNoInvalidTokens(CSharpSyntaxLexer, code1, "csharp-pp-attr-class")
+        assertEquals(SyntaxTokenKind.Annotation, t1.first { it.slice(code1) == "Serializable" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t1.first { it.slice(code1) == "Foo" }.kind)
+
+        val code2 = """
+            #if DEBUG
+            [Obsolete("x")]
+            void M() {}
+            #endif
+        """.trimIndent()
+        val t2 = assertValidSnippetHasNoInvalidTokens(CSharpSyntaxLexer, code2, "csharp-pp-attr-method")
+        assertEquals(SyntaxTokenKind.Annotation, t2.first { it.slice(code2) == "Obsolete" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t2.first { it.slice(code2) == "M" }.kind)
+
+        val code3 = """
+            #if DEBUG
+            var x = 1;
+            #endif
+        """.trimIndent()
+        val t3 = assertValidSnippetHasNoInvalidTokens(CSharpSyntaxLexer, code3, "csharp-pp-var")
+        assertEquals(SyntaxTokenKind.Keyword, t3.first { it.slice(code3) == "var" }.kind)
+
+        val code4 = """
+            #nullable enable
+            record Point(int X);
+            #line 42 "Gen.cs"
+            partial class Widget {}
+            #pragma warning disable 1591
+            async Task RunAsync() {}
+        """.trimIndent()
+        val t4 = assertValidSnippetHasNoInvalidTokens(CSharpSyntaxLexer, code4, "csharp-pp-contextual")
+        assertEquals(SyntaxTokenKind.Keyword, t4.first { it.slice(code4) == "record" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t4.first { it.slice(code4) == "Point" }.kind)
+        assertEquals(SyntaxTokenKind.String, t4.first { it.slice(code4) == "\"Gen.cs\"" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t4.first { it.slice(code4) == "partial" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t4.first { it.slice(code4) == "Widget" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, t4.first { it.slice(code4) == "async" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t4.first { it.slice(code4) == "Task" }.kind)
+        assertEquals(SyntaxTokenKind.Function, t4.first { it.slice(code4) == "RunAsync" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixture() {
         assertMatchesOracleFixture(CSharpOracleFixtures.classesAttributesAndPreprocessor)
     }
