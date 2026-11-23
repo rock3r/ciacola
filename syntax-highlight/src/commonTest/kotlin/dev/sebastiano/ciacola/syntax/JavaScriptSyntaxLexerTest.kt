@@ -139,6 +139,10 @@ class JavaScriptSyntaxLexerTest {
                 "large-jsx" to largeJsx,
             ),
         )
+
+        val largeJsxTokens = JavaScriptSyntaxLexer.lex(largeJsx)
+        assertEquals(SyntaxTokenKind.Tag, largeJsxTokens.first { it.slice(largeJsx) == "div" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, largeJsxTokens.first { it.slice(largeJsx) == "span" }.kind)
     }
 
     @Test
@@ -209,5 +213,29 @@ class JavaScriptSyntaxLexerTest {
         for (ident in listOf("café", "Δt", "𠮷", "𝐀", "e\u0301")) {
             assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == ident }.kind, "Unicode ident $ident")
         }
+    }
+
+    @Test
+    fun handlesBareJsxLongBodiesMultiLineRootsUnclosedSnippetsAndParenColonText() {
+        val longBodyCode = "const view = (\n  <div>\n    " + "<span>hello world</span>\n    ".repeat(60) + "  </div>\n);"
+        val tLong = assertLosslessInvariants(JavaScriptSyntaxLexer, longBodyCode, "js-bare-jsx-long-body")
+        assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longBodyCode) == "div" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longBodyCode) == "span" }.kind)
+
+        val multiLineRoot = "export function Page({ children }) {\n  return (\n    <Layout>\n      <main>{children}</main>\n    </Layout>\n  );\n}"
+        val tMulti = assertLosslessInvariants(JavaScriptSyntaxLexer, multiLineRoot, "js-multiline-root")
+        assertEquals(SyntaxTokenKind.Tag, tMulti.first { it.slice(multiLineRoot) == "Layout" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tMulti.first { it.slice(multiLineRoot) == "main" }.kind)
+
+        val unclosedSnippet = "const view = <Card>\n  <span>Don't break</span>\n"
+        val tUnclosed = assertLosslessInvariants(JavaScriptSyntaxLexer, unclosedSnippet, "js-unclosed-bare-jsx")
+        assertEquals(SyntaxTokenKind.Tag, tUnclosed.first { it.slice(unclosedSnippet) == "Card" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tUnclosed.first { it.slice(unclosedSnippet) == "span" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tUnclosed.first { it.slice(unclosedSnippet) == "Don't" }.kind)
+
+        val parenColonText = "const ui = <label>(optional): name</label>;"
+        val tParen = assertLosslessInvariants(JavaScriptSyntaxLexer, parenColonText, "js-jsx-paren-colon-text")
+        assertEquals(SyntaxTokenKind.Tag, tParen.first { it.slice(parenColonText) == "label" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tParen.first { it.slice(parenColonText) == "(optional):" }.kind)
     }
 }

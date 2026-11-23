@@ -30,7 +30,8 @@ class XmlSyntaxLexerTest {
 
         assertEquals(SyntaxTokenKind.Keyword, firstKind("<?xml"))
         assertEquals(SyntaxTokenKind.Keyword, firstKind("<?custom-pi target?>"))
-        assertEquals(SyntaxTokenKind.Keyword, firstKind("<!DOCTYPE layout>"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("<!DOCTYPE"))
+        assertEquals(SyntaxTokenKind.Keyword, firstKind("layout"))
         assertEquals(SyntaxTokenKind.Tag, firstKind("LinearLayout"))
         assertEquals(SyntaxTokenKind.Attribute, firstKind("android:layout_width"))
         assertEquals(SyntaxTokenKind.String, firstKind("\"match_parent\""))
@@ -103,7 +104,9 @@ class XmlSyntaxLexerTest {
 
         val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-backfill")
         assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "standalone" }.kind)
-        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code).startsWith("<!DOCTYPE") && it.slice(code).endsWith("]>") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<!DOCTYPE" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<!ELEMENT" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "]>" || it.slice(code) == "]" }.kind)
         assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "xmlns:app" }.kind)
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).startsWith("<![CDATA[") && it.slice(code).contains("]] inside") }.kind)
         assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "app:item" }.kind)
@@ -145,5 +148,17 @@ class XmlSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Tag, unicodeTokens.first { it.slice(unicodeNames) == "café" }.kind)
         assertEquals(SyntaxTokenKind.Attribute, unicodeTokens.first { it.slice(unicodeNames) == "prix" }.kind)
         assertEquals(SyntaxTokenKind.Tag, unicodeTokens.first { it.slice(unicodeNames) == "größe" }.kind)
+    }
+
+    @Test
+    fun r2_p2_xml_doctypeInternalSubsetCommentWithApostropheDoesNotSwallowDocument() {
+        val code = "<!DOCTYPE r [\n<!-- don't remove -->\n<!ELEMENT r ANY>\n]>\n<r a='1'>x</r>\n"
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-dtd-comment-apostrophe")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Comment, tokens.first { it.slice(code) == "<!-- don't remove -->" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<!ELEMENT" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "r" && it.startIndex > code.indexOf("]>") }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "a" && it.startIndex > code.indexOf("]>") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "'1'" }.kind)
     }
 }

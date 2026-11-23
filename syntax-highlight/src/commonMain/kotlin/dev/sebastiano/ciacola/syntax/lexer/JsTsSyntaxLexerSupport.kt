@@ -12,7 +12,9 @@ import org.antlr.v4.kotlinruntime.CharStreams
 internal fun lexJsOrTs(source: String, isTypeScript: Boolean): List<SyntaxToken> {
     if (source.isEmpty()) return emptyList()
 
-    val lexer = JavaScriptLexer(CharStreams.fromString(source))
+    val lexer = JavaScriptLexer(CharStreams.fromString(source)).apply {
+        this.isTypeScript = isTypeScript
+    }
     val raw = ArrayList<RawJsToken>(source.length / 3 + 8)
 
     driveAntlrLexer(

@@ -918,10 +918,8 @@ UNICODE_CLASS_LO:
 	'\u3131'..'\u318E' |
 	'\u31A0'..'\u31BA' |
 	'\u31F0'..'\u31FF' |
-	'\u3400' |
-	'\u4DB5' |
-	'\u4E00' |
-	'\u9FCC' |
+	'\u3400'..'\u4DB5' |
+	'\u4E00'..'\u9FFF' |
 	'\uA000'..'\uA014' |
 	'\uA016'..'\uA48C' |
 	'\uA4D0'..'\uA4F7' |
@@ -966,8 +964,7 @@ UNICODE_CLASS_LO:
 	'\uAB20'..'\uAB26' |
 	'\uAB28'..'\uAB2E' |
 	'\uABC0'..'\uABE2' |
-	'\uAC00' |
-	'\uD7A3' |
+	'\uAC00'..'\uD7A3' |
 	'\uD7B0'..'\uD7C6' |
 	'\uD7CB'..'\uD7FB' |
 	'\uF900'..'\uFA6D' |

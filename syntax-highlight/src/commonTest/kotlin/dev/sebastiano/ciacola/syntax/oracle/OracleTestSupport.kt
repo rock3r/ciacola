@@ -25,7 +25,7 @@ data class OracleFixture(
     val code: String,
     val expectations: List<OracleTokenExpectation>,
     val minAgreementRatio: Double = 0.92,
-    val maxOverrideShare: Double = 0.40,
+    val maxOverrideShare: Double = 0.25,
 )
 
 private data class OracleMismatch(
@@ -38,9 +38,9 @@ private data class OracleMismatch(
 
 /**
  * Verifies [fixture] against [SyntaxHighlighter.lex]:
- * 1. Confirms lossless invariants on [OracleFixture.code].
- * 2. Enforces `allowedKinds.size in 1..3`, explanatory notes on overrides beyond `{shikiKind, pygmentsKind}`,
- *    non-zero raw-oracle coverage, and `overrideShare <= maxOverrideShare`.
+ * 1. Confirms lossless invariants on [OracleFixture.code] and non-empty [OracleFixture.expectations].
+ * 2. Enforces `allowedKinds.size in 1..3`, replacing-only overrides (zero overlap with `{shikiKind, pygmentsKind}`)
+ *    with explanatory notes, non-zero raw-oracle coverage, and `overrideShare <= maxOverrideShare`.
  * 3. Matches each [OracleTokenExpectation] span against the dominant overlapping non-whitespace
  *    emitted token kind.
  * 4. Fails with a detailed diff if any `STRICT:` or override expectation mismatches, or if either
@@ -49,7 +49,10 @@ private data class OracleMismatch(
 fun assertMatchesOracleFixture(fixture: OracleFixture) {
     val lexer = SyntaxHighlighter.lexer(fixture.language)
     val tokens = assertLosslessInvariants(lexer, fixture.code, label = "oracle:${fixture.name}")
-    if (fixture.expectations.isEmpty()) return
+    assertTrue(
+        fixture.expectations.isNotEmpty(),
+        "Oracle fixture '${fixture.name}' (${fixture.language.id}) must have non-empty expectations",
+    )
 
     val mismatches = mutableListOf<OracleMismatch>()
     val strictMismatches = mutableListOf<OracleMismatch>()
@@ -74,6 +77,10 @@ fun assertMatchesOracleFixture(fixture: OracleFixture) {
             assertTrue(
                 exp.note.isNotBlank(),
                 "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') extends allowedKinds beyond {shiki=${exp.shikiKind}, pygments=${exp.pygmentsKind}} to ${exp.allowedKinds} without an explanatory note",
+            )
+            assertTrue(
+                exp.allowedKinds.none { it == exp.shikiKind || it == exp.pygmentsKind },
+                "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') uses a widening override ${exp.allowedKinds} that retains oracle kind(s) {shiki=${exp.shikiKind}, pygments=${exp.pygmentsKind}}; overrides must replace oracle kinds",
             )
         } else {
             rawTotal++

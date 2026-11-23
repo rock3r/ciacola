@@ -68,19 +68,40 @@ object XmlSyntaxLexer : SyntaxLexer {
                     -> out += SyntaxToken(SyntaxTokenKind.String, start, end)
                     XmlTokens.COMMENT,
                     XmlTokens.UNTERMINATED_COMMENT,
+                    XmlTokens.DTD_SUBSET_COMMENT,
+                    XmlTokens.DTD_SUBSET_UNTERM_COMMENT,
                     -> out += SyntaxToken(SyntaxTokenKind.Comment, start, end)
                     XmlTokens.CDATA,
                     XmlTokens.UNTERMINATED_CDATA,
                     -> out += SyntaxToken(SyntaxTokenKind.String, start, end)
                     XmlTokens.PI,
                     XmlTokens.UNTERMINATED_PI,
-                    XmlTokens.DTD,
+                    XmlTokens.DTD_OPEN,
+                    XmlTokens.DTD_SUBSET_OPEN,
+                    XmlTokens.DTD_CLOSE,
+                    XmlTokens.DTD_STRING,
+                    XmlTokens.DTD_UNTERM_STRING,
+                    XmlTokens.DTD_CONTENT,
+                    XmlTokens.DTD_FALLBACK,
+                    XmlTokens.DTD_SUBSET_PI,
+                    XmlTokens.DTD_SUBSET_UNTERM_PI,
+                    XmlTokens.DTD_SUBSET_DECL_OPEN,
+                    XmlTokens.DTD_SUBSET_CLOSE,
+                    XmlTokens.DTD_SUBSET_TEXT,
+                    XmlTokens.DTD_SUBSET_FALLBACK,
+                    XmlTokens.DTD_DECL_CLOSE,
+                    XmlTokens.DTD_DECL_STRING,
+                    XmlTokens.DTD_DECL_UNTERM_STRING,
+                    XmlTokens.DTD_DECL_CONTENT,
                     -> out += SyntaxToken(SyntaxTokenKind.Keyword, start, end)
                     XmlTokens.EntityRef,
                     XmlTokens.CharRef,
                     -> out += SyntaxToken(SyntaxTokenKind.Constant, start, end)
                     XmlTokens.SEA_WS,
                     XmlTokens.S,
+                    XmlTokens.DTD_WS,
+                    XmlTokens.DTD_SUBSET_WS,
+                    XmlTokens.DTD_DECL_WS,
                     -> out += SyntaxToken(SyntaxTokenKind.Whitespace, start, end)
                     XmlTokens.TEXT -> out += SyntaxToken(SyntaxTokenKind.Plain, start, end)
                     else -> out += SyntaxToken(SyntaxTokenKind.Invalid, start, end)

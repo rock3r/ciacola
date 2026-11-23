@@ -13,11 +13,13 @@ import org.antlr.v4.kotlinruntime.Token
  * comparison/generics and JSX elements.
  */
 internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
+    var isTypeScript: Boolean = false
+
     private var lastNonHiddenType: Int = Token.INVALID_TYPE
     private var lastNonHiddenText: String? = null
     private var lastParenWasCondition: Boolean = false
     private val parenConditionStack = ArrayList<Boolean>()
-    private val failedClosingTagRanges = HashMap<String, Long>()
+    private var lastClosingTagOffsetByName: HashMap<String, Int>? = null
 
     protected abstract fun isHiddenTokenType(type: Int): Boolean
     protected abstract fun isIdentTokenType(type: Int): Boolean
@@ -32,7 +34,7 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
         lastNonHiddenText = null
         lastParenWasCondition = false
         parenConditionStack.clear()
-        failedClosingTagRanges.clear()
+        lastClosingTagOffsetByName = null
     }
 
     override fun nextToken(): Token {
@@ -144,108 +146,56 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
             !hadTypeArgs && next == 'e'.code && matchesExtendsAt(pos) -> false
             next == '/'.code && _input.LA(pos + 1) == '>'.code -> true
             next == '{'.code || isJsIdentStartCodePoint(next) -> true
-            next == '>'.code -> isBareOpeningTagJsx(nameStart, tagEnd, pos + 1)
+            next == '>'.code -> {
+                if (!isTypeScript) return true
+                val tagName = readTagName(nameStart, tagEnd)
+                val gtOffset = _input.index() + pos - 1
+                hasClosingTagAfter(tagName, gtOffset)
+            }
             else -> false
         }
     }
 
-    private fun isBareOpeningTagJsx(tagStart: Int, tagEnd: Int, afterGtOffset: Int): Boolean {
-        val scanLimit = 1024
-        var p = afterGtOffset
-        while (p < afterGtOffset + scanLimit) {
-            val ch = _input.LA(p)
-            if (ch == ' '.code || ch == '\t'.code || ch == '\r'.code || ch == '\n'.code) {
-                p++
-            } else {
-                break
-            }
-        }
-        if (_input.LA(p) == '('.code && looksLikeGenericArrowParams(p, afterGtOffset + scanLimit)) {
-            return false
-        }
-        return hasMatchingClosingTag(tagStart, tagEnd, afterGtOffset, scanLimit)
+    private fun hasClosingTagAfter(tagName: String, gtOffset: Int): Boolean {
+        val index = lastClosingTagOffsetByName ?: buildClosingTagIndex().also { lastClosingTagOffsetByName = it }
+        return (index[tagName] ?: -1) > gtOffset
     }
 
-    private fun looksLikeGenericArrowParams(openParenOffset: Int, maxOffset: Int): Boolean {
-        var paren = 1
-        var p = openParenOffset + 1
-        while (p < maxOffset && paren > 0) {
-            val ch = _input.LA(p)
-            if (ch == IntStream.EOF) return false
-            if (ch == '('.code) {
-                paren++
-            } else if (ch == ')'.code) {
-                paren--
-            }
-            p++
-        }
-        if (paren > 0) return false
-        while (p < maxOffset) {
-            val ch = _input.LA(p)
-            if (ch == ' '.code || ch == '\t'.code || ch == '\r'.code || ch == '\n'.code) {
-                p++
-            } else {
-                break
-            }
-        }
-        val after = _input.LA(p)
-        return after == ':'.code || (after == '='.code && _input.LA(p + 1) == '>'.code)
-    }
-
-    private fun hasMatchingClosingTag(
-        tagStart: Int,
-        tagEnd: Int,
-        scanFromOffset: Int,
-        scanLimit: Int,
-    ): Boolean {
-        val tagLen = tagEnd - tagStart
-        val tagName = buildString(tagLen) {
-            for (k in tagStart until tagEnd) {
-                appendCodePoint(_input.LA(k))
-            }
-        }
+    private fun buildClosingTagIndex(): HashMap<String, Int> {
+        val map = HashMap<String, Int>()
         val baseIndex = _input.index()
-        val absStart = baseIndex + scanFromOffset - 1
-        val absEndLimit = absStart + scanLimit
-
-        val cached = failedClosingTagRanges[tagName]
-        var scanAbs = absStart
-        if (cached != null) {
-            val cachedStart = (cached ushr 32).toInt()
-            val cachedEnd = cached.toInt()
-            if (absStart in cachedStart..cachedEnd) {
-                if (cachedEnd >= absEndLimit) return false
-                scanAbs = (cachedEnd - tagLen - 2).coerceAtLeast(absStart)
-            }
-        }
-
-        var offset = scanAbs - baseIndex + 1
-        val maxOffset = scanFromOffset + scanLimit
-        while (offset < maxOffset) {
+        var offset = 1
+        while (true) {
             val ch = _input.LA(offset)
-            if (ch == IntStream.EOF) {
-                failedClosingTagRanges[tagName] = (absStart.toLong() shl 32) or (absEndLimit.toLong() and 0xFFFFFFFFL)
-                return false
-            }
-            if (ch == '<'.code && _input.LA(offset + 1) == '/'.code) {
-                var matched = true
-                for (i in 0 until tagLen) {
-                    if (_input.LA(offset + 2 + i) != _input.LA(tagStart + i)) {
-                        matched = false
+            if (ch == IntStream.EOF) break
+            if (ch == '<'.code && _input.LA(offset + 1) == '/'.code && isJsIdentStartCodePoint(_input.LA(offset + 2))) {
+                val tagStartOffset = offset + 2
+                var p = tagStartOffset + 1
+                while (true) {
+                    val c = _input.LA(p)
+                    if (c != IntStream.EOF && (isJsIdentPartCodePoint(c) || c == '.'.code || c == ':'.code || c == '-'.code)) {
+                        p++
+                    } else {
                         break
                     }
                 }
-                if (matched) {
-                    val after = _input.LA(offset + 2 + tagLen)
-                    if (after == '>'.code || after == ' '.code || after == '\t'.code || after == '\r'.code || after == '\n'.code) {
-                        return true
-                    }
+                val after = _input.LA(p)
+                if (after == '>'.code || after == ' '.code || after == '\t'.code || after == '\r'.code || after == '\n'.code) {
+                    val tagName = readTagName(tagStartOffset, p)
+                    map[tagName] = baseIndex + offset - 1
                 }
+                offset = p
+            } else {
+                offset++
             }
-            offset++
         }
-        failedClosingTagRanges[tagName] = (absStart.toLong() shl 32) or (absEndLimit.toLong() and 0xFFFFFFFFL)
-        return false
+        return map
+    }
+
+    private fun readTagName(startOffset: Int, endOffset: Int): String = buildString(endOffset - startOffset) {
+        for (k in startOffset until endOffset) {
+            appendCodePoint(_input.LA(k))
+        }
     }
 
     private fun StringBuilder.appendCodePoint(cp: Int) {

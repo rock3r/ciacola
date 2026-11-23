@@ -1,9 +1,11 @@
 package dev.sebastiano.ciacola.syntax.oracle
 
 import dev.sebastiano.ciacola.syntax.SyntaxLanguage
+import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.assertAllOracleFixtures
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class DualOracleSuiteTest {
@@ -123,5 +125,50 @@ class DualOracleSuiteTest {
         val fixtures = shaderOracleFixtures.filter { it.language == SyntaxLanguage.Agsl }
         assertTrue(fixtures.isNotEmpty())
         assertAllOracleFixtures(fixtures)
+    }
+
+    @Test
+    fun r2_p2_oracle_fixtureWithoutExpectationsIsRejected() {
+        assertFailsWith<AssertionError> {
+            assertMatchesOracleFixture(
+                OracleFixture(
+                    name = "empty-expectations",
+                    language = SyntaxLanguage.Kotlin,
+                    code = "val x = 1",
+                    expectations = emptyList(),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun r2_p2_oracle_wideningOverrideIsRejected() {
+        assertFailsWith<AssertionError> {
+            assertMatchesOracleFixture(
+                OracleFixture(
+                    name = "widening-override",
+                    language = SyntaxLanguage.Kotlin,
+                    code = "val x = 1",
+                    expectations = listOf(
+                        OracleTokenExpectation(
+                            text = "val",
+                            startIndex = 0,
+                            endIndex = 3,
+                            shikiKind = SyntaxTokenKind.Keyword,
+                            pygmentsKind = SyntaxTokenKind.Keyword,
+                        ),
+                        OracleTokenExpectation(
+                            text = "x",
+                            startIndex = 4,
+                            endIndex = 5,
+                            shikiKind = SyntaxTokenKind.Plain,
+                            pygmentsKind = SyntaxTokenKind.Plain,
+                            allowedKinds = setOf(SyntaxTokenKind.Plain, SyntaxTokenKind.Property),
+                            note = "Widening override retaining oracle kind",
+                        ),
+                    ),
+                ),
+            )
+        }
     }
 }

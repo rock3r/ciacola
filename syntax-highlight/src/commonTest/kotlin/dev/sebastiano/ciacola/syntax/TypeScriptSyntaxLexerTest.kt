@@ -124,6 +124,10 @@ class TypeScriptSyntaxLexerTest {
                 "repeated-angles" to repeatedAngles,
             ),
         )
+
+        val largeTsxTokens = TypeScriptSyntaxLexer.lex(largeTsx)
+        assertEquals(SyntaxTokenKind.Tag, largeTsxTokens.first { it.slice(largeTsx) == "ul" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, largeTsxTokens.first { it.slice(largeTsx) == "li" }.kind)
     }
 
     @Test
@@ -233,5 +237,21 @@ class TypeScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Tag, t5.first { it.slice(jsxGeneric) == "Select" }.kind)
         assertEquals(SyntaxTokenKind.Type, t5.first { it.slice(jsxGeneric) == "string" }.kind)
         assertEquals(SyntaxTokenKind.Tag, t5.first { it.slice(jsxGeneric) == "Option" }.kind)
+
+        val jsxGenericAttr = "const selAttr = <Select<string> value=\"a\" />;"
+        val t5b = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxGenericAttr, "tsx-generic-attr")
+        assertEquals(SyntaxTokenKind.Tag, t5b.first { it.slice(jsxGenericAttr) == "Select" }.kind)
+        assertEquals(SyntaxTokenKind.Type, t5b.first { it.slice(jsxGenericAttr) == "string" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, t5b.first { it.slice(jsxGenericAttr) == "value" }.kind)
+
+        val longTsxBody = "const list = (\n  <ul>\n    " + "<li>item</li>\n    ".repeat(120) + "  </ul>\n);"
+        val tLong = assertLosslessInvariants(TypeScriptSyntaxLexer, longTsxBody, "tsx-bare-long-body")
+        assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longTsxBody) == "ul" }.kind)
+        assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longTsxBody) == "li" }.kind)
+
+        val parenColonTsx = "const note = <span>(c): 2024</span>;"
+        val tParenColon = assertLosslessInvariants(TypeScriptSyntaxLexer, parenColonTsx, "tsx-paren-colon-text")
+        assertEquals(SyntaxTokenKind.Tag, tParenColon.first { it.slice(parenColonTsx) == "span" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tParenColon.first { it.slice(parenColonTsx) == "(c):" }.kind)
     }
 }

@@ -52,8 +52,8 @@ UNTERMINATED_CDATA
     ;
 
 /** DTD declarations and internal subsets such as <!DOCTYPE ... [...]> */
-DTD
-    : '<!' [A-Za-z] ( '[' ( '"' ~["]* '"' | '\'' ~[']* '\'' | ~[\]'"] )* ']'? | ~[>[] )* '>'?
+DTD_OPEN
+    : '<!' [A-Za-z]+ -> pushMode(DTD_MODE)
     ;
 
 EntityRef : '&' Name ';';
@@ -92,6 +92,36 @@ STRING              : '"' ~[<"]* '"' | '\'' ~[<']* '\'';
 UNTERMINATED_STRING : '"' ~[<"]* | '\'' ~[<']*;
 Name          : NameStartChar NameChar*;
 S             : [ \t\r\n]+;
+
+mode DTD_MODE;
+
+DTD_SUBSET_OPEN   : '[' -> pushMode(DTD_SUBSET);
+DTD_CLOSE         : '>' -> popMode;
+DTD_STRING        : '"' ~["]* '"' | '\'' ~[']* '\'';
+DTD_UNTERM_STRING : '"' ~["]* | '\'' ~[']*;
+DTD_WS            : [ \t\r\n\uFEFF]+;
+DTD_CONTENT       : ~[[\]>"'\t\r\n \uFEFF]+;
+DTD_FALLBACK      : ']';
+
+mode DTD_SUBSET;
+
+DTD_SUBSET_COMMENT        : '<!--' ( ~'-' | '-' ~'-' | '-' '-'+ ~[->] )* '-'* '-->';
+DTD_SUBSET_UNTERM_COMMENT : '<!--' ( ~'-' | '-' ~'-' | '-' '-'+ ~[->] )* '-'*;
+DTD_SUBSET_PI             : '<?' ( ~'?' | '?'+ ~[?>] )* '?'* '?>';
+DTD_SUBSET_UNTERM_PI      : '<?' ( ~'?' | '?'+ ~[?>] )* '?'*;
+DTD_SUBSET_DECL_OPEN      : '<!' [A-Za-z]+ -> pushMode(DTD_DECL);
+DTD_SUBSET_CLOSE          : ']' -> popMode;
+DTD_SUBSET_WS             : [ \t\r\n\uFEFF]+;
+DTD_SUBSET_TEXT           : ~[<[\]\t\r\n \uFEFF]+;
+DTD_SUBSET_FALLBACK       : '<' | '[';
+
+mode DTD_DECL;
+
+DTD_DECL_CLOSE         : '>' -> popMode;
+DTD_DECL_STRING        : '"' ~["]* '"' | '\'' ~[']* '\'';
+DTD_DECL_UNTERM_STRING : '"' ~["]* | '\'' ~[']*;
+DTD_DECL_WS            : [ \t\r\n\uFEFF]+;
+DTD_DECL_CONTENT       : ~[>"'\t\r\n \uFEFF]+;
 
 fragment HEXDIGIT: [a-fA-F0-9];
 

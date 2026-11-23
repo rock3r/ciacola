@@ -303,4 +303,26 @@ class PythonSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.String, pepTokens.first { it.slice(pep701Multiline) == "}" }.kind)
         assertEquals(SyntaxTokenKind.String, pepTokens.first { it.slice(pep701Multiline) == "___" && it.startIndex > pep701Multiline.indexOf("}") }.kind)
     }
+
+    @Test
+    fun r2_p2_python_pep701MultilineInterpolationWithGeneratorLine() {
+        val code = "s = f\"items: {\n  ', '.join(\n    str(i)\n    for i in items\n  )\n}\"\n"
+        val tokens = assertLosslessInvariants(PythonSyntaxLexer, code, "python-pep701-generator")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "for" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "in" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.last { it.slice(code) == "}" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.last { it.slice(code) == "\"" }.kind)
+    }
+
+    @Test
+    fun r2_p2_python_pep701MultilineInterpolationWithConditionalExpressionLine() {
+        val code = "s = f\"val={\n  a\n  if cond else b\n}\"\n"
+        val tokens = assertLosslessInvariants(PythonSyntaxLexer, code, "python-pep701-ternary")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "if" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "else" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.last { it.slice(code) == "}" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.last { it.slice(code) == "\"" }.kind)
+    }
 }

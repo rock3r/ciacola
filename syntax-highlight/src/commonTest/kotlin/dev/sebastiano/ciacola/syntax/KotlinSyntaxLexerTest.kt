@@ -214,4 +214,13 @@ class KotlinSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "this" }.kind)
         assertEquals(SyntaxTokenKind.Annotation, tokens.first { it.slice(code) == "@A" }.kind)
     }
+
+    @Test
+    fun r2_p2_kotlin_cjkIdeographAndHangulIdentifiersAreNotInvalid() {
+        val code = "val 名前 = 1\nval 변수 = 2\n"
+        val tokens = assertLosslessInvariants(KotlinSyntaxLexer, code, "kotlin-cjk-hangul-idents")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "名前" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "변수" }.kind)
+    }
 }

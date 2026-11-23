@@ -160,6 +160,8 @@ internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
         var offset = 1
         var inInterpolation = true
         var braceDepth = 1
+        var parenDepth = 0
+        var bracketDepth = 0
         var atLineStart = true
 
         while (offset <= SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) {
@@ -181,7 +183,7 @@ internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
                         offset = skipToLineEnd(offset + 1)
                         continue
                     }
-                    if (braceDepth == 1 && startsStatementKeyword(offset)) {
+                    if (braceDepth == 1 && parenDepth == 0 && bracketDepth == 0 && startsStatementKeyword(offset)) {
                         return false
                     }
                     atLineStart = false
@@ -200,6 +202,22 @@ internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
                     }
                     ch == '#'.code -> {
                         offset = skipToLineEnd(offset + 1)
+                    }
+                    ch == '('.code -> {
+                        parenDepth++
+                        offset++
+                    }
+                    ch == ')'.code -> {
+                        if (parenDepth > 0) parenDepth--
+                        offset++
+                    }
+                    ch == '['.code -> {
+                        bracketDepth++
+                        offset++
+                    }
+                    ch == ']'.code -> {
+                        if (bracketDepth > 0) bracketDepth--
+                        offset++
                     }
                     ch == '{'.code -> {
                         braceDepth++
@@ -237,6 +255,8 @@ internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
                         } else {
                             inInterpolation = true
                             braceDepth = 1
+                            parenDepth = 0
+                            bracketDepth = 0
                             atLineStart = false
                             offset++
                         }
@@ -318,12 +338,46 @@ internal abstract class PythonLexerBase(input: CharStream) : Lexer(input) {
                             after == '\r'.code ||
                             after == '\n'.code
                     }
-                    "if", "elif", "while", "with", "match" -> {
+                    "if" -> {
+                        (after == ' '.code || after == '\t'.code || after == '('.code) &&
+                            lineEndsWithColon(offset + keyword.length)
+                    }
+                    "for" -> {
+                        (after == ' '.code || after == '\t'.code) &&
+                            lineEndsWithColon(offset + keyword.length)
+                    }
+                    "elif", "while", "with", "match" -> {
                         after == ' '.code || after == '\t'.code || after == '('.code
                     }
                     else -> after == ' '.code || after == '\t'.code
                 }
                 if (validBoundary) return true
+            }
+        }
+        return false
+    }
+
+    private fun lineEndsWithColon(startOffset: Int): Boolean {
+        var offset = startOffset
+        var lastSignificant = 0
+        while (offset <= SINGLE_LINE_FSTRING_LOOKAHEAD_LIMIT) {
+            val ch = _input.LA(offset)
+            when {
+                ch == -1 || ch == '\n'.code || ch == '\r'.code || ch == '#'.code -> {
+                    return lastSignificant == ':'.code
+                }
+                ch == '\''.code || ch == '"'.code -> {
+                    offset = skipQuotedLiteralInLookahead(offset, ch)
+                    if (offset < 0) return false
+                    lastSignificant = ch
+                }
+                ch == ' '.code || ch == '\t'.code || ch == '\u000C'.code || ch == '\uFEFF'.code -> {
+                    offset++
+                }
+                else -> {
+                    lastSignificant = ch
+                    offset++
+                }
             }
         }
         return false
