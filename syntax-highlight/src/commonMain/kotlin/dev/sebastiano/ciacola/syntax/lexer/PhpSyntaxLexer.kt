@@ -43,34 +43,108 @@ internal object PhpSyntaxLexer : SyntaxLexer {
 
         classifyPhpTokens(source, raw)
 
-        val out = ArrayList<SyntaxToken>(raw.size)
-        var i = 0
-        while (i < raw.size) {
-            val tok = raw[i]
-            if (tok.type == PhpTokens.HTML_CHUNK) {
-                val htmlStart = tok.start
-                var htmlEnd = tok.end
-                var j = i + 1
-                while (j < raw.size && raw[j].type == PhpTokens.HTML_CHUNK) {
-                    htmlEnd = raw[j].end
-                    j++
-                }
-                val htmlTokens = HtmlSyntaxLexer.lex(source.substring(htmlStart, htmlEnd))
-                for (ht in htmlTokens) {
-                    out += SyntaxToken(
-                        kind = ht.kind,
-                        startIndex = htmlStart + ht.startIndex,
-                        endIndex = htmlStart + ht.endIndex,
-                    )
-                }
-                i = j
-            } else {
-                out += SyntaxToken(kind = tok.kind, startIndex = tok.start, endIndex = tok.end)
-                i++
-            }
+        val hasHtmlChunks = raw.any { it.type == PhpTokens.HTML_CHUNK }
+        if (!hasHtmlChunks) {
+            return raw.map { SyntaxToken(kind = it.kind, startIndex = it.start, endIndex = it.end) }
         }
-        return out
+
+        return spliceHtmlAndPhpTokens(source, raw)
     }
+}
+
+private class PhpIsland(
+    val start: Int,
+    val end: Int,
+    val rawStartIndex: Int,
+    val rawEndIndex: Int,
+)
+
+private fun spliceHtmlAndPhpTokens(
+    source: String,
+    raw: List<RawPhpToken>,
+): List<SyntaxToken> {
+    val islands = ArrayList<PhpIsland>()
+    var idx = 0
+    while (idx < raw.size) {
+        if (raw[idx].type == PhpTokens.HTML_CHUNK) {
+            idx++
+            continue
+        }
+        val rawStart = idx
+        val startOffset = raw[idx].start
+        var endOffset = raw[idx].end
+        idx++
+        while (idx < raw.size && raw[idx].type != PhpTokens.HTML_CHUNK) {
+            endOffset = raw[idx].end
+            idx++
+        }
+        islands += PhpIsland(
+            start = startOffset,
+            end = endOffset,
+            rawStartIndex = rawStart,
+            rawEndIndex = idx,
+        )
+    }
+
+    if (islands.isEmpty()) {
+        return HtmlSyntaxLexer.lex(source)
+    }
+
+    val maskedHtml = buildString(source.length) {
+        var cursor = 0
+        for (island in islands) {
+            if (island.start > cursor) {
+                append(source, cursor, island.start)
+            }
+            for (pos in island.start until island.end) {
+                val ch = source[pos]
+                append(if (ch == '\n' || ch == '\r') ch else 'x')
+            }
+            cursor = island.end
+        }
+        if (cursor < source.length) {
+            append(source, cursor, source.length)
+        }
+    }
+
+    val htmlTokens = HtmlSyntaxLexer.lex(maskedHtml)
+    val out = ArrayList<SyntaxToken>(htmlTokens.size + raw.size)
+    var hIdx = 0
+    var pIdx = 0
+    var cursor = 0
+
+    while (cursor < source.length) {
+        while (hIdx < htmlTokens.size && htmlTokens[hIdx].endIndex <= cursor) {
+            hIdx++
+        }
+        val nextIsland = if (pIdx < islands.size) islands[pIdx] else null
+        if (nextIsland != null && cursor >= nextIsland.start) {
+            for (r in nextIsland.rawStartIndex until nextIsland.rawEndIndex) {
+                val pt = raw[r]
+                out += SyntaxToken(kind = pt.kind, startIndex = pt.start, endIndex = pt.end)
+            }
+            cursor = nextIsland.end
+            pIdx++
+            continue
+        }
+
+        val limit = nextIsland?.start ?: source.length
+        if (hIdx < htmlTokens.size) {
+            val ht = htmlTokens[hIdx]
+            val segStart = maxOf(cursor, ht.startIndex)
+            val segEnd = minOf(limit, ht.endIndex)
+            if (segEnd > segStart) {
+                out += SyntaxToken(kind = ht.kind, startIndex = segStart, endIndex = segEnd)
+                cursor = segEnd
+            } else {
+                hIdx++
+            }
+        } else if (cursor < limit) {
+            out += SyntaxToken(kind = SyntaxTokenKind.Plain, startIndex = cursor, endIndex = limit)
+            cursor = limit
+        }
+    }
+    return out
 }
 
 private class RawPhpToken(

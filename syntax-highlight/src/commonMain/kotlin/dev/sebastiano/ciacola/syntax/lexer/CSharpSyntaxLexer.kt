@@ -73,6 +73,7 @@ private fun emitRawCSharpToken(
         CSharpTokens.BLOCK_COMMENT,
         CSharpTokens.UNTERMINATED_BLOCK_COMMENT,
         CSharpTokens.PP_LINE_COMMENT,
+        CSharpTokens.PP_BLOCK_COMMENT,
         -> out += RawCSharpToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true)
 
         CSharpTokens.PP_HASH,
@@ -111,6 +112,8 @@ private fun emitRawCSharpToken(
         CSharpTokens.IRAW_TEXT,
         CSharpTokens.INTERP_FORMAT_COLON,
         CSharpTokens.FMT_RBRACE,
+        CSharpTokens.FMT_ESCAPE,
+        CSharpTokens.FMT_VERBATIM_QUOTE,
         CSharpTokens.FMT_QUOTE,
         CSharpTokens.FMT_TEXT,
         -> out += RawCSharpToken(type, start, end, SyntaxTokenKind.String, isHidden = false)

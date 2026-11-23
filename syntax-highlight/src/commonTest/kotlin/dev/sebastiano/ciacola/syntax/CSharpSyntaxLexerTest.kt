@@ -282,6 +282,65 @@ class CSharpSyntaxLexerTest {
     }
 
     @Test
+    fun handlesMultilineVerbatimRawAndLongExpressionsInsideRegularInterpolation() {
+        val longArm = (1..25).joinToString("\n            ") { i -> "$i => \"item_$i\"," }
+        val code = """
+            var a = ${'$'}"res: {
+                @"line 1
+            line 2"
+            }";
+            var b = ${'$'}"raw: {
+                ""${'"'}
+                multi
+                line
+                ""${'"'}
+            }";
+            var c = ${'$'}"big: {
+                x switch {
+                    $longArm
+                    _ => "default"
+                }
+            }";
+            int after = 1;
+        """.trimIndent()
+
+        assertTrue(code.indexOf("int after") > 550)
+        val tokens = assertValidSnippetHasNoInvalidTokens(CSharpSyntaxLexer, code, "csharp-multiline-interp-hole")
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "int" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "after" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.last { it.slice(code) == "1" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).contains("line 2") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).contains("multi") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "switch" }.kind)
+    }
+
+    @Test
+    fun handlesFormatSpecifierEscapesBracesNullableTargetsU8SuffixesAndInlinePpComments() {
+        val code = """
+            #if DEBUG /* inline comment */
+            var a = ${'$'}"val: {n:0\"px\"}";
+            var b = $@"val: {n:0""px""}";
+            var c = ${'$'}"val: {n:0}}}";
+            var d = ${'$'}"price: {x as decimal? + 1:#,##0}";
+            var e = ${'$'}"hello {x}"u8;
+            var f = $@"verb {x}"U8;
+            var g = ${'$'}${'$'}""${'"'}raw {{x}}""${'"'}u8;
+            #endif
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(CSharpSyntaxLexer, code, "csharp-format-u8-pp")
+        assertEquals(SyntaxTokenKind.Comment, tokens.first { it.slice(code) == "/* inline comment */" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\\\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "}}" && it.startIndex > code.indexOf("var c =") }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, tokens.first { it.slice(code) == "}" && it.startIndex > code.indexOf("var c =") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "#,##0" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"u8" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"U8" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"\"\"u8" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixture() {
         assertMatchesOracleFixture(CSharpOracleFixtures.classesAttributesAndPreprocessor)
     }

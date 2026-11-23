@@ -231,6 +231,48 @@ class PhpSyntaxLexerTest {
     }
 
     @Test
+    fun handlesUnclosedSimpleIndexBracketsAndPreservesHtmlAndScriptStateAcrossPhpIslands() {
+        val unclosedIndexCode = """
+            <?php
+            ${'$'}s = "val=${'$'}a[";
+            ${'$'}next = "hello";
+            ${'$'}cmd = `echo ${'$'}a[`;
+            ${'$'}afterCmd = 42;
+            ${'$'}h = <<<EOT
+            ${'$'}a[
+            EOT;
+            ${'$'}afterHeredoc = 123;
+        """.trimIndent()
+
+        val unclosedTokens = assertValidSnippetHasNoInvalidTokens(PhpSyntaxLexer, unclosedIndexCode, "php-unclosed-simple-index")
+        assertEquals(SyntaxTokenKind.String, unclosedTokens.first { it.slice(unclosedIndexCode) == "val=" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, unclosedTokens.first { it.slice(unclosedIndexCode) == "\$next" }.kind)
+        assertEquals(SyntaxTokenKind.String, unclosedTokens.first { it.slice(unclosedIndexCode) == "hello" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, unclosedTokens.first { it.slice(unclosedIndexCode) == "\$afterCmd" }.kind)
+        assertEquals(SyntaxTokenKind.Number, unclosedTokens.first { it.slice(unclosedIndexCode) == "42" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, unclosedTokens.first { it.slice(unclosedIndexCode) == "\$afterHeredoc" }.kind)
+        assertEquals(SyntaxTokenKind.Number, unclosedTokens.first { it.slice(unclosedIndexCode) == "123" }.kind)
+
+        val mixedTemplate = """
+            <div class="<?= ${'$'}cls ?>" id="main" data-x="1">Hello</div>
+            <script>
+            const userId = <?= ${'$'}id ?>;
+            const name = "hello";
+            </script>
+        """.trimIndent()
+
+        val mixedTokens = assertValidSnippetHasNoInvalidTokens(PhpSyntaxLexer, mixedTemplate, "php-html-script-islands")
+        assertEquals(SyntaxTokenKind.Attribute, mixedTokens.first { it.slice(mixedTemplate) == "id" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, mixedTokens.first { it.slice(mixedTemplate) == "data-x" }.kind)
+        assertEquals(SyntaxTokenKind.String, mixedTokens.first { it.slice(mixedTemplate) == "\"main\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, mixedTokens.first { it.slice(mixedTemplate) == "\"1\"" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, mixedTokens.first { it.slice(mixedTemplate) == "Hello" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, mixedTokens.first { it.slice(mixedTemplate) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, mixedTokens.last { it.slice(mixedTemplate) == "const" }.kind)
+        assertEquals(SyntaxTokenKind.String, mixedTokens.first { it.slice(mixedTemplate) == "\"hello\"" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixture() {
         assertMatchesOracleFixture(PhpOracleFixtures.modernClassesAttributesAndStrings)
     }

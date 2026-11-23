@@ -93,14 +93,58 @@ internal abstract class PhpLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun onSimpleVarIndex(indexMode: Int, indexOpenType: Int, fallbackTextType: Int) {
-        if (afterSimpleVar) {
-            afterSimpleVar = false
+        val hadSimpleVar = afterSimpleVar
+        afterSimpleVar = false
+        if (hadSimpleVar && hasValidSimpleIndexAhead()) {
             type = indexOpenType
             pushMode(indexMode)
         } else {
             type = fallbackTextType
         }
     }
+
+    private fun hasValidSimpleIndexAhead(): Boolean {
+        var offset = 1
+        val first = _input.LA(offset)
+        when {
+            first == '-'.code -> {
+                offset++
+                if (_input.LA(offset) !in '0'.code..'9'.code) return false
+                while (_input.LA(offset) in '0'.code..'9'.code) {
+                    offset++
+                }
+            }
+            first in '0'.code..'9'.code -> {
+                while (_input.LA(offset) in '0'.code..'9'.code) {
+                    offset++
+                }
+            }
+            first == '$'.code -> {
+                offset++
+                if (!isPhpIdentStart(_input.LA(offset))) return false
+                offset++
+                while (isPhpIdentContinue(_input.LA(offset))) {
+                    offset++
+                }
+            }
+            isPhpIdentStart(first) -> {
+                offset++
+                while (isPhpIdentContinue(_input.LA(offset))) {
+                    offset++
+                }
+            }
+            else -> return false
+        }
+        return _input.LA(offset) == ']'.code
+    }
+
+    private fun isPhpIdentStart(ch: Int): Boolean =
+        ch != IntStream.EOF && (
+            ch in 'a'.code..'z'.code ||
+                ch in 'A'.code..'Z'.code ||
+                ch == '_'.code ||
+                ch >= 0x80
+            )
 
     protected fun consumeNowdoc() {
         val marker = extractMarker(text)

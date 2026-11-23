@@ -297,6 +297,10 @@ PP_LINE_COMMENT
     : '//' ~[\r\n]*
     ;
 
+PP_BLOCK_COMMENT
+    : '/*' ( ~[*\r\n] | '*'+ ~[*/\r\n] )* '*'+ '/'
+    ;
+
 PP_STRING
     : '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
     ;
@@ -331,7 +335,7 @@ IR_BACKSLASH
     ;
 
 IR_CLOSE
-    : '"' { exitInterpString(); }
+    : '"' ( [uU] '8' )? { exitInterpString(); }
     ;
 
 IR_UNTERM_NL
@@ -358,7 +362,7 @@ IV_ESCAPED_QUOTE
     ;
 
 IV_CLOSE
-    : '"' { exitInterpString(); }
+    : '"' ( [uU] '8' )? { exitInterpString(); }
     ;
 
 IV_TEXT
@@ -391,6 +395,18 @@ FMT_RBRACE
     : '}'+ { onFormatSpecRBrace(Tokens.INTERP_CLOSE, Tokens.FMT_TEXT); }
     ;
 
+FMT_ESCAPE
+    : '\\' ~[\r\n] { onFormatSpecEscape(Tokens.FMT_TEXT); }
+    ;
+
+FMT_BACKSLASH
+    : '\\' -> type(FMT_TEXT)
+    ;
+
+FMT_VERBATIM_QUOTE
+    : '""' { onFormatSpecVerbatimQuote(Tokens.FMT_TEXT); }
+    ;
+
 FMT_QUOTE
     : '"' { onFormatSpecQuoteOrNewline(isNewline = false, fallbackTextType = Tokens.FMT_TEXT); }
     ;
@@ -400,5 +416,5 @@ FMT_NEWLINE
     ;
 
 FMT_TEXT
-    : ~[}"\r\n]+
+    : ~[}"\\\r\n]+
     ;
