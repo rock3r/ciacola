@@ -560,6 +560,41 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun literalOpeningBraceDoesNotNestParameterExpansion() {
+        val bareBrace = "echo \${x:-{}; echo after # trailing\n"
+        val tBare = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, bareBrace, "shell-param-exp-bare-brace")
+        assertEquals(2, tBare.count { it.slice(bareBrace) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tBare.first { it.slice(bareBrace) == "after" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, tBare.first { it.slice(bareBrace) == "# trailing" }.kind)
+
+        val patternSubstAndHeredoc = "echo \${x/{/}; cat <<EOF\nbody\nEOF\necho after_heredoc\n"
+        val tSub = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, patternSubstAndHeredoc, "shell-param-exp-pattern-brace")
+        assertEquals(2, tSub.count { it.slice(patternSubstAndHeredoc) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.String, tSub.last { it.slice(patternSubstAndHeredoc) == "EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tSub.first { it.slice(patternSubstAndHeredoc) == "after_heredoc" }.kind)
+
+        val nestedParamExp = "echo \${x:-\${y:-{}}; echo after_nested\n"
+        val tNested = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, nestedParamExp, "shell-param-exp-nested-bare-brace")
+        assertEquals(2, tNested.count { it.slice(nestedParamExp) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Property, tNested.first { it.slice(nestedParamExp) == "x" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tNested.first { it.slice(nestedParamExp) == "y" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tNested.first { it.slice(nestedParamExp) == "after_nested" }.kind)
+
+        val quotedAndEscapedBraces =
+            "echo \${x:-\"}\"}; echo \${x:-'}'}; echo \${x:-\\}}; echo \${x:-\$(echo \"}\")}; echo after_all\n"
+        val tQuoted = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, quotedAndEscapedBraces, "shell-param-exp-quoted-braces")
+        assertEquals(6, tQuoted.count { it.slice(quotedAndEscapedBraces) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tQuoted.first { it.slice(quotedAndEscapedBraces) == "after_all" }.kind)
+
+        val heredocDelimBareBrace = "cat <<\${x:-{}; echo same_line\nbody\n\${x:-{}\necho after_delim\n"
+        val tDelim = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, heredocDelimBareBrace, "shell-heredoc-delim-bare-brace")
+        assertEquals(2, tDelim.count { it.slice(heredocDelimBareBrace) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.String, tDelim.last { it.slice(heredocDelimBareBrace) == "\${x:-{}" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tDelim.first { it.slice(heredocDelimBareBrace) == "same_line" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tDelim.first { it.slice(heredocDelimBareBrace) == "after_delim" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }

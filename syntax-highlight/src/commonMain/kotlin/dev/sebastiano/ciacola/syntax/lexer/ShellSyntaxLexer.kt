@@ -327,7 +327,6 @@ private class CommandScopeFrame(
 private class ParamExpFrame(
     var expectingVarName: Boolean = true,
     var inZshFlagsParen: Boolean = false,
-    var braceDepth: Int = 0,
     var bracketDepth: Int = 0,
     var sawModifierOp: Boolean = false,
 )
@@ -415,13 +414,8 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             }
 
             ShellTokens.PE_RBRACE -> {
-                val pe = paramExpStack.lastOrNull()
-                if (pe != null && pe.braceDepth > 0) {
-                    pe.braceDepth--
-                } else {
-                    if (paramExpStack.isNotEmpty()) paramExpStack.removeAt(paramExpStack.lastIndex)
-                    if (activeSubMode.lastOrNull() == MODE_PARAM_EXP) activeSubMode.removeAt(activeSubMode.lastIndex)
-                }
+                if (paramExpStack.isNotEmpty()) paramExpStack.removeAt(paramExpStack.lastIndex)
+                if (activeSubMode.lastOrNull() == MODE_PARAM_EXP) activeSubMode.removeAt(activeSubMode.lastIndex)
                 i++
                 continue
             }
@@ -548,7 +542,6 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
             val pe = paramExpStack.lastOrNull()
             if (pe != null) {
                 when (type) {
-                    ShellTokens.PE_LBRACE -> pe.braceDepth++
                     ShellTokens.PE_LPAREN -> {
                         if (pe.expectingVarName) pe.inZshFlagsParen = true
                     }

@@ -245,7 +245,7 @@ PE_LOCALE_DQUOTE_START : '$"' { pushDQuote(Modes.DQUOTE); } ;
 PE_DQUOTE_START        : '"' { pushDQuote(Modes.DQUOTE); } ;
 PE_SINGLE_STRING       : '\'' ~[']* '\''? ;
 PE_BACKTICK            : '`' { pushBacktick(); } ;
-PE_LBRACE              : '{' { onParamExpLBrace(); } ;
+PE_LBRACE              : '{' ;
 PE_RBRACE              : '}' { onParamExpRBrace(); } ;
 PE_LPAREN              : '(' ;
 PE_RPAREN              : ')' ;

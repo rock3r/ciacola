@@ -7,7 +7,7 @@ import org.antlr.v4.kotlinruntime.Lexer
 /**
  * Pure Kotlin Multiplatform base lexer for [ShellLexer] tracking command/subshell/backtick
  * scopes, `case ... in ... esac` pattern boundaries, arithmetic paren nesting, parameter-expansion
- * brace nesting, O(N) balanced `((` / `$((` lookahead, and FIFO heredoc queues in O(N) time.
+ * nesting, O(N) balanced `((` / `$((` lookahead, and FIFO heredoc queues in O(N) time.
  */
 internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
@@ -63,7 +63,6 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
     private val scopeStack = ArrayList<ScopeFrame>().apply {
         add(ScopeFrame(ScopeKind.TOP_LEVEL))
     }
-    private val paramExpBraceDepthStack = ArrayList<Int>()
     private val arithParenDepthStack = ArrayList<Int>()
     private val arithIsCommandStack = ArrayList<Boolean>()
     private val arithBalanceCache = HashMap<Int, Boolean>()
@@ -377,27 +376,10 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun pushParamExp(paramExpMode: Int) {
         onNonCommandArgToken()
-        paramExpBraceDepthStack.add(0)
         pushMode(paramExpMode)
     }
 
-    protected fun onParamExpLBrace() {
-        if (paramExpBraceDepthStack.isNotEmpty()) {
-            val idx = paramExpBraceDepthStack.lastIndex
-            paramExpBraceDepthStack[idx] = paramExpBraceDepthStack[idx] + 1
-        }
-    }
-
     protected fun onParamExpRBrace() {
-        if (paramExpBraceDepthStack.isNotEmpty()) {
-            val idx = paramExpBraceDepthStack.lastIndex
-            val depth = paramExpBraceDepthStack[idx]
-            if (depth > 0) {
-                paramExpBraceDepthStack[idx] = depth - 1
-                return
-            }
-            paramExpBraceDepthStack.removeAt(idx)
-        }
         if (!_modeStack.isEmpty) {
             popMode()
         }
@@ -881,8 +863,8 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         _input.consume()
         appendCodePoint(out, openCp)
         _input.consume()
-        var depth = 1
-        while (depth > 0) {
+        val closeStack = ArrayList<Int>().apply { add(closeCp) }
+        while (closeStack.isNotEmpty()) {
             val c = _input.LA(1)
             if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) break
             when (c) {
@@ -928,15 +910,68 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                     }
                 }
                 '`'.code -> consumeBacktickInDelim(out)
-                openCp -> {
-                    depth++
-                    appendCodePoint(out, c)
-                    _input.consume()
+                '$'.code -> {
+                    when (_input.LA(2)) {
+                        '('.code -> {
+                            out.append('$').append('(')
+                            _input.consume()
+                            _input.consume()
+                            closeStack.add(')'.code)
+                        }
+                        '{'.code -> {
+                            out.append('$').append('{')
+                            _input.consume()
+                            _input.consume()
+                            closeStack.add('}'.code)
+                        }
+                        '\''.code -> {
+                            out.append('$').append('\'')
+                            _input.consume()
+                            _input.consume()
+                            while (true) {
+                                val q = _input.LA(1)
+                                if (q == IntStream.EOF || q == '\r'.code || q == '\n'.code) break
+                                if (q == '\\'.code) {
+                                    out.append('\\')
+                                    _input.consume()
+                                    val esc = _input.LA(1)
+                                    if (esc != IntStream.EOF && esc != '\r'.code && esc != '\n'.code) {
+                                        appendCodePoint(out, esc)
+                                        _input.consume()
+                                    }
+                                } else {
+                                    appendCodePoint(out, q)
+                                    _input.consume()
+                                    if (q == '\''.code) break
+                                }
+                            }
+                        }
+                        else -> {
+                            out.append('$')
+                            _input.consume()
+                        }
+                    }
                 }
-                closeCp -> {
-                    depth--
-                    appendCodePoint(out, c)
+                '('.code -> {
+                    out.append('(')
                     _input.consume()
+                    if (closeStack.last() == ')'.code) {
+                        closeStack.add(')'.code)
+                    }
+                }
+                ')'.code -> {
+                    out.append(')')
+                    _input.consume()
+                    if (closeStack.last() == ')'.code) {
+                        closeStack.removeAt(closeStack.lastIndex)
+                    }
+                }
+                '}'.code -> {
+                    out.append('}')
+                    _input.consume()
+                    if (closeStack.last() == '}'.code) {
+                        closeStack.removeAt(closeStack.lastIndex)
+                    }
                 }
                 else -> {
                     appendCodePoint(out, c)
@@ -1234,7 +1269,6 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         super.reset()
         scopeStack.clear()
         scopeStack.add(ScopeFrame(ScopeKind.TOP_LEVEL))
-        paramExpBraceDepthStack.clear()
         arithParenDepthStack.clear()
         arithIsCommandStack.clear()
         arithBalanceCache.clear()
