@@ -3,7 +3,7 @@
  */
 lexer grammar JavaScriptLexer;
 
-import UnicodeIdent;
+import UnicodeJsIdent;
 
 options {
     superClass = JsTsLexerBase;
@@ -131,7 +131,7 @@ tokens {
             )
 
         // All statement/type-ending tokens (SEMI, RPAREN, RBRACK, RBRACE, GT, RSHIFT, URSHIFT,
-        // ARROW, STRING, TEMPLATE_END, numeric literals, INVALID_TYPE, etc.) precede a block `{`.
+        // ARROW, STRING, TEMPLATE_CLOSE, numeric literals, INVALID_TYPE, etc.) precede a block `{`.
         else -> true
     }
 
@@ -224,11 +224,11 @@ SHEBANG
     ;
 
 WS
-    : [ \t\r\n\uFEFF]+
+    : [ \t\r\n\u000B\u000C\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+
     ;
 
 LINE_COMMENT
-    : '//' ~[\r\n]*
+    : '//' ~[\r\n\u2028\u2029]*
     ;
 
 BLOCK_COMMENT
@@ -384,12 +384,12 @@ fragment DECIMAL_DIGITS
     ;
 
 fragment IDENT_START
-    : UNICODE_XID_START
+    : UNICODE_ID_START
     | [_$]
     ;
 
 fragment IDENT_PART
-    : UNICODE_XID_CONTINUE
+    : UNICODE_ID_CONTINUE
     | '$'
     ;
 

@@ -6,21 +6,21 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.json.JsonLexer
 import dev.sebastiano.ciacola.syntax.antlr.json.JsonLexer.Tokens as JsonTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for JSON and JSONC (`//` and `/* */` comments),
  * with contextual lookahead to distinguish object property keys from string values.
  */
-object JsonSyntaxLexer : SyntaxLexer {
+internal object JsonSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Json
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = JsonLexer(CharStreams.fromString(source))
+        val lexer = JsonLexer(antlrCharStream(source))
         val rawTypes = ArrayList<Int>(source.length / 4 + 8)
         val rawStarts = ArrayList<Int>(source.length / 4 + 8)
         val rawEnds = ArrayList<Int>(source.length / 4 + 8)

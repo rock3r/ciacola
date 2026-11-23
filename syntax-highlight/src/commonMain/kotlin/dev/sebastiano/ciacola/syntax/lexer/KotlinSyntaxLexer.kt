@@ -6,20 +6,20 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.kotlin.KotlinLexer
 import dev.sebastiano.ciacola.syntax.antlr.kotlin.KotlinLexer.Tokens as KotlinTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Kotlin source code.
  */
-object KotlinSyntaxLexer : SyntaxLexer {
+internal object KotlinSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Kotlin
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = KotlinLexer(CharStreams.fromString(source))
+        val lexer = KotlinLexer(antlrCharStream(source))
         val raw = ArrayList<RawKotlinToken>(source.length / 3 + 8)
 
         driveAntlrLexer(

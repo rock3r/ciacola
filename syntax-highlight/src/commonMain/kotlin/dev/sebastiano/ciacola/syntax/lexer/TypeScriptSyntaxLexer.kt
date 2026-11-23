@@ -7,7 +7,7 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for TypeScript and TSX source code.
  */
-object TypeScriptSyntaxLexer : SyntaxLexer {
+internal object TypeScriptSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.TypeScript
 
     override fun lex(source: String): List<SyntaxToken> =

@@ -116,5 +116,27 @@ class WarpLanguageResolutionTest {
             assertTrue(darkDistinct.size >= 2, "Expected highlighted token colors in dark palette for $langId")
             assertTrue(lightDistinct.size >= 2, "Expected highlighted token colors in light palette for $langId")
         }
+
+        // AGSL and SkSL shader types should render with the same palette.type color (not keyword).
+        val agslTokens = parse("uniform float2 iResolution; half4 main(float2 p) { return half4(0.5); }", Agsl)
+        val skslTokens = parse("uniform float2 iResolution; half4 main(float2 p) { return half4(0.5); }", Sksl)
+        for (palette in listOf(darkPalette, lightPalette)) {
+            assertEquals(
+                palette.type,
+                palette.colorForWarpScope(agslTokens.first { it.content == "float2" }.scope),
+            )
+            assertEquals(
+                palette.type,
+                palette.colorForWarpScope(agslTokens.first { it.content == "half4" }.scope),
+            )
+            assertEquals(
+                palette.colorForWarpScope(skslTokens.first { it.content == "float2" }.scope),
+                palette.colorForWarpScope(agslTokens.first { it.content == "float2" }.scope),
+            )
+            assertEquals(
+                palette.keyword,
+                palette.colorForWarpScope(agslTokens.first { it.content == "uniform" }.scope),
+            )
+        }
     }
 }

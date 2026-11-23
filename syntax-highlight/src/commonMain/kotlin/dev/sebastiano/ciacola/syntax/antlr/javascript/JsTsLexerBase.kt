@@ -368,11 +368,10 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
 
     private fun isJsIdentStartCodePoint(cp: Int): Boolean {
         if (cp <= 0) return false
-        return (cp in 'a'.code..'z'.code) ||
-            (cp in 'A'.code..'Z'.code) ||
-            cp == '_'.code ||
-            cp == '$'.code ||
-            cp >= 0xC0
+        if (cp in 'a'.code..'z'.code || cp in 'A'.code..'Z'.code || cp == '_'.code || cp == '$'.code) return true
+        if (cp < 0xC0) return false
+        if (isJsWhitespaceCodePoint(cp) || isNonIdentPunctuationCodePoint(cp)) return false
+        return true
     }
 
     private fun isJsIdentPartCodePoint(cp: Int): Boolean =
@@ -381,4 +380,20 @@ internal abstract class JsTsLexerBase(input: CharStream) : Lexer(input) {
             (cp in 0x0300..0x036F) ||
             cp == 0x200C ||
             cp == 0x200D
+
+    private fun isJsWhitespaceCodePoint(cp: Int): Boolean =
+        cp == 0x00A0 ||
+            cp == 0x1680 ||
+            cp in 0x2000..0x200A ||
+            cp == 0x2028 ||
+            cp == 0x2029 ||
+            cp == 0x202F ||
+            cp == 0x205F ||
+            cp == 0x3000 ||
+            cp == 0xFEFF
+
+    private fun isNonIdentPunctuationCodePoint(cp: Int): Boolean =
+        cp == 0x060C ||
+            cp in 0x2E00..0x2E7F ||
+            cp in 0xFFE0..0xFFEF
 }

@@ -19,6 +19,8 @@ val generateAntlrGrammars = tasks.register("generateAntlrGrammars") {
 }
 
 kotlin {
+    explicitApi()
+
     jvm()
 
     @OptIn(ExperimentalWasmDsl::class)
@@ -66,7 +68,9 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
             include("**/*.g4")
         }
         packageName = pkgName
-        arguments = listOf("-lib", sharedAntlrDir.asFile.absolutePath)
+        // AntlrWorkerManager sets the worker workingDir to layout.projectDirectory, so a relative
+        // path resolves cleanly while keeping Gradle's build cache relocatable across machines.
+        arguments = listOf("-lib", "src/commonMain/antlr/shared")
         outputDirectory = outDir.get().asFile
 
         doLast {
@@ -132,22 +136,90 @@ tasks.matching {
     dependsOn(generateAntlrGrammars)
 }
 
+tasks.withType(org.gradle.jvm.tasks.Jar::class.java).configureEach {
+    from(rootProject.file("LICENSE.txt")) {
+        into("META-INF")
+    }
+    from(layout.projectDirectory.file("NOTICE.txt")) {
+        into("META-INF")
+    }
+}
+
 val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourcesJar") {
     group = "verification"
-    description = "Verifies jvmSourcesJar layout, hygiene, and internal visibility of ANTLR lexers."
+    description = "Verifies published JAR notices, UnicodeIdent.g4 notice header, sources layout, hygiene, and internal visibility."
+    val jvmJarTask = tasks.named("jvmJar", org.gradle.jvm.tasks.Jar::class.java)
     val sourcesJarTask = tasks.named("jvmSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
-    dependsOn(sourcesJarTask)
-    val jarFileProvider = sourcesJarTask.flatMap { it.archiveFile }
-    inputs.file(jarFileProvider)
+    val jsSourcesJarTask = tasks.named("jsSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
+    val wasmJsSourcesJarTask = tasks.named("wasmJsSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
+    val allMetadataJarTask = tasks.named("allMetadataJar", org.gradle.jvm.tasks.Jar::class.java)
+    dependsOn(jvmJarTask, sourcesJarTask, jsSourcesJarTask, wasmJsSourcesJarTask, allMetadataJarTask)
+
+    val jarProviders = listOf(
+        jvmJarTask.flatMap { it.archiveFile },
+        sourcesJarTask.flatMap { it.archiveFile },
+        jsSourcesJarTask.flatMap { it.archiveFile },
+        wasmJsSourcesJarTask.flatMap { it.archiveFile },
+        allMetadataJarTask.flatMap { it.archiveFile },
+    )
+    val sourcesJarProvider = sourcesJarTask.flatMap { it.archiveFile }
+    val sharedUnicodeDir = layout.projectDirectory.dir("src/commonMain/antlr/shared")
+    val sharedUnicodeFiles = fileTree(sharedUnicodeDir) { include("Unicode*.g4") }
+    jarProviders.forEach { inputs.file(it) }
+    inputs.files(sharedUnicodeFiles).withPathSensitivity(PathSensitivity.RELATIVE)
 
     doLast {
-        val jarFile = jarFileProvider.get().asFile
         val violations = mutableListOf<String>()
-        ZipFile(jarFile).use { zip ->
+        val requiredNoticeSnippets = listOf(
+            "Apache License, Version 2.0",
+            "Copyright (c) 2013 Terence Parr",
+            "Redistribution and use in source and binary forms",
+            "UNICODE LICENSE V3",
+            "Permission is hereby granted, free of charge, to any person obtaining",
+        )
+
+        val unicodeGrammars = sharedUnicodeDir.asFile.listFiles { file ->
+            file.isFile && file.name.startsWith("Unicode") && file.extension == "g4"
+        }?.sortedBy { it.name }.orEmpty()
+        if (unicodeGrammars.size < 4) {
+            violations += "Expected at least 4 generated Unicode*.g4 grammars in ${sharedUnicodeDir.asFile.name}, found ${unicodeGrammars.map { it.name }}"
+        }
+        for (grammarFile in unicodeGrammars) {
+            val grammarText = grammarFile.readText()
+            if (!grammarText.contains("UNICODE LICENSE V3") ||
+                !grammarText.contains("Permission is hereby granted, free of charge, to any person obtaining")
+            ) {
+                violations += "${grammarFile.name} is missing the Unicode License v3 copyright and permission notice header"
+            }
+        }
+
+        for (jarProvider in jarProviders) {
+            val jarFile = jarProvider.get().asFile
+            ZipFile(jarFile).use { zip ->
+                val licenseEntry = zip.getEntry("META-INF/LICENSE.txt")
+                if (licenseEntry == null) {
+                    violations += "Missing META-INF/LICENSE.txt in ${jarFile.name}"
+                }
+                val noticeEntry = zip.getEntry("META-INF/NOTICE.txt")
+                if (noticeEntry == null) {
+                    violations += "Missing META-INF/NOTICE.txt in ${jarFile.name}"
+                } else {
+                    val noticeText = zip.getInputStream(noticeEntry).bufferedReader().use { it.readText() }
+                    for (snippet in requiredNoticeSnippets) {
+                        if (!noticeText.contains(snippet)) {
+                            violations += "META-INF/NOTICE.txt in ${jarFile.name} is missing required notice text: '$snippet'"
+                        }
+                    }
+                }
+            }
+        }
+
+        val sourcesJarFile = sourcesJarProvider.get().asFile
+        ZipFile(sourcesJarFile).use { zip ->
             val entries = zip.entries().asSequence().toList()
             val ktEntries = entries.filter { !it.isDirectory && it.name.endsWith(".kt") }
             if (ktEntries.none { it.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") }) {
-                violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${jarFile.name}"
+                violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${sourcesJarFile.name}"
             }
             val modifierWord =
                 """(?:public|open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
@@ -158,12 +230,12 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             for (entry in entries) {
                 if (entry.isDirectory) continue
                 if (entry.name.endsWith(".tokens") || entry.name.endsWith(".interp")) {
-                    violations += "Forbidden ANTLR sidecar file in ${jarFile.name}: ${entry.name}"
+                    violations += "Forbidden ANTLR sidecar file in ${sourcesJarFile.name}: ${entry.name}"
                 }
                 if (entry.name.startsWith("commonMain/") && entry.name.endsWith(".kt") &&
                     !entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/")
                 ) {
-                    violations += "Improperly rooted Kotlin source in ${jarFile.name}: ${entry.name}"
+                    violations += "Improperly rooted Kotlin source in ${sourcesJarFile.name}: ${entry.name}"
                 }
                 if (entry.name.endsWith(".kt")) {
                     val text = zip.getInputStream(entry).bufferedReader().use { it.readText() }
@@ -171,16 +243,18 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
                     if (firstLine.startsWith("// Generated from /") || windowsDriveHeader.containsMatchIn(firstLine)) {
                         violations += "Absolute local path leaked in ${entry.name}: $firstLine"
                     }
-                    if (entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") &&
-                        topLevelNonInternal.containsMatchIn(text)
-                    ) {
+                    val isInternalPackage =
+                        entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") ||
+                            entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/lexer/") ||
+                            entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/internal/")
+                    if (isInternalPackage && topLevelNonInternal.containsMatchIn(text)) {
                         violations += "Public top-level declaration in ${entry.name}"
                     }
                 }
             }
         }
         if (violations.isNotEmpty()) {
-            throw GradleException("SourcesJar verification failed:\n" + violations.joinToString("\n") { " - $it" })
+            throw GradleException("Packaging verification failed:\n" + violations.joinToString("\n") { " - $it" })
         }
     }
 }
@@ -200,6 +274,16 @@ mavenPublishing {
             license {
                 name = "The Apache Software License, Version 2.0"
                 url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                distribution = "repo"
+            }
+            license {
+                name = "BSD 3-Clause License (adapted XML grammar)"
+                url = "https://opensource.org/licenses/BSD-3-Clause"
+                distribution = "repo"
+            }
+            license {
+                name = "Unicode License v3 (UCD-derived identifier tables)"
+                url = "https://www.unicode.org/license.txt"
                 distribution = "repo"
             }
         }
@@ -225,7 +309,7 @@ configure<DokkaExtension> {
             remoteLineSuffix = "#L"
         }
         perPackageOption {
-            matchingRegex.set("""dev\.sebastiano\.ciacola\.syntax\.antlr(\..*)?""")
+            matchingRegex.set("""dev\.sebastiano\.ciacola\.syntax\.(antlr|lexer|internal)(\..*)?""")
             suppress.set(true)
         }
     }

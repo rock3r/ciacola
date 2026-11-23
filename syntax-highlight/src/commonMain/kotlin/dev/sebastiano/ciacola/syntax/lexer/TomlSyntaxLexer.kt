@@ -6,20 +6,20 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.toml.TomlLexer
 import dev.sebastiano.ciacola.syntax.antlr.toml.TomlLexer.Tokens as TomlTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for TOML 1.0/1.1 source code.
  */
-object TomlSyntaxLexer : SyntaxLexer {
+internal object TomlSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Toml
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = TomlLexer(CharStreams.fromString(source))
+        val lexer = TomlLexer(antlrCharStream(source))
         val raw = ArrayList<RawTomlToken>(source.length / 4 + 8)
 
         driveAntlrLexer(

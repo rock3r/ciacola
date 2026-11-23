@@ -16,11 +16,11 @@ class SyntaxHighlightPackagingTest {
             SyntaxLanguage::class.java,
             SyntaxLexer::class.java,
             SyntaxHighlighter::class.java,
-        ) + discoverClassesInPackage("dev.sebastiano.ciacola.syntax.lexer")
+        )
 
         assertTrue(publicApiClasses.isNotEmpty(), "Expected public API classes to inspect")
         for (clazz in publicApiClasses) {
-            if (!Modifier.isPublic(clazz.modifiers)) continue
+            assertTrue(Modifier.isPublic(clazz.modifiers), "Expected public API class ${clazz.name} to be public")
 
             clazz.genericSuperclass?.let { superType ->
                 assertFalse(
@@ -65,9 +65,11 @@ class SyntaxHighlightPackagingTest {
     }
 
     @Test
-    fun antlrSourcesAreInternalCleanAndProperlyRooted() {
+    fun antlrAndLexerSourcesAreInternalCleanAndProperlyRooted() {
         val moduleDir = resolveModuleDir()
         val handWrittenAntlrDir = File(moduleDir, "src/commonMain/kotlin/dev/sebastiano/ciacola/syntax/antlr")
+        val lexerImplDir = File(moduleDir, "src/commonMain/kotlin/dev/sebastiano/ciacola/syntax/lexer")
+        val internalDir = File(moduleDir, "src/commonMain/kotlin/dev/sebastiano/ciacola/syntax/internal")
         val generatedAntlrRoot = File(moduleDir, "build/generatedAntlr")
 
         val modifierWord =
@@ -86,14 +88,16 @@ class SyntaxHighlightPackagingTest {
         }
 
         val kotlinFiles = buildList {
-            if (handWrittenAntlrDir.isDirectory) {
-                handWrittenAntlrDir.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { add(it) }
+            for (dir in listOf(handWrittenAntlrDir, lexerImplDir, internalDir)) {
+                if (dir.isDirectory) {
+                    dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { add(it) }
+                }
             }
             for (root in activeGeneratedRoots) {
                 root.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { add(it) }
             }
         }
-        assertTrue(kotlinFiles.isNotEmpty(), "Expected Kotlin files under antlr directories in $moduleDir")
+        assertTrue(kotlinFiles.isNotEmpty(), "Expected Kotlin files under internal implementation directories in $moduleDir")
 
         for (file in kotlinFiles) {
             val content = file.readText()
@@ -104,7 +108,42 @@ class SyntaxHighlightPackagingTest {
             )
             assertFalse(
                 topLevelNonInternal.containsMatchIn(content),
-                "ANTLR file ${file.path} contains a non-internal top-level declaration",
+                "Internal implementation file ${file.path} contains a non-internal top-level declaration",
+            )
+        }
+
+        val noticeFile = File(moduleDir, "NOTICE.txt")
+        assertTrue(noticeFile.isFile, "Expected module NOTICE.txt at ${noticeFile.path}")
+        val noticeText = noticeFile.readText()
+        assertTrue(noticeText.contains("Apache License, Version 2.0"), "NOTICE.txt must cite Apache-2.0")
+        assertTrue(noticeText.contains("Copyright (c) 2013 Terence Parr"), "NOTICE.txt must retain XML BSD-3-Clause copyright")
+        assertTrue(
+            noticeText.contains("Redistribution and use in source and binary forms"),
+            "NOTICE.txt must retain XML BSD-3-Clause permission text",
+        )
+        assertTrue(noticeText.contains("DerivedCoreProperties-16.0.0.txt"), "NOTICE.txt must cite DerivedCoreProperties-16.0.0.txt")
+        assertTrue(noticeText.contains("UnicodeData-16.0.0.txt"), "NOTICE.txt must cite UnicodeData-16.0.0.txt")
+        assertTrue(noticeText.contains("UNICODE LICENSE V3"), "NOTICE.txt must contain Unicode License v3 title")
+        assertTrue(
+            noticeText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
+            "NOTICE.txt must contain the Unicode License v3 permission notice",
+        )
+
+        val expectedUnicodeGrammars = listOf(
+            "UnicodeIdent.g4",
+            "UnicodeJsIdent.g4",
+            "UnicodeJavaIdent.g4",
+            "UnicodeGoIdent.g4",
+        )
+        for (name in expectedUnicodeGrammars) {
+            assertTrue(noticeText.contains(name), "NOTICE.txt must cite $name")
+            val grammarFile = File(moduleDir, "src/commonMain/antlr/shared/$name")
+            assertTrue(grammarFile.isFile, "Expected $name at ${grammarFile.path}")
+            val grammarText = grammarFile.readText()
+            assertTrue(grammarText.contains("UNICODE LICENSE V3"), "$name must carry Unicode License v3 header")
+            assertTrue(
+                grammarText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
+                "$name must carry the Unicode License v3 permission notice",
             )
         }
 
@@ -120,29 +159,6 @@ class SyntaxHighlightPackagingTest {
                 .toList()
             assertTrue(misrooted.isEmpty(), "Generated ANTLR sources must sit under .../kotlin/dev/sebastiano/ciacola/syntax/antlr/, found $misrooted")
         }
-    }
-
-    private fun discoverClassesInPackage(packageName: String): List<Class<*>> {
-        val classLoader = Thread.currentThread().contextClassLoader ?: SyntaxHighlightPackagingTest::class.java.classLoader
-        val packagePath = packageName.replace('.', '/')
-        val resources = classLoader.getResources(packagePath)
-        val classes = mutableListOf<Class<*>>()
-        while (resources.hasMoreElements()) {
-            val url = resources.nextElement()
-            if (url.protocol == "file") {
-                val dir = File(url.toURI())
-                if (!dir.isDirectory) continue
-                dir.listFiles()
-                    ?.filter { it.isFile && it.extension == "class" && !it.name.contains('$') }
-                    ?.forEach { classFile ->
-                        val simpleName = classFile.nameWithoutExtension
-                        if (!simpleName.endsWith("Test")) {
-                            classes += Class.forName("$packageName.$simpleName", false, classLoader)
-                        }
-                    }
-            }
-        }
-        return classes
     }
 
     private fun resolveModuleDir(): File {

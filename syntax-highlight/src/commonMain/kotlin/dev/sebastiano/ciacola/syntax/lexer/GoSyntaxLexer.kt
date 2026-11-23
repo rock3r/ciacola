@@ -6,21 +6,21 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.go.GoLexer
 import dev.sebastiano.ciacola.syntax.antlr.go.GoLexer.Tokens as GoTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Go source code.
  */
-object GoSyntaxLexer : SyntaxLexer {
+internal object GoSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Go
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = GoLexer(CharStreams.fromString(source))
+        val lexer = GoLexer(antlrCharStream(source))
         val raw = ArrayList<RawGoToken>(source.length / 3 + 8)
 
         driveAntlrLexer(

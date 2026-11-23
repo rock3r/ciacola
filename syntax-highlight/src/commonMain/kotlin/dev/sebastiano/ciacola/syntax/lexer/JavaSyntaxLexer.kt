@@ -6,21 +6,21 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.java.JavaLexer
 import dev.sebastiano.ciacola.syntax.antlr.java.JavaLexer.Tokens as JavaTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Java 21+ source code.
  */
-object JavaSyntaxLexer : SyntaxLexer {
+internal object JavaSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Java
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = JavaLexer(CharStreams.fromString(source))
+        val lexer = JavaLexer(antlrCharStream(source))
         val raw = ArrayList<RawJavaToken>(source.length / 3 + 8)
 
         driveAntlrLexer(

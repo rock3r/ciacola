@@ -3,7 +3,7 @@
  */
 lexer grammar GoLexer;
 
-import UnicodeIdent;
+import UnicodeGoIdent;
 
 WS
     : [ \t\r\n\uFEFF]+
@@ -147,12 +147,14 @@ IDENT
     ;
 
 fragment IDENT_START
-    : UNICODE_XID_START
+    : UNICODE_LETTER
     | '_'
     ;
 
 fragment IDENT_CONTINUE
-    : UNICODE_XID_CONTINUE
+    : UNICODE_LETTER
+    | UNICODE_DIGIT
+    | '_'
     ;
 
 ERROR_CHAR

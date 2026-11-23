@@ -208,7 +208,7 @@ class TypeScriptSyntaxLexerTest {
     }
 
     @Test
-    fun distinguishesGenericArrowsAndAngleAssertionsFromBareJsxTags() {
+    fun distinguishesGenericArrowsAndAngleAssertionsFromJsx() {
         val code1 = "const id = <T>(x: T): T => x;\nexport function next() { return 1; }"
         val t1 = assertLosslessInvariants(TypeScriptSyntaxLexer, code1, "ts-generic-arrow-no-comma")
         assertEquals(SyntaxTokenKind.Keyword, t1.first { it.slice(code1) == "export" }.kind)
@@ -226,7 +226,10 @@ class TypeScriptSyntaxLexerTest {
         val t3 = assertLosslessInvariants(TypeScriptSyntaxLexer, code3, "ts-angle-cast")
         assertEquals(SyntaxTokenKind.Keyword, t3.last { it.slice(code3) == "const" }.kind)
         assertEquals(SyntaxTokenKind.Property, t3.first { it.slice(code3) == "body" }.kind)
+    }
 
+    @Test
+    fun handlesBareAndGenericTsxElementsWithParenTextAndLongBodies() {
         val jsxParen = "const ui = <div>(hello)</div>;"
         val t4 = assertLosslessInvariants(TypeScriptSyntaxLexer, jsxParen, "tsx-paren-children")
         assertEquals(SyntaxTokenKind.Tag, t4.first { it.slice(jsxParen) == "div" }.kind)
@@ -266,7 +269,7 @@ class TypeScriptSyntaxLexerTest {
     }
 
     @Test
-    fun distinguishesObjectLiteralDivisionFromBlockFollowedByRegex() {
+    fun treatsSlashAfterTypedObjectLiteralsAndTernaryTypedArrowsAsDivision() {
         val code = "const n: number = { valueOf: () => 12 } / 2 / 3;\nif (n > 0) { log(n) }\n/ok/i.test(s);"
         val tokens = assertLosslessInvariants(TypeScriptSyntaxLexer, code, "ts-obj-div-vs-block-regex")
         assertEquals(2, tokens.count { it.slice(code) == "/" && it.kind == SyntaxTokenKind.Operator })
@@ -274,6 +277,14 @@ class TypeScriptSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "3" }.kind)
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "/ok/i" }.kind)
 
+        val ternaryTypedArrow = "const v = ok ? (e: number) => e : { valueOf: () => 12 } / 2 / 3;"
+        val ternTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, ternaryTypedArrow, "ts-ternary-paren-colon")
+        assertTrue(ternTokens.none { it.kind == SyntaxTokenKind.String })
+        assertEquals(2, ternTokens.count { it.slice(ternaryTypedArrow) == "/" && it.kind == SyntaxTokenKind.Operator })
+    }
+
+    @Test
+    fun treatsSlashAndTsxAfterGenericClassAndTypedFunctionBlocksAsBlockFollowers() {
         val genericFn = "function f(): Promise<void> { }\n/re/.test(s);"
         val gtFnTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, genericFn, "ts-gt-fn-regex")
         assertEquals(SyntaxTokenKind.String, gtFnTokens.first { it.slice(genericFn) == "/re/" }.kind)
@@ -293,12 +304,10 @@ class TypeScriptSyntaxLexerTest {
         val classThenTsx = "class Box<T> { }\n<div className=\"a\" />;"
         val classTsxTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, classThenTsx, "ts-gt-class-tsx")
         assertEquals(SyntaxTokenKind.Tag, classTsxTokens.first { it.slice(classThenTsx) == "div" }.kind)
+    }
 
-        val ternaryTypedArrow = "const v = ok ? (e: number) => e : { valueOf: () => 12 } / 2 / 3;"
-        val ternTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, ternaryTypedArrow, "ts-ternary-paren-colon")
-        assertTrue(ternTokens.none { it.kind == SyntaxTokenKind.String })
-        assertEquals(2, ternTokens.count { it.slice(ternaryTypedArrow) == "/" && it.kind == SyntaxTokenKind.Operator })
-
+    @Test
+    fun treatsSlashAndTsxAfterVoidNestedGenericLiteralAndUnionObjectReturnBlocksAsBlockFollowers() {
         val voidFnRegex = "function f(): void { }\n/re/.test(s);"
         val voidRegexTokens = assertLosslessInvariants(TypeScriptSyntaxLexer, voidFnRegex, "ts-void-fn-regex")
         assertEquals(SyntaxTokenKind.String, voidRegexTokens.first { it.slice(voidFnRegex) == "/re/" }.kind)

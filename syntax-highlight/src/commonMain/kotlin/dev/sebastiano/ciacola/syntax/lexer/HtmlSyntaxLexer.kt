@@ -6,21 +6,21 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.html.HtmlLexer
 import dev.sebastiano.ciacola.syntax.antlr.html.HtmlLexer.Tokens as HtmlTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 mode-switched lexical tokenizer for HTML5 with embedded `<script>` (JS/TS/JSON)
  * and `<style>` (CSS) delegation.
  */
-object HtmlSyntaxLexer : SyntaxLexer {
+internal object HtmlSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Html
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = HtmlLexer(CharStreams.fromString(source))
+        val lexer = HtmlLexer(antlrCharStream(source))
         val raw = ArrayList<RawHtmlToken>(source.length / 4 + 8)
 
         driveAntlrLexer(

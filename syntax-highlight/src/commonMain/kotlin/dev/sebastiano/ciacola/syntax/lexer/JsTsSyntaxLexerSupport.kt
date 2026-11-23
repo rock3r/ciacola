@@ -4,15 +4,15 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.javascript.JavaScriptLexer
 import dev.sebastiano.ciacola.syntax.antlr.javascript.JavaScriptLexer.Tokens as JsTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 internal fun lexJsOrTs(source: String, isTypeScript: Boolean): List<SyntaxToken> {
     if (source.isEmpty()) return emptyList()
 
-    val lexer = JavaScriptLexer(CharStreams.fromString(source)).apply {
+    val lexer = JavaScriptLexer(antlrCharStream(source)).apply {
         this.isTypeScript = isTypeScript
     }
     val raw = ArrayList<RawJsToken>(source.length / 3 + 8)
@@ -59,7 +59,7 @@ private class RawJsToken(
 private fun containsNewline(source: String, start: Int, end: Int): Boolean {
     for (i in start until end) {
         val c = source[i]
-        if (c == '\n' || c == '\r') return true
+        if (c == '\n' || c == '\r' || c == '\u2028' || c == '\u2029') return true
     }
     return false
 }

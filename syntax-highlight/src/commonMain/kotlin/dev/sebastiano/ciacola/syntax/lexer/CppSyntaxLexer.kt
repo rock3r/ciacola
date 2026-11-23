@@ -6,15 +6,15 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.cpp.CppLexer
 import dev.sebastiano.ciacola.syntax.antlr.cpp.CppLexer.Tokens as CppTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for C++ (C++20/C++23).
  */
-object CppSyntaxLexer : SyntaxLexer {
+internal object CppSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Cpp
 
     override fun lex(source: String): List<SyntaxToken> =
@@ -82,7 +82,7 @@ private class RawCppToken(
 internal fun lexCFamily(source: String, dialect: CFamilyDialect): List<SyntaxToken> {
     if (source.isEmpty()) return emptyList()
 
-    val lexer = CppLexer(CharStreams.fromString(source)).apply {
+    val lexer = CppLexer(antlrCharStream(source)).apply {
         enableCppFeatures = dialect.isCpp
     }
     val raw = ArrayList<RawCppToken>(source.length / 3 + 8)

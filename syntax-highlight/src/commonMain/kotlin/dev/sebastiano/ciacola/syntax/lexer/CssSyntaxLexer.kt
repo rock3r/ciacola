@@ -6,20 +6,20 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.css.CssLexer
 import dev.sebastiano.ciacola.syntax.antlr.css.CssLexer.Tokens as CssTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for CSS stylesheets.
  */
-object CssSyntaxLexer : SyntaxLexer {
+internal object CssSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Css
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = CssLexer(CharStreams.fromString(source))
+        val lexer = CssLexer(antlrCharStream(source))
         val raw = ArrayList<RawCssToken>(source.length / 3 + 8)
 
         driveAntlrLexer(
