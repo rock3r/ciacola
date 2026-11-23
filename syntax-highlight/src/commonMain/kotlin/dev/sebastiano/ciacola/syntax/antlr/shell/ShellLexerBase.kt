@@ -29,6 +29,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         val kind: ScopeKind,
         var parenDepth: Int = 0,
         var atCommandPosition: Boolean = true,
+        var atWordBoundary: Boolean = true,
         var expectingFuncHeaderName: Boolean = false,
         var afterFuncHeader: Boolean = false,
         var sawFuncDeclCommand: Boolean = false,
@@ -64,6 +65,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
     }
     private val paramExpBraceDepthStack = ArrayList<Int>()
     private val arithParenDepthStack = ArrayList<Int>()
+    private val arithIsCommandStack = ArrayList<Boolean>()
     private val arithBalanceCache = HashMap<Int, Boolean>()
     private val heredocStack = ArrayList<HeredocFrame>()
     private var pendingStripTabs: Boolean = false
@@ -77,14 +79,20 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun isAtStartOfInput(): Boolean = _tokenStartCharIndex == 0
 
-    protected fun isCommentStart(): Boolean {
-        if (_tokenStartCharIndex == 0) return true
-        return isCommentBoundaryChar(_input.LA(-2))
+    protected fun isCommentStart(): Boolean = currentScope().atWordBoundary
+
+    protected fun onWordBoundary() {
+        currentScope().atWordBoundary = true
+    }
+
+    protected fun onWordPart() {
+        currentScope().atWordBoundary = false
     }
 
     protected fun onCommandSeparator() {
         val scope = currentScope()
         scope.atCommandPosition = true
+        scope.atWordBoundary = true
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
@@ -96,7 +104,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onLBrace() {
         val scope = currentScope()
-        val precededByBoundary = _tokenStartCharIndex == 0 || isBraceOpenBoundaryChar(_input.LA(-2))
+        val precededByBoundary = scope.atWordBoundary
         val next = _input.LA(1)
         val followedByWsOrEof = next == IntStream.EOF ||
             next == ' '.code ||
@@ -106,6 +114,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             next == '\u000C'.code
         if ((scope.atCommandPosition || scope.afterFuncHeader) && precededByBoundary && followedByWsOrEof) {
             scope.atCommandPosition = true
+            scope.atWordBoundary = false
             scope.expectingFuncHeaderName = false
             scope.afterFuncHeader = false
             scope.sawFuncDeclCommand = false
@@ -122,6 +131,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onPipeOrListOp() {
         val scope = currentScope()
+        scope.atWordBoundary = true
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
@@ -136,6 +146,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onCaseArmTerminator() {
         val scope = currentScope()
+        scope.atWordBoundary = true
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
@@ -152,6 +163,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onDefaultWord(lexeme: String) {
         val scope = currentScope()
+        scope.atWordBoundary = false
         if (scope.expectingFuncHeaderName) {
             scope.expectingFuncHeaderName = false
             scope.afterFuncHeader = true
@@ -238,6 +250,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onNonCommandArgToken() {
         val scope = currentScope()
+        scope.atWordBoundary = false
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
@@ -251,6 +264,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onAssignmentEq() {
         val scope = currentScope()
+        scope.atWordBoundary = false
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
@@ -258,6 +272,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onLParen() {
         val scope = currentScope()
+        scope.atWordBoundary = true
         scope.parenDepth++
         if (scope.sawFuncDeclCommand) {
             // `foo()` keeps `sawFuncDeclCommand` until `)` so `foo() { ... }` knows `{` opens a body.
@@ -278,6 +293,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             if (scope.parenDepth == topCase.baseParenDepth) {
                 topCase.inPattern = false
                 scope.atCommandPosition = true
+                scope.atWordBoundary = true
                 scope.sawFuncDeclCommand = false
                 return
             }
@@ -285,6 +301,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 scope.parenDepth--
                 topCase.inPattern = false
                 scope.atCommandPosition = true
+                scope.atWordBoundary = true
                 scope.sawFuncDeclCommand = false
                 return
             }
@@ -292,6 +309,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         if (scope.parenDepth > 0) {
             scope.parenDepth--
             scope.atCommandPosition = false
+            scope.atWordBoundary = true
             if (scope.sawFuncDeclCommand) {
                 scope.sawFuncDeclCommand = false
                 scope.afterFuncHeader = true
@@ -304,6 +322,8 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 popMode()
             }
             onNonCommandArgToken()
+        } else {
+            scope.atWordBoundary = true
         }
     }
 
@@ -456,8 +476,14 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             when (ch) {
                 '\\'.code -> {
                     val next = _input.LA(offset + 1)
-                    offset += if (next == IntStream.EOF) 1 else 2
-                    prevChar = next
+                    if (next == '\n'.code) {
+                        offset += 2
+                    } else if (next == '\r'.code) {
+                        offset += if (_input.LA(offset + 2) == '\n'.code) 3 else 2
+                    } else {
+                        offset += if (next == IntStream.EOF) 1 else 2
+                        prevChar = 'a'.code
+                    }
                 }
                 '\''.code -> {
                     offset++
@@ -582,9 +608,10 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         return arithBalanceCache[entryPos] ?: true
     }
 
-    protected fun pushArith(arithMode: Int) {
+    protected fun pushArith(arithMode: Int, isCommand: Boolean = false) {
         onNonCommandArgToken()
         arithParenDepthStack.add(0)
+        arithIsCommandStack.add(isCommand)
         pushMode(arithMode)
     }
 
@@ -607,6 +634,9 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         } else {
             // Malformed input hit an unmatched ')' inside ARITH: pop safely instead of leaking.
             arithParenDepthStack.removeAt(idx)
+            if (arithIsCommandStack.isNotEmpty()) {
+                arithIsCommandStack.removeAt(arithIsCommandStack.lastIndex)
+            }
             if (!_modeStack.isEmpty) {
                 popMode()
             }
@@ -620,12 +650,21 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         if (arithParenDepthStack.isNotEmpty()) {
             arithParenDepthStack.removeAt(arithParenDepthStack.lastIndex)
         }
+        val wasCommand = if (arithIsCommandStack.isNotEmpty()) {
+            arithIsCommandStack.removeAt(arithIsCommandStack.lastIndex)
+        } else {
+            false
+        }
         if (!_modeStack.isEmpty) {
             popMode()
+        }
+        if (wasCommand && _mode == DEFAULT_MODE) {
+            currentScope().atWordBoundary = true
         }
     }
 
     protected fun onHeredocOp(stripTabs: Boolean, delimMode: Int) {
+        currentScope().atWordBoundary = true
         if (hasHeredocDelimiterAhead()) {
             pendingStripTabs = stripTabs
             pushMode(delimMode)
@@ -767,7 +806,8 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         }
 
         val delimiter = unquoted.toString()
-        currentScope().pendingHeredocs.add(
+        val scope = currentScope()
+        scope.pendingHeredocs.add(
             HeredocSpec(
                 delimiter = delimiter,
                 delimiterCodePoints = toCodePoints(delimiter),
@@ -775,6 +815,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 isQuoted = isQuoted,
             ),
         )
+        scope.atWordBoundary = false
         pendingStripTabs = false
     }
 
@@ -1042,6 +1083,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
     protected fun onDefaultNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {
         val scope = currentScope()
         scope.atCommandPosition = true
+        scope.atWordBoundary = true
         scope.expectingFuncHeaderName = false
         scope.afterFuncHeader = false
         scope.sawFuncDeclCommand = false
@@ -1178,6 +1220,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             popMode()
             val scope = currentScope()
             scope.atCommandPosition = true
+            scope.atWordBoundary = true
             scope.expectingFuncHeaderName = false
             scope.afterFuncHeader = false
             scope.sawFuncDeclCommand = false
@@ -1193,6 +1236,7 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         scopeStack.add(ScopeFrame(ScopeKind.TOP_LEVEL))
         paramExpBraceDepthStack.clear()
         arithParenDepthStack.clear()
+        arithIsCommandStack.clear()
         arithBalanceCache.clear()
         heredocStack.clear()
         pendingStripTabs = false
@@ -1214,9 +1258,6 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
                 ch == '<'.code ||
                 ch == '>'.code ||
                 ch == '`'.code
-
-        fun isBraceOpenBoundaryChar(ch: Int): Boolean =
-            isCommentBoundaryChar(ch) || ch == '{'.code || ch == '}'.code
 
         fun toCodePoints(s: String): IntArray {
             val cps = IntArray(s.length)

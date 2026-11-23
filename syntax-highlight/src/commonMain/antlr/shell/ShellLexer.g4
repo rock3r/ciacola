@@ -15,16 +15,16 @@ tokens {
 
 // Shebang and comments (consume literal '#' prefix before semantic predicate)
 SHEBANG
-    : '#!' { isAtStartOfInput() }? ~[\r\n]*
+    : '#!' { isAtStartOfInput() }? ~[\r\n]* { onWordBoundary(); }
     ;
 
 COMMENT
-    : '#' { isCommentStart() }? ~[\r\n]*
+    : '#' { isCommentStart() }? ~[\r\n]* { onWordBoundary(); }
     ;
 
 // Whitespace, line continuations, and newlines
 WS
-    : [ \t\f\uFEFF]+
+    : [ \t\f\uFEFF]+ { onWordBoundary(); }
     ;
 
 LINE_CONTINUATION
@@ -74,7 +74,7 @@ PROC_SUB_OUT
     ;
 
 ARITH_CMD_START
-    : '((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH); }
+    : '((' { hasBalancedDoubleParenClose() }? { pushArith(Modes.ARITH, isCommand = true); }
     ;
 
 BACKTICK
@@ -95,7 +95,7 @@ DOLLAR
 
 // Here-strings, heredocs, and redirections
 HERE_STRING
-    : ( '{' [a-zA-Z_][a-zA-Z0-9_]* '}' | [0-9]+ )? '<<<'
+    : ( '{' [a-zA-Z_][a-zA-Z0-9_]* '}' | [0-9]+ )? '<<<' { onWordBoundary(); }
     ;
 
 HEREDOC_STRIP_OP
@@ -107,21 +107,21 @@ HEREDOC_OP
     ;
 
 FD_REDIR
-    : '{' [a-zA-Z_][a-zA-Z0-9_]* '}' ( '>&' | '<&' | '<>' | '>>' | '>|' | '>' | '<' )
+    : '{' [a-zA-Z_][a-zA-Z0-9_]* '}' ( '>&' | '<&' | '<>' | '>>' | '>|' | '>' | '<' ) { onWordBoundary(); }
     ;
 
 NUM_REDIR
-    : [0-9]+ ( '>&' | '<&' | '<>' | '>>' | '>|' | '>' | '<' )
+    : [0-9]+ ( '>&' | '<&' | '<>' | '>>' | '>|' | '>' | '<' ) { onWordBoundary(); }
     ;
 
-AMP_GT_APPEND : '&>>';
-AMP_GT        : '&>';
+AMP_GT_APPEND : '&>>' { onWordBoundary(); };
+AMP_GT        : '&>' { onWordBoundary(); };
 PIPE_AMP      : '|&' { onPipeOrListOp(); };
-GT_APPEND     : '>>';
-GT_CLOBBER    : '>|';
-LT_GT         : '<>';
-GT_AMP        : '>&';
-LT_AMP        : '<&';
+GT_APPEND     : '>>' { onWordBoundary(); };
+GT_CLOBBER    : '>|' { onWordBoundary(); };
+LT_GT         : '<>' { onWordBoundary(); };
+GT_AMP        : '>&' { onWordBoundary(); };
+LT_AMP        : '<&' { onWordBoundary(); };
 
 // Pipelines, lists, case terminators, and test operators
 AND_AND       : '&&' { onPipeOrListOp(); };
@@ -129,29 +129,29 @@ OR_OR         : '||' { onPipeOrListOp(); };
 SEMI_SEMI_AMP : ';;&' { onCaseArmTerminator(); };
 SEMI_SEMI     : ';;' { onCaseArmTerminator(); };
 SEMI_AMP      : ';&' { onCaseArmTerminator(); };
-EQ_TILDE      : '=~';
-EQ_EQ         : '==';
-BANG_EQ       : '!=';
-PLUS_EQ       : '+=';
-LBRACK_LBRACK : '[[';
-RBRACK_RBRACK : ']]';
+EQ_TILDE      : '=~' { onWordPart(); };
+EQ_EQ         : '==' { onWordPart(); };
+BANG_EQ       : '!=' { onWordPart(); };
+PLUS_EQ       : '+=' { onWordPart(); };
+LBRACK_LBRACK : '[[' { onWordPart(); };
+RBRACK_RBRACK : ']]' { onWordPart(); };
 
 LPAREN : '(' { onLParen(); };
 RPAREN : ')' { onRParen(); };
 LBRACE : '{' { onLBrace(); };
-RBRACE : '}';
-LBRACK : '[';
-RBRACK : ']';
+RBRACE : '}' { onWordPart(); };
+LBRACK : '[' { onWordPart(); };
+RBRACK : ']' { onWordPart(); };
 SEMI   : ';' { onCommandSeparator(); };
 PIPE   : '|' { onPipeOrListOp(); };
 AMP    : '&' { onCommandSeparator(); };
-LT     : '<';
-GT     : '>';
+LT     : '<' { onWordBoundary(); };
+GT     : '>' { onWordBoundary(); };
 EQ     : '=' { onAssignmentEq(); };
-PLUS   : '+';
-BANG   : '!';
-COMMA  : ',';
-HASH   : '#';
+PLUS   : '+' { onWordPart(); };
+BANG   : '!' { onWordPart(); };
+COMMA  : ',' { onWordPart(); };
+HASH   : '#' { onWordPart(); };
 
 // Numeric literals (placed before WORD so pure numbers win over WORD)
 HEX_INT
@@ -210,7 +210,7 @@ fragment WORD_CONT
     ;
 
 ERROR_CHAR
-    : .
+    : . { onWordPart(); }
     ;
 
 // ---------------- Double-Quoted Strings ("..." and $"...") ----------------

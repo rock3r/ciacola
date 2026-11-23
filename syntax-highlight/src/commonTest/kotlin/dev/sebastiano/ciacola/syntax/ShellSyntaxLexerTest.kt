@@ -527,6 +527,39 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun respectsEscapedBoundariesAndContinuationsForComments() {
+        val escapedSpace = "echo foo\\ #bar; echo after_space\n"
+        val tEscSpace = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, escapedSpace, "shell-comment-escaped-space")
+        assertTrue(tEscSpace.none { it.kind == SyntaxTokenKind.Comment })
+        assertEquals(2, tEscSpace.count { it.slice(escapedSpace) == "echo" && it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Plain, tEscSpace.first { it.slice(escapedSpace) == "after_space" }.kind)
+
+        val escapedSemi = "echo foo\\;#bar; echo after_semi\n"
+        val tEscSemi = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, escapedSemi, "shell-comment-escaped-semi")
+        assertTrue(tEscSemi.none { it.kind == SyntaxTokenKind.Comment })
+        assertEquals(2, tEscSemi.count { it.slice(escapedSemi) == "echo" && it.kind == SyntaxTokenKind.Function })
+
+        val wordLineCont = "echo foo\\\n#bar; echo after_cont\n"
+        val tWordCont = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, wordLineCont, "shell-comment-word-line-cont")
+        assertTrue(tWordCont.none { it.kind == SyntaxTokenKind.Comment })
+        assertEquals(2, tWordCont.count { it.slice(wordLineCont) == "echo" && it.kind == SyntaxTokenKind.Function })
+
+        val wsLineCont = "echo \\\n#real comment; echo skipped\n"
+        val tWsCont = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, wsLineCont, "shell-comment-ws-line-cont")
+        assertEquals(SyntaxTokenKind.Comment, tWsCont.first { it.slice(wsLineCont) == "#real comment; echo skipped" }.kind)
+
+        val evenBackslashSpace = "echo foo\\\\ #real comment; echo skipped\n"
+        val tEvenBs = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, evenBackslashSpace, "shell-comment-even-bs")
+        assertEquals(SyntaxTokenKind.Comment, tEvenBs.first { it.slice(evenBackslashSpace) == "#real comment; echo skipped" }.kind)
+
+        val afterSubstitutions = "echo \$(echo hi)#not_c; echo `echo hi`#not_c2; (echo sub)#real_c\n(( 1 ))#arith_c\n"
+        val tSubst = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, afterSubstitutions, "shell-comment-after-subst")
+        assertTrue(tSubst.none { it.slice(afterSubstitutions).startsWith("#not_c") && it.kind == SyntaxTokenKind.Comment })
+        assertEquals(SyntaxTokenKind.Comment, tSubst.first { it.slice(afterSubstitutions) == "#real_c" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, tSubst.first { it.slice(afterSubstitutions) == "#arith_c" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }
