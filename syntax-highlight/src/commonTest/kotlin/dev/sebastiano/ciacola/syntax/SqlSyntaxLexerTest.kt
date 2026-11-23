@@ -179,6 +179,64 @@ class SqlSyntaxLexerTest {
     }
 
     @Test
+    fun handlesDialectParametersBracketAliasesTempTablesAndHashOperators() {
+        val dialectParamsAndBrackets = """
+            SELECT * FROM t WHERE id = ${'$'}user_id;
+            MERGE t USING s ON 1=1 WHEN MATCHED THEN DELETE OUTPUT ${'$'}action;
+            CREATE USER [domain\bob];
+            CREATE LOGIN [app\svc] FROM WINDOWS;
+            CREATE ROLE [readers];
+            SELECT [u].[Id] FROM [dbo].[Users] [u] WHERE arr[1] = 2 AND matrix[1][2] = 3 AND ARRAY['a'][1] = 'a';
+        """.trimIndent()
+        fun assertFirstKind(
+            tokens: List<SyntaxToken>,
+            src: String,
+            expected: SyntaxTokenKind,
+            text: String,
+            predicate: (SyntaxToken) -> Boolean = { true },
+        ) {
+            val tok = tokens.firstOrNull { it.slice(src) == text && predicate(it) }
+                ?: error("Missing token '$text' in: ${tokens.filter { !it.slice(src).isBlank() }.map { "${it.kind}:${it.slice(src)}@${it.startIndex}" }}")
+            assertEquals(expected, tok.kind, "Expected '$text' to be $expected")
+        }
+
+        val t1 = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, dialectParamsAndBrackets, "sql-params-brackets")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "${'$'}user_id")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "${'$'}action")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Keyword, "USER")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Keyword, "LOGIN")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Keyword, "ROLE")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "[domain\\bob]")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "[app\\svc]")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "[readers]")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "[u]")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Property, "[Id]")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Property, "[Users]")
+        val aliasIdx = dialectParamsAndBrackets.indexOf("[Users] [u]") + "[Users] ".length
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Plain, "[u]") { it.startIndex == aliasIdx }
+        val arrIdx = dialectParamsAndBrackets.indexOf("arr[1]")
+        assertFirstKind(t1, dialectParamsAndBrackets, SyntaxTokenKind.Punctuation, "[") { it.startIndex > arrIdx }
+
+        val hashDisambiguation = """
+            #-- separator comment
+            CREATE TABLE #users (id INT);
+            SELECT * FROM ##global_users WHERE id = 1;
+            SELECT 5 # 3 AS x;
+            SELECT data
+              #> '{a,b}' FROM tbl;
+            SELECT 1; #-- inline after semicolon
+        """.trimIndent()
+        val t2 = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, hashDisambiguation, "sql-hash-disambiguation")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Comment, "#-- separator comment")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Plain, "#users")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Plain, "##global_users")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Operator, "#")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Number, "3")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Operator, "#>")
+        assertFirstKind(t2, hashDisambiguation, SyntaxTokenKind.Comment, "#-- inline after semicolon")
+    }
+
+    @Test
     fun handlesUnterminatedContainersBomAndSupplementaryUnicodeLosslessly() {
         val unterminatedDollar = "SELECT ${'$'}tag${'$'}unclosed body"
         val tokens1 = assertLosslessInvariants(SqlSyntaxLexer, unterminatedDollar, "sql-unclosed-dollar")

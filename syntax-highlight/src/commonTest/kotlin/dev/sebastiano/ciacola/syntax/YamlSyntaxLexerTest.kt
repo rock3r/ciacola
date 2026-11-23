@@ -140,6 +140,33 @@ class YamlSyntaxLexerTest {
         assertTrue(topTokens.any { it.kind == SyntaxTokenKind.String && it.slice(topLevelBlock).contains("top line 2") })
         assertEquals(SyntaxTokenKind.Keyword, topTokens.first { it.slice(topLevelBlock) == "..." }.kind)
         assertEquals(SyntaxTokenKind.Property, topTokens.first { it.slice(topLevelBlock) == "next" }.kind)
+
+        val taggedSeq = """
+            items:
+              - !!str |
+                hello: 1 # not-a-comment
+                world
+              - !tag >
+                folded: ok # still body
+              - next: 2
+        """.trimIndent()
+        val taggedTokens = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, taggedSeq, "yaml-tagged-seq-block")
+        assertTrue(
+            taggedTokens.any { it.kind == SyntaxTokenKind.String && it.slice(taggedSeq).contains("hello: 1 # not-a-comment") },
+            "Expected tagged sequence literal block body to stay String, got $taggedTokens",
+        )
+        assertTrue(
+            taggedTokens.any { it.kind == SyntaxTokenKind.String && it.slice(taggedSeq).contains("folded: ok # still body") },
+            "Expected tagged sequence folded block body to stay String, got $taggedTokens",
+        )
+        assertEquals(SyntaxTokenKind.Property, taggedTokens.first { it.slice(taggedSeq) == "next" }.kind)
+
+        val anchoredSeq = "- &anc |\n  key: value # inside block\n"
+        val anchoredTokens = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, anchoredSeq, "yaml-anchored-seq-block")
+        assertTrue(
+            anchoredTokens.any { it.kind == SyntaxTokenKind.String && it.slice(anchoredSeq) == "  key: value # inside block" },
+            "Expected anchored sequence block body to be a single String token, got $anchoredTokens",
+        )
     }
 
     @Test
@@ -168,6 +195,17 @@ class YamlSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "1" }.kind)
         assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "\"b\"" }.kind)
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "\"x\"" }.kind)
+
+        val nestedFlow = "[foo [1, 2]]"
+        val nestedTokens = assertValidSnippetHasNoInvalidTokens(YamlSyntaxLexer, nestedFlow, "yaml-flow-nested-ws")
+        assertTrue(
+            nestedTokens.any { it.slice(nestedFlow) == "foo" && it.kind == SyntaxTokenKind.String },
+            "Expected 'foo' without trailing space in '$nestedFlow', got $nestedTokens",
+        )
+        assertTrue(
+            nestedTokens.any { it.slice(nestedFlow) == " " && it.kind == SyntaxTokenKind.Whitespace },
+            "Expected Whitespace token before '[' in '$nestedFlow', got $nestedTokens",
+        )
     }
 
     @Test

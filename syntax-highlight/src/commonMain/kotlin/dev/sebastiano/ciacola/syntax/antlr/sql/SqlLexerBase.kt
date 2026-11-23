@@ -28,7 +28,7 @@ internal object SqlKeywords {
         "INNER", "INSERT", "INSTEAD", "INTERSECT", "INTO", "INVOKER", "IS", "ISOLATION",
         "JOIN",
         "KEY",
-        "LANGUAGE", "LAST", "LATERAL", "LEFT", "LEVEL", "LIKE", "LIMIT", "LOOP",
+        "LANGUAGE", "LAST", "LATERAL", "LEFT", "LEVEL", "LIKE", "LIMIT", "LOGIN", "LOOP",
         "MATCHED", "MATERIALIZED", "MERGE",
         "NATURAL", "NEW", "NEXT", "NO", "NOLOCK", "NOT", "NOTHING", "NULLIF", "NULLS",
         "OF", "OFFSET", "OLD", "ON", "ONLY", "OR", "ORDER", "ORDINALITY", "OTHERS", "OUTER",
@@ -36,14 +36,14 @@ internal object SqlKeywords {
         "PARTITION", "PERCENT", "PERFORM", "PIVOT", "PLPGSQL", "PRAGMA", "PRECEDING",
         "PREPARE", "PRIMARY", "PRINT", "PRIVILEGES", "PROCEDURE", "PUBLIC",
         "RAISE", "RANGE", "READ", "RECURSIVE", "REFERENCES", "RENAME", "REPEATABLE",
-        "REPLACE", "RESTRICT", "RETURN", "RETURNING", "REVOKE", "RIGHT", "ROLLBACK",
+        "REPLACE", "RESTRICT", "RETURN", "RETURNING", "REVOKE", "RIGHT", "ROLE", "ROLLBACK",
         "ROW", "ROWS",
-        "SAVEPOINT", "SCHEMA", "SECURITY", "SELECT", "SEQUENCE", "SERIALIZABLE", "SET",
+        "SAVEPOINT", "SCHEMA", "SECURITY", "SELECT", "SEQUENCE", "SERIALIZABLE", "SERVER", "SET",
         "SHOW", "SIMILAR", "SOME", "SQL", "STABLE", "START", "STATEMENT", "STRICT",
         "TABLE", "TEMP", "TEMPORARY", "THEN", "THROW", "TIES", "TO", "TOP", "TRANSACTION",
         "TRIGGER", "TRUNCATE", "TRY", "TUPLE", "TYPE",
         "UNBOUNDED", "UNCOMMITTED", "UNION", "UNIQUE", "UNPIVOT", "UPDATE", "UPDLOCK",
-        "USE", "USING",
+        "USE", "USER", "USING",
         "VACUUM", "VALUES", "VARYING", "VIEW", "VOLATILE",
         "WAITFOR", "WHEN", "WHERE", "WHILE", "WINDOW", "WITH", "WITHIN", "WITHOUT", "WORK",
         "WRITE",
@@ -130,32 +130,87 @@ internal object SqlKeywords {
         "VIEW",
         "WITH",
     )
+
+    /**
+     * Keywords that commonly precede a T-SQL `#temp` / `##global` table identifier across a newline.
+     */
+    val tempTableIntroducers: Set<String> = hashSetOf(
+        "FROM",
+        "INTO",
+        "JOIN",
+        "MERGE",
+        "TABLE",
+        "TRUNCATE",
+        "UPDATE",
+    )
 }
 
 /**
  * Pure Kotlin Multiplatform base lexer for [SqlLexer], providing O(N) nested block comment
  * scanning, PostgreSQL dollar-quoted string matching (`$$...$$` and `$tag$...$tag$`),
- * T-SQL `[Column Name]` vs array subscript `[1]` disambiguation, and trailing-dot float guard.
+ * T-SQL `[Column Name]` vs array subscript `[1]` disambiguation, `#` comment/temp-table/XOR
+ * disambiguation, and trailing-dot float guard.
  */
 internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
     private var allowBracketIdent: Boolean = true
+    private var inValuePosition: Boolean = false
+    private var allowTempTableAtLineStart: Boolean = false
+    private var afterTypeOrArray: Boolean = false
 
     override fun reset() {
         super.reset()
         allowBracketIdent = true
+        inValuePosition = false
+        allowTempTableAtLineStart = false
+        afterTypeOrArray = false
     }
 
-    protected fun isBracketIdentAllowed(): Boolean = allowBracketIdent
+    protected fun isInValuePosition(): Boolean = inValuePosition
 
-    protected fun setBracketIdentAllowed(allowed: Boolean) {
-        allowBracketIdent = allowed
+    protected fun onOperatorToken() {
+        allowBracketIdent = true
+        inValuePosition = false
+        allowTempTableAtLineStart = false
+        afterTypeOrArray = false
+    }
+
+    protected fun onValueToken() {
+        allowBracketIdent = false
+        inValuePosition = true
+        allowTempTableAtLineStart = false
+        afterTypeOrArray = false
     }
 
     protected fun onIdentMatched() {
         val text = _input.getText(Interval(_tokenStartCharIndex, _input.index() - 1))
         val upper = text.uppercase()
-        allowBracketIdent = upper in SqlKeywords.keywords && upper !in SqlKeywords.types
+        val isType = upper in SqlKeywords.types
+        val isConst = upper in SqlKeywords.constants
+        val isKw = upper in SqlKeywords.keywords
+        allowBracketIdent = isKw && !isType
+        inValuePosition = isConst || (!isKw && !isType)
+        allowTempTableAtLineStart = upper in SqlKeywords.tempTableIntroducers
+        afterTypeOrArray = isType
     }
+
+    protected fun isBracketIdentAllowed(): Boolean {
+        if (_input.LA(1) == ']'.code) return false
+        if (allowBracketIdent) return true
+        if (afterTypeOrArray) return false
+        if (!isPrecededByHorizontalWs() && !bracketBodyHasSpaceOrBackslash()) return false
+        return isValidBracketAliasBody()
+    }
+
+    protected fun isNotDoubleDashAfterHash(): Boolean = _input.LA(1) != '-'.code
+
+    protected fun isLineStartHashComment(): Boolean {
+        if (!isAtLineStartAfterPrefix()) return false
+        if (inValuePosition && isPgJsonOpAfterHash()) return false
+        if (allowTempTableAtLineStart && isTempTableIdentAhead()) return false
+        return true
+    }
+
+    protected fun isNonLineStartHashComment(): Boolean = !inValuePosition && !isTempTableIdentAhead()
 
     protected fun isNotRangeDotFloat(): Boolean = _input.LA(1) != '.'.code
 
@@ -201,6 +256,83 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
         }
     }
 
+    private fun isAtLineStartAfterPrefix(): Boolean {
+        val startCp = _tokenStartCharIndex
+        val currentIndex = _input.index()
+        var back = 1
+        while (startCp - back >= 0) {
+            val ch = _input.LA(-(currentIndex - startCp + back))
+            if (ch == '\n'.code || ch == '\r'.code || ch == IntStream.EOF) return true
+            if (ch == ' '.code || ch == '\t'.code || (startCp - back == 0 && ch == BOM_CODE_POINT)) {
+                back++
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun isPgJsonOpAfterHash(): Boolean {
+        val c1 = _input.LA(1)
+        if (c1 == '>'.code) return true
+        return c1 == '-'.code && _input.LA(2) != '-'.code
+    }
+
+    private fun isTempTableIdentAhead(): Boolean {
+        val first = if (_input.LA(1) == '#'.code) _input.LA(2) else _input.LA(1)
+        return first == '_'.code ||
+            first in 'A'.code..'Z'.code ||
+            first in 'a'.code..'z'.code ||
+            (first >= 0x80 && first != IntStream.EOF)
+    }
+
+    private fun isPrecededByHorizontalWs(): Boolean {
+        if (_tokenStartCharIndex == 0) return true
+        val dist = _input.index() - _tokenStartCharIndex + 1
+        val prev = _input.LA(-dist)
+        return prev == ' '.code || prev == '\t'.code || prev == '\r'.code || prev == '\n'.code || prev == BOM_CODE_POINT
+    }
+
+    private fun bracketBodyHasSpaceOrBackslash(): Boolean {
+        var offset = 1
+        while (true) {
+            val ch = _input.LA(offset)
+            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) return false
+            if (ch == ']'.code) {
+                if (_input.LA(offset + 1) == ']'.code) {
+                    offset += 2
+                    continue
+                }
+                return false
+            }
+            if (ch == ' '.code || ch == '\t'.code || ch == '\\'.code) return true
+            offset++
+        }
+    }
+
+    private fun isValidBracketAliasBody(): Boolean {
+        var offset = 1
+        var len = 0
+        var allDigits = true
+        while (true) {
+            val ch = _input.LA(offset)
+            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) return false
+            if (ch == ']'.code) {
+                if (_input.LA(offset + 1) == ']'.code) {
+                    allDigits = false
+                    len += 2
+                    offset += 2
+                    continue
+                }
+                return len > 0 && !allDigits
+            }
+            if (ch == ','.code || ch == '\''.code || ch == '['.code) return false
+            if (ch !in '0'.code..'9'.code) allDigits = false
+            len++
+            offset++
+        }
+    }
+
     private fun toCodePoints(str: String): IntArray {
         val out = IntArray(str.length)
         var count = 0
@@ -217,5 +349,9 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         return if (count == out.size) out else out.copyOf(count)
+    }
+
+    private companion object {
+        const val BOM_CODE_POINT = 0xFEFF
     }
 }

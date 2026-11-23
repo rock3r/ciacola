@@ -57,6 +57,7 @@ internal object SqlSyntaxLexer : SyntaxLexer {
 
                 SqlTokens.LINE_COMMENT,
                 SqlTokens.BLOCK_COMMENT,
+                SqlTokens.HASH_LINE_COMMENT,
                 SqlTokens.HASH_COMMENT,
                 -> SyntaxTokenKind.Comment
 
@@ -97,6 +98,7 @@ internal object SqlSyntaxLexer : SyntaxLexer {
                 SqlTokens.PG_HASH_PATH_TEXT,
                 SqlTokens.PG_HASH_PATH,
                 SqlTokens.PG_HASH_DELETE,
+                SqlTokens.HASH_XOR,
                 SqlTokens.DOUBLE_COLON,
                 SqlTokens.COLON_EQ,
                 SqlTokens.FAT_ARROW,
@@ -146,6 +148,8 @@ internal object SqlSyntaxLexer : SyntaxLexer {
                 SqlTokens.NAMED_PARAM,
                 SqlTokens.AT_VAR,
                 SqlTokens.POSITIONAL_PARAM,
+                SqlTokens.DOLLAR_PARAM,
+                SqlTokens.TEMP_TABLE_IDENT,
                 -> SyntaxTokenKind.Plain
 
                 SqlTokens.IDENT -> {
@@ -218,6 +222,7 @@ private fun isHiddenSqlToken(type: Int): Boolean =
     type == SqlTokens.WS ||
         type == SqlTokens.LINE_COMMENT ||
         type == SqlTokens.BLOCK_COMMENT ||
+        type == SqlTokens.HASH_LINE_COMMENT ||
         type == SqlTokens.HASH_COMMENT
 
 private fun isFollowedByOpenParen(rawTypes: List<Int>, fromIndex: Int): Boolean =

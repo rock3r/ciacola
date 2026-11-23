@@ -23,220 +23,236 @@ BLOCK_COMMENT
     : '/*' { consumeNestedBlockComment(); }
     ;
 
+HASH_LINE_COMMENT
+    : '#' { isLineStartHashComment() }? ~[\r\n]*
+    ;
+
 PG_HASH_PATH_TEXT
-    : '#>>' { setBracketIdentAllowed(true); }
+    : '#>>' { onOperatorToken(); }
     ;
 
 PG_HASH_PATH
-    : '#>' { setBracketIdentAllowed(true); }
+    : '#>' { onOperatorToken(); }
     ;
 
 PG_HASH_DELETE
-    : '#-' { setBracketIdentAllowed(true); }
+    : '#-' { isNotDoubleDashAfterHash() }? { onOperatorToken(); }
+    ;
+
+TEMP_TABLE_IDENT
+    : '#' '#'? ( [A-Za-z_] | UNICODE_XID_START ) ( [A-Za-z0-9_$] | UNICODE_XID_CONTINUE )* { onValueToken(); }
+    ;
+
+HASH_XOR
+    : '#' { isInValuePosition() }? { onOperatorToken(); }
     ;
 
 HASH_COMMENT
-    : '#' ( ~[>\-\r\n] ~[\r\n]* )?
+    : '#' { isNonLineStartHashComment() }? ~[\r\n]*
     ;
 
 DOLLAR_STRING
-    : '$' ( DollarTagStart DollarTagChar* )? '$' { consumeDollarString(); setBracketIdentAllowed(false); }
+    : '$' ( DollarTagStart DollarTagChar* )? '$' { consumeDollarString(); onValueToken(); }
+    ;
+
+DOLLAR_PARAM
+    : '$' DollarTagStart DollarTagChar* { onValueToken(); }
     ;
 
 PG_ESCAPE_STRING
-    : [eE] '\'' ( '\\' . | '\'\'' | ~['\\] )* '\'' { setBracketIdentAllowed(false); }
+    : [eE] '\'' ( '\\' . | '\'\'' | ~['\\] )* '\'' { onValueToken(); }
     ;
 
 UNTERMINATED_PG_ESCAPE_STRING
-    : [eE] '\'' ( '\\' . | '\'\'' | ~['\\] )* '\\'? { setBracketIdentAllowed(false); }
+    : [eE] '\'' ( '\\' . | '\'\'' | ~['\\] )* '\\'? { onValueToken(); }
     ;
 
 NATIONAL_STRING
-    : [nN] '\'' ( '\'\'' | ~['] )* '\'' { setBracketIdentAllowed(false); }
+    : [nN] '\'' ( '\'\'' | ~['] )* '\'' { onValueToken(); }
     ;
 
 UNTERMINATED_NATIONAL_STRING
-    : [nN] '\'' ( '\'\'' | ~['] )* { setBracketIdentAllowed(false); }
+    : [nN] '\'' ( '\'\'' | ~['] )* { onValueToken(); }
     ;
 
 BIT_STRING
-    : [bB] '\'' ( '\'\'' | ~['] )* '\'' { setBracketIdentAllowed(false); }
+    : [bB] '\'' ( '\'\'' | ~['] )* '\'' { onValueToken(); }
     ;
 
 UNTERMINATED_BIT_STRING
-    : [bB] '\'' ( '\'\'' | ~['] )* { setBracketIdentAllowed(false); }
+    : [bB] '\'' ( '\'\'' | ~['] )* { onValueToken(); }
     ;
 
 HEX_STRING
-    : [xX] '\'' ( '\'\'' | ~['] )* '\'' { setBracketIdentAllowed(false); }
+    : [xX] '\'' ( '\'\'' | ~['] )* '\'' { onValueToken(); }
     ;
 
 UNTERMINATED_HEX_STRING
-    : [xX] '\'' ( '\'\'' | ~['] )* { setBracketIdentAllowed(false); }
+    : [xX] '\'' ( '\'\'' | ~['] )* { onValueToken(); }
     ;
 
 STRING
-    : '\'' ( '\'\'' | ~['] )* '\'' { setBracketIdentAllowed(false); }
+    : '\'' ( '\'\'' | ~['] )* '\'' { onValueToken(); }
     ;
 
 UNTERMINATED_STRING
-    : '\'' ( '\'\'' | ~['] )* { setBracketIdentAllowed(false); }
+    : '\'' ( '\'\'' | ~['] )* { onValueToken(); }
     ;
 
 DOUBLE_QUOTED_IDENT
-    : '"' ( '""' | ~["] )* '"' { setBracketIdentAllowed(false); }
+    : '"' ( '""' | ~["] )* '"' { onValueToken(); }
     ;
 
 UNTERMINATED_DOUBLE_QUOTED_IDENT
-    : '"' ( '""' | ~["] )* { setBracketIdentAllowed(false); }
+    : '"' ( '""' | ~["] )* { onValueToken(); }
     ;
 
 BACKTICK_IDENT
-    : '`' ( '``' | ~[`] )* '`' { setBracketIdentAllowed(false); }
+    : '`' ( '``' | ~[`] )* '`' { onValueToken(); }
     ;
 
 UNTERMINATED_BACKTICK_IDENT
-    : '`' ( '``' | ~[`] )* { setBracketIdentAllowed(false); }
+    : '`' ( '``' | ~[`] )* { onValueToken(); }
     ;
 
 BRACKET_IDENT
-    : '[' { isBracketIdentAllowed() }? ( ']]' | ~[\]\r\n] )* ']' { setBracketIdentAllowed(false); }
+    : '[' { isBracketIdentAllowed() }? ( ']]' | ~[\]\r\n] )* ']' { onValueToken(); }
     ;
 
 HEX_NUMBER
-    : '0' [xX] [0-9a-fA-F] ( '_'? [0-9a-fA-F] )* { setBracketIdentAllowed(false); }
+    : '0' [xX] [0-9a-fA-F] ( '_'? [0-9a-fA-F] )* { onValueToken(); }
     ;
 
 FLOAT_NUMBER
     : ( Digits '.' Digits? Exponent?
       | '.' Digits Exponent?
       | Digits Exponent
-      ) { setBracketIdentAllowed(false); }
-    | Digits '.' { isNotRangeDotFloat() }? { setBracketIdentAllowed(false); }
+      ) { onValueToken(); }
+    | Digits '.' { isNotRangeDotFloat() }? { onValueToken(); }
     ;
 
 INT_NUMBER
-    : Digits { setBracketIdentAllowed(false); }
+    : Digits { onValueToken(); }
     ;
 
 DOUBLE_COLON
-    : '::' { setBracketIdentAllowed(true); }
+    : '::' { onOperatorToken(); }
     ;
 
 COLON_EQ
-    : ':=' { setBracketIdentAllowed(true); }
+    : ':=' { onOperatorToken(); }
     ;
 
 FAT_ARROW
-    : '=>' { setBracketIdentAllowed(true); }
+    : '=>' { onOperatorToken(); }
     ;
 
 JSON_EXTRACT_TEXT
-    : '->>' { setBracketIdentAllowed(true); }
+    : '->>' { onOperatorToken(); }
     ;
 
 JSON_EXTRACT
-    : '->' { setBracketIdentAllowed(true); }
+    : '->' { onOperatorToken(); }
     ;
 
 PG_CONTAINS
-    : '@>' { setBracketIdentAllowed(true); }
+    : '@>' { onOperatorToken(); }
     ;
 
 PG_CONTAINED_BY
-    : '<@' { setBracketIdentAllowed(true); }
+    : '<@' { onOperatorToken(); }
     ;
 
 PG_JSON_EXISTS_ALL
-    : '?&' { setBracketIdentAllowed(true); }
+    : '?&' { onOperatorToken(); }
     ;
 
 PG_JSON_EXISTS_ANY
-    : '?|' { setBracketIdentAllowed(true); }
+    : '?|' { onOperatorToken(); }
     ;
 
 CONCAT_OP
-    : '||' { setBracketIdentAllowed(true); }
+    : '||' { onOperatorToken(); }
     ;
 
 NEQ_ANGLE
-    : '<>' { setBracketIdentAllowed(true); }
+    : '<>' { onOperatorToken(); }
     ;
 
 NEQ_BANG
-    : '!=' { setBracketIdentAllowed(true); }
+    : '!=' { onOperatorToken(); }
     ;
 
 LEQ
-    : '<=' { setBracketIdentAllowed(true); }
+    : '<=' { onOperatorToken(); }
     ;
 
 GEQ
-    : '>=' { setBracketIdentAllowed(true); }
+    : '>=' { onOperatorToken(); }
     ;
 
 LSHIFT
-    : '<<' { setBracketIdentAllowed(true); }
+    : '<<' { onOperatorToken(); }
     ;
 
 RSHIFT
-    : '>>' { setBracketIdentAllowed(true); }
+    : '>>' { onOperatorToken(); }
     ;
 
 REGEX_NOT_ICASE
-    : '!~*' { setBracketIdentAllowed(true); }
+    : '!~*' { onOperatorToken(); }
     ;
 
 REGEX_NOT_CASE
-    : '!~' { setBracketIdentAllowed(true); }
+    : '!~' { onOperatorToken(); }
     ;
 
 REGEX_ICASE
-    : '~*' { setBracketIdentAllowed(true); }
+    : '~*' { onOperatorToken(); }
     ;
 
 DOTDOT
-    : '..' { setBracketIdentAllowed(true); }
+    : '..' { onOperatorToken(); }
     ;
 
 NAMED_PARAM
-    : ':' [A-Za-z_][A-Za-z0-9_]* { setBracketIdentAllowed(false); }
+    : ':' [A-Za-z_][A-Za-z0-9_]* { onValueToken(); }
     ;
 
 AT_VAR
-    : '@' '@'? [A-Za-z_][A-Za-z0-9_]* { setBracketIdentAllowed(false); }
+    : '@' '@'? [A-Za-z_][A-Za-z0-9_]* { onValueToken(); }
     ;
 
 POSITIONAL_PARAM
-    : '$' [0-9]+ { setBracketIdentAllowed(false); }
+    : '$' [0-9]+ { onValueToken(); }
     ;
 
 QUESTION_PARAM
-    : '?' { setBracketIdentAllowed(false); }
+    : '?' { onValueToken(); }
     ;
 
-PLUS    : '+' { setBracketIdentAllowed(true); } ;
-MINUS   : '-' { setBracketIdentAllowed(true); } ;
-STAR    : '*' { setBracketIdentAllowed(true); } ;
-SLASH   : '/' { setBracketIdentAllowed(true); } ;
-PERCENT : '%' { setBracketIdentAllowed(true); } ;
-EQ      : '=' { setBracketIdentAllowed(true); } ;
-LT      : '<' { setBracketIdentAllowed(true); } ;
-GT      : '>' { setBracketIdentAllowed(true); } ;
-AMP     : '&' { setBracketIdentAllowed(true); } ;
-PIPE    : '|' { setBracketIdentAllowed(true); } ;
-CARET   : '^' { setBracketIdentAllowed(true); } ;
-TILDE   : '~' { setBracketIdentAllowed(true); } ;
-BANG    : '!' { setBracketIdentAllowed(true); } ;
+PLUS    : '+' { onOperatorToken(); } ;
+MINUS   : '-' { onOperatorToken(); } ;
+STAR    : '*' { onOperatorToken(); } ;
+SLASH   : '/' { onOperatorToken(); } ;
+PERCENT : '%' { onOperatorToken(); } ;
+EQ      : '=' { onOperatorToken(); } ;
+LT      : '<' { onOperatorToken(); } ;
+GT      : '>' { onOperatorToken(); } ;
+AMP     : '&' { onOperatorToken(); } ;
+PIPE    : '|' { onOperatorToken(); } ;
+CARET   : '^' { onOperatorToken(); } ;
+TILDE   : '~' { onOperatorToken(); } ;
+BANG    : '!' { onOperatorToken(); } ;
 
-LPAREN  : '(' { setBracketIdentAllowed(true); } ;
-RPAREN  : ')' { setBracketIdentAllowed(false); } ;
-LBRACK  : '[' { setBracketIdentAllowed(true); } ;
-RBRACK  : ']' { setBracketIdentAllowed(false); } ;
-COMMA   : ',' { setBracketIdentAllowed(true); } ;
-SEMI    : ';' { setBracketIdentAllowed(true); } ;
-DOT     : '.' { setBracketIdentAllowed(true); } ;
-COLON   : ':' { setBracketIdentAllowed(true); } ;
+LPAREN  : '(' { onOperatorToken(); } ;
+RPAREN  : ')' { onValueToken(); } ;
+LBRACK  : '[' { onOperatorToken(); } ;
+RBRACK  : ']' { onValueToken(); } ;
+COMMA   : ',' { onOperatorToken(); } ;
+SEMI    : ';' { onOperatorToken(); } ;
+DOT     : '.' { onOperatorToken(); } ;
+COLON   : ':' { onOperatorToken(); } ;
 
 IDENT
     : ( [A-Za-z_] | UNICODE_XID_START ) ( [A-Za-z0-9_$] | UNICODE_XID_CONTINUE )* { onIdentMatched(); }

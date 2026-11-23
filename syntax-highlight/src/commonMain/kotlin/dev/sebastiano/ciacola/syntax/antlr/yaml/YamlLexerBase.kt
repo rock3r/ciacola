@@ -118,7 +118,7 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
                 ) {
                     break
                 }
-                if (flowDepth > 0 && isFlowClosingOrComma(afterWs)) {
+                if (flowDepth > 0 && isAnyFlowIndicator(afterWs)) {
                     break
                 }
                 if (afterWs == ':'.code && isColonEndAt(k + 1)) {
@@ -260,7 +260,50 @@ internal abstract class YamlLexerBase(input: CharStream) : Lexer(input) {
                 break
             }
         }
-        return if (col < lineLen) visualIndent else lastSeqIndent
+        return if (col < lineLen && hasMappingColonInRange(col, lineLen, ::charAtLineCol)) {
+            visualIndent
+        } else {
+            lastSeqIndent
+        }
+    }
+
+    private inline fun hasMappingColonInRange(
+        startCol: Int,
+        endCol: Int,
+        charAt: (Int) -> Int,
+    ): Boolean {
+        var c = startCol
+        var inDouble = false
+        var inSingle = false
+        while (c < endCol) {
+            val ch = charAt(c)
+            when {
+                inDouble -> {
+                    if (ch == '\\'.code) {
+                        c += 2
+                        continue
+                    }
+                    if (ch == '"'.code) inDouble = false
+                }
+                inSingle -> {
+                    if (ch == '\''.code) {
+                        if (c + 1 < endCol && charAt(c + 1) == '\''.code) {
+                            c += 2
+                            continue
+                        }
+                        inSingle = false
+                    }
+                }
+                ch == '"'.code -> inDouble = true
+                ch == '\''.code -> inSingle = true
+                ch == ':'.code -> {
+                    val next = if (c + 1 < endCol) charAt(c + 1) else -1
+                    if (next == ' '.code || next == '\t'.code) return true
+                }
+            }
+            c++
+        }
+        return false
     }
 
     private fun scanBlockScalarEndOffset(): Int {
