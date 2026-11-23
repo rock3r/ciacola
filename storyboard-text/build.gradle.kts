@@ -24,6 +24,7 @@ kotlin {
     sourceSets {
         commonMain {
             dependencies {
+                api(project(":syntax-highlight"))
                 implementation(compose.material)
                 implementation(libs.antlr.kotlin.runtime)
             }

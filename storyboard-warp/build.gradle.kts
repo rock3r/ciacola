@@ -19,6 +19,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            api(project(":syntax-highlight"))
             implementation(project(":storyboard"))
             implementation(project(":storyboard-layout"))
             implementation(project(":storyboard-text"))

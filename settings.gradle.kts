@@ -24,6 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "ciacola"
 
+include(":syntax-highlight")
 include(":storyboard")
 include(":storyboard-easel")
 include(":storyboard-layout")

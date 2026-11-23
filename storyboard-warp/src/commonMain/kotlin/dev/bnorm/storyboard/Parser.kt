@@ -1,10 +1,8 @@
 package dev.bnorm.storyboard
 
-import dev.bnorm.storyboard.text.highlight.SyntaxToken
-import dev.bnorm.storyboard.text.highlight.SyntaxTokenKind
-import dev.bnorm.storyboard.text.highlight.lexJsonSyntax
-import dev.bnorm.storyboard.text.highlight.lexKotlinSyntax
-import dev.bnorm.storyboard.text.highlight.lexXmlSyntax
+import dev.sebastiano.ciacola.syntax.SyntaxHighlighter
+import dev.sebastiano.ciacola.syntax.SyntaxLanguage
+import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 
 /**
  * A custom parser if you wanted full control on how to parse tokens.
@@ -19,21 +17,20 @@ interface Parser {
 /**
  * Parses [code] into line-indexed, syntax-scoped [Token]s for [language].
  *
- * Built-in languages (`Kotlin`, `Xml`, `Json`) use ANTLR4 DFA / state-machine lexers in common
- * code across all targets (JVM and WasmJs) with no regular-expression grammar engines.
+ * Built-in languages (`Kotlin`, `Xml`, `Json`) use ANTLR4 DFA lexers from `:syntax-highlight` in
+ * common code across all targets (JVM, JS, and WasmJs) with no regular-expression grammar engines.
  */
 fun parse(code: String, language: Language): List<Token> = when (language) {
     is Custom -> language.parser.parse(code)
-    Kotlin -> parseWithSyntaxLexer(code, language, "kotlin", ::lexKotlinSyntax)
-    Xml -> parseWithSyntaxLexer(code, language, "xml", ::lexXmlSyntax)
-    Json -> parseWithSyntaxLexer(code, language, "json", ::lexJsonSyntax)
+    Kotlin -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Kotlin)
+    Xml -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Xml)
+    Json -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Json)
 }
 
 private fun parseWithSyntaxLexer(
     code: String,
     language: Language,
-    suffix: String,
-    lex: (String) -> List<SyntaxToken>,
+    syntaxLanguage: SyntaxLanguage,
 ): List<Token> {
     if (code.isEmpty()) return emptyList()
 
@@ -43,7 +40,8 @@ private fun parseWithSyntaxLexer(
         code
     }
     val baseScope = language.scopeName()
-    val spans = lex(normalized)
+    val suffix = syntaxLanguage.id
+    val spans = SyntaxHighlighter.lex(normalized, syntaxLanguage)
 
     val out = ArrayList<Token>(spans.size * 2)
     var lineNumber = 0
@@ -123,6 +121,8 @@ private fun scopeForKind(kind: SyntaxTokenKind, baseScope: String, suffix: Strin
     SyntaxTokenKind.Annotation -> "meta.annotation.$suffix"
     SyntaxTokenKind.Attribute -> "entity.other.attribute-name.$suffix"
     SyntaxTokenKind.Tag -> "entity.name.tag.$suffix"
+    SyntaxTokenKind.Operator -> "punctuation.operator.$suffix"
+    SyntaxTokenKind.Preprocessor -> "meta.annotation.preprocessor.$suffix"
     SyntaxTokenKind.Punctuation -> "punctuation.$suffix"
     SyntaxTokenKind.Invalid -> "invalid.illegal.$suffix"
 }
