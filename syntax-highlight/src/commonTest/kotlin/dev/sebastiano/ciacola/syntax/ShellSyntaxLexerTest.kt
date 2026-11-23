@@ -248,6 +248,8 @@ class ShellSyntaxLexerTest {
                 },
                 "deep-cmdsub" to ("\$(".repeat(150) + "echo hi" + ")".repeat(150)),
                 "deep-double-paren" to ("(".repeat(1_000) + "echo a) && (echo b" + ")".repeat(1_000)),
+                "long-heredoc-expand-line" to ("cat <<\$EOF\n" + "\$a\\x ".repeat(4_000) + "\n\$EOF\necho done\n"),
+                "long-heredoc-expand-plain-line" to ("cat <<EOF\n" + "\$a\\x ".repeat(4_000) + "\nEOF\necho done\n"),
                 "unterminated-heredoc" to ("cat <<EOF\n" + "line \$x \${y:-1}\n".repeat(1_000)),
             ),
         )

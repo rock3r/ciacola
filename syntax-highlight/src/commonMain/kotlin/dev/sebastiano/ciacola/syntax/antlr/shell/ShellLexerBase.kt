@@ -40,7 +40,6 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         val delimiterCodePoints: IntArray,
         val stripTabs: Boolean,
         val isQuoted: Boolean,
-        val hasSpecialExpandChars: Boolean,
     )
 
     private class HeredocFrame(
@@ -703,14 +702,12 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         val delimiter = unquoted.toString()
-        val hasSpecialExpandChars = !isQuoted && delimiter.any { it == '$' || it == '\\' || it == '`' }
         pendingHeredocs.add(
             HeredocSpec(
                 delimiter = delimiter,
                 delimiterCodePoints = toCodePoints(delimiter),
                 stripTabs = pendingStripTabs,
                 isQuoted = isQuoted,
-                hasSpecialExpandChars = hasSpecialExpandChars,
             ),
         )
         pendingStripTabs = false
@@ -725,7 +722,12 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         if (pendingHeredocs.isNotEmpty()) {
             val nextSpec = pendingHeredocs.removeAt(0)
             heredocStack.add(HeredocFrame(spec = nextSpec))
-            pushMode(if (nextSpec.isQuoted) heredocLiteralMode else heredocExpandMode)
+            val targetMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
+                heredocLiteralMode
+            } else {
+                heredocExpandMode
+            }
+            pushMode(targetMode)
         }
     }
 
@@ -758,76 +760,8 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         frame?.atLineStart = false
     }
 
-    protected fun isHeredocExpandClosingLine(): Boolean {
-        val frame = heredocStack.lastOrNull() ?: return false
-        if (!frame.spec.hasSpecialExpandChars || !frame.atLineStart) return false
-        val after = _input.LA(1)
-        if (after != IntStream.EOF && after != '\r'.code && after != '\n'.code) return false
-        val spec = frame.spec
-        val segment = text
-        val startOffset = if (spec.stripTabs) {
-            var i = 0
-            while (i < segment.length && segment[i] == '\t') i++
-            i
-        } else {
-            0
-        }
-        val delim = spec.delimiter
-        return segment.length - startOffset == delim.length &&
-            segment.regionMatches(startOffset, delim, 0, delim.length)
-    }
-
-    protected fun finishHeredocExpandClosingLine(
-        delimEndTokenType: Int,
-        heredocLiteralMode: Int,
-        heredocExpandMode: Int,
-    ) {
-        val frame = heredocStack.lastOrNull() ?: return
-        type = delimEndTokenType
-        if (_input.LA(1) == IntStream.EOF) {
-            advanceOrExitHeredoc(heredocLiteralMode, heredocExpandMode)
-        } else {
-            frame.closedPendingNewline = true
-        }
-    }
-
     protected fun markHeredocLineBody() {
         heredocStack.lastOrNull()?.atLineStart = false
-    }
-
-    protected fun checkHeredocExpandSegment(
-        delimEndTokenType: Int,
-        heredocLiteralMode: Int,
-        heredocExpandMode: Int,
-    ) {
-        val frame = heredocStack.lastOrNull() ?: return
-        if (!frame.atLineStart) return
-        val after = _input.LA(1)
-        if (after != IntStream.EOF && after != '\r'.code && after != '\n'.code) {
-            frame.atLineStart = false
-            return
-        }
-        val segment = text
-        val startOffset = if (frame.spec.stripTabs) {
-            var i = 0
-            while (i < segment.length && segment[i] == '\t') i++
-            i
-        } else {
-            0
-        }
-        val delim = frame.spec.delimiter
-        if (segment.length - startOffset == delim.length &&
-            segment.regionMatches(startOffset, delim, 0, delim.length)
-        ) {
-            type = delimEndTokenType
-            if (after == IntStream.EOF) {
-                advanceOrExitHeredoc(heredocLiteralMode, heredocExpandMode)
-            } else {
-                frame.closedPendingNewline = true
-            }
-        } else {
-            frame.atLineStart = false
-        }
     }
 
     protected fun onHeredocNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {
@@ -838,7 +772,28 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
             advanceOrExitHeredoc(heredocLiteralMode, heredocExpandMode)
         } else {
             frame.atLineStart = true
+            if (!frame.spec.isQuoted && isClosingDelimiterAhead(frame.spec) && _mode != heredocLiteralMode) {
+                // Switch to literal mode for the closing delimiter line so delimiters with `$`/`\\`/`` ` `` match in O(1).
+                mode(heredocLiteralMode)
+            }
         }
+    }
+
+    private fun isClosingDelimiterAhead(spec: HeredocSpec): Boolean {
+        var offset = 1
+        if (spec.stripTabs) {
+            while (_input.LA(offset) == '\t'.code) {
+                offset++
+            }
+        }
+        val delimCps = spec.delimiterCodePoints
+        for (cpIdx in delimCps.indices) {
+            if (_input.LA(offset + cpIdx) != delimCps[cpIdx]) {
+                return false
+            }
+        }
+        val after = _input.LA(offset + delimCps.size)
+        return after == IntStream.EOF || after == '\r'.code || after == '\n'.code
     }
 
     private fun countLeadingTabsFromTokenStart(): Int {
@@ -868,7 +823,11 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         if (pendingHeredocs.isNotEmpty()) {
             val nextSpec = pendingHeredocs.removeAt(0)
             heredocStack.add(HeredocFrame(spec = nextSpec))
-            val nextMode = if (nextSpec.isQuoted) heredocLiteralMode else heredocExpandMode
+            val nextMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
+                heredocLiteralMode
+            } else {
+                heredocExpandMode
+            }
             if (_mode != nextMode) {
                 mode(nextMode)
             }

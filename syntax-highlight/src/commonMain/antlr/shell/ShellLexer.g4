@@ -342,11 +342,6 @@ HE_NEWLINE
     : ( '\r'? '\n' | '\r' ) { onHeredocNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
     ;
 
-HE_DELIM_CLOSE
-    : ~[\r\n]+ { isHeredocExpandClosingLine() }?
-      { finishHeredocExpandClosingLine(Tokens.HEREDOC_DELIM_END, Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
-    ;
-
 HE_LINE_CONT
     : '\\' ( '\r'? '\n' | '\r' ) { markHeredocLineBody(); }
     ;
@@ -388,5 +383,5 @@ HE_DOLLAR
     ;
 
 HE_TEXT
-    : ~[\r\n$\\`]+ { checkHeredocExpandSegment(Tokens.HEREDOC_DELIM_END, Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
+    : ~[\r\n$\\`]+ { markHeredocLineBody(); }
     ;
