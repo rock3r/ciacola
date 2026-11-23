@@ -150,15 +150,28 @@ internal object SqlKeywords {
      * (e.g. `'C:\Backup\' FROM t`) from MySQL backslash-escaped quotes (e.g. `'users\' name'`).
      */
     val postStringKeywords: Set<String> = hashSetOf(
-        "ALTER", "AND", "AS", "ASC", "BEGIN", "BETWEEN", "BY", "CASE", "CHECK", "COLLATE",
-        "COMMIT", "CONFLICT", "CREATE", "CROSS", "DEFAULT", "DELETE", "DESC", "DO", "DROP",
-        "ELSE", "ELSEIF", "ELSIF", "END", "ESCAPE", "EXCEPT", "FALSE", "FETCH", "FILTER",
-        "FIRST", "FOR", "FROM", "FULL", "GROUP", "GROUPS", "HAVING", "ILIKE", "IN", "INNER",
-        "INSERT", "INTERSECT", "INTO", "IS", "JOIN", "LAST", "LEFT", "LIKE", "LIMIT", "LOOP",
-        "NATURAL", "NEXT", "NOT", "NULL", "NULLS", "OFFSET", "ON", "ONLY", "OR", "ORDER",
-        "OUTER", "OVER", "PARTITION", "RANGE", "RETURNING", "RIGHT", "ROLLBACK", "ROW", "ROWS",
-        "SELECT", "SET", "SIMILAR", "THEN", "TO", "TRUE", "UNION", "UPDATE", "USING", "VALUES",
-        "WHEN", "WHERE", "WINDOW", "WITH", "XOR",
+        "ALTER", "AND", "AS", "ASC", "AT", "BEGIN", "BETWEEN", "BY", "CASE", "CHECK", "COLLATE",
+        "COMMIT", "CONFLICT", "CREATE", "CROSS", "DECLARE", "DEFAULT", "DELETE", "DESC", "DO",
+        "DROP", "ELSE", "ELSEIF", "ELSIF", "END", "ESCAPE", "EXCEPT", "EXEC", "FALSE", "FETCH",
+        "FILTER", "FIRST", "FOR", "FROM", "FULL", "GROUP", "GROUPS", "HAVING", "IF", "ILIKE",
+        "IN", "INNER", "INSERT", "INTERSECT", "INTO", "IS", "JOIN", "LAST", "LEFT", "LIKE",
+        "LIMIT", "LOOP", "MINUS", "NATURAL", "NEXT", "NOT", "NULL", "NULLS", "OFFSET", "ON",
+        "ONLY", "OR", "ORDER", "OUTER", "OVER", "PARTITION", "PRINT", "RANGE", "RETURN",
+        "RETURNING", "RIGHT", "ROLLBACK", "ROW", "ROWS", "SELECT", "SET", "SIMILAR", "THEN",
+        "TO", "TRUE", "UNION", "UPDATE", "USING", "VALUES", "WHEN", "WHERE", "WINDOW", "WITH",
+        "XOR",
+    )
+
+    /**
+     * Structural SQL clause keywords that can follow an implicit column alias (e.g.
+     * `SELECT 'C:\' dir FROM t`). Combined with next-quote context checking so MySQL prose
+     * containing escaped quotes followed by English words (`'players\' scores from last season'`)
+     * stays inside the string literal.
+     */
+    val postAliasClauseKeywords: Set<String> = hashSetOf(
+        "CROSS", "EXCEPT", "FETCH", "FOR", "FROM", "FULL", "GROUP", "HAVING", "INNER",
+        "INTERSECT", "INTO", "JOIN", "LEFT", "LIMIT", "MINUS", "NATURAL", "OFFSET", "ORDER",
+        "OUTER", "RETURNING", "RIGHT", "UNION", "WHERE", "WINDOW",
     )
 }
 
@@ -324,7 +337,7 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
                 }
                 if (next == quote) {
                     if (_input.LA(3) == quote) {
-                        if (sawBackslashQuoteEscape || isSqlStringBoundaryAfterQuote(4)) {
+                        if (sawBackslashQuoteEscape || isSqlStringBoundaryAfterQuote(quote, 4)) {
                             // MySQL escaped quote right before the closing quote: 'foo\'';
                             sawBackslashQuoteEscape = true
                             _input.consume()
@@ -335,7 +348,7 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
                         }
                         continue
                     }
-                    if (!sawBackslashQuoteEscape && isSqlStringBoundaryAfterQuote(3)) {
+                    if (!sawBackslashQuoteEscape && isSqlStringBoundaryAfterQuote(quote, 3)) {
                         // Standard SQL string ending with a literal backslash: '\', 'C:\';
                         _input.consume()
                         _input.consume()
@@ -355,7 +368,7 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
         }
     }
 
-    private fun isSqlStringBoundaryAfterQuote(startOffset: Int): Boolean {
+    private fun isSqlStringBoundaryAfterQuote(quote: Int, startOffset: Int): Boolean {
         val c = _input.LA(startOffset)
         if (isSqlImmediateDelimiterOrOperator(startOffset, c)) return true
         if (c != ' '.code && c != '\t'.code) return false
@@ -381,10 +394,308 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
             if (next == ' '.code || next == '\t'.code) return true
         }
 
-        if (afterWs !in 'A'.code..'Z'.code && afterWs !in 'a'.code..'z'.code) return false
-        val sb = StringBuilder(16)
+        if (!isSqlIdentStart(afterWs)) return false
+        val firstWord = readSqlUpperWord(offset, maxLen = 16)
+        if (firstWord != null && firstWord in SqlKeywords.postStringKeywords) {
+            return isFollowedByNewStringOrNoQuoteOnLine(quote, offset)
+        }
+
+        // Check for an implicit column alias after a trailing-backslash string, e.g.
+        // `SELECT 'C:\' path; SELECT 1;` or `SELECT 'C:\' dir FROM t;`.
+        var aliasEnd = offset + 1
+        val aliasLimit = offset + 64
+        while (aliasEnd < aliasLimit && isSqlIdentContinue(_input.LA(aliasEnd))) {
+            aliasEnd++
+        }
+        if (isSqlIdentContinue(_input.LA(aliasEnd))) return false
+
+        var afterAlias = aliasEnd
+        var sawWsAfterAlias = false
+        while (true) {
+            val ch = _input.LA(afterAlias)
+            if (ch == ' '.code || ch == '\t'.code) {
+                sawWsAfterAlias = true
+                afterAlias++
+            } else {
+                break
+            }
+        }
+        val nextAfterAlias = _input.LA(afterAlias)
+        if (nextAfterAlias == IntStream.EOF ||
+            nextAfterAlias == ','.code || nextAfterAlias == ')'.code ||
+            nextAfterAlias == ';'.code || nextAfterAlias == ']'.code ||
+            (nextAfterAlias == '-'.code && _input.LA(afterAlias + 1) == '-'.code) ||
+            (nextAfterAlias == '/'.code && _input.LA(afterAlias + 1) == '*'.code)
+        ) {
+            return isFollowedByNewStringOrNoQuoteOnLine(quote, afterAlias)
+        }
+        if (nextAfterAlias == '\r'.code || nextAfterAlias == '\n'.code) {
+            var nextLineOff = afterAlias + 1
+            if (nextAfterAlias == '\r'.code && _input.LA(nextLineOff) == '\n'.code) {
+                nextLineOff++
+            }
+            while (true) {
+                val ch = _input.LA(nextLineOff)
+                if (ch == ' '.code || ch == '\t'.code) {
+                    nextLineOff++
+                } else {
+                    break
+                }
+            }
+            val nextLineFirst = _input.LA(nextLineOff)
+            if (nextLineFirst == IntStream.EOF) return true
+            if (nextLineFirst == ','.code || nextLineFirst == ')'.code || nextLineFirst == ';'.code) {
+                return isFollowedByNewStringOrNoQuoteOnLine(quote, nextLineOff)
+            }
+            val nextLineWord = readSqlUpperWord(nextLineOff, maxLen = 16)
+            if (nextLineWord != null && nextLineWord in SqlKeywords.postAliasClauseKeywords) {
+                return isFollowedByNewStringOrNoQuoteOnLine(quote, nextLineOff)
+            }
+            return false
+        }
+        if (sawWsAfterAlias) {
+            val clauseWord = readSqlUpperWord(afterAlias, maxLen = 16)
+            if (clauseWord != null && clauseWord in SqlKeywords.postAliasClauseKeywords) {
+                return isFollowedByNewStringOrNoQuoteOnLine(quote, afterAlias)
+            }
+        }
+        return false
+    }
+
+    /**
+     * Scans forward from [fromOffset] up to [MAX_QUOTE_SCAN_STEPS] characters to the first
+     * code-level [quote] on the current line (stopping at `--`, multiline block comments or
+     * dollar-quoted strings, CR/LF, or EOF, and skipping same-line closed block comments,
+     * `[...]`, `` `...` ``, `$tag$...$tag$`, and opposite-quote `"..."`/`'...'` spans).
+     *
+     * Stateless and bounded by a constant step budget per call, guaranteeing strictly O(N) total
+     * runtime across all inputs with zero cross-call caching side effects.
+     */
+    private fun isFollowedByNewStringOrNoQuoteOnLine(quote: Int, fromOffset: Int): Boolean {
+        val qOffset = findFirstCodeQuoteOffsetOnLine(quote, fromOffset)
+        if (qOffset < 0) return true
+        if (qOffset <= 1) return false
+        val next = _input.LA(qOffset + 1)
+        if (next == IntStream.EOF) return false
+
+        val prev = _input.LA(qOffset - 1)
+        if (isSqlStringOpenerPredecessor(prev)) return true
+        if (quote == '\''.code && qOffset >= 3 && isSqlStringOpenerPredecessor(_input.LA(qOffset - 2))) {
+            return isSqlStringPrefixOpener(prev, next)
+        }
+        return false
+    }
+
+    private fun findFirstCodeQuoteOffsetOnLine(quote: Int, fromOffset: Int): Int {
+        var off = fromOffset
+        val maxOff = fromOffset + MAX_QUOTE_SCAN_STEPS
+        while (off < maxOff) {
+            val ch = _input.LA(off)
+            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) return -1
+            if (ch == quote) return off
+
+            if (ch == '-'.code && _input.LA(off + 1) == '-'.code) {
+                return -1
+            }
+            if (ch == '/'.code && _input.LA(off + 1) == '*'.code) {
+                var depth = 1
+                var scan = off + 2
+                while (depth > 0) {
+                    if (scan >= maxOff) return -1
+                    val c1 = _input.LA(scan)
+                    if (c1 == IntStream.EOF || c1 == '\r'.code || c1 == '\n'.code) {
+                        // Multiline block comment runs past EOL; rest of line is comment, not code.
+                        return -1
+                    }
+                    val c2 = _input.LA(scan + 1)
+                    if (c1 == '/'.code && c2 == '*'.code) {
+                        depth++
+                        scan += 2
+                    } else if (c1 == '*'.code && c2 == '/'.code) {
+                        depth--
+                        scan += 2
+                    } else {
+                        scan++
+                    }
+                }
+                off = scan
+                continue
+            }
+            if (ch == '['.code) {
+                val res = skipLineContainer(
+                    startOff = off + 1,
+                    maxOff = maxOff,
+                    closeCh = ']'.code,
+                    allowDoubledClose = true,
+                    allowBackslashEscape = false,
+                    targetQuote = quote,
+                )
+                if (res < 0) return if (res == UNCLOSED_NO_QUOTE) -1 else -res
+                off = res
+                continue
+            }
+            if (ch == '`'.code) {
+                val res = skipLineContainer(
+                    startOff = off + 1,
+                    maxOff = maxOff,
+                    closeCh = '`'.code,
+                    allowDoubledClose = true,
+                    allowBackslashEscape = false,
+                    targetQuote = quote,
+                )
+                if (res < 0) return if (res == UNCLOSED_NO_QUOTE) -1 else -res
+                off = res
+                continue
+            }
+            if (ch == '"'.code && quote != '"'.code) {
+                val res = skipLineContainer(
+                    startOff = off + 1,
+                    maxOff = maxOff,
+                    closeCh = '"'.code,
+                    allowDoubledClose = true,
+                    allowBackslashEscape = true,
+                    targetQuote = quote,
+                )
+                if (res < 0) return if (res == UNCLOSED_NO_QUOTE) -1 else -res
+                off = res
+                continue
+            }
+            if (ch == '\''.code && quote != '\''.code) {
+                val res = skipLineContainer(
+                    startOff = off + 1,
+                    maxOff = maxOff,
+                    closeCh = '\''.code,
+                    allowDoubledClose = true,
+                    allowBackslashEscape = true,
+                    targetQuote = quote,
+                )
+                if (res < 0) return if (res == UNCLOSED_NO_QUOTE) -1 else -res
+                off = res
+                continue
+            }
+            if (ch == '$'.code) {
+                val tagLen = matchDollarTagLengthAt(off)
+                if (tagLen > 0) {
+                    var scan = off + tagLen
+                    var closed = false
+                    while (scan < maxOff) {
+                        val c1 = _input.LA(scan)
+                        if (c1 == IntStream.EOF || c1 == '\r'.code || c1 == '\n'.code) {
+                            // Multiline dollar-quoted string runs past EOL; rest of line is string body.
+                            return -1
+                        }
+                        if (c1 == '$'.code && matchesDollarTagAt(off, tagLen, scan)) {
+                            off = scan + tagLen
+                            closed = true
+                            break
+                        }
+                        scan++
+                    }
+                    if (!closed) return -1
+                    continue
+                }
+            }
+            off++
+        }
+        return -1
+    }
+
+    private fun matchDollarTagLengthAt(startOff: Int): Int {
+        if (_input.LA(startOff) != '$'.code) return 0
+        val second = _input.LA(startOff + 1)
+        if (second == '$'.code) return 2
+        if (!isSqlIdentStart(second)) return 0
+        var len = 2
+        while (len < 32) {
+            val ch = _input.LA(startOff + len)
+            if (ch == '$'.code) return len + 1
+            if (isSqlIdentStart(ch) || ch in '0'.code..'9'.code) {
+                len++
+            } else {
+                return 0
+            }
+        }
+        return 0
+    }
+
+    private fun matchesDollarTagAt(tagStartOff: Int, tagLen: Int, candidateOff: Int): Boolean {
+        for (i in 0 until tagLen) {
+            if (_input.LA(candidateOff + i) != _input.LA(tagStartOff + i)) return false
+        }
+        return true
+    }
+
+    /**
+     * Scans a same-line delimited span (`[...]`, `` `...` ``, `"..."`, or `'...'`) within [maxOff].
+     * Returns a positive offset right after the closing delimiter when closed, `-firstQuoteOffset`
+     * if unclosed before EOL/[maxOff] and [targetQuote] appeared inside, or [UNCLOSED_NO_QUOTE]
+     * if unclosed with no [targetQuote] inside.
+     */
+    private fun skipLineContainer(
+        startOff: Int,
+        maxOff: Int,
+        closeCh: Int,
+        allowDoubledClose: Boolean,
+        allowBackslashEscape: Boolean,
+        targetQuote: Int,
+    ): Int {
+        var scan = startOff
+        var firstQuote = -1
+        while (scan < maxOff) {
+            val c = _input.LA(scan)
+            if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) {
+                return if (firstQuote >= 0) -firstQuote else UNCLOSED_NO_QUOTE
+            }
+            if (allowBackslashEscape && c == '\\'.code) {
+                val next = _input.LA(scan + 1)
+                if (next == IntStream.EOF || next == '\r'.code || next == '\n'.code) {
+                    return if (firstQuote >= 0) -firstQuote else UNCLOSED_NO_QUOTE
+                }
+                if (next == targetQuote && firstQuote < 0) firstQuote = scan + 1
+                scan += 2
+                continue
+            }
+            if (c == closeCh) {
+                if (allowDoubledClose && _input.LA(scan + 1) == closeCh) {
+                    scan += 2
+                    continue
+                }
+                return scan + 1
+            }
+            if (c == targetQuote && firstQuote < 0) firstQuote = scan
+            scan++
+        }
+        return if (firstQuote >= 0) -firstQuote else UNCLOSED_NO_QUOTE
+    }
+
+    private fun isSqlStringOpenerPredecessor(ch: Int): Boolean =
+        ch == ' '.code || ch == '\t'.code ||
+            ch == '('.code || ch == ','.code || ch == ';'.code || ch == '['.code || ch == '{'.code ||
+            ch == '='.code || ch == '+'.code || ch == '-'.code || ch == '*'.code ||
+            ch == '/'.code || ch == '%'.code || ch == '<'.code || ch == '>'.code ||
+            ch == '|'.code || ch == '&'.code || ch == '~'.code || ch == '@'.code
+
+    private fun isSqlStringPrefixOpener(prefix: Int, afterQuote: Int): Boolean = when (prefix) {
+        'b'.code, 'B'.code -> afterQuote == '0'.code || afterQuote == '1'.code || afterQuote == '\''.code
+        'x'.code, 'X'.code -> afterQuote in '0'.code..'9'.code ||
+            afterQuote in 'a'.code..'f'.code ||
+            afterQuote in 'A'.code..'F'.code ||
+            afterQuote == '\''.code
+        'e'.code, 'E'.code, 'n'.code, 'N'.code, 'q'.code, 'Q'.code ->
+            afterQuote != IntStream.EOF &&
+                afterQuote != '\r'.code && afterQuote != '\n'.code &&
+                afterQuote != ','.code && afterQuote != ')'.code &&
+                afterQuote != ';'.code && afterQuote != ']'.code &&
+                afterQuote != ' '.code && afterQuote != '\t'.code
+        else -> false
+    }
+
+    private fun readSqlUpperWord(offset: Int, maxLen: Int): String? {
+        val first = _input.LA(offset)
+        if (first !in 'A'.code..'Z'.code && first !in 'a'.code..'z'.code) return null
+        val sb = StringBuilder(maxLen)
         var k = 0
-        while (k < 16) {
+        while (k < maxLen) {
             val ch = _input.LA(offset + k)
             if (ch in 'A'.code..'Z'.code || ch in 'a'.code..'z'.code || ch == '_'.code) {
                 sb.append(ch.toChar().uppercaseChar())
@@ -394,17 +705,15 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         val trailing = _input.LA(offset + k)
-        if (trailing in 'A'.code..'Z'.code ||
-            trailing in 'a'.code..'z'.code ||
-            trailing in '0'.code..'9'.code ||
-            trailing == '_'.code ||
-            trailing == '$'.code ||
-            trailing >= 0x80
-        ) {
-            return false
-        }
-        return sb.toString() in SqlKeywords.postStringKeywords
+        if (isSqlIdentContinue(trailing)) return null
+        return sb.toString()
     }
+
+    private fun isSqlIdentStart(ch: Int): Boolean =
+        ch in 'A'.code..'Z'.code || ch in 'a'.code..'z'.code || ch == '_'.code || ch >= 0x80
+
+    private fun isSqlIdentContinue(ch: Int): Boolean =
+        isSqlIdentStart(ch) || ch in '0'.code..'9'.code || ch == '$'.code
 
     private fun isSqlImmediateDelimiterOrOperator(offset: Int, c: Int): Boolean {
         if (c == IntStream.EOF ||
@@ -524,5 +833,7 @@ internal abstract class SqlLexerBase(input: CharStream) : Lexer(input) {
 
     private companion object {
         const val BOM_CODE_POINT = 0xFEFF
+        const val MAX_QUOTE_SCAN_STEPS = 256
+        const val UNCLOSED_NO_QUOTE = Int.MIN_VALUE
     }
 }

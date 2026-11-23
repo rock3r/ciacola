@@ -250,6 +250,10 @@ class SqlSyntaxLexerTest {
             SELECT 'say \'yes\', ok' AS msg, 2;
             SELECT '<a href=\'/x\'>' AS html, 3;
             SELECT 'it\'s\'' AS quoted, 4;
+            SELECT 'users\' names and roles' AS prose1, 5;
+            SELECT 'users\' names, roles' AS prose2, 6;
+            INSERT INTO t VALUES ('the girls\' team), (x)');
+            SELECT 'the teachers\' notes for today', 'players\' scores from last season.', 'the boys\' door left open.', 'users\' names where possible!', 'users\' and roles', 'Customers\' return policy?', 'kids\' at play.', 'users\' note:', 'customers\' orders from plan B', 'users\' notes for vitamin E', 'owners\' manual for Model X';
         """.trimIndent()
         val escapedTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, escapedStatements, "sql-mysql-escapes")
         val nonWsEscaped = escapedTokens
@@ -327,8 +331,89 @@ class SqlSyntaxLexerTest {
                 SyntaxTokenKind.Punctuation to ",",
                 SyntaxTokenKind.Number to "4",
                 SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'users\\' names and roles'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "prose1",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "5",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'users\\' names, roles'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "prose2",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "6",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "INSERT",
+                SyntaxTokenKind.Keyword to "INTO",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Keyword to "VALUES",
+                SyntaxTokenKind.Punctuation to "(",
+                SyntaxTokenKind.String to "'the girls\\' team), (x)'",
+                SyntaxTokenKind.Punctuation to ")",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'the teachers\\' notes for today'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'players\\' scores from last season.'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'the boys\\' door left open.'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'users\\' names where possible!'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'users\\' and roles'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'Customers\\' return policy?'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'kids\\' at play.'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'users\\' note:'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'customers\\' orders from plan B'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'users\\' notes for vitamin E'",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'owners\\' manual for Model X'",
+                SyntaxTokenKind.Punctuation to ";",
             ),
             nonWsEscaped,
+        )
+
+        val multiLineProseAndAlias = "SELECT 'users\\' data\nmore text' AS ml1, 'users\\' data\nfrom yesterday' AS ml2;\nSELECT 'C:\\' path\nFROM t;\nSELECT 'C:\\' AS dir, \$\$it's\nmore\$\$;\nSELECT 'C:\\' AS p /* the user's\n dir */;\n"
+        val mlProseTokens = assertValidSnippetHasNoInvalidTokens(SqlSyntaxLexer, multiLineProseAndAlias, "sql-ml-prose-alias")
+        assertEquals(
+            listOf(
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'users\\' data\nmore text'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "ml1",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'users\\' data\nfrom yesterday'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "ml2",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Plain to "path",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "dir",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "\$\$it's\nmore\$\$",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "p",
+                SyntaxTokenKind.Comment to "/* the user's\n dir */",
+                SyntaxTokenKind.Punctuation to ";",
+            ),
+            mlProseTokens.filter { it.kind != SyntaxTokenKind.Whitespace }.map { it.kind to it.slice(multiLineProseAndAlias) },
         )
 
         val multiLineMysqlEscape = "SELECT 'run \\'echo\\'\\nnext' AS s, 5;\nSELECT 'run \\'echo\\'\nnext' AS s2, 6;"
@@ -360,6 +445,20 @@ class SqlSyntaxLexerTest {
             SET @path = 'C:\Backup\'+@db+'.bak';
             SET @npath = N'C:\'+@x;
             SELECT * FROM t ORDER BY '\' DESC;
+            SELECT 'C:\' path; SELECT 1;
+            SELECT 'C:\' dir FROM t WHERE x = 'y';
+            SELECT 'C:\' p1, 'D:\' p2;
+            SELECT 'C:\' AS dir, ';' AS sep, SPLIT_PART(x, ',', 1);
+            SELECT 'C:\Backup\' AS backup_dir -- the user's folder
+            SELECT 'C:\' AS [user's dir];
+            SELECT 'C:\' AS p; -- don't
+            SELECT 'C:\' AS p1 /* user's dir */, 'a--b' AS s, 'C:\' AS p2 -- don't
+            SELECT 'C:\' AS dir, STRING_AGG(name, ', ') AS names FROM t;
+            SELECT 'C:\' AS "user's dir";
+            SELECT 'C:\' AS a, 'x' AS "it's", 'D:\' AS c -- don't
+            SELECT 'C:\' AS a, 'it\'s' AS b, 'D:\' AS c -- don't
+            SELECT 'C:\' AS dir, ${'$'}${'$'}it's ok${'$'}${'$'};
+            SELECT "C:\" AS p, 'a"b';
             SELECT "col\", "other" FROM t;
         """.trimIndent()
         val trailingBsTokens = assertValidSnippetHasNoInvalidTokens(
@@ -429,6 +528,139 @@ class SqlSyntaxLexerTest {
                 SyntaxTokenKind.Keyword to "BY",
                 SyntaxTokenKind.String to "'\\'",
                 SyntaxTokenKind.Keyword to "DESC",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Plain to "path",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Plain to "dir",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Keyword to "WHERE",
+                SyntaxTokenKind.Plain to "x",
+                SyntaxTokenKind.Operator to "=",
+                SyntaxTokenKind.String to "'y'",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Plain to "p1",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'D:\\'",
+                SyntaxTokenKind.Plain to "p2",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "dir",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "';'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "sep",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Function to "SPLIT_PART",
+                SyntaxTokenKind.Punctuation to "(",
+                SyntaxTokenKind.Plain to "x",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "','",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Number to "1",
+                SyntaxTokenKind.Punctuation to ")",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\Backup\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "backup_dir",
+                SyntaxTokenKind.Comment to "-- the user's folder",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "[user's dir]",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "p",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Comment to "-- don't",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "p1",
+                SyntaxTokenKind.Comment to "/* user's dir */",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'a--b'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "s",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "p2",
+                SyntaxTokenKind.Comment to "-- don't",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "dir",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.Function to "STRING_AGG",
+                SyntaxTokenKind.Punctuation to "(",
+                SyntaxTokenKind.Plain to "name",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "', '",
+                SyntaxTokenKind.Punctuation to ")",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "names",
+                SyntaxTokenKind.Keyword to "FROM",
+                SyntaxTokenKind.Plain to "t",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.String to "\"user's dir\"",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "a",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'x'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.String to "\"it's\"",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'D:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "c",
+                SyntaxTokenKind.Comment to "-- don't",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "a",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'it\\'s'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "b",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'D:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "c",
+                SyntaxTokenKind.Comment to "-- don't",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "'C:\\'",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "dir",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "${'$'}${'$'}it's ok${'$'}${'$'}",
+                SyntaxTokenKind.Punctuation to ";",
+                SyntaxTokenKind.Keyword to "SELECT",
+                SyntaxTokenKind.String to "\"C:\\\"",
+                SyntaxTokenKind.Keyword to "AS",
+                SyntaxTokenKind.Plain to "p",
+                SyntaxTokenKind.Punctuation to ",",
+                SyntaxTokenKind.String to "'a\"b'",
                 SyntaxTokenKind.Punctuation to ";",
                 SyntaxTokenKind.Keyword to "SELECT",
                 SyntaxTokenKind.String to "\"col\\\"",
@@ -543,6 +775,10 @@ class SqlSyntaxLexerTest {
         val manyRanges = "SELECT " + "1..2,".repeat(8_000) + "3;"
         val manyBackslashQuotes = "SELECT '" + "\\'   ".repeat(8_000) + "';"
         val wideSpaceAfterBackslashQuote = "SELECT '\\'" + " ".repeat(16_000) + "x';"
+        val manyImplicitAliasesSameLine = "SELECT " + (1..2_000).joinToString(", ") { "'C:\\' p$it" } + ";"
+        val unclosedContainersInProse = "SELECT " + "'a\\' and [x', ".repeat(2_000) + "1;"
+        val closedBracketsInDoubleQuoteEscape = "SELECT '" + "\\'' AND [".repeat(4_000) + "x] y';"
+        val nestedBlockCommentsInDoubleQuoteEscape = "SELECT '" + "\\'' AND /*".repeat(2_000) + " */".repeat(2_000) + " y';"
 
         assertLinearPerformance(
             lexer = SqlSyntaxLexer,
@@ -555,6 +791,10 @@ class SqlSyntaxLexerTest {
                 "many-ranges" to manyRanges,
                 "many-backslash-quotes" to manyBackslashQuotes,
                 "wide-space-after-backslash-quote" to wideSpaceAfterBackslashQuote,
+                "many-implicit-aliases-same-line" to manyImplicitAliasesSameLine,
+                "unclosed-containers-in-prose" to unclosedContainersInProse,
+                "closed-brackets-in-double-quote-escape" to closedBracketsInDoubleQuoteEscape,
+                "nested-block-comments-in-double-quote-escape" to nestedBlockCommentsInDoubleQuoteEscape,
             ),
         )
     }
