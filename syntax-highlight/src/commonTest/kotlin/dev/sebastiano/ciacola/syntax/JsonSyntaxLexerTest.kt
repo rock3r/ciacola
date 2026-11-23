@@ -89,4 +89,32 @@ class JsonSyntaxLexerTest {
             ),
         )
     }
+
+    @Test
+    fun handlesFullEscapesSurrogatesSignedZerosTrailingCommasAndInvalidForms() {
+        val code = """
+            {
+              "escapes": "\"\\\/\b\f\n\r\t\u00E9\uD83D\uDE00",
+              "negZero": -0,
+              "floatZero": 0.0,
+              "exp": 1e+10,
+              "negExp": -3.14E-2,
+              "deep": { "a": [ { "b": true }, ], },
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(JsonSyntaxLexer, code, "json-backfill")
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "\"escapes\"" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).contains("\\uD83D\\uDE00") }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "-0" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0.0" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "1e+10" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "-3.14E-2" }.kind)
+
+        val bad = "{ unquoted: 'single', bad: NaN }"
+        val badTokens = assertLosslessInvariants(JsonSyntaxLexer, bad, "json-bad")
+        assertTrue(badTokens.any { it.slice(bad) == "unquoted" && it.kind == SyntaxTokenKind.Invalid })
+        assertTrue(badTokens.any { it.slice(bad) == "'" && it.kind == SyntaxTokenKind.Invalid })
+        assertTrue(badTokens.any { it.slice(bad) == "NaN" && it.kind == SyntaxTokenKind.Invalid })
+    }
 }

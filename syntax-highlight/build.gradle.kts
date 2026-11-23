@@ -76,6 +76,9 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
 registerAntlrLexer("kotlin")
 registerAntlrLexer("xml")
 registerAntlrLexer("json")
+registerAntlrLexer("python")
+registerAntlrLexer("toml")
+registerAntlrLexer("java")
 
 tasks.withType(KotlinCompilationTask::class.java).configureEach {
     dependsOn(generateAntlrGrammars)

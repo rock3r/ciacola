@@ -93,7 +93,7 @@ private fun emitKotlinRawToken(
         -> out += RawKotlinToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true)
 
         KotlinTokens.EXCL_WS -> {
-            out += RawKotlinToken(KotlinTokens.EXCL_NO_WS, start, start + 1, SyntaxTokenKind.Punctuation, isHidden = false)
+            out += RawKotlinToken(KotlinTokens.EXCL_NO_WS, start, start + 1, SyntaxTokenKind.Operator, isHidden = false)
             emitHiddenOrGap(code, start + 1, end, out)
         }
 
@@ -129,9 +129,13 @@ private fun emitKotlinRawToken(
         KotlinTokens.LineStrRef,
         KotlinTokens.MultiLineStrRef,
         -> {
-            out += RawKotlinToken(type, start, start + 1, SyntaxTokenKind.Keyword, isHidden = false)
-            if (start + 1 < end) {
-                out += RawKotlinToken(KotlinTokens.Identifier, start + 1, end, SyntaxTokenKind.Plain, isHidden = false)
+            var dollarEnd = start
+            while (dollarEnd < end && code[dollarEnd] == '$') dollarEnd++
+            if (dollarEnd > start) {
+                out += RawKotlinToken(type, start, dollarEnd, SyntaxTokenKind.Keyword, isHidden = false)
+            }
+            if (dollarEnd < end) {
+                out += RawKotlinToken(KotlinTokens.Identifier, dollarEnd, end, SyntaxTokenKind.Plain, isHidden = false)
             }
         }
 
@@ -145,6 +149,8 @@ private fun emitKotlinRawToken(
             out += RawKotlinToken(type, start, end, SyntaxTokenKind.Punctuation, isHidden = false)
         }
 
+        KotlinTokens.MULTI_DOLLAR_QUOTE_OPEN,
+        KotlinTokens.MULTI_DOLLAR_TRIPLE_QUOTE_OPEN,
         KotlinTokens.QUOTE_OPEN,
         KotlinTokens.QUOTE_CLOSE,
         KotlinTokens.LineStrText,
@@ -182,6 +188,7 @@ private fun emitKotlinRawToken(
         else -> {
             val initialKind = when {
                 isKotlinHardKeyword(type) -> SyntaxTokenKind.Keyword
+                isKotlinOperator(type) -> SyntaxTokenKind.Operator
                 isKotlinPunctuation(type) -> SyntaxTokenKind.Punctuation
                 type == KotlinTokens.AT_NO_WS -> SyntaxTokenKind.Annotation
                 else -> SyntaxTokenKind.Plain
@@ -615,16 +622,7 @@ private fun isKotlinUseSiteTarget(type: Int): Boolean = when (type) {
 private fun isKotlinIdentifierLike(type: Int): Boolean =
     type == KotlinTokens.Identifier || type == KotlinTokens.IdentifierOrSoftKey || isKotlinSoftKeyword(type)
 
-private fun isKotlinPunctuation(type: Int): Boolean = when (type) {
-    KotlinTokens.RESERVED,
-    KotlinTokens.DOT,
-    KotlinTokens.COMMA,
-    KotlinTokens.LPAREN,
-    KotlinTokens.RPAREN,
-    KotlinTokens.LSQUARE,
-    KotlinTokens.RSQUARE,
-    KotlinTokens.LCURL,
-    KotlinTokens.RCURL,
+private fun isKotlinOperator(type: Int): Boolean = when (type) {
     KotlinTokens.MULT,
     KotlinTokens.MOD,
     KotlinTokens.DIV,
@@ -635,8 +633,6 @@ private fun isKotlinPunctuation(type: Int): Boolean = when (type) {
     KotlinTokens.CONJ,
     KotlinTokens.DISJ,
     KotlinTokens.EXCL_NO_WS,
-    KotlinTokens.COLON,
-    KotlinTokens.SEMICOLON,
     KotlinTokens.ASSIGNMENT,
     KotlinTokens.ADD_ASSIGNMENT,
     KotlinTokens.SUB_ASSIGNMENT,
@@ -647,10 +643,6 @@ private fun isKotlinPunctuation(type: Int): Boolean = when (type) {
     KotlinTokens.DOUBLE_ARROW,
     KotlinTokens.RANGE,
     KotlinTokens.RANGE_UNTIL,
-    KotlinTokens.COLONCOLON,
-    KotlinTokens.DOUBLE_SEMICOLON,
-    KotlinTokens.HASH,
-    KotlinTokens.QUEST_NO_WS,
     KotlinTokens.LANGLE,
     KotlinTokens.RANGLE,
     KotlinTokens.LE,
@@ -659,8 +651,28 @@ private fun isKotlinPunctuation(type: Int): Boolean = when (type) {
     KotlinTokens.EXCL_EQEQ,
     KotlinTokens.EQEQ,
     KotlinTokens.EQEQEQ,
-    KotlinTokens.SINGLE_QUOTE,
     KotlinTokens.AMP,
+    -> true
+    else -> false
+}
+
+private fun isKotlinPunctuation(type: Int): Boolean = when (type) {
+    KotlinTokens.RESERVED,
+    KotlinTokens.DOT,
+    KotlinTokens.COMMA,
+    KotlinTokens.LPAREN,
+    KotlinTokens.RPAREN,
+    KotlinTokens.LSQUARE,
+    KotlinTokens.RSQUARE,
+    KotlinTokens.LCURL,
+    KotlinTokens.RCURL,
+    KotlinTokens.COLON,
+    KotlinTokens.SEMICOLON,
+    KotlinTokens.COLONCOLON,
+    KotlinTokens.DOUBLE_SEMICOLON,
+    KotlinTokens.HASH,
+    KotlinTokens.QUEST_NO_WS,
+    KotlinTokens.SINGLE_QUOTE,
     -> true
     else -> false
 }

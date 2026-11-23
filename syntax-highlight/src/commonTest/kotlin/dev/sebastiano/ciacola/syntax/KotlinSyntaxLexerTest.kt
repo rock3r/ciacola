@@ -149,4 +149,39 @@ class KotlinSyntaxLexerTest {
         )
         assertMatchesOracleFixture(fixture)
     }
+
+    @Test
+    fun handlesMultiDollarInterpolationBackticksContextParamsAndModifiers() {
+        val code = """
+            context(logger: Logger)
+            suspend inline fun <reified T> run(
+                noinline f: () -> Unit,
+                crossinline g: () -> Unit,
+            ) {
+                val `when` = 1
+                val `in space` = 2
+                val sealed = 3
+                val price = ${'$'}${'$'}"price ${'$'}100, ${'$'}${'$'}sealed, ${'$'}${'$'}{`when` + 1}"
+                val rawMulti = ${'$'}${'$'}${'$'}""${'"'}raw ${'$'}${'$'}keep ${'$'}${'$'}${'$'}price""${'"'}
+                val nested = "${'$'}{"inner ${'$'}{sealed + 1}"}"
+                val uHex = 0xFF_00u
+                val uLong = 42UL
+            }
+        """.trimIndent()
+
+        val tokens = assertLosslessInvariants(KotlinSyntaxLexer, code, "kotlin-backfill")
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "context" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "noinline" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "crossinline" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "`when`" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "`in space`" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "sealed" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "$$" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).startsWith("100") }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, tokens.first { it.slice(code) == "$${'$'}{" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code).contains("keep") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "$$$" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "0xFF_00u" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "42UL" }.kind)
+    }
 }

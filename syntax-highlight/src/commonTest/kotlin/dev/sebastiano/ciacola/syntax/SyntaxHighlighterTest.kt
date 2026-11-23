@@ -31,19 +31,29 @@ class SyntaxHighlighterTest {
     }
 
     @Test
-    fun registryProvidesKotlinXmlAndJsonAndHandlesUnsupportedCleanly() {
+    fun registryProvidesSupportedLanguagesAndHandlesUnsupportedCleanly() {
         assertEquals(
-            setOf(SyntaxLanguage.Kotlin, SyntaxLanguage.Xml, SyntaxLanguage.Json),
+            setOf(
+                SyntaxLanguage.Kotlin,
+                SyntaxLanguage.Xml,
+                SyntaxLanguage.Json,
+                SyntaxLanguage.Python,
+                SyntaxLanguage.Toml,
+                SyntaxLanguage.Java,
+            ),
             SyntaxHighlighter.supportedLanguages,
         )
 
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Kotlin))
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Xml))
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Json))
-        assertNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Python))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Python))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Toml))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Java))
+        assertNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Rust))
 
         assertFailsWith<IllegalArgumentException> {
-            SyntaxHighlighter.lexer(SyntaxLanguage.Python)
+            SyntaxHighlighter.lexer(SyntaxLanguage.Rust)
         }
 
         val ktTokens = SyntaxHighlighter.lex("val x = 1", "kt")
@@ -51,7 +61,11 @@ class SyntaxHighlighterTest {
         assertTrue(ktTokens.isNotEmpty())
         assertEquals("val x = 1", ktTokens.joinToString("") { it.slice("val x = 1") })
 
-        assertNull(SyntaxHighlighter.lex("print(1)", "py"))
+        val pyTokens = SyntaxHighlighter.lex("print(1)", "py")
+        assertNotNull(pyTokens)
+        assertTrue(pyTokens.isNotEmpty())
+
+        assertNull(SyntaxHighlighter.lex("fn main() {}", "rs"))
         assertNull(SyntaxHighlighter.lex("foo", "unknown-lang"))
     }
 
