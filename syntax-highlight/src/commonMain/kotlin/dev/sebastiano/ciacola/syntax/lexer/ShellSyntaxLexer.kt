@@ -178,6 +178,31 @@ private fun emitRawShellToken(
         ShellTokens.HERE_STRING,
         ShellTokens.HEREDOC_STRIP_OP,
         ShellTokens.HEREDOC_OP,
+        -> {
+            if (source[start] == '{') {
+                val closeBrace = source.indexOf('}', start)
+                if (closeBrace in (start + 1) until (end - 1)) {
+                    out += RawShellToken(SYNTHETIC_FD_PREFIX, start, start + 1, SyntaxTokenKind.Punctuation, isHidden = false)
+                    out += RawShellToken(SYNTHETIC_FD_NAME, start + 1, closeBrace, SyntaxTokenKind.Property, isHidden = false)
+                    out += RawShellToken(SYNTHETIC_FD_PREFIX, closeBrace, closeBrace + 1, SyntaxTokenKind.Punctuation, isHidden = false)
+                    out += RawShellToken(type, closeBrace + 1, end, SyntaxTokenKind.Operator, isHidden = false)
+                } else {
+                    out += RawShellToken(type, start, end, SyntaxTokenKind.Operator, isHidden = false)
+                }
+            } else if (source[start] in '0'..'9') {
+                var opStart = start
+                while (opStart < end && source[opStart] in '0'..'9') opStart++
+                if (opStart > start && opStart < end) {
+                    out += RawShellToken(SYNTHETIC_FD_PREFIX, start, opStart, SyntaxTokenKind.Number, isHidden = false)
+                    out += RawShellToken(type, opStart, end, SyntaxTokenKind.Operator, isHidden = false)
+                } else {
+                    out += RawShellToken(type, start, end, SyntaxTokenKind.Operator, isHidden = false)
+                }
+            } else {
+                out += RawShellToken(type, start, end, SyntaxTokenKind.Operator, isHidden = false)
+            }
+        }
+
         ShellTokens.AMP_GT_APPEND,
         ShellTokens.AMP_GT,
         ShellTokens.PIPE_AMP,
@@ -784,6 +809,12 @@ private fun classifyShellTokens(source: String, raw: List<RawShellToken>) {
                 }
             }
 
+            SYNTHETIC_FD_PREFIX,
+            SYNTHETIC_FD_NAME,
+            -> {
+                cmd.justClosedFuncHeader = false
+            }
+
             ShellTokens.HERE_STRING,
             ShellTokens.HEREDOC_STRIP_OP,
             ShellTokens.HEREDOC_OP,
@@ -1167,6 +1198,7 @@ private const val MODE_ARITH = 3
 
 private const val SYNTHETIC_FD_NAME = -1001
 private const val SYNTHETIC_REDIR_OP = -1002
+private const val SYNTHETIC_FD_PREFIX = -1003
 
 private val CONTROL_KEYWORDS = setOf(
     "if",

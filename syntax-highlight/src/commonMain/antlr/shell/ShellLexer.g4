@@ -95,15 +95,15 @@ DOLLAR
 
 // Here-strings, heredocs, and redirections
 HERE_STRING
-    : '<<<'
+    : ( '{' [a-zA-Z_][a-zA-Z0-9_]* '}' | [0-9]+ )? '<<<'
     ;
 
 HEREDOC_STRIP_OP
-    : '<<-' { onHeredocOp(stripTabs = true, Modes.HEREDOC_DELIM); }
+    : ( '{' [a-zA-Z_][a-zA-Z0-9_]* '}' | [0-9]+ )? '<<-' { onHeredocOp(stripTabs = true, Modes.HEREDOC_DELIM); }
     ;
 
 HEREDOC_OP
-    : '<<' { onHeredocOp(stripTabs = false, Modes.HEREDOC_DELIM); }
+    : ( '{' [a-zA-Z_][a-zA-Z0-9_]* '}' | [0-9]+ )? '<<' { onHeredocOp(stripTabs = false, Modes.HEREDOC_DELIM); }
     ;
 
 FD_REDIR
@@ -356,7 +356,7 @@ HE_NEWLINE
     ;
 
 HE_LINE_CONT
-    : '\\' ( '\r'? '\n' | '\r' ) { markHeredocLineBody(); }
+    : '\\' ( '\r'? '\n' | '\r' ) { onHeredocLineContinuation(Modes.HEREDOC_LITERAL); }
     ;
 
 HE_ESCAPE
@@ -396,5 +396,5 @@ HE_DOLLAR
     ;
 
 HE_TEXT
-    : ~[\r\n$\\`]+ { markHeredocLineBody(); }
+    : ~[\r\n$\\`]+ { markHeredocTextBody(text); }
     ;

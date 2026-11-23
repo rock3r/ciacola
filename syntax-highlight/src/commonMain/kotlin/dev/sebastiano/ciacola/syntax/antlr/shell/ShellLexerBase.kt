@@ -906,6 +906,21 @@ internal abstract class ShellLexerBase(input: CharStream) : Lexer(input) {
         heredocStack.lastOrNull()?.atLineStart = false
     }
 
+    protected fun markHeredocTextBody(lexeme: String) {
+        val frame = heredocStack.lastOrNull() ?: return
+        if (frame.atLineStart && frame.spec.stripTabs && lexeme.all { it == '\t' }) {
+            return
+        }
+        frame.atLineStart = false
+    }
+
+    protected fun onHeredocLineContinuation(heredocLiteralMode: Int) {
+        val frame = heredocStack.lastOrNull() ?: return
+        if (frame.atLineStart && !frame.spec.isQuoted && isClosingDelimiterAhead(frame.spec) && _mode != heredocLiteralMode) {
+            mode(heredocLiteralMode)
+        }
+    }
+
     protected fun onHeredocNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {
         val frame = heredocStack.lastOrNull() ?: return
         val closedEmptyDelim = frame.atLineStart && frame.spec.delimiter.isEmpty()

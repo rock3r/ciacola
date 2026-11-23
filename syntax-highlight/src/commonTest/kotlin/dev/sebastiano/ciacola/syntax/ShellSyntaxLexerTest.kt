@@ -421,6 +421,55 @@ class ShellSyntaxLexerTest {
     }
 
     @Test
+    fun handlesNumericAndNamedFdHeredocsAndLineContinuationsBeforeDelimiter() {
+        val numHeredoc = "cat 0<<EOF\nhello\nEOF\necho after_num\n"
+        val tNum = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, numHeredoc, "shell-num-fd-heredoc")
+        assertEquals(SyntaxTokenKind.Number, tNum.first { it.slice(numHeredoc) == "0" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tNum.first { it.slice(numHeredoc) == "<<" }.kind)
+        assertEquals(SyntaxTokenKind.String, tNum.first { it.slice(numHeredoc) == "hello" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tNum.first { it.slice(numHeredoc) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tNum.first { it.slice(numHeredoc) == "after_num" }.kind)
+
+        val numStripHeredoc = "cat 0<<-EOF\n\tbody\n\tEOF\necho after_num_strip\n"
+        val tNumStrip = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, numStripHeredoc, "shell-num-fd-strip-heredoc")
+        assertEquals(SyntaxTokenKind.Number, tNumStrip.first { it.slice(numStripHeredoc) == "0" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tNumStrip.first { it.slice(numStripHeredoc) == "<<-" }.kind)
+        assertEquals(SyntaxTokenKind.String, tNumStrip.first { it.slice(numStripHeredoc) == "\tbody" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tNumStrip.first { it.slice(numStripHeredoc) == "echo" }.kind)
+
+        val namedFdAndHereStr = "cat {fd}<<EOF\nbody\nEOF\ncat 3<<<\"hi\"\n0<<EOF2 echo prefixed\nbody2\nEOF2\n"
+        val tNamed = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, namedFdAndHereStr, "shell-named-fd-heredoc")
+        assertEquals(SyntaxTokenKind.Property, tNamed.first { it.slice(namedFdAndHereStr) == "fd" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tNamed.first { it.slice(namedFdAndHereStr) == "<<" }.kind)
+        assertEquals(SyntaxTokenKind.String, tNamed.first { it.slice(namedFdAndHereStr) == "body" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tNamed.first { it.slice(namedFdAndHereStr) == "3" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tNamed.first { it.slice(namedFdAndHereStr) == "<<<" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tNamed.first { it.slice(namedFdAndHereStr) == "echo" }.kind)
+
+        val contBeforeClose = "cat <<EOF\n\\\nEOF\necho after_cont\n"
+        val tCont = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, contBeforeClose, "shell-heredoc-cont-close")
+        assertEquals(SyntaxTokenKind.String, tCont.last { it.slice(contBeforeClose) == "EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tCont.first { it.slice(contBeforeClose) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tCont.first { it.slice(contBeforeClose) == "after_cont" }.kind)
+
+        val doubleContStrip = "cat <<-EOF\n\t\\\n\t\\\n\tEOF\necho after_strip_cont\n"
+        val tStripCont = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, doubleContStrip, "shell-heredoc-strip-cont")
+        assertEquals(SyntaxTokenKind.Function, tStripCont.first { it.slice(doubleContStrip) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tStripCont.first { it.slice(doubleContStrip) == "after_strip_cont" }.kind)
+
+        val contAfterBody = "cat <<EOF\nfoo\\\nEOF\nstill_body\nEOF\necho after_body_cont\n"
+        val tBodyCont = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, contAfterBody, "shell-heredoc-body-cont")
+        assertEquals(SyntaxTokenKind.String, tBodyCont.first { it.slice(contAfterBody) == "still_body" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tBodyCont.first { it.slice(contAfterBody) == "echo" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tBodyCont.first { it.slice(contAfterBody) == "after_body_cont" }.kind)
+
+        val tabWithoutStrip = "cat <<EOF\n\t\\\nEOF\nstill_body2\nEOF\necho after_tab_nostrip\n"
+        val tTabNoStrip = assertValidSnippetHasNoInvalidTokens(ShellSyntaxLexer, tabWithoutStrip, "shell-heredoc-tab-nostrip")
+        assertEquals(SyntaxTokenKind.String, tTabNoStrip.first { it.slice(tabWithoutStrip) == "still_body2" }.kind)
+        assertEquals(SyntaxTokenKind.Function, tTabNoStrip.first { it.slice(tabWithoutStrip) == "echo" }.kind)
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         assertAllOracleFixtures(shellOracleFixtures)
     }
