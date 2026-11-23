@@ -31,7 +31,7 @@ class SyntaxHighlighterTest {
     }
 
     @Test
-    fun registryProvidesRegisteredLexersAndHandlesUnsupportedCleanly() {
+    fun registryProvidesSupportedLanguagesAndHandlesUnsupportedCleanly() {
         assertEquals(
             setOf(
                 SyntaxLanguage.Kotlin,
@@ -41,6 +41,13 @@ class SyntaxHighlighterTest {
                 SyntaxLanguage.Css,
                 SyntaxLanguage.JavaScript,
                 SyntaxLanguage.TypeScript,
+                SyntaxLanguage.Rust,
+                SyntaxLanguage.Go,
+                SyntaxLanguage.C,
+                SyntaxLanguage.Cpp,
+                SyntaxLanguage.Glsl,
+                SyntaxLanguage.Sksl,
+                SyntaxLanguage.Agsl,
             ),
             SyntaxHighlighter.supportedLanguages,
         )
@@ -52,6 +59,13 @@ class SyntaxHighlighterTest {
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Css))
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.JavaScript))
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.TypeScript))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Rust))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Go))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.C))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Cpp))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Glsl))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Sksl))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Agsl))
         assertNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Python))
 
         assertFailsWith<IllegalArgumentException> {
@@ -62,6 +76,22 @@ class SyntaxHighlighterTest {
         assertNotNull(ktTokens)
         assertTrue(ktTokens.isNotEmpty())
         assertEquals("val x = 1", ktTokens.joinToString("") { it.slice("val x = 1") })
+
+        val aliasSamples = mapOf(
+            "rs" to "fn main() {}",
+            "golang" to "func main() {}",
+            "h" to "int x = 1;",
+            "c++" to "auto x = 0uz;",
+            "vert" to "vec4 p = vec4(1.0);",
+            "sksl" to "half4 main(float2 p) { return half4(1.0); }",
+            "agsl" to "uniform float2 iResolution;",
+        )
+        for ((alias, snippet) in aliasSamples) {
+            val aliasTokens = SyntaxHighlighter.lex(snippet, alias)
+            assertNotNull(aliasTokens, "Expected lexer for alias '$alias'")
+            assertTrue(aliasTokens.isNotEmpty())
+            assertEquals(snippet, aliasTokens.joinToString("") { it.slice(snippet) })
+        }
 
         assertNull(SyntaxHighlighter.lex("print(1)", "py"))
         assertNull(SyntaxHighlighter.lex("foo", "unknown-lang"))

@@ -79,6 +79,10 @@ registerAntlrLexer("json")
 registerAntlrLexer("css")
 registerAntlrLexer("javascript")
 registerAntlrLexer("html")
+registerAntlrLexer("rust")
+registerAntlrLexer("go")
+registerAntlrLexer("cpp")
+registerAntlrLexer("glsl")
 
 tasks.withType(KotlinCompilationTask::class.java).configureEach {
     dependsOn(generateAntlrGrammars)

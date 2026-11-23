@@ -1,0 +1,266 @@
+/**
+ * Lossless ANTLR4 lexer grammar shared by C (C11/C23) and C++ (C++20/C++23).
+ * Preprocessor directives, `#include` headers, line continuations, and C++ raw strings
+ * (`R"delim(...)delim"`) are handled in linear time.
+ */
+lexer grammar CppLexer;
+
+options {
+    superClass = CppLexerBase;
+}
+
+WS
+    : [ \t\r\n\u000B\u000C]+
+    ;
+
+LINE_COMMENT
+    : '//' ( '\\' '\r'? '\n' | ~[\r\n] )*
+    ;
+
+BLOCK_COMMENT
+    : '/*' ( ~'*' | '*'+ ~[*/] )* '*'+ '/'
+    ;
+
+UNTERMINATED_BLOCK_COMMENT
+    : '/*' ( ~'*' | '*'+ ~[*/] )* '*'*
+    ;
+
+PP_HASH
+    : '#' -> pushMode(PP_HEADER_MODE)
+    ;
+
+RAW_STRING
+    : { enableCppFeatures }? ('u8' | 'u' | 'U' | 'L')? 'R"' ~[()\\ \t\r\n\u000B\u000C]* '(' { consumeCppRawString(); }
+    ;
+
+STRING
+    : ('u8' | 'u' | 'U' | 'L')? '"' ( '\\' '\r'? '\n' | '\\' . | ~["\\\r\n] )* '"'
+    ;
+
+UNTERMINATED_STRING
+    : ('u8' | 'u' | 'U' | 'L')? '"' ( '\\' '\r'? '\n' | '\\' . | ~["\\\r\n] )* '\\'?
+    ;
+
+CHAR_LITERAL
+    : ('u8' | 'u' | 'U' | 'L')? '\'' ( '\\' '\r'? '\n' | '\\' . | ~['\\\r\n] )+ '\''
+    ;
+
+UNTERMINATED_CHAR
+    : ('u8' | 'u' | 'U' | 'L')? '\'' ( '\\' '\r'? '\n' | '\\' . | ~['\\\r\n] )* '\\'?
+    ;
+
+HEX_FLOAT
+    : '0' [xX] ( HexDigits ( '.' HexDigits? )? | '.' HexDigits ) [pP] [+-]? Digits NumSuffix?
+    ;
+
+HEX_INT
+    : '0' [xX] HexDigits NumSuffix?
+    ;
+
+BIN_INT
+    : '0' [bB] BinDigits NumSuffix?
+    ;
+
+OCT_INT
+    : '0' ( '\''? [0-7] )+ NumSuffix?
+    ;
+
+FLOAT
+    : ( Digits '.' Digits? Exponent? | '.' Digits Exponent? | Digits Exponent ) NumSuffix?
+    ;
+
+DEC_INT
+    : Digits NumSuffix?
+    ;
+
+fragment Digits
+    : [0-9] ( '\''? [0-9] )*
+    ;
+
+fragment HexDigits
+    : [0-9a-fA-F] ( '\''? [0-9a-fA-F] )*
+    ;
+
+fragment BinDigits
+    : [01] ( '\''? [01] )*
+    ;
+
+fragment Exponent
+    : [eE] [+-]? Digits
+    ;
+
+fragment NumSuffix
+    : [uUlLzZfF]+
+    ;
+
+// Multi-char operators & punctuation
+SPACESHIP  : '<=>';
+ELLIPSIS   : '...';
+ARROWSTAR  : '->*';
+DOTSTAR    : '.*';
+COLONCOLON : '::';
+ARROW      : '->';
+SHLEQ      : '<<=';
+SHREQ      : '>>=';
+SHL        : '<<';
+SHR        : '>>';
+PLUSPLUS   : '++';
+MINUSMINUS : '--';
+ANDAND     : '&&';
+OROR       : '||';
+EQEQ       : '==';
+NE         : '!=';
+LE         : '<=';
+GE         : '>=';
+PLUSEQ     : '+=';
+MINUSEQ    : '-=';
+STAREQ     : '*=';
+SLASHEQ    : '/=';
+PERCENTEQ  : '%=';
+AMPEQ      : '&=';
+PIPEEQ     : '|=';
+CARETEQ    : '^=';
+
+// Single-char operators & punctuation
+LPAREN   : '(';
+RPAREN   : ')';
+LBRACE   : '{';
+RBRACE   : '}';
+LBRACK   : '[';
+RBRACK   : ']';
+SEMI     : ';';
+COMMA    : ',';
+DOT      : '.';
+COLON    : ':';
+QUESTION : '?';
+PLUS     : '+';
+MINUS    : '-';
+STAR     : '*';
+SLASH    : '/';
+PERCENT  : '%';
+CARET    : '^';
+AMP      : '&';
+PIPE     : '|';
+TILDE    : '~';
+BANG     : '!';
+EQ       : '=';
+LT       : '<';
+GT       : '>';
+
+IDENT
+    : [a-zA-Z_] [a-zA-Z0-9_]*
+    ;
+
+ERROR_CHAR
+    : .
+    ;
+
+mode PP_HEADER_MODE;
+
+PP_HDR_WS
+    : [ \t]+
+    ;
+
+PP_HDR_LINE_CONT
+    : '\\' '\r'? '\n'
+    ;
+
+PP_HDR_LINE_COMMENT
+    : '//' ~[\r\n]*
+    ;
+
+PP_HDR_BLOCK_COMMENT
+    : '/*' ( ~'*' | '*'+ ~[*/] )* ( '*'+ '/' | '*'* )
+    ;
+
+PP_HDR_INCLUDE
+    : ( 'include_next' | 'include' | 'import' ) -> mode(PP_INCLUDE_MODE)
+    ;
+
+PP_HDR_DIRECTIVE
+    : [a-zA-Z_] [a-zA-Z0-9_]* -> mode(PP_BODY_MODE)
+    ;
+
+PP_HDR_NL
+    : '\r'? '\n' -> popMode
+    ;
+
+PP_HDR_OTHER
+    : ~[\r\n] -> mode(PP_BODY_MODE)
+    ;
+
+mode PP_INCLUDE_MODE;
+
+PP_INC_WS
+    : [ \t]+
+    ;
+
+PP_INC_LINE_CONT
+    : '\\' '\r'? '\n'
+    ;
+
+PP_INC_LINE_COMMENT
+    : '//' ~[\r\n]*
+    ;
+
+PP_INC_BLOCK_COMMENT
+    : '/*' ( ~'*' | '*'+ ~[*/] )* ( '*'+ '/' | '*'* )
+    ;
+
+PP_INC_SYS_HEADER
+    : '<' ~[>\r\n]+ '>'
+    ;
+
+PP_INC_STR_HEADER
+    : '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
+    ;
+
+PP_INC_NL
+    : '\r'? '\n' -> popMode
+    ;
+
+PP_INC_OTHER
+    : ~[\r\n \t/\\"<]+
+    | '/'
+    | '\\'
+    | '"'
+    | '<'
+    ;
+
+mode PP_BODY_MODE;
+
+PP_BODY_WS
+    : [ \t]+
+    ;
+
+PP_BODY_LINE_CONT
+    : '\\' '\r'? '\n'
+    ;
+
+PP_BODY_LINE_COMMENT
+    : '//' ~[\r\n]*
+    ;
+
+PP_BODY_BLOCK_COMMENT
+    : '/*' ( ~'*' | '*'+ ~[*/] )* ( '*'+ '/' | '*'* )
+    ;
+
+PP_BODY_STRING
+    : '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
+    ;
+
+PP_BODY_CHAR
+    : '\'' ( '\\' ~[\r\n] | ~['\\\r\n] )* '\''
+    ;
+
+PP_BODY_NL
+    : '\r'? '\n' -> popMode
+    ;
+
+PP_BODY_TEXT
+    : ~[\r\n \t"'/\\]+
+    | '/'
+    | '\\'
+    | '"'
+    | '\''
+    ;
