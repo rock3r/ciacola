@@ -64,18 +64,19 @@ OPEN        : '<'       -> pushMode(INSIDE);
 XMLDeclOpen : '<?xml' S -> pushMode(INSIDE);
 
 PI
-    : '<?' ( '?>' | PI_BODY_START ( ~'?' | '?'+ ~[?>] )* '?'* '?>' )
+    : '<?' ( ( 'x' | 'xm' | 'xml' )? '?'* '?>' | PI_BODY_START ( ~'?' | '?'+ ~[?>] )* '?'* '?>' )
     ;
 
 UNTERMINATED_PI
-    : '<?' ( PI_BODY_START ( ~'?' | '?'+ ~[?>] )* '?'* | 'xml' | 'xm' | 'x' )?
+    : '<?' ( PI_BODY_START ( ~'?' | '?'+ ~[?>] )* '?'* | ( 'x' | 'xm' | 'xml' )? '?'* )
     ;
 
 fragment PI_BODY_START
-    : ~[x?\r\n\t ]
-    | 'x' ~[m?\r\n\t ]
-    | 'xm' ~[l?\r\n\t ]
+    : ~[x?]
+    | 'x' ~[m?]
+    | 'xm' ~[l?]
     | 'xml' ~[ \t\r\n?]
+    | ( 'x' | 'xm' | 'xml' )? '?'+ ~[?>]
     ;
 
 TEXT: ~[<&]+; // match any 16 bit char other than < and &

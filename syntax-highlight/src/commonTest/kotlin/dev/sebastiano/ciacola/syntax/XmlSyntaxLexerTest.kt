@@ -161,4 +161,33 @@ class XmlSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "a" && it.startIndex > code.indexOf("]>") }.kind)
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "'1'" }.kind)
     }
+
+    @Test
+    fun acceptsProcessingInstructionTargetsNamedXAndXmWithoutBreakingXmlDecl() {
+        val code = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <?x instruction <not-a-tag>?>
+            <?xm instruction <also-not-a-tag>?>
+            <?x?>
+            <?xm??>
+            <?x?data?>
+            <?xml-stylesheet href="a.xsl"?>
+            <root/>
+        """.trimIndent()
+        val tokens = assertLosslessInvariants(XmlSyntaxLexer, code, "xml-pi-x-xm")
+        assertTrue(tokens.none { it.kind == SyntaxTokenKind.Invalid })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "<?xml" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, tokens.first { it.slice(code) == "version" }.kind)
+        for (pi in listOf(
+            "<?x instruction <not-a-tag>?>",
+            "<?xm instruction <also-not-a-tag>?>",
+            "<?x?>",
+            "<?xm??>",
+            "<?x?data?>",
+            "<?xml-stylesheet href=\"a.xsl\"?>",
+        )) {
+            assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == pi }.kind, pi)
+        }
+        assertEquals(SyntaxTokenKind.Tag, tokens.first { it.slice(code) == "root" }.kind)
+    }
 }
