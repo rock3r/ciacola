@@ -7,7 +7,7 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for C (C11/C23).
  */
-object CSyntaxLexer : SyntaxLexer {
+internal object CSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.C
 
     override fun lex(source: String): List<SyntaxToken> =

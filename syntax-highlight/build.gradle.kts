@@ -19,6 +19,8 @@ val generateAntlrGrammars = tasks.register("generateAntlrGrammars") {
 }
 
 kotlin {
+    explicitApi()
+
     jvm()
 
     @OptIn(ExperimentalWasmDsl::class)
@@ -66,7 +68,9 @@ fun registerAntlrLexer(dirName: String, packageSuffix: String = dirName) {
             include("**/*.g4")
         }
         packageName = pkgName
-        arguments = listOf("-lib", sharedAntlrDir.asFile.absolutePath)
+        // AntlrWorkerManager sets the worker workingDir to layout.projectDirectory, so a relative
+        // path resolves cleanly while keeping Gradle's build cache relocatable across machines.
+        arguments = listOf("-lib", "src/commonMain/antlr/shared")
         outputDirectory = outDir.get().asFile
 
         doLast {
@@ -132,22 +136,53 @@ tasks.matching {
     dependsOn(generateAntlrGrammars)
 }
 
+tasks.withType(org.gradle.jvm.tasks.Jar::class.java).configureEach {
+    from(rootProject.file("LICENSE.txt")) {
+        into("META-INF")
+    }
+    from(layout.projectDirectory.file("NOTICE.txt")) {
+        into("META-INF")
+    }
+}
+
 val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourcesJar") {
     group = "verification"
-    description = "Verifies jvmSourcesJar layout, hygiene, and internal visibility of ANTLR lexers."
+    description = "Verifies jvmJar and jvmSourcesJar notices, layout, hygiene, and internal visibility."
+    val jvmJarTask = tasks.named("jvmJar", org.gradle.jvm.tasks.Jar::class.java)
     val sourcesJarTask = tasks.named("jvmSourcesJar", org.gradle.jvm.tasks.Jar::class.java)
-    dependsOn(sourcesJarTask)
-    val jarFileProvider = sourcesJarTask.flatMap { it.archiveFile }
-    inputs.file(jarFileProvider)
+    dependsOn(jvmJarTask, sourcesJarTask)
+    val jvmJarProvider = jvmJarTask.flatMap { it.archiveFile }
+    val sourcesJarProvider = sourcesJarTask.flatMap { it.archiveFile }
+    inputs.file(jvmJarProvider)
+    inputs.file(sourcesJarProvider)
 
     doLast {
-        val jarFile = jarFileProvider.get().asFile
+        val jvmJarFile = jvmJarProvider.get().asFile
+        val sourcesJarFile = sourcesJarProvider.get().asFile
         val violations = mutableListOf<String>()
-        ZipFile(jarFile).use { zip ->
+
+        ZipFile(jvmJarFile).use { zip ->
+            val names = zip.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toSet()
+            if ("META-INF/LICENSE.txt" !in names) {
+                violations += "Missing META-INF/LICENSE.txt in ${jvmJarFile.name}"
+            }
+            if ("META-INF/NOTICE.txt" !in names) {
+                violations += "Missing META-INF/NOTICE.txt in ${jvmJarFile.name}"
+            }
+        }
+
+        ZipFile(sourcesJarFile).use { zip ->
             val entries = zip.entries().asSequence().toList()
+            val entryNames = entries.filter { !it.isDirectory }.map { it.name }.toSet()
+            if ("META-INF/LICENSE.txt" !in entryNames) {
+                violations += "Missing META-INF/LICENSE.txt in ${sourcesJarFile.name}"
+            }
+            if ("META-INF/NOTICE.txt" !in entryNames) {
+                violations += "Missing META-INF/NOTICE.txt in ${sourcesJarFile.name}"
+            }
             val ktEntries = entries.filter { !it.isDirectory && it.name.endsWith(".kt") }
             if (ktEntries.none { it.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") }) {
-                violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${jarFile.name}"
+                violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${sourcesJarFile.name}"
             }
             val modifierWord =
                 """(?:public|open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
@@ -158,12 +193,12 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             for (entry in entries) {
                 if (entry.isDirectory) continue
                 if (entry.name.endsWith(".tokens") || entry.name.endsWith(".interp")) {
-                    violations += "Forbidden ANTLR sidecar file in ${jarFile.name}: ${entry.name}"
+                    violations += "Forbidden ANTLR sidecar file in ${sourcesJarFile.name}: ${entry.name}"
                 }
                 if (entry.name.startsWith("commonMain/") && entry.name.endsWith(".kt") &&
                     !entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/")
                 ) {
-                    violations += "Improperly rooted Kotlin source in ${jarFile.name}: ${entry.name}"
+                    violations += "Improperly rooted Kotlin source in ${sourcesJarFile.name}: ${entry.name}"
                 }
                 if (entry.name.endsWith(".kt")) {
                     val text = zip.getInputStream(entry).bufferedReader().use { it.readText() }
@@ -171,16 +206,18 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
                     if (firstLine.startsWith("// Generated from /") || windowsDriveHeader.containsMatchIn(firstLine)) {
                         violations += "Absolute local path leaked in ${entry.name}: $firstLine"
                     }
-                    if (entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") &&
-                        topLevelNonInternal.containsMatchIn(text)
-                    ) {
+                    val isInternalPackage =
+                        entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") ||
+                            entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/lexer/") ||
+                            entry.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/internal/")
+                    if (isInternalPackage && topLevelNonInternal.containsMatchIn(text)) {
                         violations += "Public top-level declaration in ${entry.name}"
                     }
                 }
             }
         }
         if (violations.isNotEmpty()) {
-            throw GradleException("SourcesJar verification failed:\n" + violations.joinToString("\n") { " - $it" })
+            throw GradleException("Packaging verification failed:\n" + violations.joinToString("\n") { " - $it" })
         }
     }
 }
@@ -225,7 +262,7 @@ configure<DokkaExtension> {
             remoteLineSuffix = "#L"
         }
         perPackageOption {
-            matchingRegex.set("""dev\.sebastiano\.ciacola\.syntax\.antlr(\..*)?""")
+            matchingRegex.set("""dev\.sebastiano\.ciacola\.syntax\.(antlr|lexer|internal)(\..*)?""")
             suppress.set(true)
         }
     }

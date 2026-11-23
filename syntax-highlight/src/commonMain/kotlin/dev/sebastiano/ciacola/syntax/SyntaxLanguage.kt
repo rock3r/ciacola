@@ -4,10 +4,10 @@ package dev.sebastiano.ciacola.syntax
  * Supported syntax highlighting languages, along with their TextMate-style [scopeName]
  * and recognized file/fence [aliases].
  */
-enum class SyntaxLanguage(
-    val id: String,
-    val scopeName: String,
-    val aliases: Set<String>,
+public enum class SyntaxLanguage(
+    public val id: String,
+    public val scopeName: String,
+    public val aliases: Set<String>,
 ) {
     Kotlin("kotlin", "source.kotlin", setOf("kt", "kts")),
     Xml("xml", "text.xml", setOf("svg", "xsd", "plist")),
@@ -28,7 +28,7 @@ enum class SyntaxLanguage(
     Agsl("agsl", "source.agsl", emptySet()),
     ;
 
-    companion object {
+    public companion object {
         private val byNameOrAlias: Map<String, SyntaxLanguage> = buildMap {
             for (language in SyntaxLanguage.entries) {
                 put(language.id.lowercase(), language)
@@ -42,7 +42,7 @@ enum class SyntaxLanguage(
          * Resolves a [SyntaxLanguage] by canonical [id] or any entry in [aliases],
          * ignoring surrounding whitespace and letter case.
          */
-        fun fromNameOrAlias(name: String): SyntaxLanguage? {
+        public fun fromNameOrAlias(name: String): SyntaxLanguage? {
             val normalized = name.trim().lowercase()
             if (normalized.isEmpty()) return null
             return byNameOrAlias[normalized]

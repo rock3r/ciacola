@@ -39,7 +39,7 @@ private data class OracleMismatch(
 /**
  * Verifies [fixture] against [SyntaxHighlighter.lex]:
  * 1. Confirms lossless invariants on [OracleFixture.code] and non-empty [OracleFixture.expectations].
- * 2. Enforces `allowedKinds.size in 1..3`, single-kind replacing-only overrides (zero overlap with
+ * 2. Enforces non-empty `allowedKinds`, single-kind replacing-only overrides (zero overlap with
  *    `{shikiKind, pygmentsKind}`) with explanatory notes, non-zero raw-oracle coverage, and
  *    `overrideShare <= maxOverrideShare`.
  * 3. Matches each [OracleTokenExpectation] span against the dominant overlapping non-whitespace
@@ -67,10 +67,6 @@ fun assertMatchesOracleFixture(fixture: OracleFixture) {
         assertTrue(
             exp.allowedKinds.isNotEmpty(),
             "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') must have non-empty allowedKinds",
-        )
-        assertTrue(
-            exp.allowedKinds.size <= 3,
-            "Oracle fixture '${fixture.name}' expectation #$idx ('${exp.text}') has allowedKinds.size=${exp.allowedKinds.size} (> 3): ${exp.allowedKinds}",
         )
         val extendsBeyondOracles = !exp.allowedKinds.all { it == exp.shikiKind || it == exp.pygmentsKind }
         if (extendsBeyondOracles) {

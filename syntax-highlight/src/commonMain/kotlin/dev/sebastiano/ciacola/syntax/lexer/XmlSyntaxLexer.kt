@@ -6,20 +6,20 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.xml.XMLLexer
 import dev.sebastiano.ciacola.syntax.antlr.xml.XMLLexer.Tokens as XmlTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 mode-switched DFA lexical tokenizer for XML source code.
  */
-object XmlSyntaxLexer : SyntaxLexer {
+internal object XmlSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Xml
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = XMLLexer(CharStreams.fromString(source))
+        val lexer = XMLLexer(antlrCharStream(source))
         val out = ArrayList<SyntaxToken>(source.length / 4 + 8)
         var expectingTagName = false
 

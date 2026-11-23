@@ -6,15 +6,15 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.glsl.GlslLexer
 import dev.sebastiano.ciacola.syntax.antlr.glsl.GlslLexer.Tokens as GlslTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for GLSL shaders.
  */
-object GlslSyntaxLexer : SyntaxLexer {
+internal object GlslSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Glsl
 
     override fun lex(source: String): List<SyntaxToken> =
@@ -24,7 +24,7 @@ object GlslSyntaxLexer : SyntaxLexer {
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Skia Shading Language (SkSL).
  */
-object SkslSyntaxLexer : SyntaxLexer {
+internal object SkslSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Sksl
 
     override fun lex(source: String): List<SyntaxToken> =
@@ -34,7 +34,7 @@ object SkslSyntaxLexer : SyntaxLexer {
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Android Graphics Shading Language (AGSL).
  */
-object AgslSyntaxLexer : SyntaxLexer {
+internal object AgslSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Agsl
 
     override fun lex(source: String): List<SyntaxToken> =
@@ -52,7 +52,7 @@ private class RawShaderToken(
 private fun lexShader(source: String, types: Set<String>): List<SyntaxToken> {
     if (source.isEmpty()) return emptyList()
 
-    val lexer = GlslLexer(CharStreams.fromString(source))
+    val lexer = GlslLexer(antlrCharStream(source))
     val raw = ArrayList<RawShaderToken>(source.length / 3 + 8)
 
     driveAntlrLexer(

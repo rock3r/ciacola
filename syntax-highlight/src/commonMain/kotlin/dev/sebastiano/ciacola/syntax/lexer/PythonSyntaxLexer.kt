@@ -6,21 +6,21 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.python.PythonLexer
 import dev.sebastiano.ciacola.syntax.antlr.python.PythonLexer.Tokens as PythonTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Python 3.12+ source code.
  */
-object PythonSyntaxLexer : SyntaxLexer {
+internal object PythonSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Python
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = PythonLexer(CharStreams.fromString(source))
+        val lexer = PythonLexer(antlrCharStream(source))
         val raw = ArrayList<RawPythonToken>(source.length / 3 + 8)
 
         driveAntlrLexer(

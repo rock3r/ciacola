@@ -86,6 +86,7 @@ data class DeckCodePalette(
 
     fun colorForWarpScope(scope: String): Color = when {
         scope.contains("annotation") || scope.contains("attribute") -> annotation
+        scope.contains("storage.type") -> type
         scope.contains("keyword") || scope.contains("storage") || scope.contains("entity.name.tag") -> keyword
         scope.contains("string") -> string
         scope.contains("comment") -> comment

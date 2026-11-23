@@ -216,23 +216,32 @@ class JavaScriptSyntaxLexerTest {
     }
 
     @Test
-    fun handlesBareJsxLongBodiesMultiLineRootsUnclosedSnippetsAndParenColonText() {
+    fun handlesBareJsxWithLongBodies() {
         val longBodyCode = "const view = (\n  <div>\n    " + "<span>hello world</span>\n    ".repeat(60) + "  </div>\n);"
         val tLong = assertLosslessInvariants(JavaScriptSyntaxLexer, longBodyCode, "js-bare-jsx-long-body")
         assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longBodyCode) == "div" }.kind)
         assertEquals(SyntaxTokenKind.Tag, tLong.first { it.slice(longBodyCode) == "span" }.kind)
+    }
 
+    @Test
+    fun handlesMultiLineJsxRootElement() {
         val multiLineRoot = "export function Page({ children }) {\n  return (\n    <Layout>\n      <main>{children}</main>\n    </Layout>\n  );\n}"
         val tMulti = assertLosslessInvariants(JavaScriptSyntaxLexer, multiLineRoot, "js-multiline-root")
         assertEquals(SyntaxTokenKind.Tag, tMulti.first { it.slice(multiLineRoot) == "Layout" }.kind)
         assertEquals(SyntaxTokenKind.Tag, tMulti.first { it.slice(multiLineRoot) == "main" }.kind)
+    }
 
+    @Test
+    fun handlesUnclosedBareJsxSnippetWithoutLosingTextMode() {
         val unclosedSnippet = "const view = <Card>\n  <span>Don't break</span>\n"
         val tUnclosed = assertLosslessInvariants(JavaScriptSyntaxLexer, unclosedSnippet, "js-unclosed-bare-jsx")
         assertEquals(SyntaxTokenKind.Tag, tUnclosed.first { it.slice(unclosedSnippet) == "Card" }.kind)
         assertEquals(SyntaxTokenKind.Tag, tUnclosed.first { it.slice(unclosedSnippet) == "span" }.kind)
         assertEquals(SyntaxTokenKind.Plain, tUnclosed.first { it.slice(unclosedSnippet) == "Don't" }.kind)
+    }
 
+    @Test
+    fun handlesParenAndColonInsideJsxChildText() {
         val parenColonText = "const ui = <label>(optional): name</label>;"
         val tParen = assertLosslessInvariants(JavaScriptSyntaxLexer, parenColonText, "js-jsx-paren-colon-text")
         assertEquals(SyntaxTokenKind.Tag, tParen.first { it.slice(parenColonText) == "label" }.kind)
@@ -240,7 +249,7 @@ class JavaScriptSyntaxLexerTest {
     }
 
     @Test
-    fun distinguishesExpressionBracesFromBlockBracesBeforeSlash() {
+    fun treatsSlashAfterObjectLiteralAndNestedTernaryObjectsAsDivision() {
         val objDiv = "const n = { valueOf: () => 12 } / 2 / 3;"
         val objTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, objDiv, "js-obj-literal-div")
         assertTrue(objTokens.none { it.kind == SyntaxTokenKind.String })
@@ -258,7 +267,10 @@ class JavaScriptSyntaxLexerTest {
         val exprTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, nestedAndTernary, "js-nested-ternary-obj-div")
         assertTrue(exprTokens.none { it.kind == SyntaxTokenKind.String })
         assertEquals(6, exprTokens.count { it.slice(nestedAndTernary) == "/" && it.kind == SyntaxTokenKind.Operator })
+    }
 
+    @Test
+    fun treatsSlashAfterStatementBlockBracesAsRegexLiteral() {
         val blockRegex = """
             if (ok) { run() }
             /foo/g.test(s);
@@ -277,7 +289,10 @@ class JavaScriptSyntaxLexerTest {
         for (re in listOf("/foo/g", "/bar/i", "/baz/m", "/lbl/", "/tryre/", "/dore/", "/destr/g")) {
             assertEquals(SyntaxTokenKind.String, blockTokens.first { it.slice(blockRegex) == re }.kind, re)
         }
+    }
 
+    @Test
+    fun treatsSlashAfterObjectLiteralsInTemplatesJsxExportDefaultAndMethodShorthandAsDivision() {
         val tplObjDiv = "const s = `\${ { valueOf: () => 12 } / 2 / 3 }`;"
         val tplTokens = assertLosslessInvariants(JavaScriptSyntaxLexer, tplObjDiv, "js-tpl-obj-div")
         assertEquals(2, tplTokens.count { it.slice(tplObjDiv) == "/" && it.kind == SyntaxTokenKind.Operator })

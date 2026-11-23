@@ -131,7 +131,7 @@ tokens {
             )
 
         // All statement/type-ending tokens (SEMI, RPAREN, RBRACK, RBRACE, GT, RSHIFT, URSHIFT,
-        // ARROW, STRING, TEMPLATE_END, numeric literals, INVALID_TYPE, etc.) precede a block `{`.
+        // ARROW, STRING, TEMPLATE_CLOSE, numeric literals, INVALID_TYPE, etc.) precede a block `{`.
         else -> true
     }
 

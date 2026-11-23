@@ -192,3 +192,80 @@ fun assertAllOracleFixtures(fixtures: List<OracleFixture>) {
         fail(failures.joinToString("\n\n"))
     }
 }
+
+/**
+ * Verifies that lexing a valid [code] snippet satisfies [assertLosslessInvariants] and emits zero
+ * [SyntaxTokenKind.Invalid] tokens.
+ */
+fun assertValidSnippetHasNoInvalidTokens(
+    lexer: SyntaxLexer,
+    code: String,
+    label: String = lexer.language.id,
+): List<SyntaxToken> {
+    val tokens = assertLosslessInvariants(lexer, code, label = "valid:$label")
+    val invalidTokens = tokens.filter { it.kind == SyntaxTokenKind.Invalid }
+    assertTrue(
+        invalidTokens.isEmpty(),
+        "[valid:$label] Expected zero Invalid tokens for valid ${lexer.language.id} snippet, got: " +
+            invalidTokens.joinToString(", ") { "${it.startIndex}..${it.endIndex}='${it.slice(code)}'" },
+    )
+    return tokens
+}
+
+/**
+ * Verifies the concatenation property `lex(container + tail) == lex(container) + shift(lex(tail))`
+ * for self-delimited container tokens (comments, strings, raw strings, CDATA, PIs, DTDs, embedded
+ * blocks, etc.) followed by delimiter-bearing [tails]. Catches longest-match hazards where a
+ * container rule accidentally consumes across a closing delimiter into following tokens.
+ */
+fun assertContainerTokenConcatenation(
+    lexer: SyntaxLexer,
+    containers: List<Pair<String, SyntaxTokenKind?>>,
+    tails: List<String>,
+    label: String = lexer.language.id,
+) {
+    for ((cIdx, entry) in containers.withIndex()) {
+        val (container, expectedKind) = entry
+        val baseTokens = assertLosslessInvariants(
+            lexer = lexer,
+            code = container,
+            label = "concat:$label:container#$cIdx",
+        )
+        if (expectedKind != null) {
+            assertEquals(
+                1,
+                baseTokens.size,
+                "[concat:$label:container#$cIdx] Expected single container token for '$container', got $baseTokens",
+            )
+            assertEquals(
+                expectedKind,
+                baseTokens.single().kind,
+                "[concat:$label:container#$cIdx] Expected kind $expectedKind for '$container'",
+            )
+        }
+        for ((tIdx, tail) in tails.withIndex()) {
+            val tailTokens = assertLosslessInvariants(
+                lexer = lexer,
+                code = tail,
+                label = "concat:$label:tail#$tIdx",
+            )
+            val combined = container + tail
+            val combinedTokens = assertLosslessInvariants(
+                lexer = lexer,
+                code = combined,
+                label = "concat:$label:c$cIdx+t$tIdx",
+            )
+            val expected = baseTokens + tailTokens.map { tok ->
+                tok.copy(
+                    startIndex = tok.startIndex + container.length,
+                    endIndex = tok.endIndex + container.length,
+                )
+            }
+            assertEquals(
+                expected,
+                combinedTokens,
+                "[concat:$label] Concatenation mismatch for container='$container' + tail='$tail'",
+            )
+        }
+    }
+}

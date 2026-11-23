@@ -6,21 +6,21 @@ import dev.sebastiano.ciacola.syntax.SyntaxToken
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.antlr.rust.RustLexer
 import dev.sebastiano.ciacola.syntax.antlr.rust.RustLexer.Tokens as RustTokens
+import dev.sebastiano.ciacola.syntax.internal.antlrCharStream
 import dev.sebastiano.ciacola.syntax.internal.driveAntlrLexer
 import dev.sebastiano.ciacola.syntax.internal.emitDefaultGap
 import dev.sebastiano.ciacola.syntax.internal.looksLikeTypeName
-import org.antlr.v4.kotlinruntime.CharStreams
 
 /**
  * Lossless ANTLR4 DFA-based lexical tokenizer for Rust source code.
  */
-object RustSyntaxLexer : SyntaxLexer {
+internal object RustSyntaxLexer : SyntaxLexer {
     override val language: SyntaxLanguage = SyntaxLanguage.Rust
 
     override fun lex(source: String): List<SyntaxToken> {
         if (source.isEmpty()) return emptyList()
 
-        val lexer = RustLexer(CharStreams.fromString(source))
+        val lexer = RustLexer(antlrCharStream(source))
         val raw = ArrayList<RawRustToken>(source.length / 3 + 8)
 
         driveAntlrLexer(
