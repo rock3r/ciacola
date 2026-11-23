@@ -1,7 +1,11 @@
 package dev.sebastiano.ciacola.syntax
 
+import dev.sebastiano.ciacola.syntax.lexer.CssSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.HtmlSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.JavaScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JsonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.KotlinSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.TypeScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.XmlSyntaxLexer
 
 /**
@@ -24,6 +28,10 @@ object SyntaxHighlighter {
         SyntaxLanguage.Kotlin to KotlinSyntaxLexer,
         SyntaxLanguage.Xml to XmlSyntaxLexer,
         SyntaxLanguage.Json to JsonSyntaxLexer,
+        SyntaxLanguage.Html to HtmlSyntaxLexer,
+        SyntaxLanguage.Css to CssSyntaxLexer,
+        SyntaxLanguage.JavaScript to JavaScriptSyntaxLexer,
+        SyntaxLanguage.TypeScript to TypeScriptSyntaxLexer,
     )
 
     /** Languages that currently have a registered [SyntaxLexer]. */

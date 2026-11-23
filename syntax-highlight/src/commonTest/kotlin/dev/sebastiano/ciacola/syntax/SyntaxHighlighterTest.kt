@@ -31,15 +31,27 @@ class SyntaxHighlighterTest {
     }
 
     @Test
-    fun registryProvidesKotlinXmlAndJsonAndHandlesUnsupportedCleanly() {
+    fun registryProvidesRegisteredLexersAndHandlesUnsupportedCleanly() {
         assertEquals(
-            setOf(SyntaxLanguage.Kotlin, SyntaxLanguage.Xml, SyntaxLanguage.Json),
+            setOf(
+                SyntaxLanguage.Kotlin,
+                SyntaxLanguage.Xml,
+                SyntaxLanguage.Json,
+                SyntaxLanguage.Html,
+                SyntaxLanguage.Css,
+                SyntaxLanguage.JavaScript,
+                SyntaxLanguage.TypeScript,
+            ),
             SyntaxHighlighter.supportedLanguages,
         )
 
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Kotlin))
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Xml))
         assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Json))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Html))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Css))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.JavaScript))
+        assertNotNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.TypeScript))
         assertNull(SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Python))
 
         assertFailsWith<IllegalArgumentException> {
