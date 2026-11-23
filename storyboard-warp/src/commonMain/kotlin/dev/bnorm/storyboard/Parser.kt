@@ -17,14 +17,28 @@ interface Parser {
 /**
  * Parses [code] into line-indexed, syntax-scoped [Token]s for [language].
  *
- * Built-in languages (`Kotlin`, `Xml`, `Json`) use ANTLR4 DFA lexers from `:syntax-highlight` in
- * common code across all targets (JVM, JS, and WasmJs) with no regular-expression grammar engines.
+ * All 17 built-in languages use ANTLR4 DFA lexers from `:syntax-highlight` in common code across
+ * all targets (JVM, JS, and WasmJs) with no regular-expression grammar engines.
  */
 fun parse(code: String, language: Language): List<Token> = when (language) {
     is Custom -> language.parser.parse(code)
     Kotlin -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Kotlin)
     Xml -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Xml)
     Json -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Json)
+    Html -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Html)
+    Css -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Css)
+    JavaScript -> parseWithSyntaxLexer(code, language, SyntaxLanguage.JavaScript)
+    TypeScript -> parseWithSyntaxLexer(code, language, SyntaxLanguage.TypeScript)
+    Rust -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Rust)
+    Go -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Go)
+    Python -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Python)
+    Toml -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Toml)
+    Java -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Java)
+    C -> parseWithSyntaxLexer(code, language, SyntaxLanguage.C)
+    Cpp -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Cpp)
+    Glsl -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Glsl)
+    Sksl -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Sksl)
+    Agsl -> AgslParser.parse(code)
 }
 
 private fun parseWithSyntaxLexer(

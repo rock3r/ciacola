@@ -22,7 +22,7 @@ class LanguageHighlightTest {
     }
 
     @Test
-    fun highlightsKotlinXmlJsonAndFallsBackForUnregisteredLanguages() {
+    fun highlightsAllSeventeenRegisteredSyntaxLanguages() {
         val kt = "val x: Int = 42"
         val ktAnnotated = kt.highlight(testStyle, SyntaxLanguage.Kotlin)
         assertEquals(kt, ktAnnotated.text)
@@ -42,12 +42,41 @@ class LanguageHighlightTest {
         assertTrue(xmlAnnotated.spanStyles.any { it.start == 1 && it.end == 4 && it.item == testStyle.keyword })
         assertTrue(xmlAnnotated.spanStyles.any { it.start == 5 && it.end == 9 && it.item == testStyle.annotation })
 
-        // Unregistered language falls back cleanly to base simple style
         val py = "def foo(): pass"
         val pyAnnotated = py.highlight(testStyle, SyntaxLanguage.Python)
         assertEquals(py, pyAnnotated.text)
-        assertEquals(1, pyAnnotated.spanStyles.size)
-        assertEquals(testStyle.simple, pyAnnotated.spanStyles.single().item)
+        assertTrue(pyAnnotated.spanStyles.any { it.start == 0 && it.end == 3 && it.item == testStyle.keyword })
+        assertTrue(pyAnnotated.spanStyles.any { it.start == 4 && it.end == 7 && it.item == testStyle.staticFunctionCall })
+        assertTrue(pyAnnotated.spanStyles.any { it.start == 11 && it.end == 15 && it.item == testStyle.keyword })
+
+        val samples = mapOf(
+            SyntaxLanguage.Kotlin to kt,
+            SyntaxLanguage.Xml to xml,
+            SyntaxLanguage.Json to json,
+            SyntaxLanguage.Html to "<div class=\"hero\">Hi</div>",
+            SyntaxLanguage.Css to ".hero { color: #ff0; }",
+            SyntaxLanguage.JavaScript to "const x = 42;",
+            SyntaxLanguage.TypeScript to "type Id = string;",
+            SyntaxLanguage.Rust to "fn main() {}",
+            SyntaxLanguage.Go to "func main() {}",
+            SyntaxLanguage.Python to py,
+            SyntaxLanguage.Toml to "name = \"ciacola\"",
+            SyntaxLanguage.Java to "record Point(int x) {}",
+            SyntaxLanguage.C to "int main(void) { return 0; }",
+            SyntaxLanguage.Cpp to "template <typename T> void f(T v) {}",
+            SyntaxLanguage.Glsl to "uniform vec4 uColor;",
+            SyntaxLanguage.Sksl to "half4 main(float2 p) { return half4(1.0); }",
+            SyntaxLanguage.Agsl to "uniform float2 iResolution;",
+        )
+        assertEquals(SyntaxLanguage.entries.toSet(), samples.keys)
+        for ((language, snippet) in samples) {
+            val annotated = snippet.highlight(testStyle, language)
+            assertEquals(snippet, annotated.text)
+            assertTrue(
+                annotated.spanStyles.size > 1,
+                "Expected highlighted spans beyond base style for $language",
+            )
+        }
     }
 
     @Test

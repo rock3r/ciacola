@@ -36,7 +36,8 @@ license.
 | **AndroidX Collection** | `androidx.collection:collection:1.6.0` | The Android Open Source Project | Apache-2.0 | <https://developer.android.com/jetpack/androidx/releases/collection> |
 | **Apache PDFBox** | `org.apache.pdfbox:pdfbox:3.0.8` (`:storyboard-easel`) | Copyright 2002-2026 The Apache Software Foundation | Apache-2.0 | <https://pdfbox.apache.org/> |
 | **FileKit** | `io.github.vinceglb:filekit-core:0.15.0`, `io.github.vinceglb:filekit-dialogs-compose:0.15.0` (`:storyboard-easel`) | Copyright Vinceglb and FileKit contributors | MIT | <https://github.com/vinceglb/FileKit> |
-| **ANTLR Kotlin** | `com.strumenta:antlr-kotlin-runtime:1.0.13`, `com.strumenta.antlr-kotlin:1.0.13` (`:storyboard-text`, `:storyboard-warp`) | Strumenta and ANTLR 4 contributors | Apache-2.0 & BSD-3-Clause | <https://github.com/Strumenta/antlr-kotlin> |
+| **ANTLR Kotlin** | `com.strumenta:antlr-kotlin-runtime:1.0.13`, `com.strumenta.antlr-kotlin:1.0.13` (`:syntax-highlight`, `:storyboard-text`) | Strumenta and ANTLR 4 contributors | Apache-2.0 & BSD-3-Clause | <https://github.com/Strumenta/antlr-kotlin> |
+| **ANTLR v4 Kotlin & XML Lexer Grammars** | `KotlinLexer.g4`, `UnicodeClasses.g4`, `XMLLexer.g4` (`:syntax-highlight`, `:storyboard-text`) | JetBrains s.r.o. (Kotlin grammar, Apache-2.0); Copyright 2013 Terence Parr (XML reference grammar, BSD-3-Clause) | Apache-2.0 & BSD-3-Clause | <https://kotlinlang.org/docs/reference/grammar.html>, <https://github.com/antlr/grammars-v4> |
 | **Ktor Client** | `io.ktor:ktor-client-{core,content-negotiation,js,okhttp}:3.5.2`, `io.ktor:ktor-serialization-kotlinx-json:3.5.2` (`:examples:interactive`) | JetBrains s.r.o. and Ktor contributors | Apache-2.0 | <https://github.com/ktorio/ktor> |
 | **OkHttp** | `com.squareup.okhttp3:okhttp` (via `ktor-client-okhttp`, `:examples:interactive`) | Square, Inc. | Apache-2.0 | <https://square.github.io/okhttp/> |
 

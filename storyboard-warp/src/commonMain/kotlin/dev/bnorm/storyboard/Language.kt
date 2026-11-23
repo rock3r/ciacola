@@ -32,6 +32,97 @@ object Xml : Language {
     }
 }
 
+/** HTML */
+object Html : Language {
+    override fun scopeName(): String {
+        return "text.html.basic"
+    }
+}
+
+/** Cascading Style Sheets. */
+object Css : Language {
+    override fun scopeName(): String {
+        return "source.css"
+    }
+}
+
+/** JavaScript and JSX. */
+object JavaScript : Language {
+    override fun scopeName(): String {
+        return "source.js"
+    }
+}
+
+/** TypeScript and TSX. */
+object TypeScript : Language {
+    override fun scopeName(): String {
+        return "source.ts"
+    }
+}
+
+/** The Rust programming language. */
+object Rust : Language {
+    override fun scopeName(): String {
+        return "source.rust"
+    }
+}
+
+/** The Go programming language. */
+object Go : Language {
+    override fun scopeName(): String {
+        return "source.go"
+    }
+}
+
+/** The Python programming language. */
+object Python : Language {
+    override fun scopeName(): String {
+        return "source.python"
+    }
+}
+
+/** Tom's Obvious, Minimal Language. */
+object Toml : Language {
+    override fun scopeName(): String {
+        return "source.toml"
+    }
+}
+
+/** The Java programming language. */
+object Java : Language {
+    override fun scopeName(): String {
+        return "source.java"
+    }
+}
+
+/** The C programming language. */
+object C : Language {
+    override fun scopeName(): String {
+        return "source.c"
+    }
+}
+
+/** The C++ programming language. */
+object Cpp : Language {
+    override fun scopeName(): String {
+        return "source.cpp"
+    }
+}
+
+/** OpenGL Shading Language (GLSL). */
+object Glsl : Language {
+    override fun scopeName(): String {
+        return "source.glsl"
+    }
+}
+
+/** Skia Shading Language (SkSL). */
+object Sksl : Language {
+    override fun scopeName(): String {
+        return "source.sksl"
+    }
+}
+
 /** A custom language that is [Parser] aware */
 class Custom(val parser: Parser) : Language {
     override fun scopeName(): String {

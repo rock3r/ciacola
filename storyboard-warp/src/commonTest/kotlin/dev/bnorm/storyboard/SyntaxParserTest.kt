@@ -243,4 +243,62 @@ class SyntaxParserTest {
         assertEquals(2, jsonDiffs.size)
         assertEquals(3, jsonDiffs[0].rows.size)
     }
+
+    @Test
+    fun allSeventeenBuiltInLanguagesParseLosslesslyMapColorsAndBuildDiffLists() {
+        data class LangSample(
+            val language: Language,
+            val before: String,
+            val after: String,
+            val keywordSample: String? = null,
+        )
+
+        val samples = listOf(
+            LangSample(Kotlin, "fun greet(x: Int) = x + 1\n\nval ok = true", "fun greet(x: Int) = x + 2\n\nval ok = false", "fun"),
+            LangSample(Xml, "<Layout width=\"10\">\n\n  <!-- ok -->\n</Layout>", "<Layout width=\"20\">\n\n  <!-- ok -->\n</Layout>", "Layout"),
+            LangSample(Json, "{\n  \"count\": 1,\n  \"ok\": true\n}", "{\n  \"count\": 2,\n  \"ok\": false\n}"),
+            LangSample(Html, "<!DOCTYPE html>\n<div class=\"card\"><script>const x = 1;</script></div>", "<!DOCTYPE html>\n<div class=\"card\"><script>const x = 2;</script></div>", "div"),
+            LangSample(Css, "@media (min-width: 600px) {\n  .card { color: #ff00aa; }\n}", "@media (min-width: 800px) {\n  .card { color: #00ffaa; }\n}", "media"),
+            LangSample(JavaScript, "export async function load(url) {\n  const re = /abc/gi;\n  return `${'$'}{url}`;\n}", "export async function load(url) {\n  const re = /xyz/gi;\n  return `${'$'}{url}`;\n}", "async"),
+            LangSample(TypeScript, "interface Box<T> {\n  readonly value: T;\n}\nconst b = { value: 1 } satisfies Box<number>;", "interface Box<T> {\n  readonly value: T;\n}\nconst b = { value: 2 } satisfies Box<number>;", "interface"),
+            LangSample(Rust, "pub fn add<'a>(x: &'a i32) -> i32 {\n  /* nested /* ok */ */\n  *x + 1\n}", "pub fn add<'a>(x: &'a i32) -> i32 {\n  /* nested /* ok */ */\n  *x + 2\n}", "fn"),
+            LangSample(Go, "package main\n\nfunc Map[T any](in []T) int {\n  return len(in)\n}", "package main\n\nfunc Map[T any](in []T) int {\n  return len(in) + 1\n}", "func"),
+            LangSample(Python, "@dataclass\ndef compute(x: int) -> str:\n    return f\"val={x + 1}\"", "@dataclass\ndef compute(x: int) -> str:\n    return f\"val={x + 2}\"", "def"),
+            LangSample(Toml, "[package]\nname = \"ciacola\"\nversion = \"0.1.0\"\nedition = 2024", "[package]\nname = \"ciacola\"\nversion = \"0.2.0\"\nedition = 2024"),
+            LangSample(Java, "public record Point(int x, int y) {\n  String label() { return \"\"\"\n    pt\n    \"\"\"; }\n}", "public record Point(int x, int y) {\n  String label() { return \"\"\"\n    point\n    \"\"\"; }\n}", "record"),
+            LangSample(C, "#include <stdint.h>\n_Static_assert(sizeof(int) >= 4, \"ok\");\nint main(void) { return 0; }", "#include <stdint.h>\n_Static_assert(sizeof(int) >= 4, \"ok\");\nint main(void) { return 1; }", "return"),
+            LangSample(Cpp, "template <typename T>\nconcept Num = requires(T a) { a + a; };\nauto f() { return R\"(raw)\"; }", "template <typename T>\nconcept Num = requires(T a) { a + a; };\nauto f() { return R\"(raw2)\"; }", "concept"),
+            LangSample(Glsl, "#version 450\nlayout(location = 0) out vec4 color;\nvoid main() { color = vec4(1.0); }", "#version 450\nlayout(location = 0) out vec4 color;\nvoid main() { color = vec4(0.5); }", "void"),
+            LangSample(Sksl, "uniform shader child;\nhalf4 main(float2 p) {\n  return child.eval(p);\n}", "uniform shader child;\nhalf4 main(float2 p) {\n  return child.eval(p * 2.0);\n}", "uniform"),
+            LangSample(Agsl, "uniform float2 iResolution;\n\nhalf4 main(float2 coord) {\n  return half4(coord / iResolution, 0.0, 1.0);\n}", "uniform float2 iResolution;\n\nhalf4 main(float2 coord) {\n  return half4(coord / iResolution, 1.0, 1.0);\n}", "uniform"),
+        )
+
+        assertEquals(17, samples.size)
+        assertEquals(17, samples.map { it.language }.toSet().size)
+
+        for (sample in samples) {
+            val beforeTokens = assertLosslessAndWellFormed(sample.before, sample.language)
+            val afterTokens = assertLosslessAndWellFormed(sample.after, sample.language)
+            assertTrue(beforeTokens.all { it.language === sample.language })
+            assertTrue(afterTokens.all { it.language === sample.language })
+
+            if (sample.keywordSample != null) {
+                val kwTok = beforeTokens.first { it.content == sample.keywordSample }
+                assertEquals(Keyword, kwTok.color(), "Expected Keyword color for '${sample.keywordSample}' in ${sample.language.scopeName()}")
+            }
+
+            // Ensure every emitted token resolves a valid Color without throwing.
+            for (tok in beforeTokens) {
+                tok.color()
+            }
+
+            val diffs = buildDiffList(
+                listOf(BasicCode(sample.before), BasicCode(sample.after)),
+                sample.language,
+            )
+            assertEquals(2, diffs.size, "Expected 2 diff frames for ${sample.language.scopeName()}")
+            assertEquals(sample.before.split('\n').size, diffs[0].rows.size)
+            assertEquals(sample.after.split('\n').size, diffs[1].rows.size)
+        }
+    }
 }
