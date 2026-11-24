@@ -1,5 +1,14 @@
 import com.strumenta.antlrkotlin.gradle.AntlrKotlinTask
 import java.util.zip.ZipFile
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
@@ -18,6 +27,68 @@ val generateAntlrGrammars = tasks.register("generateAntlrGrammars") {
     description = "Generates all ANTLR4 Kotlin lexers for :syntax-highlight."
 }
 
+@CacheableTask
+abstract class GenerateBundledSyntaxSchemesTask : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val schemeFiles: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val rootOut = outputDir.get().asFile
+        rootOut.deleteRecursively()
+        val pkgDir = rootOut.resolve("dev/sebastiano/ciacola/syntax/internal")
+        pkgDir.mkdirs()
+
+        val files = schemeFiles.files
+            .filter { it.isFile && it.name.endsWith(".scheme.json") }
+            .sortedBy { it.name }
+        if (files.isEmpty()) {
+            throw GradleException("No *.scheme.json files found for BundledSyntaxSchemePayloads generation")
+        }
+
+        val sb = StringBuilder()
+        sb.appendLine("// Generated from bundled syntax color scheme definitions")
+        sb.appendLine("package dev.sebastiano.ciacola.syntax.internal")
+        sb.appendLine()
+        sb.appendLine("internal object BundledSyntaxSchemePayloads {")
+        for (file in files) {
+            val slug = file.name.removeSuffix(".scheme.json")
+            val constName = slug.uppercase().replace('-', '_')
+            val payload = file.readText(Charsets.UTF_8).trim()
+            sb.append("    internal const val ").append(constName).append(": String = \"")
+            for (ch in payload) {
+                when (ch) {
+                    '\\' -> sb.append("\\\\")
+                    '"' -> sb.append("\\\"")
+                    '$' -> sb.append("\\$")
+                    '\n' -> sb.append("\\n")
+                    '\r' -> sb.append("\\r")
+                    '\t' -> sb.append("\\t")
+                    else -> sb.append(ch)
+                }
+            }
+            sb.appendLine("\"")
+        }
+        sb.appendLine("}")
+
+        pkgDir.resolve("BundledSyntaxSchemePayloads.kt").writeText(sb.toString(), Charsets.UTF_8)
+    }
+}
+
+val schemesDir = layout.projectDirectory.dir("src/commonMain/schemes")
+val generatedSchemesDir = layout.buildDirectory.dir("generatedSchemes/kotlin")
+
+val generateBundledSyntaxSchemes = tasks.register("generateBundledSyntaxSchemes", GenerateBundledSyntaxSchemesTask::class.java) {
+    group = "build"
+    description = "Embeds bundled *.scheme.json files into internal Kotlin constants for KMP targets."
+    schemeFiles.from(fileTree(schemesDir) { include("*.scheme.json") })
+    outputDir.set(generatedSchemesDir)
+}
+
 kotlin {
     explicitApi()
 
@@ -34,6 +105,7 @@ kotlin {
 
     sourceSets {
         commonMain {
+            kotlin.srcDir(generateBundledSyntaxSchemes.flatMap { it.outputDir })
             dependencies {
                 implementation(libs.antlr.kotlin.runtime)
             }
@@ -141,14 +213,14 @@ registerAntlrLexer("protobuf")
 registerAntlrLexer("hcl")
 
 tasks.withType(KotlinCompilationTask::class.java).configureEach {
-    dependsOn(generateAntlrGrammars)
+    dependsOn(generateAntlrGrammars, generateBundledSyntaxSchemes)
 }
 
 tasks.matching {
     it.name.endsWith("SourcesJar", ignoreCase = true) ||
         it.name.contains("dokka", ignoreCase = true)
 }.configureEach {
-    dependsOn(generateAntlrGrammars)
+    dependsOn(generateAntlrGrammars, generateBundledSyntaxSchemes)
 }
 
 tasks.withType(org.gradle.jvm.tasks.Jar::class.java).configureEach {
@@ -191,6 +263,9 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             "Redistribution and use in source and binary forms",
             "UNICODE LICENSE V3",
             "Permission is hereby granted, free of charge, to any person obtaining",
+            "IntelliJ Platform Color Schemes",
+            "GitHub Primer Color Themes",
+            "MIT License",
         )
 
         val unicodeGrammars = sharedUnicodeDir.asFile.listFiles { file ->
@@ -235,6 +310,9 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             val ktEntries = entries.filter { !it.isDirectory && it.name.endsWith(".kt") }
             if (ktEntries.none { it.name.startsWith("commonMain/dev/sebastiano/ciacola/syntax/antlr/") }) {
                 violations += "Expected ANTLR sources under commonMain/dev/sebastiano/ciacola/syntax/antlr/ in ${sourcesJarFile.name}"
+            }
+            if (ktEntries.none { it.name == "commonMain/dev/sebastiano/ciacola/syntax/internal/BundledSyntaxSchemePayloads.kt" }) {
+                violations += "Expected generated BundledSyntaxSchemePayloads.kt in ${sourcesJarFile.name}"
             }
             val modifierWord =
                 """(?:public|open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
@@ -299,6 +377,11 @@ mavenPublishing {
             license {
                 name = "Unicode License v3 (UCD-derived identifier tables)"
                 url = "https://www.unicode.org/license.txt"
+                distribution = "repo"
+            }
+            license {
+                name = "MIT License (bundled GitHub Primer syntax color schemes)"
+                url = "https://opensource.org/licenses/MIT"
                 distribution = "repo"
             }
         }
