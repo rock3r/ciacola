@@ -133,7 +133,7 @@ class ReviewLifecycleAndClampingTest {
         // 1. Ctrl+Click stage to comment hint stays visible even when 1 comment is applying!
         onNode(hasText("stage to comment", substring = true)).assertIsDisplayed()
         onNodeWithTag("ciacola-hud-applying-badge").assertIsDisplayed()
-        onNode(hasText("1 applying…")).assertIsDisplayed()
+        onNode(hasText("1 with the agent")).assertIsDisplayed()
 
         // 2. Starting a drag on the HUD while Inspect mode is active must be ignored (no composer).
         runOnIdle { coordinator.inspectModeEnabled = true }

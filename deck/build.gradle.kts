@@ -226,6 +226,87 @@ tasks.register<JavaExec>("exportVideo") {
     requestedThemeProp.orNull?.let { args("--theme=$it") }
 }
 
+val requestedTimeoutProp = ciacolaArgProp("ciacola.timeout")
+val requestedStoryboardDirProp = ciacolaArgProp("ciacola.storyboardDir")
+val requestedIncludeTakenProp = ciacolaArgProp("ciacola.includeTaken")
+
+tasks.register<JavaExec>("reviewWait") {
+    description =
+        "Blocks until the author queues a review comment, prints it, and records it taken " +
+            "(use -Pciacola.deck=<id> -Pciacola.timeout=30m). Gradle reports every failure as " +
+            "exit 1, so a timeout is told apart by its message, not its code; call DeckAgentCli " +
+            "directly for the numeric codes."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    // Waiting for a person is not a cacheable, up-to-date-able thing.
+    outputs.upToDateWhen { false }
+    args("--review-wait")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedTimeoutProp.orNull?.let { args("--timeout=$it") }
+    requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
+    // A timeout is an ordinary outcome, not a crash: report it as one sentence the caller can act
+    // on rather than letting Gradle print a process-exited-3 stack trace over it. The build still
+    // fails, so `until ./gradlew :deck:reviewWait; do :; done` keeps working.
+    isIgnoreExitValue = true
+    doLast {
+        val exit = executionResult.get().exitValue
+        if (exit == 3) {
+            throw GradleException("No review comment was queued before the timeout. Run this task again to keep waiting.")
+        }
+        if (exit != 0) {
+            throw GradleException("reviewWait failed with exit code $exit.")
+        }
+    }
+}
+
+tasks.register<JavaExec>("reviewExport") {
+    description =
+        "Prints the review comments the author has queued, without blocking " +
+            "(use -Pciacola.deck=<id> -Pciacola.json=true -Pciacola.includeTaken=true)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    outputs.upToDateWhen { false }
+    args("--review-export")
+    if (requestedIncludeTakenProp.orNull?.toBoolean() == true) args("--include-taken")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
+    if (requestedJsonProp.orNull.equals("true", ignoreCase = true)) {
+        args("--json")
+    }
+}
+
+val requestedCommentProp = ciacolaArgProp("ciacola.comment")
+val requestedResolutionProp = ciacolaArgProp("ciacola.resolution")
+val requestedReviewStatusProp = ciacolaArgProp("ciacola.reviewStatus")
+
+tasks.register<JavaExec>("reviewResolve") {
+    description =
+        "Writes a verdict back onto a review comment, which the running deck picks up within " +
+            "250ms (use -Pciacola.comment=<id> -Pciacola.resolution=<text>)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    outputs.upToDateWhen { false }
+    // Without a comment id there is no mode flag at all, and the CLI's complaint would be about
+    // modes rather than about the property the caller actually forgot.
+    args("--review-resolve=" + (requestedCommentProp.orNull ?: ""))
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedResolutionProp.orNull?.let { args("--resolution=$it") }
+    requestedReviewStatusProp.orNull?.let { args("--review-status=$it") }
+    requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
+}
+
 tasks.named("check") {
     dependsOn(verifyDecksCanonical)
 }

@@ -57,8 +57,27 @@ class SlideReviewWindow(
         internal set
 
     override val name: String = "Review"
+
+    /**
+     * Re-checks the push command whenever the panel is shown, however it was shown.
+     *
+     * [openForAgentConfiguration] is only one of the ways in; F4 and the menu set [visible]
+     * directly, and someone who has just gone off to install the agent will come back through one
+     * of those.
+     */
+    private fun onBecameVisible() {
+        store.refreshPushAvailability()
+    }
     override val minimumSize: DpSize get() = DpSize(420.dp, 480.dp)
-    override var visible: Boolean by mutableStateOf(false)
+    private var visibleState: Boolean by mutableStateOf(false)
+
+    override var visible: Boolean
+        get() = visibleState
+        set(value) {
+            val wasVisible = visibleState
+            visibleState = value
+            if (value && !wasVisible) onBecameVisible()
+        }
     var highlightAgentConfigBanner: Boolean by mutableStateOf(false)
         internal set
 
@@ -78,7 +97,8 @@ class SlideReviewWindow(
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
         val queuedCount = store.comments.count {
-            it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+            (it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed) &&
+                it.id !in store.claimedIds
         }
         val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
 
@@ -105,13 +125,14 @@ class SlideReviewWindow(
         }
         Separator()
         val agentConfigured = store.effectiveConversationId().isNotBlank()
+        val pushAvailable = store.agentPushAvailable()
         Item(
-            text = if (agentConfigured || queuedCount == 0) {
-                "Send Queued Comments ($queuedCount)"
-            } else {
-                "Configure Agent to Send ($queuedCount)…"
+            text = when {
+                !pushAvailable -> "Waiting for an Agent ($queuedCount)"
+                agentConfigured || queuedCount == 0 -> "Send Queued Comments ($queuedCount)"
+                else -> "Configure Agent to Send ($queuedCount)…"
             },
-            enabled = queuedCount > 0,
+            enabled = queuedCount > 0 && pushAvailable,
             onClick = {
                 if (store.effectiveConversationId().isBlank()) {
                     openForAgentConfiguration()
@@ -264,6 +285,7 @@ private fun ReviewOuterWindowOverlay(
         while (true) {
             delay(250)
             store.reloadFromDisk()
+            store.reloadClaims()
         }
     }
 
@@ -351,30 +373,49 @@ private fun ReviewOuterWindowOverlay(
             coordinator.hudBoundsInRoot = null
         }
         val agentConfigured = store.effectiveConversationId().isNotBlank()
+        val pushAvailable = store.agentPushAvailable()
         CiacolaJewelTheme(isDark = isDark) {
             Box(Modifier.fillMaxSize()) {
                 if (showHud) {
+                    // A claimed comment is with an agent, not waiting for one: counting it as
+                    // waiting is how the HUD offered to send work that was already under way.
                     val queuedCount = store.comments.count {
-                        it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+                        (it.status == ReviewCommentStatus.Queued ||
+                            it.status == ReviewCommentStatus.Failed) &&
+                            it.id !in store.claimedIds
                     }
-                    val applyingCount = store.comments.count { it.status == ReviewCommentStatus.Applying }
+                    val applyingCount = store.comments.count {
+                        // A claim only means work in progress while the comment is still waiting
+                        // for a verdict. Resolved or failed, it is no longer with anybody, and
+                        // counting a stale sidecar entry here spins the HUD for ever.
+                        it.status == ReviewCommentStatus.Applying ||
+                            (it.status == ReviewCommentStatus.Queued && it.id in store.claimedIds)
+                    }
                     val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
+                    // Failed counts as waiting again once the claim is gone, so this is only the
+                    // case nothing else reports: an agent holds it and has said it cannot do it.
+                    val needsAttentionCount = store.comments.count {
+                        it.status == ReviewCommentStatus.Failed && it.id in store.claimedIds
+                    }
 
                     ReviewHudToolbar(
                         inspectActive = coordinator.inspectModeEnabled || coordinator.isCtrlKeyHeld,
                         inspectPinned = coordinator.inspectModeEnabled,
                         timelineDocked = windowController.timelineDockedProvider(),
                         agentConfigured = agentConfigured,
+                        pushAvailable = pushAvailable,
                         queuedCount = queuedCount,
                         applyingCount = applyingCount,
+                        deliveringCount = store.deliveringIds.size,
                         appliedCount = appliedCount,
+                        needsAttentionCount = needsAttentionCount,
                         onHudBoundsChanged = { coordinator.hudBoundsInRoot = it },
                         onToggleInspectMode = {
                             coordinator.inspectModeEnabled = !coordinator.inspectModeEnabled
                         },
                         onToggleTimeline = windowController.onToggleTimeline,
                         onOpenReviewPanel = {
-                            if (agentConfigured) {
+                            if (agentConfigured || !pushAvailable) {
                                 windowController.visible = true
                             } else {
                                 windowController.openForAgentConfiguration()
@@ -385,6 +426,25 @@ private fun ReviewOuterWindowOverlay(
                                 windowController.openForAgentConfiguration()
                             } else {
                                 scope.launch { store.flushQueued() }
+                            }
+                        },
+                    )
+                }
+
+                val notice = store.activityNotice
+                if (notice != null && !overviewOpen && !hideForAudience) {
+                    ReviewActivityNoticeBar(
+                        notice = notice,
+                        onDismiss = { store.dismissNotice(notice.id) },
+                        onOpenReviewPanel = {
+                            store.dismissNotice(notice.id)
+                            // Only chase a Conversation ID when one would change anything. With
+                            // no push command the panel's red "not configured" banner is an
+                            // error about a feature that is not on offer.
+                            if (agentConfigured || !pushAvailable) {
+                                windowController.visible = true
+                            } else {
+                                windowController.openForAgentConfiguration()
                             }
                         },
                     )
@@ -417,15 +477,23 @@ private fun ReviewOuterWindowOverlay(
                             lastSeenPending = null
                             draftWasRestored = false
                             restoredFromTarget = null
+                            val submittedNote = composerNoteState.text.toString()
                             coordinator.clearComposerDraft()
                             composerNoteState.setTextAndPlaceCursorAtEnd("")
                             coordinator.dismissActivePopups(fromEscapeKey = false)
                             scope.launch {
-                                store.submitComment(
+                                val saved = store.submitComment(
                                     comment = comment,
                                     dispatchImmediate = dispatchImmediate,
                                     pngBytes = pngBytes,
                                 )
+                                if (saved == null) {
+                                    // The queue was busy and nothing was written. A notice alone
+                                    // would leave the author retyping a note they had already
+                                    // sent, so the draft comes back with its target.
+                                    coordinator.composerDraftText = submittedNote
+                                    coordinator.composerDraftTarget = comment.target
+                                }
                             }
                         },
                     )
@@ -441,6 +509,13 @@ private fun ReviewOuterWindowOverlay(
                         stageBoundsInRoot = coordinator.stageBoundsInRoot,
                         stageFormatSize = coordinator.stageFormatSize,
                         agentConfigured = agentConfigured,
+                        pushAvailable = pushAvailable,
+                        delivering = activePinComment.id in store.deliveringIds,
+                        claimed = activePinComment.id in store.claimedIds,
+                        onReleaseClaim = {
+                            scope.launch { store.releaseClaim(activePinComment.id) }
+                            coordinator.dismissActivePopups(fromEscapeKey = false)
+                        },
                         onClose = { fromEsc ->
                             coordinator.dismissActivePopups(fromEscapeKey = fromEsc)
                         },

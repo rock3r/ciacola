@@ -133,6 +133,9 @@ internal fun AnchoredCommentComposerPopup(
         clickPointPx
     }
 
+    val pushAvailable = store.agentPushAvailable()
+    // Everything about a target conversation is push furniture; with nothing to push to it is a
+    // field that cannot change any outcome.
     val convIdState = rememberTextFieldState(initialText = store.effectiveConversationId())
     var submitting by remember(pending) { mutableStateOf(false) }
     var validationError by remember(pending) { mutableStateOf<String?>(null) }
@@ -225,7 +228,7 @@ internal fun AnchoredCommentComposerPopup(
             (ev.key == Key.Enter || ev.key == Key.NumPadEnter) &&
             (ev.isMetaPressed || ev.isCtrlPressed)
         ) {
-            submit(dispatchImmediate = !ev.isShiftPressed)
+            submit(dispatchImmediate = pushAvailable && !ev.isShiftPressed)
             return true
         }
         return false
@@ -322,7 +325,11 @@ internal fun AnchoredCommentComposerPopup(
                     outline = if (validationError != null && noteState.text.isBlank()) Outline.Error else Outline.None,
                     placeholder = {
                         Text(
-                            text = "Describe what to change (⌘↵ sends)…",
+                            text = if (pushAvailable) {
+                                "Describe what to change (⌘↵ sends)…"
+                            } else {
+                                "Describe what to change (⌘↵ queues)…"
+                            },
                             style = JewelTheme.typography.regular,
                         )
                     },
@@ -356,7 +363,9 @@ internal fun AnchoredCommentComposerPopup(
                     )
                 }
 
-                if (store.effectiveConversationId().isBlank()) {
+                // Only worth asking for when something could push with it. With no push command
+                // the composer only queues, and the field is a question with no purpose.
+                if (store.effectiveConversationId().isBlank() && store.agentPushAvailable()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextField(
                             state = convIdState,
@@ -392,19 +401,36 @@ internal fun AnchoredCommentComposerPopup(
                         },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(
-                            enabled = hasNote && !submitting,
-                            onClick = { submit(dispatchImmediate = false) },
-                            modifier = Modifier.testTag("ciacola-review-queue-button"),
-                        ) {
-                            Text("Queue")
+                        if (pushAvailable) {
+                            OutlinedButton(
+                                enabled = hasNote && !submitting,
+                                onClick = { submit(dispatchImmediate = false) },
+                                modifier = Modifier.testTag("ciacola-review-queue-button"),
+                            ) {
+                                Text("Queue")
+                            }
+                            CiacolaPrimaryButton(
+                                text = "Send",
+                                enabled = hasNote && !submitting,
+                                onClick = { submit(dispatchImmediate = true) },
+                                modifier = Modifier.testTag("ciacola-review-send-button"),
+                            )
+                        } else {
+                            // Nothing to push to, so Send would be Queue with a different word on
+                            // it and a notice afterwards explaining why it was not a send.
+                            Tooltip(
+                                tooltip = {
+                                    Text("An agent on :deck:reviewWait picks this up within seconds")
+                                },
+                            ) {
+                                CiacolaPrimaryButton(
+                                    text = "Queue for agent",
+                                    enabled = hasNote && !submitting,
+                                    onClick = { submit(dispatchImmediate = false) },
+                                    modifier = Modifier.testTag("ciacola-review-queue-button"),
+                                )
+                            }
                         }
-                        CiacolaPrimaryButton(
-                            text = "Send",
-                            enabled = hasNote && !submitting,
-                            onClick = { submit(dispatchImmediate = true) },
-                            modifier = Modifier.testTag("ciacola-review-send-button"),
-                        )
                     }
                 }
             }
@@ -498,6 +524,10 @@ internal fun AnchoredSelectedPinPopup(
     stageBoundsInRoot: Rect?,
     stageFormatSize: IntSize,
     agentConfigured: Boolean = true,
+    pushAvailable: Boolean = true,
+    delivering: Boolean = false,
+    claimed: Boolean = false,
+    onReleaseClaim: () -> Unit = {},
     onClose: (fromEscapeKey: Boolean) -> Unit,
     onDelete: () -> Unit,
     onMarkApplied: () -> Unit = {},
@@ -600,11 +630,11 @@ internal fun AnchoredSelectedPinPopup(
                     ) {
                         Icon(
                             key = comment.status.iconKey(),
-                            contentDescription = comment.status.labelText(),
+                            contentDescription = comment.status.labelText(delivering, claimed),
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = "#$displayNumber · ${comment.status.labelText()}",
+                            text = "#$displayNumber · ${comment.status.labelText(delivering, claimed)}",
                             style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                             color = statusPalette.colorFor(comment.status),
                         )
@@ -628,16 +658,27 @@ internal fun AnchoredSelectedPinPopup(
 
                 if (comment.resolution.isNotBlank()) {
                     val resShape = RoundedCornerShape(4.dp)
+                    // Green only for a comment that is actually done: an agent reporting that it
+                    // could not do something writes a resolution too.
+                    val resolved = comment.status == ReviewCommentStatus.Applied
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, statusPalette.applied, resShape)
+                            .border(
+                                1.dp,
+                                if (resolved) statusPalette.applied else statusPalette.queued,
+                                resShape,
+                            )
                             .padding(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
                         Icon(
-                            key = AllIconsKeys.General.GreenCheckmark,
+                            key = if (resolved) {
+                                AllIconsKeys.General.GreenCheckmark
+                            } else {
+                                AllIconsKeys.General.Information
+                            },
                             contentDescription = "Resolution",
                             modifier = Modifier.size(14.dp),
                         )
@@ -731,7 +772,25 @@ internal fun AnchoredSelectedPinPopup(
                                         Text("Mark Applied")
                                     }
                                 }
-                                if (agentConfigured) {
+                                if (claimed) {
+                                    // A claim has no expiry, so this is the author's only way
+                                    // back if the agent that took the note is gone.
+                                    Tooltip(
+                                        tooltip = {
+                                            Text("Hand this comment back to the queue for another agent")
+                                        },
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = onReleaseClaim,
+                                            modifier = Modifier.testTag("ciacola-review-pin-release-claim"),
+                                        ) {
+                                            Text("Release")
+                                        }
+                                    }
+                                } else if (!pushAvailable) {
+                                    // Nothing to push to: the queue is the path, and an agent on
+                                    // :deck:reviewWait is already watching it.
+                                } else if (agentConfigured) {
                                     val isQueued = comment.status == ReviewCommentStatus.Queued
                                     val label = if (isQueued) "Send Now" else "Retry Send"
                                     val tip = if (isQueued) {

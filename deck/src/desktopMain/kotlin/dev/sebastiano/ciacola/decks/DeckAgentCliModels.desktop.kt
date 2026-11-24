@@ -179,3 +179,35 @@ internal data class RenderManifest(
     val slides: List<RenderManifestSlide>,
     val byKey: Map<String, String>,
 )
+
+internal fun printAgentCliUsage() {
+    println(
+        """
+        Usage: DeckAgentCli <--lint | --render-slides | --export-video | --review-wait |
+                             --review-export | --review-resolve=<id>> --deck=<id|path> [options]
+
+        Options:
+          --deck=<id|path>       Deck ID (e.g. foundation) or path to a .deck.json file
+          --dir=<decksDir>       Override directory scanned for *.deck.json files
+          --slides=<1,3-5>       1-based non-skipped slide numbers / ranges
+          --beats=<0,1>          0-based beat indices filter (--render-slides only)
+          --out=<dir|file>       Output directory (or .mp4 path for --export-video)
+          --fps=<30|60>          Frame rate for --export-video (default: 30)
+          --size=<WxH>           Pixel resolution (default: 1280x720)
+          --theme=<name>         Theme override (e.g. dark or light)
+          --json                 Machine-readable JSON report (--lint, --review-export)
+          --fail-on=<error|warning>  Exit non-zero threshold for --lint (default: error)
+          --timeout=<30m|45s|ms> Deadline for --review-wait (default: 30m)
+          --include-taken        Also list comments already taken (--review-export only)
+          --storyboard-dir=<dir> Override the .storyboard root holding the review queue
+          --resolution=<text>    Note written next to a resolved comment
+          --review-status=<applied|failed|queued>  Verdict to write (default: applied)
+
+        Review modes read .storyboard/decks/<deckId>/review-comments.json, the queue the deck
+        writes on Queue. --review-wait blocks until a comment arrives, prints it and records it
+        taken in review-agent-taken.json, exiting 3 on timeout so the caller can run it again;
+        --review-export prints and returns; --review-resolve writes a verdict back, which the
+        running deck picks up within 250ms.
+        """.trimIndent(),
+    )
+}

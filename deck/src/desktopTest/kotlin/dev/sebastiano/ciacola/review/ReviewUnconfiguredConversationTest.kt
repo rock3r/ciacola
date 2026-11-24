@@ -21,6 +21,7 @@ import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
+import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -33,10 +34,17 @@ class ReviewUnconfiguredConversationTest {
     fun blankConversationIdValidatesInlineOnSendAndHudOpensReviewConfigurationPanel() = runComposeUiTest {
         val tempRoot = Files.createTempDirectory("ciacola-review-unconfigured")
         val storyboardDir = Files.createDirectories(tempRoot.resolve(".storyboard"))
+        // A push command exists here: this test is about a blank Conversation ID, not about having
+        // nothing to push to (which hides Send altogether).
+        val fakeAgentApi = tempRoot.resolve("fake-agentapi.sh").apply {
+            writeText("#!/bin/sh\nexit 0\n")
+            // setPosixFilePermissions throws on Windows; toFile().setExecutable is portable.
+            toFile().setExecutable(true)
+        }
         val store = ReviewCommentStore(
             storyboardDir = storyboardDir,
             workspaceRoot = tempRoot,
-            envProvider = { null },
+            envProvider = { key -> if (key == "CIACOLA_AGENTAPI_BIN") fakeAgentApi.toAbsolutePath().toString() else null },
             systemPropertyProvider = { null },
         )
         assertEquals("", store.effectiveConversationId(), "Precondition: fresh store must have blank Conversation ID")
@@ -110,9 +118,15 @@ class ReviewUnconfiguredConversationTest {
         assertEquals(1, store.comments.size)
         assertEquals(ReviewCommentStatus.Queued, store.comments.single().status)
 
+        // Queueing has to say so. The pin it leaves behind looks the same whether the click was
+        // Queue or a Send that quietly fell back to the queue, which is exactly the confusion.
+        onNodeWithTag("ciacola-review-notice").assertIsDisplayed()
+        onNode(hasText("Queued comment #1")).assertIsDisplayed()
+        onNode(hasText("reviewWait", substring = true)).assertIsDisplayed()
+
         // Clicking the HUD queued button when unconfigured must open the F4 Review configuration panel
         // instead of silently looping Queued -> Applying -> Queued.
-        onNode(hasText("Set Agent (1)") or hasText("Send 1")).performClick()
+        onNode(hasText("Set Agent") or hasText("Send now")).performClick()
         waitForIdle()
 
         assertTrue(reviewWindow.visible, "HUD queued button must open the F4 Review configuration panel when unconfigured")

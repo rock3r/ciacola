@@ -39,6 +39,7 @@ import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintEngine
 import dev.sebastiano.ciacola.inspector.lint.DocumentLintIssue
 import dev.sebastiano.ciacola.inspector.lint.DocumentLintReport
 import dev.sebastiano.ciacola.inspector.lint.LintSeverity
+import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -60,11 +61,13 @@ import org.jetbrains.skia.ImageInfo
 
 /**
  * Headless CLI entry point for agentic `.deck.json` workflows backing `:deck:lintDeck`,
- * `:deck:renderSlides`, and `:deck:exportVideo`.
+ * `:deck:renderSlides`, `:deck:exportVideo`, `:deck:reviewWait` and `:deck:reviewExport`.
  */
 object DeckAgentCli {
 
     private val Mp4ExtensionRegex = Regex("""(?i)\.mp4$""")
+
+    internal const val DEFAULT_REVIEW_TIMEOUT_MILLIS = 30 * 60 * 1_000L
 
     internal val defaultVideoExporterFactory: (
         fps: Int,
@@ -97,13 +100,13 @@ object DeckAgentCli {
 
     fun runCli(args: Array<String>): Int {
         if ("--help" in args || "-h" in args || args.isEmpty()) {
-            printUsage()
+            printAgentCliUsage()
             return if (args.isEmpty()) 1 else 0
         }
 
         val parsed = runCatching { parseArgs(args) }.getOrElse { err ->
             System.err.println("Error: ${err.message}")
-            printUsage()
+            printAgentCliUsage()
             return 1
         }
 
@@ -111,13 +114,40 @@ object DeckAgentCli {
             CliMode.Lint -> runLint(parsed)
             CliMode.RenderSlides -> runRenderSlides(parsed)
             CliMode.ExportVideo -> runExportVideo(parsed)
+            CliMode.ReviewWait, CliMode.ReviewExport, CliMode.ReviewResolve -> runReviewMode(parsed)
         }
     }
+
+    private fun runReviewMode(o: CliOptions): Int = when (o.mode) {
+        CliMode.ReviewWait -> runReviewWaitMode(o.storyboardDirArg, o.deckArg, o.reviewTimeoutMillis)
+        CliMode.ReviewExport ->
+            runReviewExportMode(o.storyboardDirArg, o.deckArg, o.includeTaken, o.jsonOutput)
+        else -> runReviewResolveMode(
+            o.storyboardDirArg,
+            o.deckArg,
+            // parseArgs has already insisted on this, so that a missing comment id prints
+            // "Error: ..." and the usage text rather than a stack trace.
+            o.resolveCommentId.orEmpty(),
+            o.resolution,
+            o.reviewStatus,
+        )
+    }
+
+    private const val MISSING_MODE_MESSAGE =
+        "Specify one mode: --lint, --render-slides, --export-video, --review-wait, " +
+            "--review-export or --review-resolve=<commentId>"
 
     private enum class CliMode {
         Lint,
         RenderSlides,
         ExportVideo,
+        ReviewWait,
+        ReviewExport,
+        ReviewResolve,
+        ;
+
+        val isReviewMode: Boolean
+            get() = this == ReviewWait || this == ReviewExport || this == ReviewResolve
     }
 
     private data class CliOptions(
@@ -132,6 +162,12 @@ object DeckAgentCli {
         val theme: String?,
         val jsonOutput: Boolean,
         val failOnWarning: Boolean,
+        val includeTaken: Boolean = false,
+        val storyboardDirArg: String? = null,
+        val resolveCommentId: String? = null,
+        val resolution: String = "",
+        val reviewStatus: ReviewCommentStatus = ReviewCommentStatus.Applied,
+        val reviewTimeoutMillis: Long = DEFAULT_REVIEW_TIMEOUT_MILLIS,
     )
 
     private fun parseArgs(args: Array<String>): CliOptions {
@@ -146,6 +182,12 @@ object DeckAgentCli {
         var theme: String? = null
         var jsonOutput = false
         var failOnWarning = false
+        var includeTaken = false
+        var storyboardDirArg: String? = null
+        var resolveCommentId: String? = null
+        var resolution = ""
+        var reviewStatus = ReviewCommentStatus.Applied
+        var reviewTimeoutMillis = DEFAULT_REVIEW_TIMEOUT_MILLIS
 
         fun setMode(next: CliMode) {
             if (mode != null && mode != next) {
@@ -156,6 +198,21 @@ object DeckAgentCli {
 
         for (arg in args) {
             when {
+                arg == "--review-wait" -> setMode(CliMode.ReviewWait)
+                arg.startsWith("--review-resolve=") -> {
+                    setMode(CliMode.ReviewResolve)
+                    resolveCommentId = arg.removePrefix("--review-resolve=").trim()
+                }
+                arg.startsWith("--resolution=") -> resolution = arg.removePrefix("--resolution=").trim()
+                arg.startsWith("--review-status=") ->
+                    reviewStatus = parseReviewStatus(arg.removePrefix("--review-status="))
+                arg == "--review-export" -> setMode(CliMode.ReviewExport)
+                arg == "--include-taken" -> includeTaken = true
+                arg.startsWith("--storyboard-dir=") ->
+                    storyboardDirArg = arg.removePrefix("--storyboard-dir=").trim()
+                arg.startsWith("--timeout=") -> {
+                    reviewTimeoutMillis = parseReviewTimeout(arg.removePrefix("--timeout=").trim())
+                }
                 arg == "--lint" -> setMode(CliMode.Lint)
                 arg == "--render-slides" -> setMode(CliMode.RenderSlides)
                 arg == "--export-video" -> setMode(CliMode.ExportVideo)
@@ -185,9 +242,17 @@ object DeckAgentCli {
             }
         }
 
-        val resolvedMode = mode ?: error("Specify one mode: --lint, --render-slides, or --export-video")
+        val resolvedMode = mode ?: error(MISSING_MODE_MESSAGE)
+        // Every mode needs to be told which deck, the review ones included: they pick a
+        // .storyboard/decks/<id>/ folder, and quietly defaulting to one means an agent that
+        // forgot the flag waits half an hour on a queue nobody is writing to.
         val resolvedDeck = deckArg?.takeIf { it.isNotEmpty() }
             ?: error("Missing --deck=<id|path> (or -Pciacola.deck=<id|path>)")
+        // Checked here, with --deck, so the diagnostic goes through runCatching in runCli: thrown
+        // later it escapes as a stack trace instead of an error line and the usage text.
+        if (resolvedMode == CliMode.ReviewResolve && resolveCommentId.isNullOrEmpty()) {
+            error("Missing --review-resolve=<commentId> (or -Pciacola.comment=<commentId>)")
+        }
 
         return CliOptions(
             mode = resolvedMode,
@@ -201,6 +266,12 @@ object DeckAgentCli {
             theme = theme,
             jsonOutput = jsonOutput,
             failOnWarning = failOnWarning,
+            includeTaken = includeTaken,
+            storyboardDirArg = storyboardDirArg?.takeIf { it.isNotEmpty() },
+            resolveCommentId = resolveCommentId?.takeIf { it.isNotEmpty() },
+            resolution = resolution,
+            reviewStatus = reviewStatus,
+            reviewTimeoutMillis = reviewTimeoutMillis,
         )
     }
 
@@ -1026,23 +1097,4 @@ object DeckAgentCli {
         slideChangeHoldMs: Long = 2_000L,
     ): Duration = exportHoldDurationInternal(document, index, intraSlideHoldMs, slideChangeHoldMs)
 
-    private fun printUsage() {
-        println(
-            """
-            Usage: DeckAgentCli <--lint | --render-slides | --export-video> --deck=<id|path> [options]
-
-            Options:
-              --deck=<id|path>       Deck ID (e.g. foundation) or path to a .deck.json file
-              --dir=<decksDir>       Override directory scanned for *.deck.json files
-              --slides=<1,3-5>       1-based non-skipped slide numbers / ranges
-              --beats=<0,1>          0-based beat indices filter (--render-slides only)
-              --out=<dir|file>       Output directory (or .mp4 path for --export-video)
-              --fps=<30|60>          Frame rate for --export-video (default: 30)
-              --size=<WxH>           Pixel resolution (default: 1280x720)
-              --theme=<name>         Theme override (e.g. dark or light)
-              --json                 Machine-readable JSON report (--lint only)
-              --fail-on=<error|warning>  Exit non-zero threshold for --lint (default: error)
-            """.trimIndent(),
-        )
-    }
 }

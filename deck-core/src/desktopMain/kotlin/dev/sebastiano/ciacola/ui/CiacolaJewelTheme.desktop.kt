@@ -105,18 +105,35 @@ fun rememberReviewStatusPalette(): ReviewStatusPalette {
 }
 
 fun ReviewCommentStatus.iconKey(): IconKey = when (this) {
-    ReviewCommentStatus.Queued -> AllIconsKeys.General.Warning
+    // Not a warning: waiting in the outbox for an agent to collect is the normal, expected state
+    // of a comment, and a warning triangle on it teaches the author to ignore the whole row.
+    ReviewCommentStatus.Queued -> AllIconsKeys.Actions.Upload
     ReviewCommentStatus.Applying -> AllIconsKeys.Actions.Refresh
     ReviewCommentStatus.Applied -> AllIconsKeys.General.GreenCheckmark
     ReviewCommentStatus.Failed -> AllIconsKeys.General.Error
 }
 
-fun ReviewCommentStatus.labelText(): String = when (this) {
-    ReviewCommentStatus.Queued -> "Queued"
-    ReviewCommentStatus.Applying -> "Applying…"
-    ReviewCommentStatus.Applied -> "Applied"
-    ReviewCommentStatus.Failed -> "Delivery failed"
-}
+/**
+ * @param delivering `true` while a push of this comment is in flight. `Applying` is persisted both
+ *   for the seconds a push takes and for however long the agent then holds the comment, and those
+ *   are different answers to "what is happening right now?".
+ * @param claimed `true` when an agent has taken this comment from the queue. The status stays
+ *   `Queued` until that agent reports back, so without this the UI calls a comment somebody is
+ *   working on "waiting for an agent".
+ */
+fun ReviewCommentStatus.labelText(delivering: Boolean = false, claimed: Boolean = false): String =
+    when (this) {
+        // "Queued" read as something the author still had to do; the comment is in fact already
+        // waiting where an agent reads it, which is the whole point when nothing is pushing.
+        // Once an agent has claimed it, saying it is waiting is simply false.
+        ReviewCommentStatus.Queued -> if (claimed) "With an agent" else "Waiting for an agent"
+        ReviewCommentStatus.Applying -> if (delivering) "Sending to the agent…" else "With the agent"
+        ReviewCommentStatus.Applied -> "Applied"
+        // Claimed and failed is not work in progress: an agent took the note and reported that it
+        // could not do it. Calling that "with an agent" leaves the comment looking busy for ever,
+        // when what it actually needs is the author's attention.
+        ReviewCommentStatus.Failed -> if (claimed) "Needs attention" else "Delivery failed"
+    }
 
 /**
  * Resolves a focus ring color derived from Jewel's focused outline token that guarantees at least

@@ -293,6 +293,7 @@ class SlideReviewSystemTest {
             ),
             dispatchImmediate = false,
         )
+        assertNotNull(queued)
         assertEquals(ReviewCommentStatus.Queued, queued.status)
 
         val commentsJsonPath = storyboardDir.resolve("review-comments.json")

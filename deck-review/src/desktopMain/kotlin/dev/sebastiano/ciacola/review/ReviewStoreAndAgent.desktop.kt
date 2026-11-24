@@ -3,11 +3,13 @@ package dev.sebastiano.ciacola.review
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -69,6 +71,7 @@ class ReviewCommentStore(
     }
 
     val commentsFile: Path = storyboardDir.resolve("review-comments.json")
+    val claimsFile: Path = storyboardDir.resolve(ReviewClaims.FILE_NAME)
     val configFile: Path = storyboardDir.resolve("review-config.json")
     val capturesDir: Path = storyboardDir.resolve("review-captures")
 
@@ -77,6 +80,81 @@ class ReviewCommentStore(
     var config by mutableStateOf(ReviewConfig())
         private set
 
+    /**
+     * Comment ids whose push to the agent is in flight right now. A comment is `Applying` both
+     * while it is being pushed and for as long as the agent holds it afterwards, and those two
+     * mean very different things to whoever just clicked Send, so the in-flight half is tracked
+     * here rather than persisted.
+     */
+    val deliveringIds = SnapshotStateList<String>()
+
+    /**
+     * Comment ids an agent has claimed, refreshed by the same poll that reloads the queue.
+     *
+     * A claimed comment is still `Queued` — the agent has not reported back — so without this the
+     * UI would call it "waiting for an agent" while an agent is in fact working on it, and offer
+     * to send it to a second one.
+     */
+    val claimedIds = SnapshotStateList<String>()
+
+    private var lastClaimsModifiedMillis: Long = -1L
+    private var lastClaimsFileSize: Long = -1L
+
+    /** Whether a push command exists; see [agentPushAvailable]. */
+    private var pushBinAvailable: Boolean by mutableStateOf(false)
+
+    /** What the last review action did, for [ReviewActivityNoticeBar]. */
+    var activityNotice: ReviewActivityNotice? by mutableStateOf(null)
+        private set
+
+    private var noticeSeq: Long = 0L
+
+    private val noticeLock = Any()
+
+    private val deliveryLock = Any()
+
+    private data class FlushOutcome(
+        val dispatched: List<SlideReviewComment>,
+        val allClaimed: List<SlideReviewComment>,
+    )
+
+    private data class RetryOutcome(val comment: SlideReviewComment?, val claimedAlready: Boolean)
+
+    private fun postNotice(
+        kind: ReviewNoticeKind,
+        text: Pair<String, String>,
+        autoDismissMillis: Long?,
+    ) {
+        // Notices are posted from Dispatchers.IO as well as the UI thread. Allocating the id and
+        // publishing it have to be one step, or two notices share an id and the auto-dismiss
+        // timer for the first one takes the second one down with it.
+        synchronized(noticeLock) {
+            noticeSeq += 1
+            activityNotice = ReviewActivityNotice(
+                id = noticeSeq,
+                kind = kind,
+                title = text.first,
+                detail = text.second,
+                autoDismissMillis = autoDismissMillis,
+            )
+        }
+    }
+
+    /** Clears the notice only while it is still the one [noticeId] named. */
+    fun dismissNotice(noticeId: Long) {
+        synchronized(noticeLock) {
+            if (activityNotice?.id == noticeId) activityNotice = null
+        }
+    }
+
+    private fun displayNumbersOf(items: List<SlideReviewComment>): List<Int> {
+        // One immutable snapshot: this runs on Dispatchers.IO, and walking the live
+        // SnapshotStateList while the author queues or a reload swaps it can throw mid-dispatch,
+        // after the comment has already been persisted as Applying.
+        val snapshot = comments.toList()
+        return items.map { reviewDisplayNumber(snapshot, it.id) }.sorted()
+    }
+
     private var lastObservedModifiedMillis: Long = -1L
     private var lastObservedFileSize: Long = -1L
     private var lastConfigModifiedMillis: Long = -1L
@@ -84,6 +162,7 @@ class ReviewCommentStore(
 
     init {
         config = readConfigInternal()
+        refreshPushAvailability()
         reloadFromDisk()
     }
 
@@ -162,6 +241,85 @@ class ReviewCommentStore(
         return "agentapi"
     }
 
+    /**
+     * Whether there is a command on this machine to push a comment to at all.
+     *
+     * Without one, Send can only ever end where Queue already put the comment, so offering it is
+     * a dead end dressed up as an action. The queue is the real path: an agent on
+     * `:deck:reviewWait` collects from it.
+     *
+     * The answer is snapshot state so that [refreshPushAvailability] reaches the open UI, and it
+     * is only ever *read* here: this is called from composition, and resolving lazily would mean
+     * writing state while composing, which costs a wasted frame on every store and invites the
+     * loop where the write invalidates its own reader.
+     */
+    fun agentPushAvailable(): Boolean = pushBinAvailable
+
+    private fun resolvePushAvailability(bin: String): Boolean =
+        isExecutableAvailable(
+            bin = bin,
+            path = envProvider("PATH"),
+            baseDir = workspaceRoot,
+            pathExt = envProvider("PATHEXT"),
+        )
+
+    /**
+     * Re-checks the push command, for the moments where the answer plausibly just changed: the
+     * review panel opening, and a launch that failed.
+     */
+    fun refreshPushAvailability() {
+        pushBinAvailable = resolvePushAvailability(effectiveAgentApiBin())
+    }
+
+    /**
+     * Re-reads the claims sidecar when it has changed, on the same 250 ms tick as the queue.
+     *
+     * Guarded by mtime and size like the queue itself: this runs four times a second and an
+     * unchanged file is the normal case.
+     */
+    @Synchronized
+    fun reloadClaims() {
+        val modified = runCatching { claimsFile.getLastModifiedTime().toMillis() }.getOrDefault(-1L)
+        val size = runCatching { claimsFile.fileSize() }.getOrDefault(-1L)
+        if (modified == lastClaimsModifiedMillis && size == lastClaimsFileSize) return
+        lastClaimsModifiedMillis = modified
+        lastClaimsFileSize = size
+        val ids = ReviewClaims.readIds(claimsFile) {}
+        if (claimedIds.toSet() == ids) return
+        claimedIds.clear()
+        claimedIds.addAll(ids.sorted())
+    }
+
+    /**
+     * Hands a claim back, so the comment is offered to an agent again.
+     *
+     * The author's escape hatch when the agent that took a note is gone: a claim has no expiry,
+     * because guessing one would hand a comment to a second agent while the first is still
+     * thinking.
+     */
+    suspend fun releaseClaim(commentId: String) {
+        // On IO: this takes a cross-process lock, and the caller is a button in the review UI.
+        withContext(Dispatchers.IO) {
+            inQueueTransactionOrNotify { releaseClaimsInternal(listOf(commentId)) }
+        }
+        reloadClaims()
+    }
+
+    /**
+     * Drops [ids] from the claims sidecar. Must be called inside [inQueueTransaction].
+     *
+     * Also used when a comment leaves the queue for good — resolved, deleted or cleared — because
+     * a claim on a comment that no longer waits for anybody keeps the HUD counting it as being
+     * with an agent for ever.
+     */
+    private fun releaseClaimsInternal(ids: Collection<String>) {
+        val existing = ReviewClaims.read(claimsFile) {}
+        if (existing.none { it.id in ids }) return
+        ReviewClaims.write(claimsFile, ReviewClaims.releasing(existing, ids))
+        lastClaimsModifiedMillis = -1L
+        lastClaimsFileSize = -1L
+    }
+
     @Synchronized
     fun reloadFromDisk(): Boolean {
         config = readConfigInternal()
@@ -194,28 +352,109 @@ class ReviewCommentStore(
         }
         if (comments.toList() == parsed) return false
 
-        comments.clear()
-        comments.addAll(parsed)
+        // One snapshot for both writes, as in persistCommentsInternal: this runs on
+        // Dispatchers.IO inside every mutation now, and composition reading between the clear and
+        // the add would draw an empty feed for a frame.
+        Snapshot.withMutableSnapshot {
+            comments.clear()
+            comments.addAll(parsed)
+        }
         return true
     }
 
-    @Synchronized
+    /**
+     * Runs [block] holding the queue's file lock and then this store's monitor, in that order.
+     *
+     * Every mutation goes through here so the two are always taken the same way round. A path
+     * that took the monitor first would deadlock against one already holding the file lock and
+     * waiting for the monitor, which is exactly what reading claims before marking a comment
+     * `Applying` used to do.
+     *
+     * The wait is bounded. The other holder is a separate process, and a stuck one must not be
+     * able to freeze the deck for ever; [ReviewQueueFile.Busy] surfaces as a notice instead.
+     */
+    private fun <T> inQueueTransaction(block: () -> T): T =
+        ReviewQueueFile.withLock(storyboardDir, QUEUE_LOCK_WAIT) {
+            synchronized(this) {
+                // Every mutation starts from what disk says, not from what the 250 ms poll last
+                // saw. The in-memory list lags by up to a tick, and a mutation built on that lag
+                // commits a delta against a state that no longer exists: Send Queued pressed just
+                // after an agent resolved a comment would push its verdict back to applying and
+                // dispatch the finished note again. The mtime guard makes this free when nothing
+                // has changed, which is the normal case.
+                reloadFromDisk()
+                block()
+            }
+        }
+
+    /** As [inQueueTransaction], but reports a busy queue to the author rather than throwing. */
+    private fun <T> inQueueTransactionOrNotify(block: () -> T): T? =
+        try {
+            inQueueTransaction(block)
+        } catch (e: ReviewQueueFile.Busy) {
+            postNotice(
+                kind = ReviewNoticeKind.Failed,
+                text = queueBusyNotice(e.file),
+                autoDismissMillis = STICKY_NOTICE_MILLIS,
+            )
+            null
+        }
+
+    /**
+     * Commits [updated] to disk, merged against whatever is there now.
+     *
+     * Must be called inside [inQueueTransaction]: it does not take the locks itself, so that the
+     * caller can decide what else belongs in the same transaction — reading claims, say, which
+     * has to be atomic with marking a comment `Applying` or two agents get the same note.
+     */
     private fun persistCommentsInternal(updated: List<SlideReviewComment>) {
+        val believed = comments.toList()
+        var committed = updated
         runCatching {
             Files.createDirectories(storyboardDir)
-            writeAtomically(commentsFile, json.encodeToString(updated) + "\n")
+            val raw = ReviewQueueFile.readTextOrNull(commentsFile)?.takeIf { it.isNotBlank() }
+            val onDisk = if (raw == null) {
+                updated
+            } else {
+                runCatching { json.decodeFromString<List<SlideReviewComment>>(raw) }.getOrElse {
+                    // Keep a copy before replacing something we could not read, the way
+                    // reloadFromDisk does. Overwriting an unreadable queue in silence is how a
+                    // recoverable mess becomes an unrecoverable one.
+                    runCatching {
+                        Files.copy(
+                            commentsFile,
+                            commentsFile.resolveSibling("review-comments.corrupt.json"),
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    }
+                    updated
+                }
+            }
+            val merged = mergeOntoDisk(onDisk = onDisk, believed = believed, updated = updated)
+            ReviewQueueFile.writeAtomically(commentsFile, json.encodeToString(merged) + "\n")
+            committed = merged
+            // Inside the lock: taken afterwards, a verdict committed in between would be recorded
+            // as already seen, and the 250 ms poll would never come back for it.
             lastObservedModifiedMillis = commentsFile.getLastModifiedTime().toMillis()
             lastObservedFileSize = commentsFile.fileSize()
         }
-        comments.clear()
-        comments.addAll(updated)
+        // Publish what was committed, not what was asked for. The merge may have kept another
+        // writer's verdict, and the file's mtime is now recorded as seen, so a poll will not
+        // come back for it: believing `updated` here would leave the UI showing a comment as
+        // queued that disk says is applied, and the next write would push that stale state back.
+        // One snapshot for both writes: this runs off the main thread, and composition reading
+        // between the clear and the add would draw an empty feed for a frame.
+        Snapshot.withMutableSnapshot {
+            comments.clear()
+            comments.addAll(committed)
+        }
     }
 
     suspend fun submitComment(
         comment: SlideReviewComment,
         dispatchImmediate: Boolean,
         pngBytes: ByteArray? = null,
-    ): SlideReviewComment {
+    ): SlideReviewComment? {
         val savedScreenshotPath = if (pngBytes != null && pngBytes.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 Files.createDirectories(capturesDir)
@@ -240,35 +479,90 @@ class ReviewCommentStore(
             deckFilePath = comment.deckFilePath ?: defaultDeckFilePath,
             nodeId = comment.nodeId ?: comment.target.nodeId,
         )
-        val snapshot = synchronized(this) {
-            val next = comments.toList() + prepared
-            persistCommentsInternal(next)
-            prepared
-        }
+        // On IO, not the caller's dispatcher: this takes a cross-process lock, and the caller is
+        // a Compose click handler.
+        // OrNotify, not the throwing form: a busy queue must surface as a notice and leave the
+        // composer's text where the author can send it again. Thrown from here it would escape
+        // the click handler's scope with the note already discarded.
+        val snapshot = withContext(Dispatchers.IO) {
+            inQueueTransactionOrNotify {
+                val next = comments.toList() + prepared
+                persistCommentsInternal(next)
+                prepared
+            }
+        } ?: return null
 
-        if (!dispatchImmediate) return snapshot
-        return dispatchItemsToAgent(listOf(snapshot)).single()
+        if (!dispatchImmediate) {
+            postNotice(
+                kind = ReviewNoticeKind.Queued,
+                text = queuedNotice(
+                    numbers = displayNumbersOf(listOf(snapshot)),
+                    // Not "is a conversation set": whether a Send button exists to be pressed.
+                    agentConfigured = effectiveConversationId().isNotBlank() && agentPushAvailable(),
+                ),
+                autoDismissMillis = QUEUED_NOTICE_MILLIS,
+            )
+            return snapshot
+        }
+        return dispatchItemsToAgent(listOf(snapshot)).singleOrNull()
     }
 
+    /**
+     * Pushes everything still waiting, except what an agent has already taken.
+     *
+     * Status alone is not enough to decide. A comment collected by `:deck:reviewWait` stays
+     * `Queued` until the agent resolves it, so selecting on status would hand a note somebody is
+     * already acting on to a second agent, and two of them would edit the same slide.
+     */
     suspend fun flushQueued(): Int {
-        val queued = synchronized(this) {
-            val pending = comments.filter {
-                it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+        // Reading the claims and writing `Applying` have to be one transaction: a reviewWait
+        // landing in the gap claims the same comments before the status says they are taken, and
+        // two agents edit the same slide.
+        val outcome = withContext(Dispatchers.IO) {
+            inQueueTransactionOrNotify {
+                val claimed = ReviewClaims.readIds(claimsFile) {}
+                val waiting = comments.filter {
+                    it.status == ReviewCommentStatus.Queued ||
+                        it.status == ReviewCommentStatus.Failed
+                }
+                val pending = waiting.filterNot { it.id in claimed }
+                if (pending.isEmpty()) {
+                    FlushOutcome(dispatched = emptyList(), allClaimed = waiting)
+                } else {
+                    val pendingIds = pending.map { it.id }.toSet()
+                    val updated = comments.map { c ->
+                        if (c.id in pendingIds) {
+                            c.copy(status = ReviewCommentStatus.Applying, deliveryError = null)
+                        } else {
+                            c
+                        }
+                    }
+                    persistCommentsInternal(updated)
+                    FlushOutcome(
+                        dispatched = updated.filter { it.id in pendingIds },
+                        allClaimed = emptyList(),
+                    )
+                }
             }
-            if (pending.isEmpty()) return 0
-            val pendingIds = pending.map { it.id }.toSet()
-            val updated = comments.map { c ->
-                if (c.id in pendingIds) c.copy(status = ReviewCommentStatus.Applying, deliveryError = null) else c
+        } ?: return 0
+        if (outcome.dispatched.isEmpty()) {
+            if (outcome.allClaimed.isNotEmpty()) {
+                postNotice(
+                    // Not Delivered: nothing was pushed, the comments simply stayed where they
+                    // already were, and a green tick on that reads as success.
+                    kind = ReviewNoticeKind.Queued,
+                    text = alreadyWithAnAgentNotice(displayNumbersOf(outcome.allClaimed)),
+                    autoDismissMillis = QUEUED_NOTICE_MILLIS,
+                )
             }
-            persistCommentsInternal(updated)
-            updated.filter { it.id in pendingIds }
+            return 0
         }
-        dispatchItemsToAgent(queued)
-        return queued.size
+        dispatchItemsToAgent(outcome.dispatched)
+        return outcome.dispatched.size
     }
 
     fun deleteComment(commentId: String) {
-        synchronized(this) {
+        inQueueTransactionOrNotify {
             val target = comments.firstOrNull { it.id == commentId }
             if (target != null && trashedComments.none { it.id == target.id }) {
                 trashedComments.add(target)
@@ -276,30 +570,34 @@ class ReviewCommentStore(
                     trashedComments.removeAt(0)
                 }
             }
+            releaseClaimsInternal(listOf(commentId))
             persistCommentsInternal(comments.filterNot { it.id == commentId })
         }
     }
 
-    fun restoreComment(commentId: String): Boolean {
-        synchronized(this) {
-            val idx = trashedComments.indexOfFirst { it.id == commentId }
-            if (idx < 0) return false
+    fun restoreComment(commentId: String): Boolean = inQueueTransactionOrNotify {
+        val idx = trashedComments.indexOfFirst { it.id == commentId }
+        if (idx < 0) {
+            false
+        } else {
             val item = trashedComments.removeAt(idx)
             if (comments.none { it.id == item.id }) {
                 persistCommentsInternal(comments.toList() + item)
             }
-            return true
+            true
         }
-    }
+    } ?: false
 
-    fun restoreLastDeleted(): SlideReviewComment? {
-        synchronized(this) {
-            val last = trashedComments.lastOrNull() ?: return null
+    fun restoreLastDeleted(): SlideReviewComment? = inQueueTransactionOrNotify {
+        val last = trashedComments.lastOrNull()
+        if (last == null) {
+            null
+        } else {
             trashedComments.removeAt(trashedComments.lastIndex)
             if (comments.none { it.id == last.id }) {
                 persistCommentsInternal(comments.toList() + last)
             }
-            return last
+            last
         }
     }
 
@@ -313,10 +611,12 @@ class ReviewCommentStore(
         commentId: String,
         resolutionNote: String = "Marked applied manually",
     ) {
-        synchronized(this) {
+        inQueueTransactionOrNotify {
             var changed = false
             val updated = comments.map { existing ->
-                if (existing.id == commentId) {
+                // Already applied, by an agent that got there first: leave its resolution alone
+                // rather than replacing it with this placeholder.
+                if (existing.id == commentId && existing.status != ReviewCommentStatus.Applied) {
                     changed = true
                     existing.copy(
                         status = ReviewCommentStatus.Applied,
@@ -328,23 +628,49 @@ class ReviewCommentStore(
                 }
             }
             if (changed) {
+                releaseClaimsInternal(listOf(commentId))
                 persistCommentsInternal(updated)
             }
         }
     }
 
     fun clearAppliedComments() {
-        synchronized(this) {
+        inQueueTransactionOrNotify {
+            val cleared = comments.filter { it.status == ReviewCommentStatus.Applied }
+            releaseClaimsInternal(cleared.map { it.id })
             persistCommentsInternal(comments.filterNot { it.status == ReviewCommentStatus.Applied })
         }
     }
 
     suspend fun retryComment(commentId: String) {
-        val item = synchronized(this) {
-            val target = comments.firstOrNull { it.id == commentId } ?: return
-            val retrying = target.copy(status = ReviewCommentStatus.Applying, deliveryError = null)
-            persistCommentsInternal(comments.map { if (it.id == commentId) retrying else it })
-            retrying
+        val outcome = withContext(Dispatchers.IO) {
+            inQueueTransactionOrNotify {
+                val target = comments.firstOrNull { it.id == commentId }
+                when {
+                    target == null -> RetryOutcome(null, claimedAlready = false)
+                    // An agent is already on it; pushing would be the same double delivery
+                    // flushQueued avoids, one comment at a time.
+                    commentId in ReviewClaims.readIds(claimsFile) {} ->
+                        RetryOutcome(target, claimedAlready = true)
+                    else -> {
+                        val retrying =
+                            target.copy(status = ReviewCommentStatus.Applying, deliveryError = null)
+                        persistCommentsInternal(
+                            comments.map { if (it.id == commentId) retrying else it },
+                        )
+                        RetryOutcome(retrying, claimedAlready = false)
+                    }
+                }
+            }
+        } ?: return
+        val item = outcome.comment ?: return
+        if (outcome.claimedAlready) {
+            postNotice(
+                kind = ReviewNoticeKind.Queued,
+                text = alreadyWithAnAgentNotice(displayNumbersOf(listOf(item))),
+                autoDismissMillis = QUEUED_NOTICE_MILLIS,
+            )
+            return
         }
         dispatchItemsToAgent(listOf(item))
     }
@@ -354,6 +680,11 @@ class ReviewCommentStore(
     ): List<SlideReviewComment> = withContext(Dispatchers.IO) {
         val convId = effectiveConversationId()
         if (convId.isBlank()) {
+            postNotice(
+                kind = ReviewNoticeKind.NothingToPushTo,
+                text = queuedNotice(numbers = displayNumbersOf(items), agentConfigured = false),
+                autoDismissMillis = STICKY_NOTICE_MILLIS,
+            )
             return@withContext markDeliveryFailure(
                 items = items,
                 fallbackStatus = ReviewCommentStatus.Queued,
@@ -362,7 +693,25 @@ class ReviewCommentStore(
         }
 
         val bin = effectiveAgentApiBin()
-        val message = formatAgentMessage(items)
+        // Retry Send stays live while a comment is Applying, so a second push can start on top of
+        // the first. Reserving has to be one step, or two dispatches both see the id unreserved;
+        // and the message has to be built from what this dispatch actually owns, not from what it
+        // was asked for, or the push describes comments another one is already sending.
+        val mine = synchronized(deliveryLock) {
+            val free = items.filterNot { it.id in deliveringIds }
+            deliveringIds.addAll(free.map { it.id })
+            free
+        }
+        if (mine.isEmpty()) return@withContext items
+        // Every notice from here on describes what this dispatch actually owns: another one may
+        // already be sending the rest, and naming those would report its progress as ours.
+        val numbers = displayNumbersOf(mine)
+        val message = formatAgentMessage(mine)
+        postNotice(
+            kind = ReviewNoticeKind.Sending,
+            text = sendingNotice(numbers),
+            autoDismissMillis = null,
+        )
         val result = runCatching {
             val pb = ProcessBuilder(
                 bin,
@@ -386,14 +735,50 @@ class ReviewCommentStore(
             }
         }
 
+        synchronized(deliveryLock) { deliveringIds.removeAll(mine.map { it.id }.toSet()) }
+
         if (result.isFailure) {
-            val err = result.exceptionOrNull()?.message ?: "Unknown agentapi error"
+            val cause = result.exceptionOrNull()
+            val err = cause?.message ?: "Unknown agentapi error"
+            // Having no agent binary on PATH is not a delivery failure. There is simply nothing
+            // listening to push to, and the comment is perfectly well served by staying queued for
+            // an agent that polls (`:deck:reviewWait`). Reporting it in red trains the author to
+            // ignore the one signal that should mean something went wrong.
+            // Ask the filesystem rather than the exception text: ProcessBuilder says "Cannot run
+            // program" for a command that is present but not executable, or whose interpreter is
+            // missing, and reporting those as "nothing installed" hides a fault the author can fix.
+            // Absent is the only case that means "nothing to push to"; present-but-unrunnable
+            // keeps its diagnostic, because that one the author can act on.
+            refreshPushAvailability()
+            val noAgentInstalled = isAgentBinaryMissing(cause) &&
+                !commandExistsAnywhere(
+                    bin = effectiveAgentApiBin(),
+                    path = envProvider("PATH"),
+                    baseDir = workspaceRoot,
+                    pathExt = envProvider("PATHEXT"),
+                )
+            postNotice(
+                kind = if (noAgentInstalled) ReviewNoticeKind.NothingToPushTo else ReviewNoticeKind.Failed,
+                text = if (noAgentInstalled) {
+                    nothingToPushToNotice(numbers)
+                } else {
+                    deliveryFailedNotice(numbers, err.take(300))
+                },
+                autoDismissMillis = STICKY_NOTICE_MILLIS,
+            )
             markDeliveryFailure(
-                items = items,
-                fallbackStatus = ReviewCommentStatus.Failed,
-                reason = err.take(300),
+                // Only what this dispatch reserved: another dispatch may own the rest, and
+                // marking its comments failed would offer them to a waiter mid-flight.
+                items = mine,
+                fallbackStatus = if (noAgentInstalled) ReviewCommentStatus.Queued else ReviewCommentStatus.Failed,
+                reason = if (noAgentInstalled) "" else err.take(300),
             )
         } else {
+            postNotice(
+                kind = ReviewNoticeKind.Delivered,
+                text = deliveredNotice(numbers),
+                autoDismissMillis = QUEUED_NOTICE_MILLIS,
+            )
             items
         }
     }
@@ -402,10 +787,14 @@ class ReviewCommentStore(
         items: List<SlideReviewComment>,
         fallbackStatus: ReviewCommentStatus,
         reason: String,
-    ): List<SlideReviewComment> = synchronized(this) {
+    ): List<SlideReviewComment> = inQueueTransactionOrNotify {
         val ids = items.map { it.id }.toSet()
+        // The transaction has already synced `comments` from disk, so this reads the live status.
+        // A push can time out after 15 seconds, by which time the agent may already have written
+        // Applied through :deck:reviewResolve; transitioning on a stale copy would merge that
+        // verdict away. Only a comment still being pushed is a delivery failure.
         val updated = comments.map { existing ->
-            if (existing.id in ids) {
+            if (existing.id in ids && existing.status == ReviewCommentStatus.Applying) {
                 existing.copy(status = fallbackStatus, deliveryError = reason)
             } else {
                 existing
@@ -413,7 +802,7 @@ class ReviewCommentStore(
         }
         persistCommentsInternal(updated)
         updated.filter { it.id in ids }
-    }
+    } ?: items
 
     fun copyPromptToClipboard(items: List<SlideReviewComment>): String {
         val message = formatAgentMessage(items)
@@ -545,9 +934,15 @@ class ReviewCommentStore(
             }
             val deckNoun = if (lintDeckArgs.size <= 1) "deck" else "decks"
             appendLine("2. Validate the updated $deckNoun via `$lintCommand`.")
+            // Never tell an agent to edit the queue by hand. That write would miss
+            // review-queue.lock, and the author queueing a comment at the same moment would lose
+            // it — the race this whole file's locking exists to close.
             appendLine(
-                "3. Update those comment IDs in `$absComments` to `\"status\": \"applied\"` " +
-                    "with a concise `\"resolution\"` note so the live viewer pins turn green automatically."
+                "3. Close each comment with `$gradlePrefix :deck:reviewResolve " +
+                    "-Pciacola.deck=${shellQuote(primaryDeckId)} -Pciacola.comment=<commentId> " +
+                    "-Pciacola.resolution=\"<what you changed>\"`, which takes the queue lock and " +
+                    "turns the live viewer's pin green. Do not edit `$absComments` by hand: that " +
+                    "bypasses the lock and can erase a comment queued at the same moment."
             )
         }
     }
@@ -584,6 +979,14 @@ class ReviewCommentStore(
     }
 
     private companion object {
+        /**
+         * How long a queue transaction waits for another process before giving up.
+         *
+         * Long enough that an agent mid-write is never interrupted, short enough that a stuck one
+         * cannot hold the author's deck hostage.
+         */
+        private val QUEUE_LOCK_WAIT: java.time.Duration = java.time.Duration.ofSeconds(5)
+
         private val SAFE_SHELL_ARG_REGEX = Regex("^[A-Za-z0-9_./:@%+=,-]+$")
     }
 }
@@ -667,3 +1070,13 @@ internal fun writeTextToSystemClipboard(text: String) {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
 }
+
+/**
+ * Whether a dispatch failed only because the configured agent command is not installed.
+ *
+ * That is the ordinary state for an author whose agent polls the queue instead of being pushed to,
+ * so it should leave the comment queued rather than marked as a delivery failure.
+ */
+internal fun isAgentBinaryMissing(cause: Throwable?): Boolean =
+    cause is IOException && (cause.message ?: "").contains("Cannot run program")
+
