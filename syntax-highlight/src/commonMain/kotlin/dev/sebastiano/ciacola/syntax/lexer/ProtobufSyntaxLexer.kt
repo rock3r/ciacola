@@ -162,6 +162,7 @@ private class ProtoScope(
     var stmtState: ProtoStmtState = ProtoStmtState.START,
     var pendingBraceScope: ProtoScopeKind? = null,
     var isOptionValueContext: Boolean = false,
+    val isAngleDelimited: Boolean = false,
 )
 
 private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
@@ -222,7 +223,7 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoTokens.RBRACE -> {
-                if (scopeStack.size > 1) {
+                if (scopeStack.size > 1 && !(scope.kind == ProtoScopeKind.OPTION_AGGREGATE && scope.isAngleDelimited)) {
                     scopeStack.removeAt(scopeStack.lastIndex)
                 }
                 val parent = currentScope()
@@ -290,8 +291,22 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoTokens.LANGLE -> {
-                if (scope.stmtState == ProtoStmtState.AWAITING_FIELD_TYPE ||
-                    scope.stmtState == ProtoStmtState.START
+                if (scope.kind == ProtoScopeKind.OPTION_AGGREGATE ||
+                    scope.stmtState == ProtoStmtState.IN_OPTION_VALUE ||
+                    scope.stmtState == ProtoStmtState.IN_FIELD_AFTER_NAME
+                ) {
+                    scopeStack.add(
+                        ProtoScope(
+                            kind = ProtoScopeKind.OPTION_AGGREGATE,
+                            stmtState = ProtoStmtState.START,
+                            isOptionValueContext = true,
+                            isAngleDelimited = true,
+                        ),
+                    )
+                    vi++
+                    continue
+                } else if (scope.kind != ProtoScopeKind.BRACK_FIELD_OPTS &&
+                    (scope.stmtState == ProtoStmtState.AWAITING_FIELD_TYPE || scope.stmtState == ProtoStmtState.START)
                 ) {
                     scopeStack.add(
                         ProtoScope(
@@ -305,7 +320,11 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoTokens.RANGLE -> {
-                if (scopeStack.size > 1 && scope.kind == ProtoScopeKind.ANGLE_MAP) {
+                if (scopeStack.size > 1 && scope.kind == ProtoScopeKind.OPTION_AGGREGATE && scope.isAngleDelimited) {
+                    scopeStack.removeAt(scopeStack.lastIndex)
+                    vi++
+                    continue
+                } else if (scopeStack.size > 1 && scope.kind == ProtoScopeKind.ANGLE_MAP) {
                     scopeStack.removeAt(scopeStack.lastIndex)
                     currentScope().stmtState = ProtoStmtState.AWAITING_FIELD_NAME
                     vi++
@@ -328,7 +347,7 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
         when (scope.kind) {
             ProtoScopeKind.OPTION_AGGREGATE -> {
                 if (type == ProtoTokens.IDENT) {
-                    if (nextType == ProtoTokens.COLON || nextType == ProtoTokens.LBRACE) {
+                    if (nextType == ProtoTokens.COLON || nextType == ProtoTokens.LBRACE || nextType == ProtoTokens.LANGLE) {
                         tok.kind = SyntaxTokenKind.Property
                     } else if (text in CONSTANT_LITERALS) {
                         tok.kind = SyntaxTokenKind.Constant

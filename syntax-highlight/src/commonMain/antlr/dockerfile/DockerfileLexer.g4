@@ -19,11 +19,11 @@ WS
     ;
 
 BACKSLASH_LINE_CONT
-    : '\\' { isEscapeBackslash() }? ( '\r'? '\n' | '\r' ) { onLineContinuation(); }
+    : '\\' { isEscapeBackslash() }? [ \t]* ( '\r'? '\n' | '\r' ) { onLineContinuation(); }
     ;
 
 BACKTICK_LINE_CONT
-    : '`' { isEscapeBacktick() }? ( '\r'? '\n' | '\r' ) { onLineContinuation(); }
+    : '`' { isEscapeBacktick() }? [ \t]* ( '\r'? '\n' | '\r' ) { onLineContinuation(); }
     ;
 
 NEWLINE
@@ -39,7 +39,7 @@ DQUOTE_OPEN
     ;
 
 SINGLE_STRING
-    : '\'' ~[']* '\''? { onNonWsToken(); }
+    : '\'' ~['\r\n]* '\''? { onNonWsToken(); }
     ;
 
 HEREDOC_OPEN
@@ -121,12 +121,16 @@ DQ_CLOSE
     : '"' { popMode(); }
     ;
 
+DQ_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onDQuoteNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
+    ;
+
 DQ_ESC_BS
-    : '\\' { isEscapeBackslash() }? ( '\r'? '\n' | '\r' | . )?
+    : '\\' { isEscapeBackslash() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )?
     ;
 
 DQ_ESC_BT
-    : '`' { isEscapeBacktick() }? ( '\r'? '\n' | '\r' | . )?
+    : '`' { isEscapeBacktick() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )?
     ;
 
 DQ_PARAM_EXP_OPEN
@@ -154,7 +158,7 @@ DQ_BT_LITERAL
     ;
 
 DQ_TEXT
-    : ~["\\`$]+
+    : ~["\\`$\r\n]+
     ;
 
 // ---------------- Parameter Expansion (${...}) ----------------
@@ -190,7 +194,7 @@ PE_DQUOTE_OPEN
     ;
 
 PE_SINGLE_STRING
-    : '\'' ~[']* '\''?
+    : '\'' ~['\r\n]* '\''?
     ;
 
 PE_ESC_BS

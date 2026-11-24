@@ -195,8 +195,17 @@ private class TemplateContext(
     var braceDepth: Int = 0,
 )
 
+private class HclScope(
+    val isBrace: Boolean,
+    var expectingForColon: Boolean = false,
+    var pendingTernaryColons: Int = 0,
+)
+
 private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
     val templateStack = ArrayList<TemplateContext>()
+    val scopeStack = ArrayList<HclScope>().apply {
+        add(HclScope(isBrace = false))
+    }
     var atStmtStart = true
     var prevVisibleType = -1
 
@@ -224,6 +233,7 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
             HclTokens.HD_INTERP_OPEN,
             -> {
                 templateStack.add(TemplateContext(isDirective = false))
+                scopeStack.add(HclScope(isBrace = false))
                 atStmtStart = true
                 prevVisibleType = tok.type
                 continue
@@ -233,6 +243,7 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
             HclTokens.HD_DIR_OPEN,
             -> {
                 templateStack.add(TemplateContext(isDirective = true))
+                scopeStack.add(HclScope(isBrace = false))
                 atStmtStart = true
                 prevVisibleType = tok.type
                 continue
@@ -240,6 +251,7 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
 
             HclTokens.LBRACE -> {
                 templateStack.lastOrNull()?.let { it.braceDepth++ }
+                scopeStack.add(HclScope(isBrace = true))
                 atStmtStart = true
                 prevVisibleType = tok.type
                 continue
@@ -250,7 +262,30 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
                 if (top != null && top.braceDepth > 0) {
                     top.braceDepth--
                 }
+                if (scopeStack.size > 1 && scopeStack.last().isBrace) {
+                    scopeStack.removeAt(scopeStack.lastIndex)
+                }
                 atStmtStart = true
+                prevVisibleType = tok.type
+                continue
+            }
+
+            HclTokens.LBRACK,
+            HclTokens.LPAREN,
+            -> {
+                scopeStack.add(HclScope(isBrace = false))
+                atStmtStart = false
+                prevVisibleType = tok.type
+                continue
+            }
+
+            HclTokens.RBRACK,
+            HclTokens.RPAREN,
+            -> {
+                if (scopeStack.size > 1 && !scopeStack.last().isBrace) {
+                    scopeStack.removeAt(scopeStack.lastIndex)
+                }
+                atStmtStart = false
                 prevVisibleType = tok.type
                 continue
             }
@@ -258,6 +293,28 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
             HclTokens.TEMPLATE_CLOSE -> {
                 if (templateStack.isNotEmpty()) {
                     templateStack.removeAt(templateStack.lastIndex)
+                }
+                if (scopeStack.size > 1 && !scopeStack.last().isBrace) {
+                    scopeStack.removeAt(scopeStack.lastIndex)
+                }
+                atStmtStart = false
+                prevVisibleType = tok.type
+                continue
+            }
+
+            HclTokens.QUESTION -> {
+                scopeStack.last().pendingTernaryColons++
+                atStmtStart = false
+                prevVisibleType = tok.type
+                continue
+            }
+
+            HclTokens.COLON -> {
+                val scope = scopeStack.last()
+                if (scope.pendingTernaryColons > 0) {
+                    scope.pendingTernaryColons--
+                } else if (scope.expectingForColon) {
+                    scope.expectingForColon = false
                 }
                 atStmtStart = false
                 prevVisibleType = tok.type
@@ -272,9 +329,15 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
             val text = source.substring(tok.start, tok.end)
             val afterAccessor = prevVisibleType == HclTokens.DOT || prevVisibleType == HclTokens.DOUBLE_COLON
             val inDirective = templateStack.lastOrNull()?.let { it.isDirective && it.braceDepth == 0 } == true
+            val scope = scopeStack.last()
+            val isObjectColonKey = scope.isBrace &&
+                !afterAccessor &&
+                nextType == HclTokens.COLON &&
+                !scope.expectingForColon &&
+                scope.pendingTernaryColons == 0
 
             tok.kind = when {
-                !afterAccessor && nextType == HclTokens.EQ -> SyntaxTokenKind.Property
+                !afterAccessor && (nextType == HclTokens.EQ || isObjectColonKey) -> SyntaxTokenKind.Property
                 inDirective && !afterAccessor && text in DIRECTIVE_KEYWORDS &&
                     nextType != HclTokens.DOT && nextType != HclTokens.LPAREN -> SyntaxTokenKind.Keyword
                 atStmtStart && !afterAccessor && text in BLOCK_KEYWORDS &&
@@ -282,7 +345,12 @@ private fun classifyHclTokens(source: String, raw: List<RawHclToken>) {
                     nextType != HclTokens.LPAREN -> SyntaxTokenKind.Keyword
                 !afterAccessor && text in EXPR_KEYWORDS &&
                     nextType != HclTokens.DOT && nextType != HclTokens.DOUBLE_COLON &&
-                    nextType != HclTokens.LPAREN -> SyntaxTokenKind.Keyword
+                    nextType != HclTokens.LPAREN -> {
+                    if (text == "for") {
+                        scope.expectingForColon = true
+                    }
+                    SyntaxTokenKind.Keyword
+                }
                 !afterAccessor && text in CONSTANTS -> SyntaxTokenKind.Constant
                 !afterAccessor && text in TYPE_CONSTRUCTORS -> SyntaxTokenKind.Type
                 nextType == HclTokens.LPAREN -> SyntaxTokenKind.Function

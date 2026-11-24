@@ -144,6 +144,29 @@ class ProtobufSyntaxLexerTest {
 
         val getTok = rpcTokens.first { it.slice(code) == "get" }
         assertEquals(SyntaxTokenKind.Property, getTok.kind)
+
+        val angleOptionCode = """
+            option (my.opt) = {
+              sub_msg: <
+                name: "foo"
+                enabled: true
+              >
+              other_msg <
+                count: 42
+              >
+            };
+            option (top.angle) = < flag: false >;
+        """.trimIndent() + "\n"
+        val angleTokens = assertValidSnippetHasNoInvalidTokens(ProtobufSyntaxLexer, angleOptionCode, "protobuf-angle-options")
+        for (prop in listOf("sub_msg", "name", "enabled", "other_msg", "count", "flag")) {
+            assertEquals(
+                SyntaxTokenKind.Property,
+                angleTokens.first { it.slice(angleOptionCode) == prop }.kind,
+                "Expected textproto field '$prop' inside angle-bracket message to be Property",
+            )
+        }
+        assertEquals(SyntaxTokenKind.Constant, angleTokens.first { it.slice(angleOptionCode) == "true" }.kind)
+        assertEquals(SyntaxTokenKind.Constant, angleTokens.first { it.slice(angleOptionCode) == "false" }.kind)
     }
 
     @Test

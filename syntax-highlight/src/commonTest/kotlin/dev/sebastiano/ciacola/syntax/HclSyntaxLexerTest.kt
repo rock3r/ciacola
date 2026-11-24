@@ -164,6 +164,73 @@ class HclSyntaxLexerTest {
     }
 
     @Test
+    fun handlesNestedHeredocInsideHeredocInterpMultipleHeredocsAndColonObjectKeys() {
+        val nestedHeredocCode = """
+            x = <<OUTER
+            header ${'$'}{trimspace(<<INNER)} trailer
+            inner line
+            INNER
+            outer line
+            OUTER
+            resource "aws_s3_bucket" "b" {}
+        """.trimIndent() + "\n"
+        val nestedTokens = assertValidSnippetHasNoInvalidTokens(
+            HclSyntaxLexer,
+            nestedHeredocCode,
+            "hcl-nested-heredoc-in-heredoc",
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            nestedTokens.first { it.slice(nestedHeredocCode) == "INNER" && it.startIndex > nestedHeredocCode.indexOf("inner line") }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            nestedTokens.first { it.slice(nestedHeredocCode) == "OUTER" && it.startIndex > nestedHeredocCode.indexOf("outer line") }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            nestedTokens.first { it.slice(nestedHeredocCode) == "resource" }.kind,
+        )
+
+        val multiHeredocCode = "x = [<<EOF1, <<EOF2]\nfirst\nEOF1\nsecond\nEOF2\n"
+        val multiTokens = assertValidSnippetHasNoInvalidTokens(HclSyntaxLexer, multiHeredocCode, "hcl-multi-heredoc")
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            multiTokens.last { it.slice(multiHeredocCode) == "EOF1" }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            multiTokens.last { it.slice(multiHeredocCode) == "EOF2" }.kind,
+        )
+
+        val colonKeysCode = """
+            locals {
+              policy = {
+                resource: "arn"
+                string: "text"
+                for: "loop"
+                plain_key: 1
+              }
+              mapped = { for k, v in items : k => var.ok ? a : b }
+            }
+        """.trimIndent() + "\n"
+        val colonTokens = assertValidSnippetHasNoInvalidTokens(HclSyntaxLexer, colonKeysCode, "hcl-colon-object-keys")
+        for (key in listOf("resource", "string", "for", "plain_key")) {
+            assertEquals(
+                SyntaxTokenKind.Property,
+                colonTokens.first { it.slice(colonKeysCode) == key }.kind,
+                "Expected colon-delimited object key '$key' to be Property",
+            )
+        }
+        val mappedStart = colonKeysCode.indexOf("mapped")
+        val mappedTokens = colonTokens.filter { it.startIndex >= mappedStart }
+        assertEquals(SyntaxTokenKind.Keyword, mappedTokens.first { it.slice(colonKeysCode) == "for" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, mappedTokens.first { it.slice(colonKeysCode) == "items" }.kind)
+        assertEquals(SyntaxTokenKind.Property, mappedTokens.first { it.slice(colonKeysCode) == "ok" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, mappedTokens.first { it.slice(colonKeysCode) == "a" }.kind)
+    }
+
+    @Test
     fun handlesBomCrlfUnicodeIdentifiersUnclosedConstructsAndSurrogates() {
         val loneHigh = 0xD800.toChar()
         val loneLow = 0xDC00.toChar()

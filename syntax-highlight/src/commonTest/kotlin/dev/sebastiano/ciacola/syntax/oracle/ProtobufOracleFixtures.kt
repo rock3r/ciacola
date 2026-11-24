@@ -155,7 +155,7 @@ internal object ProtobufOracleFixtures {
             OracleTokenExpectation("\"other.proto\"", 31, 44, SyntaxTokenKind.String, SyntaxTokenKind.String),
             OracleTokenExpectation(";", 44, 45, SyntaxTokenKind.Punctuation, SyntaxTokenKind.Punctuation),
             OracleTokenExpectation("extend", 46, 52, SyntaxTokenKind.Keyword, SyntaxTokenKind.Keyword),
-            OracleTokenExpectation("essageOptions", 70, 83, SyntaxTokenKind.Type, SyntaxTokenKind.Plain),
+            OracleTokenExpectation("MessageOptions", 69, 83, SyntaxTokenKind.Type, SyntaxTokenKind.Plain),
             OracleTokenExpectation("{", 84, 85, SyntaxTokenKind.Plain, SyntaxTokenKind.Punctuation),
             OracleTokenExpectation("optional", 88, 96, SyntaxTokenKind.Keyword, SyntaxTokenKind.Keyword),
             OracleTokenExpectation("string", 97, 103, SyntaxTokenKind.Type, SyntaxTokenKind.Type),

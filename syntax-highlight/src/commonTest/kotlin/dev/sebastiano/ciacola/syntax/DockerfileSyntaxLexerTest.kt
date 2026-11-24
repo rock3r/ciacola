@@ -117,8 +117,8 @@ class DockerfileSyntaxLexerTest {
             COPY <<'LIT' <<-IND /dst/
             literal ${'$'}VAR ${'$'}{NOT_EXPANDED}
             LIT
-            	indented ${'$'}EXPANDED
-            	IND
+            ${'\t'}indented ${'$'}EXPANDED
+            ${'\t'}IND
             RUN echo as from run
         """.trimIndent() + "\n"
 
@@ -150,6 +150,65 @@ class DockerfileSyntaxLexerTest {
         // Unclosed heredoc at EOF remains lossless.
         val unclosed = "RUN <<EOF\nline1\nline2 without terminator"
         assertLosslessInvariants(DockerfileSyntaxLexer, unclosed, "dockerfile-unclosed-heredoc")
+    }
+
+    @Test
+    fun recoversFromUnclosedQuotesHandlesTrailingSpacesAfterEscapeAndNestedVarsMultiArgLegacyEnv() {
+        val unclosedQuoteCode = "ENV BROKEN=\"oops\nFROM alpine:3.19\nRUN echo \"ok\"\n"
+        val unclosedTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            unclosedQuoteCode,
+            "dockerfile-unclosed-quote-recovery",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, unclosedTokens.first { it.slice(unclosedQuoteCode) == "FROM" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, unclosedTokens.first { it.slice(unclosedQuoteCode) == "RUN" }.kind)
+        assertEquals(SyntaxTokenKind.String, unclosedTokens.first { it.slice(unclosedQuoteCode) == "ok" }.kind)
+
+        val unclosedSingleCode = "RUN echo 'oops\nFROM busybox:latest\n"
+        val unclosedSingleTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            unclosedSingleCode,
+            "dockerfile-unclosed-single-recovery",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, unclosedSingleTokens.first { it.slice(unclosedSingleCode) == "FROM" }.kind)
+
+        val trailingSpacesContCode = "RUN echo hello \\   \n    && echo world\nFROM alpine\n"
+        val trailingContTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            trailingSpacesContCode,
+            "dockerfile-trailing-space-cont",
+        )
+        val echoTokens = trailingContTokens.filter { it.slice(trailingSpacesContCode) == "echo" }
+        assertEquals(2, echoTokens.size)
+        assertTrue(echoTokens.all { it.kind == SyntaxTokenKind.Function })
+
+        val nestedVarCode = "RUN echo \"${'$'}{OUTER:-${'$'}{INNER}}\"\n"
+        val nestedVarTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            nestedVarCode,
+            "dockerfile-nested-param-exp",
+        )
+        assertEquals(SyntaxTokenKind.Property, nestedVarTokens.first { it.slice(nestedVarCode) == "OUTER" }.kind)
+        assertEquals(SyntaxTokenKind.Property, nestedVarTokens.first { it.slice(nestedVarCode) == "INNER" }.kind)
+
+        val multiArgCode = "ARG DEBIAN_FRONTEND TARGETARCH TARGETOS\n"
+        val multiArgTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            multiArgCode,
+            "dockerfile-multi-arg",
+        )
+        for (argName in listOf("DEBIAN_FRONTEND", "TARGETARCH", "TARGETOS")) {
+            assertEquals(SyntaxTokenKind.Property, multiArgTokens.first { it.slice(multiArgCode) == argName }.kind)
+        }
+
+        val legacyEnvCode = "ENV JAVA_OPTS -Xmx512m -Dfoo=bar\n"
+        val legacyEnvTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            legacyEnvCode,
+            "dockerfile-legacy-env",
+        )
+        assertEquals(SyntaxTokenKind.Property, legacyEnvTokens.first { it.slice(legacyEnvCode) == "JAVA_OPTS" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, legacyEnvTokens.first { it.slice(legacyEnvCode) == "-Dfoo" }.kind)
     }
 
     @Test

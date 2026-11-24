@@ -34,8 +34,21 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
     private var commentLineInContinuation: Boolean = false
     private var paramExpBraceDepth: Int = 0
     private val paramExpDepthStack = ArrayList<Int>()
-    private val pendingHeredocs = ArrayList<HeredocSpec>()
+    private val pendingHeredocs = ArrayDeque<HeredocSpec>()
     private val heredocStack = ArrayList<HeredocFrame>()
+
+    override fun reset() {
+        super.reset()
+        escapeChar = '\\'
+        directivesActive = true
+        atLineStart = true
+        continuationPending = false
+        commentLineInContinuation = false
+        paramExpBraceDepth = 0
+        paramExpDepthStack.clear()
+        pendingHeredocs.clear()
+        heredocStack.clear()
+    }
 
     protected fun isEscapeBackslash(): Boolean = escapeChar == '\\'
 
@@ -103,7 +116,7 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         }
         continuationPending = false
         if (pendingHeredocs.isNotEmpty()) {
-            val nextSpec = pendingHeredocs.removeAt(0)
+            val nextSpec = pendingHeredocs.removeFirst()
             heredocStack.add(HeredocFrame(spec = nextSpec))
             val targetMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
                 heredocLiteralMode
@@ -111,6 +124,28 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
                 heredocExpandMode
             }
             pushMode(targetMode)
+        }
+    }
+
+    protected fun onDQuoteNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {
+        if (!_modeStack.isEmpty) {
+            popMode()
+        }
+        if (_mode == DEFAULT_MODE) {
+            directivesActive = false
+            atLineStart = true
+            continuationPending = false
+            commentLineInContinuation = false
+            if (pendingHeredocs.isNotEmpty()) {
+                val nextSpec = pendingHeredocs.removeFirst()
+                heredocStack.add(HeredocFrame(spec = nextSpec))
+                val targetMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
+                    heredocLiteralMode
+                } else {
+                    heredocExpandMode
+                }
+                pushMode(targetMode)
+            }
         }
     }
 
@@ -127,7 +162,7 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
             ((rawDelim.startsWith("'") && rawDelim.endsWith("'")) ||
                 (rawDelim.startsWith("\"") && rawDelim.endsWith("\"")))
         val delimiter = if (isQuoted) rawDelim.substring(1, rawDelim.length - 1) else rawDelim
-        pendingHeredocs.add(
+        pendingHeredocs.addLast(
             HeredocSpec(
                 delimiter = delimiter,
                 delimiterCodePoints = toCodePoints(delimiter),
@@ -224,7 +259,7 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
             heredocStack.removeAt(heredocStack.lastIndex)
         }
         if (pendingHeredocs.isNotEmpty()) {
-            val nextSpec = pendingHeredocs.removeAt(0)
+            val nextSpec = pendingHeredocs.removeFirst()
             heredocStack.add(HeredocFrame(spec = nextSpec))
             val targetMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
                 heredocLiteralMode

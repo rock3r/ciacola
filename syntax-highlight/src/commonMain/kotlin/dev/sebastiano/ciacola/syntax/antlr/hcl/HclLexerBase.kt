@@ -25,11 +25,22 @@ internal abstract class HclLexerBase(input: CharStream) : Lexer(input) {
     private class HeredocFrame(
         val spec: HeredocSpec,
         var atLineStart: Boolean = true,
+        val pendingHeredocs: ArrayDeque<HeredocSpec> = ArrayDeque(),
     )
 
     private val templateStack = ArrayList<TemplateFrame>()
-    private var pendingHeredoc: HeredocSpec? = null
+    private val topLevelPendingHeredocs = ArrayDeque<HeredocSpec>()
     private val heredocStack = ArrayList<HeredocFrame>()
+
+    override fun reset() {
+        super.reset()
+        templateStack.clear()
+        topLevelPendingHeredocs.clear()
+        heredocStack.clear()
+    }
+
+    private fun currentPendingHeredocs(): ArrayDeque<HeredocSpec> =
+        heredocStack.lastOrNull()?.pendingHeredocs ?: topLevelPendingHeredocs
 
     protected fun enterTemplateExpr() {
         pushMode(DEFAULT_MODE)
@@ -81,21 +92,31 @@ internal abstract class HclLexerBase(input: CharStream) : Lexer(input) {
             idx++
         }
         val delim = lexeme.substring(idx)
-        pendingHeredoc = HeredocSpec(
-            delimiterCodePoints = toCodePoints(delim),
-            stripIndent = stripIndent,
+        currentPendingHeredocs().addLast(
+            HeredocSpec(
+                delimiterCodePoints = toCodePoints(delim),
+                stripIndent = stripIndent,
+            ),
         )
     }
 
     protected fun onDefaultNewline(heredocMode: Int) {
-        val spec = pendingHeredoc ?: return
-        pendingHeredoc = null
+        val pending = currentPendingHeredocs()
+        if (pending.isEmpty()) return
+        val spec = pending.removeFirst()
         heredocStack.add(HeredocFrame(spec = spec, atLineStart = true))
         pushMode(heredocMode)
     }
 
     protected fun onHeredocNewline() {
-        heredocStack.lastOrNull()?.atLineStart = true
+        val frame = heredocStack.lastOrNull() ?: return
+        if (frame.pendingHeredocs.isNotEmpty()) {
+            val nestedSpec = frame.pendingHeredocs.removeFirst()
+            heredocStack.add(HeredocFrame(spec = nestedSpec, atLineStart = true))
+            pushMode(_mode)
+            return
+        }
+        frame.atLineStart = true
     }
 
     protected fun markHeredocBody() {
