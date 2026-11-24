@@ -414,6 +414,15 @@ class GroovySyntaxLexerTest {
         assertSlashyLiteralPresent("x = / \${ a = /c/ } \${ y = /b/", "c", "closed-then-open-first")
         assertSlashyLiteralPresent("x = / \${ a = /c/ } \${ y = /b/", "b", "closed-then-open-second")
 
+        assertSlashyLiteralPresent("x = / \${ y = /\"/ ; z = /b/", "\"", "slashy-dquote-first")
+        assertSlashyLiteralPresent("x = / \${ y = /\"/ ; z = /b/", "b", "slashy-dquote-second")
+        assertSlashyLiteralPresent("x = / \${ y = /'/ ; z = /b/", "'", "slashy-squote-first")
+        assertSlashyLiteralPresent("x = / \${ y = /'/ ; z = /b/", "b", "slashy-squote-second")
+        assertSlashyLiteralPresent("x = / \${ y = /a/* ; z = /b/", "b", "slashy-block-comment-second")
+    }
+
+    @Test
+    fun matchesSlashyBackslashEscapeRules() {
         val backslashCases = """
             def s = /a\${'$'}{b}/
             def u = /a\\/b/

@@ -18,16 +18,6 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         var braceDepth: Int = 0,
     )
 
-    private class InterpSpan(
-        val closePos: Int,
-        val maxSlashPos: Int,
-    )
-
-    private class BraceFrame(
-        val openPos: Int,
-        var maxSlashPos: Int = -1,
-    )
-
     private val interpStack = ArrayList<InterpFrame>()
     private var lastNonHiddenType: Int = Token.INVALID_TYPE
     private var lastNonHiddenText: String? = null
@@ -47,9 +37,8 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
     private val savedBrackTernaryDepthStack = ArrayList<Int>()
     private val savedInterpTernaryDepthStack = ArrayList<Int>()
     private val slashyCloseCache = HashMap<Int, Boolean>()
-    private val interpCloseCache = HashMap<Int, InterpSpan>()
+    private val interpCloseCache = HashMap<Int, Int>()
     private val outsideSlashyCloseCache = HashMap<Int, Boolean>()
-    private var noSlashBeforeEofFrom: Int = Int.MAX_VALUE
 
     protected fun isAtStartOfInput(): Boolean = _tokenStartCharIndex == 0
 
@@ -125,21 +114,19 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
     }
 
     /**
-     * Checks in amortized O(N) time (via [slashyCloseCache], [interpCloseCache],
-     * [outsideSlashyCloseCache], and [noSlashBeforeEofFrom]) whether a `/` at [_tokenStartCharIndex]
-     * has a matching unescaped closing `/` before EOF.
+     * Checks in amortized O(N) time (via [slashyCloseCache], [interpCloseCache], and
+     * [outsideSlashyCloseCache]) whether a `/` at [_tokenStartCharIndex] has a matching unescaped
+     * closing `/` before EOF.
      */
     private fun hasClosingSlashyDelimiter(): Boolean {
         val entryPos = _tokenStartCharIndex
-        if (entryPos >= noSlashBeforeEofFrom) return false
         slashyCloseCache[entryPos]?.let { return it }
 
         var offset = 1
         val baseIndex = _input.index()
-        var maxSlashPos = -1
-        // Explicit iterative stack of open `${` ($ position) and `{` ({ position) frames.
+        // Explicit iterative stack of open `${` ($ position) and `{` ({ position) offsets.
         // Empty means currently in slashy body (outside `${...}` interpolation).
-        val braceStack = ArrayList<BraceFrame>()
+        val braceStack = ArrayList<Int>()
         val visitedOutside = ArrayList<Int>()
 
         while (true) {
@@ -162,17 +149,14 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                     }
                     '$'.code -> {
                         if (_input.LA(offset + 1) == '{'.code) {
-                            val span = interpCloseCache[absPos]
-                            if (span != null) {
-                                if (span.closePos < 0) {
+                            val cachedClose = interpCloseCache[absPos]
+                            if (cachedClose != null) {
+                                if (cachedClose < 0) {
                                     return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
                                 }
-                                if (span.maxSlashPos > maxSlashPos) {
-                                    maxSlashPos = span.maxSlashPos
-                                }
-                                offset = span.closePos - baseIndex + 2
+                                offset = cachedClose - baseIndex + 2
                             } else {
-                                braceStack.add(BraceFrame(openPos = absPos))
+                                braceStack.add(absPos)
                                 offset += 2
                             }
                         } else {
@@ -184,35 +168,20 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
             } else {
                 when (ch) {
                     '{'.code -> {
-                        val span = interpCloseCache[absPos]
-                        if (span != null) {
-                            if (span.closePos < 0) {
+                        val cachedClose = interpCloseCache[absPos]
+                        if (cachedClose != null) {
+                            if (cachedClose < 0) {
                                 return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
                             }
-                            val top = braceStack.last()
-                            if (span.maxSlashPos > top.maxSlashPos) {
-                                top.maxSlashPos = span.maxSlashPos
-                            }
-                            offset = span.closePos - baseIndex + 2
+                            offset = cachedClose - baseIndex + 2
                         } else {
-                            braceStack.add(BraceFrame(openPos = absPos))
+                            braceStack.add(absPos)
                             offset++
                         }
                     }
                     '}'.code -> {
-                        val frame = braceStack.removeAt(braceStack.lastIndex)
-                        interpCloseCache[frame.openPos] = InterpSpan(
-                            closePos = absPos,
-                            maxSlashPos = frame.maxSlashPos,
-                        )
-                        if (braceStack.isNotEmpty()) {
-                            val parent = braceStack.last()
-                            if (frame.maxSlashPos > parent.maxSlashPos) {
-                                parent.maxSlashPos = frame.maxSlashPos
-                            }
-                        } else if (frame.maxSlashPos > maxSlashPos) {
-                            maxSlashPos = frame.maxSlashPos
-                        }
+                        val openPos = braceStack.removeAt(braceStack.lastIndex)
+                        interpCloseCache[openPos] = absPos
                         offset++
                     }
                     '"'.code -> {
@@ -222,10 +191,6 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                         offset = skipQuotedInLookahead(offset, '\''.code)
                     }
                     '/'.code -> {
-                        val top = braceStack.last()
-                        if (absPos > top.maxSlashPos) {
-                            top.maxSlashPos = absPos
-                        }
                         val next = _input.LA(offset + 1)
                         if (next == '/'.code) {
                             offset += 2
@@ -251,18 +216,14 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                     }
                     '$'.code -> {
                         if (_input.LA(offset + 1) == '{'.code) {
-                            val span = interpCloseCache[absPos]
-                            if (span != null) {
-                                if (span.closePos < 0) {
+                            val cachedClose = interpCloseCache[absPos]
+                            if (cachedClose != null) {
+                                if (cachedClose < 0) {
                                     return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
                                 }
-                                val top = braceStack.last()
-                                if (span.maxSlashPos > top.maxSlashPos) {
-                                    top.maxSlashPos = span.maxSlashPos
-                                }
-                                offset = span.closePos - baseIndex + 2
+                                offset = cachedClose - baseIndex + 2
                             } else {
-                                braceStack.add(BraceFrame(openPos = absPos))
+                                braceStack.add(absPos)
                                 offset += 2
                             }
                         } else {
@@ -274,23 +235,13 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
             }
         }
 
-        for (frame in braceStack) {
-            if (frame.maxSlashPos > maxSlashPos) {
-                maxSlashPos = frame.maxSlashPos
-            }
-        }
-        if (maxSlashPos < entryPos) {
-            noSlashBeforeEofFrom = minOf(noSlashBeforeEofFrom, entryPos)
-        } else {
-            noSlashBeforeEofFrom = minOf(noSlashBeforeEofFrom, maxSlashPos + 1)
-        }
         return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
     }
 
     private fun finishSlashyLookahead(
         entryPos: Int,
         result: Boolean,
-        braceStack: List<BraceFrame>,
+        braceStack: List<Int>,
         visitedOutside: List<Int>,
     ): Boolean {
         slashyCloseCache[entryPos] = result
@@ -298,8 +249,8 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
             outsideSlashyCloseCache[pos] = result
         }
         if (!result) {
-            for (frame in braceStack) {
-                interpCloseCache[frame.openPos] = InterpSpan(closePos = -1, maxSlashPos = frame.maxSlashPos)
+            for (openPos in braceStack) {
+                interpCloseCache[openPos] = -1
             }
         }
         return result
@@ -358,7 +309,6 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         slashyCloseCache.clear()
         interpCloseCache.clear()
         outsideSlashyCloseCache.clear()
-        noSlashBeforeEofFrom = Int.MAX_VALUE
     }
 
     override fun nextToken(): Token {
