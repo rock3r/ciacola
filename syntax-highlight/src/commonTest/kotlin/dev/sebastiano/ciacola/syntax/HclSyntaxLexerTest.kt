@@ -4,6 +4,7 @@ import dev.sebastiano.ciacola.syntax.lexer.HclSyntaxLexer
 import dev.sebastiano.ciacola.syntax.oracle.HclOracleFixtures
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class HclSyntaxLexerTest {
 
@@ -300,6 +301,96 @@ class HclSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Plain, mappedTokens.first { it.slice(colonKeysCode) == "items" }.kind)
         assertEquals(SyntaxTokenKind.Property, mappedTokens.first { it.slice(colonKeysCode) == "ok" }.kind)
         assertEquals(SyntaxTokenKind.Plain, mappedTokens.first { it.slice(colonKeysCode) == "a" }.kind)
+    }
+
+    @Test
+    fun matchesCompleteTemplateEscapeSequencesInStringsAndHeredocs() {
+        val code =
+            "command = \"echo \$\$\${HOME@Q}\"\n" +
+                "esc_dir = \"run %%%{if @x}\"\n" +
+                "real_dir = \"%{ if var.ok }yes%{ endif }\"\n" +
+                "plain_pairs = \"\$\$lit %%lit\"\n" +
+                "four_dollars = \"\$\$\$\${HOME@Q}\"\n" +
+                "strip_escape = \"\$\${~foo} %%{~if}\"\n" +
+                "script = <<EOF\n" +
+                "echo \$\$\${HOME@Q}\n" +
+                "echo \$\${USER}\n" +
+                "echo %%%{if @x}\n" +
+                "echo %%{for x}\n" +
+                "echo \$\$lit %%lit\n" +
+                "echo \${var.real}\n" +
+                "EOF\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(HclSyntaxLexer, code, "hcl-complete-template-escapes")
+
+        fun tokensOnLine(line: String, fromIndex: Int = 0): List<SyntaxToken> {
+            val s = code.indexOf(line, fromIndex)
+            assertTrue(s >= fromIndex, "Line not found at >= $fromIndex: $line")
+            return tokens.filter { it.startIndex >= s && it.endIndex <= s + line.length }
+        }
+
+        // Quoted string: `$$${HOME@Q}` -> `$` (String) + `$${` (Constant) + `HOME@Q}` (String), no interpolation
+        val cmdTokens = tokensOnLine("command = \"echo \$\$\${HOME@Q}\"")
+        assertTrue(cmdTokens.any { it.slice(code) == "$" && it.kind == SyntaxTokenKind.String })
+        assertTrue(cmdTokens.any { it.slice(code) == "\$\${" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(cmdTokens.any { it.slice(code) == "HOME@Q}" && it.kind == SyntaxTokenKind.String })
+        assertTrue(cmdTokens.none { it.kind == SyntaxTokenKind.Punctuation })
+
+        // Quoted string: `%%%{if @x}` -> `%` (String) + `%%{` (Constant) + `if @x}` (String), no directive
+        val dirTokens = tokensOnLine("esc_dir = \"run %%%{if @x}\"")
+        assertTrue(dirTokens.any { it.slice(code) == "%" && it.kind == SyntaxTokenKind.String })
+        assertTrue(dirTokens.any { it.slice(code) == "%%{" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(dirTokens.any { it.slice(code) == "if @x}" && it.kind == SyntaxTokenKind.String })
+        assertTrue(dirTokens.none { it.kind == SyntaxTokenKind.Keyword })
+
+        // Real quoted-string directive still opens directive mode
+        val realDirTokens = tokensOnLine("real_dir = \"%{ if var.ok }yes%{ endif }\"")
+        assertTrue(realDirTokens.any { it.slice(code) == "%{" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(realDirTokens.any { it.slice(code) == "if" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(realDirTokens.any { it.slice(code) == "endif" && it.kind == SyntaxTokenKind.Keyword })
+
+        // Unrelated `$$` and `%%` without `{` stay literal String
+        val pairTokens = tokensOnLine("plain_pairs = \"\$\$lit %%lit\"")
+        assertTrue(pairTokens.none { it.kind == SyntaxTokenKind.Constant })
+
+        // Four dollars before `{` -> two literal `$` + `$${` escape
+        val fourTokens = tokensOnLine("four_dollars = \"\$\$\$\${HOME@Q}\"")
+        assertEquals(2, fourTokens.count { it.slice(code) == "$" && it.kind == SyntaxTokenKind.String })
+        assertTrue(fourTokens.any { it.slice(code) == "\$\${" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(fourTokens.any { it.slice(code) == "HOME@Q}" && it.kind == SyntaxTokenKind.String })
+
+        // Escaped strip-marker forms stay literal
+        val stripTokens = tokensOnLine("strip_escape = \"\$\${~foo} %%{~if}\"")
+        assertTrue(stripTokens.any { it.slice(code) == "\$\${" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(stripTokens.any { it.slice(code) == "%%{" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(stripTokens.none { it.kind == SyntaxTokenKind.Punctuation || it.kind == SyntaxTokenKind.Keyword })
+
+        // Heredoc lines (anchored after `<<EOF` so line lookups never match the quoted strings above)
+        val heredocStart = code.indexOf("<<EOF")
+        val hdCmdTokens = tokensOnLine("echo \$\$\${HOME@Q}", heredocStart)
+        assertTrue(hdCmdTokens.any { it.slice(code) == "$" && it.kind == SyntaxTokenKind.String })
+        assertTrue(hdCmdTokens.any { it.slice(code) == "\$\${" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(hdCmdTokens.any { it.slice(code) == "HOME@Q}" && it.kind == SyntaxTokenKind.String })
+
+        val hdUserTokens = tokensOnLine("echo \$\${USER}", heredocStart)
+        assertTrue(hdUserTokens.any { it.slice(code) == "\$\${" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(hdUserTokens.any { it.slice(code) == "USER}" && it.kind == SyntaxTokenKind.String })
+
+        val hdDirTokens = tokensOnLine("echo %%%{if @x}", heredocStart)
+        assertTrue(hdDirTokens.any { it.slice(code) == "%" && it.kind == SyntaxTokenKind.String })
+        assertTrue(hdDirTokens.any { it.slice(code) == "%%{" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(hdDirTokens.any { it.slice(code) == "if @x}" && it.kind == SyntaxTokenKind.String })
+
+        val hdForTokens = tokensOnLine("echo %%{for x}", heredocStart)
+        assertTrue(hdForTokens.any { it.slice(code) == "%%{" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(hdForTokens.any { it.slice(code) == "for x}" && it.kind == SyntaxTokenKind.String })
+
+        val hdPlainTokens = tokensOnLine("echo \$\$lit %%lit", heredocStart)
+        assertTrue(hdPlainTokens.none { it.kind == SyntaxTokenKind.Constant })
+
+        val hdRealTokens = tokensOnLine("echo \${var.real}", heredocStart)
+        assertTrue(hdRealTokens.any { it.slice(code) == "\${" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(hdRealTokens.any { it.slice(code) == "real" && it.kind == SyntaxTokenKind.Property })
     }
 
     @Test

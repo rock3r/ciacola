@@ -119,11 +119,11 @@ DQ_NEWLINE
     ;
 
 DQ_ESC_DOLLAR
-    : '$$'
+    : '$${'
     ;
 
 DQ_ESC_PERCENT
-    : '%%'
+    : '%%{'
     ;
 
 DQ_ESCAPE
@@ -166,11 +166,11 @@ HD_NEWLINE
     ;
 
 HD_ESC_DOLLAR
-    : '$$' { markHeredocBody(); }
+    : '$${' { markHeredocBody(); }
     ;
 
 HD_ESC_PERCENT
-    : '%%' { markHeredocBody(); }
+    : '%%{' { markHeredocBody(); }
     ;
 
 HD_INTERP_OPEN
