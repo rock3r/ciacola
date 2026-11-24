@@ -71,7 +71,7 @@ BACKTICK_OP_DEF
     ;
 
 BACKTICK_OPEN
-    : '`' -> pushMode(BACKTICK)
+    : '`' { enterBacktick(Modes.BACKTICK); }
     ;
 
 HEREDOC_OPEN
@@ -228,7 +228,7 @@ SAFE_NAV       : '&.' { onDotToken(); };
 COLON_COLON    : '::' { onDotToken(); };
 HASH_ROCKET    : '=>' { onHashRocket(); };
 STABBY_LAMBDA  : '->' { onStabbyLambda(); };
-POW            : '**' { onDefOperatorToken(); };
+POW            : '**' { onParamPrefixOperatorToken(); };
 LSHIFT         : '<<' { onDefOperatorToken(); };
 RSHIFT         : '>>' { onDefOperatorToken(); };
 EQ_EQ          : '==' { onDefOperatorToken(); };
@@ -262,14 +262,14 @@ QUESTION : '?' { onQuestion(); };
 ASSIGN   : '=' { onAssign(); };
 PLUS     : '+' { onDefOperatorToken(); };
 MINUS    : '-' { onDefOperatorToken(); };
-STAR     : '*' { onDefOperatorToken(); };
+STAR     : '*' { onParamPrefixOperatorToken(); };
 SLASH    : '/' { onDefOperatorToken(); };
 PERCENT  : '%' { onDefOperatorToken(); };
 LT       : '<' { onDefOperatorToken(); };
 GT       : '>' { onDefOperatorToken(); };
 BANG     : '!' { onDefOperatorToken(); };
 TILDE    : '~' { onDefOperatorToken(); };
-AMP      : '&' { onDefOperatorToken(); };
+AMP      : '&' { onParamPrefixOperatorToken(); };
 PIPE     : '|' { onPipe(); };
 CARET    : '^' { onDefOperatorToken(); };
 AT       : '@' { onEndToken(); };

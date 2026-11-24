@@ -36,7 +36,19 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     private class LocalScope(
         val isIsolated: Boolean,
-        val vars: HashSet<String> = HashSet(),
+        isolatedOwner: LocalScope? = null,
+    ) {
+        val isolatedOwner: LocalScope = isolatedOwner ?: this
+        val vars: HashSet<String> = HashSet()
+        val visibleVarCounts: HashMap<String, Int>? = if (isIsolated) HashMap() else null
+        var prev: LocalScope? = null
+        var next: LocalScope? = null
+        var attached: Boolean = true
+    }
+
+    private class EndScopeEntry(
+        val kind: EndScopeKind,
+        val scope: LocalScope?,
     )
 
     private class DelimitedFrame(
@@ -46,6 +58,28 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         val isRegex: Boolean,
         val isSymbol: Boolean,
         var depth: Int = 1,
+    )
+
+    private class LambdaHeaderState(
+        val scope: LocalScope,
+        var expectingParams: Boolean = true,
+        var collectingParams: Boolean = false,
+        var hasParens: Boolean = false,
+        var inParamDefault: Boolean = false,
+        val baseDelimDepth: Int,
+        val baseEndScopeDepth: Int,
+    )
+
+    private class PipeParamState(
+        val ownerScope: LocalScope,
+        val baseDelimDepth: Int,
+        val baseEndScopeDepth: Int,
+        var inParamDefault: Boolean = false,
+    )
+
+    private class EndlessDefFrame(
+        val baseDelimDepth: Int,
+        val baseEndScopeDepth: Int,
     )
 
     private class DQuoteFrame(
@@ -72,14 +106,13 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     private val interpBraceDepths = ArrayList<Int>()
     private val percentStack = ArrayList<DelimitedFrame>()
     private val dquoteStack = ArrayList<DQuoteFrame>()
-    private val pendingHeredocs = ArrayList<HeredocSpec>()
+    private val pendingHeredocsByDepth = HashMap<Int, ArrayDeque<HeredocSpec>>()
     private val heredocStack = ArrayList<HeredocFrame>()
 
-    private val localScopeStack = ArrayList<LocalScope>().apply {
-        add(LocalScope(isIsolated = true))
-    }
-    private val endScopeStack = ArrayList<EndScopeKind>()
-    private val braceHasBlockScope = ArrayList<Boolean>()
+    private var rootLocalScope: LocalScope = LocalScope(isIsolated = true)
+    private var topLocalScope: LocalScope = rootLocalScope
+    private val endScopeStack = ArrayList<EndScopeEntry>()
+    private val braceBlockScopes = ArrayList<LocalScope?>()
     private val lhsCandidates = ArrayList<String>()
     private var expectingLhsAfterComma = false
     private var expectingForVar = false
@@ -91,15 +124,18 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     private var inDefHeader = false
     private var inDefNameBrackets = false
     private var collectingDefParams = false
-    private var defParamParenDepth = 0
+    private var defParamsHaveParens = false
+    private var defSeenBareParam = false
+    private var defParamBaseDelimDepth = 0
+    private var defParamBaseEndScopeDepth = 0
+    private var defParamOwnerScope: LocalScope? = null
     private var inDefParamDefault = false
+    private var defParamCanContinueNewline = false
     private var awaitingEndlessDefEq = false
-    private var endlessDefBaseDelimDepth = -1
-    private var expectingLambdaParams = false
-    private var collectingLambdaParams = false
-    private var lambdaParamParenDepth = 0
-    private var pendingBlockParamStart = false
-    private var inPipeBlockParams = false
+    private val endlessDefStack = ArrayList<EndlessDefFrame>()
+    private val lambdaHeaderStack = ArrayList<LambdaHeaderState>()
+    private var pendingBlockParamScope: LocalScope? = null
+    private val pipeParamStack = ArrayList<PipeParamState>()
 
     private var ternaryDepth = 0
     private val savedDelimiterTernaryDepths = ArrayList<Int>()
@@ -112,12 +148,12 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         interpBraceDepths.clear()
         percentStack.clear()
         dquoteStack.clear()
-        pendingHeredocs.clear()
+        pendingHeredocsByDepth.clear()
         heredocStack.clear()
-        localScopeStack.clear()
-        localScopeStack.add(LocalScope(isIsolated = true))
+        rootLocalScope = LocalScope(isIsolated = true)
+        topLocalScope = rootLocalScope
         endScopeStack.clear()
-        braceHasBlockScope.clear()
+        braceBlockScopes.clear()
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingForVar = false
@@ -129,15 +165,18 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         inDefHeader = false
         inDefNameBrackets = false
         collectingDefParams = false
-        defParamParenDepth = 0
+        defParamsHaveParens = false
+        defSeenBareParam = false
+        defParamBaseDelimDepth = 0
+        defParamBaseEndScopeDepth = 0
+        defParamOwnerScope = null
         inDefParamDefault = false
+        defParamCanContinueNewline = false
         awaitingEndlessDefEq = false
-        endlessDefBaseDelimDepth = -1
-        expectingLambdaParams = false
-        collectingLambdaParams = false
-        lambdaParamParenDepth = 0
-        pendingBlockParamStart = false
-        inPipeBlockParams = false
+        endlessDefStack.clear()
+        lambdaHeaderStack.clear()
+        pendingBlockParamScope = null
+        pipeParamStack.clear()
         ternaryDepth = 0
         savedDelimiterTernaryDepths.clear()
         delimiterDepth = 0
@@ -277,11 +316,17 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         expectingLhsAfterComma = false
         inRescueHeader = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortLambdaHeadersOnNewline(delimiterDepth, endScopeStack.size, exprState)
+        pendingBlockParamScope = null
 
-        if (collectingDefParams && defParamParenDepth == 0) {
+        if (collectingDefParams &&
+            !defParamsHaveParens &&
+            delimiterDepth <= defParamBaseDelimDepth &&
+            endScopeStack.size <= defParamBaseEndScopeDepth &&
+            !defParamCanContinueNewline
+        ) {
             collectingDefParams = false
+            defSeenBareParam = false
             inDefParamDefault = false
         }
         if (inDefHeader) {
@@ -293,8 +338,8 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         if (awaitingEndlessDefEq) {
             awaitingEndlessDefEq = false
         }
-        if (endlessDefBaseDelimDepth >= 0 && delimiterDepth <= endlessDefBaseDelimDepth && exprState != ExprState.BEG) {
-            popEndlessDefScope()
+        if (exprState != ExprState.BEG) {
+            popCompletedEndlessDefs()
         }
         if (expectingLoopDo && delimiterDepth <= loopHeaderDelimDepth && exprState != ExprState.BEG) {
             expectingLoopDo = false
@@ -318,12 +363,14 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onBegToken() {
         clearTransientHeaderStatesOnOperator()
+        defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
     }
 
     protected fun onQuestion() {
         clearTransientHeaderStatesOnOperator()
+        defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
         ternaryDepth++
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
@@ -331,6 +378,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onColon() {
         clearTransientHeaderStatesOnOperator()
+        defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
         if (ternaryDepth > 0) {
             ternaryDepth--
         }
@@ -340,11 +388,22 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onComma() {
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
         awaitingEndlessDefEq = false
-        if (collectingDefParams && defParamParenDepth <= 1) {
+        if (isAtDefParamCommaLevel()) {
             inDefParamDefault = false
+            defParamCanContinueNewline = !defParamsHaveParens
+        } else {
+            defParamCanContinueNewline = false
+        }
+        val topLambda = lambdaHeaderStack.lastOrNull()
+        if (topLambda != null && isAtLambdaParamCommaLevel(topLambda)) {
+            topLambda.inParamDefault = false
+        }
+        val topPipe = activePipeParam()
+        if (topPipe != null && isAtPipeParamCommaLevel(topPipe)) {
+            topPipe.inParamDefault = false
         }
         if (expectingLhsAfterComma) {
             // Keep lhsCandidates while parsing `a, b = ...`.
@@ -365,18 +424,35 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         expectingRescueVar = false
         inDefHeader = false
         inDefNameBrackets = false
-        collectingDefParams = false
-        defParamParenDepth = 0
-        inDefParamDefault = false
-        awaitingEndlessDefEq = false
-        if (endlessDefBaseDelimDepth >= 0 && delimiterDepth <= endlessDefBaseDelimDepth) {
-            popEndlessDefScope()
+        defParamCanContinueNewline = false
+        if (collectingDefParams &&
+            !defParamsHaveParens &&
+            delimiterDepth <= defParamBaseDelimDepth &&
+            endScopeStack.size <= defParamBaseEndScopeDepth
+        ) {
+            collectingDefParams = false
+            defParamsHaveParens = false
+            defSeenBareParam = false
+            inDefParamDefault = false
         }
-        expectingLambdaParams = false
-        collectingLambdaParams = false
-        lambdaParamParenDepth = 0
-        pendingBlockParamStart = false
-        inPipeBlockParams = false
+        awaitingEndlessDefEq = false
+        val topLambda = lambdaHeaderStack.lastOrNull()
+        val isLambdaBlockLocalSemi = topLambda != null &&
+            topLambda.hasParens &&
+            topLambda.collectingParams &&
+            delimiterDepth == topLambda.baseDelimDepth + 1 &&
+            endScopeStack.size == topLambda.baseEndScopeDepth
+        if (isLambdaBlockLocalSemi) {
+            topLambda.inParamDefault = false
+        } else {
+            abortLambdaHeadersAtOrAboveBase(delimiterDepth, endScopeStack.size)
+        }
+        val topPipe = activePipeParam()
+        if (topPipe != null && isAtPipeParamCommaLevel(topPipe)) {
+            topPipe.inParamDefault = false
+        }
+        popCompletedEndlessDefs()
+        pendingBlockParamScope = null
         ternaryDepth = 0
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
@@ -388,16 +464,12 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         expectingForVar = false
         inRescueHeader = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
 
         if (inDefNameBrackets) {
             inDefNameBrackets = false
-            inDefHeader = false
-            collectingDefParams = true
-            defParamParenDepth = 0
-            inDefParamDefault = false
-            awaitingEndlessDefEq = false
+            startDefParams(allowEndlessEq = false)
             exprState = ExprState.END
             sawSpaceSinceLastToken = false
             return
@@ -405,14 +477,35 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
         if (awaitingEndlessDefEq) {
             awaitingEndlessDefEq = false
-            endlessDefBaseDelimDepth = delimiterDepth
+            collectingDefParams = false
+            defParamsHaveParens = false
+            defSeenBareParam = false
+            inDefParamDefault = false
+            defParamCanContinueNewline = false
+            endlessDefStack.add(
+                EndlessDefFrame(
+                    baseDelimDepth = delimiterDepth,
+                    baseEndScopeDepth = endScopeStack.size,
+                ),
+            )
             exprState = ExprState.BEG
             sawSpaceSinceLastToken = false
             return
         }
 
-        if (collectingDefParams) {
+        if (isAtDefParamCommaLevel()) {
             inDefParamDefault = true
+            defParamCanContinueNewline = !defParamsHaveParens
+        } else {
+            defParamCanContinueNewline = false
+        }
+        val topLambda = lambdaHeaderStack.lastOrNull()
+        if (topLambda != null && isAtLambdaParamCommaLevel(topLambda)) {
+            topLambda.inParamDefault = true
+        }
+        val topPipe = activePipeParam()
+        if (topPipe != null && isAtPipeParamCommaLevel(topPipe)) {
+            topPipe.inParamDefault = true
         }
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
@@ -421,9 +514,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     protected fun onHashRocket() {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
         awaitingEndlessDefEq = false
+        defParamCanContinueNewline = false
         if (inRescueHeader) {
             expectingRescueVar = true
         }
@@ -433,19 +527,39 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onStabbyLambda() {
         clearTransientHeaderStatesOnOperator()
-        expectingLambdaParams = true
+        val scope = pushLocalScope(isIsolated = false)
+        lambdaHeaderStack.add(
+            LambdaHeaderState(
+                scope = scope,
+                baseDelimDepth = delimiterDepth,
+                baseEndScopeDepth = endScopeStack.size,
+            ),
+        )
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
     }
 
     protected fun onPipe() {
+        val pendingScope = pendingBlockParamScope
         clearTransientHeaderStatesOnOperator()
-        if (pendingBlockParamStart) {
-            pendingBlockParamStart = false
-            inPipeBlockParams = true
-            pushBlockLocalScope()
-        } else if (inPipeBlockParams) {
-            inPipeBlockParams = false
+        if (pendingScope != null && pendingScope.attached) {
+            pipeParamStack.add(
+                PipeParamState(
+                    ownerScope = pendingScope,
+                    baseDelimDepth = delimiterDepth,
+                    baseEndScopeDepth = endScopeStack.size,
+                ),
+            )
+        } else {
+            val topPipe = activePipeParam()
+            if (topPipe != null &&
+                delimiterDepth == topPipe.baseDelimDepth &&
+                endScopeStack.size == topPipe.baseEndScopeDepth
+            ) {
+                pipeParamStack.removeAt(pipeParamStack.lastIndex)
+            } else {
+                defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
+            }
         }
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
@@ -455,28 +569,42 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        pendingBlockParamStart = false
+        pendingBlockParamScope = null
         inDefNameBrackets = false
+        defParamCanContinueNewline = false
+
+        var openedLambdaParams = false
+        val topLambda = activeTopLambdaAtBase()
+        if (topLambda != null) {
+            if (topLambda.expectingParams) {
+                topLambda.expectingParams = false
+                topLambda.collectingParams = true
+                topLambda.hasParens = true
+                topLambda.inParamDefault = false
+                openedLambdaParams = true
+            } else if (!topLambda.collectingParams) {
+                abortTopLambdaHeader()
+            }
+        }
+
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
         savedLoopDoState.add(expectingLoopDo to loopHeaderDelimDepth)
         expectingLoopDo = false
         delimiterDepth++
 
-        if (expectingLambdaParams) {
-            expectingLambdaParams = false
-            collectingLambdaParams = true
-            lambdaParamParenDepth = 1
-        } else if (collectingLambdaParams) {
-            lambdaParamParenDepth++
-        } else if (collectingDefParams) {
-            defParamParenDepth++
-            awaitingEndlessDefEq = false
-        } else if (inDefHeader) {
-            inDefHeader = false
-            collectingDefParams = true
-            defParamParenDepth = 1
-            inDefParamDefault = false
+        if (!openedLambdaParams &&
+            collectingDefParams &&
+            !defParamsHaveParens &&
+            !defSeenBareParam &&
+            !inDefParamDefault &&
+            topLocalScope === defParamOwnerScope &&
+            delimiterDepth == defParamBaseDelimDepth + 1 &&
+            endScopeStack.size == defParamBaseEndScopeDepth
+        ) {
+            defParamsHaveParens = true
+            defParamBaseDelimDepth = delimiterDepth
+            defParamBaseEndScopeDepth = endScopeStack.size
             awaitingEndlessDefEq = false
         }
 
@@ -488,8 +616,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        pendingBlockParamStart = false
+        pendingBlockParamScope = null
+        defParamCanContinueNewline = false
         if (delimiterDepth > 0) delimiterDepth--
+        abortLambdaHeadersAboveDelimDepth(delimiterDepth)
         ternaryDepth = if (savedDelimiterTernaryDepths.isNotEmpty()) {
             savedDelimiterTernaryDepths.removeAt(savedDelimiterTernaryDepths.lastIndex)
         } else {
@@ -497,19 +627,20 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         }
         restoreLoopDoState()
 
-        if (collectingLambdaParams) {
-            lambdaParamParenDepth--
-            if (lambdaParamParenDepth <= 0) {
-                collectingLambdaParams = false
-                lambdaParamParenDepth = 0
-            }
-        } else if (collectingDefParams && defParamParenDepth > 0) {
-            defParamParenDepth--
-            if (defParamParenDepth == 0) {
-                collectingDefParams = false
-                inDefParamDefault = false
-                awaitingEndlessDefEq = true
-            }
+        val topLambda = activeTopLambdaAtBase()
+        if (topLambda != null && topLambda.hasParens && topLambda.collectingParams) {
+            topLambda.collectingParams = false
+            topLambda.inParamDefault = false
+        } else if (collectingDefParams &&
+            defParamsHaveParens &&
+            delimiterDepth < defParamBaseDelimDepth &&
+            endScopeStack.size <= defParamBaseEndScopeDepth
+        ) {
+            collectingDefParams = false
+            defParamsHaveParens = false
+            defSeenBareParam = false
+            inDefParamDefault = false
+            awaitingEndlessDefEq = true
         }
 
         exprState = ExprState.END
@@ -520,8 +651,9 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
+        defParamCanContinueNewline = false
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
         savedLoopDoState.add(expectingLoopDo to loopHeaderDelimDepth)
@@ -540,9 +672,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        pendingBlockParamScope = null
+        defParamCanContinueNewline = false
         if (delimiterDepth > 0) delimiterDepth--
+        abortLambdaHeadersAboveDelimDepth(delimiterDepth)
         ternaryDepth = if (savedDelimiterTernaryDepths.isNotEmpty()) {
             savedDelimiterTernaryDepths.removeAt(savedDelimiterTernaryDepths.lastIndex)
         } else {
@@ -553,10 +686,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             // `def []` or `def []=` — wait one token for optional `=`.
             inDefNameBrackets = _input.LA(1) == '='.code
             if (!inDefNameBrackets) {
-                collectingDefParams = true
-                defParamParenDepth = 0
-                inDefParamDefault = false
-                awaitingEndlessDefEq = true
+                startDefParams(allowEndlessEq = true)
             }
         }
         exprState = ExprState.END
@@ -567,16 +697,33 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        pendingBlockParamScope = null
         awaitingEndlessDefEq = false
+        defParamCanContinueNewline = false
+
+        val topLambda = activeTopLambdaAtBase()
+        if (topLambda != null) {
+            if (topLambda.expectingParams) {
+                topLambda.expectingParams = false
+                topLambda.collectingParams = true
+                topLambda.hasParens = false
+                topLambda.inParamDefault = false
+            } else if (!topLambda.collectingParams) {
+                abortTopLambdaHeader()
+            }
+        }
 
         val name = if (lexeme.length > 1) lexeme.substring(0, lexeme.length - 1) else ""
-        if (collectingDefParams && defParamParenDepth <= 1 && !inDefParamDefault) {
+        if (isCollectingDefParamName()) {
             bindLocalVar(name)
             inDefParamDefault = true
-        } else if (collectingLambdaParams && lambdaParamParenDepth == 1) {
+            if (!defParamsHaveParens) defSeenBareParam = true
+        } else if (isCollectingLambdaParamName()) {
             bindLocalVar(name)
+            lambdaHeaderStack.last().inParamDefault = true
+        } else if (isCollectingPipeParamName()) {
+            bindLocalVar(name)
+            activePipeParam()?.inParamDefault = true
         }
 
         exprState = ExprState.BEG
@@ -589,16 +736,44 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         sawSpaceSinceLastToken = false
     }
 
+    protected fun onParamPrefixOperatorToken() {
+        if (isDefMethodNameContext()) {
+            onDefOperatorToken()
+            return
+        }
+        if (collectingDefParams && !defParamsHaveParens && isAtDefParamCommaLevel()) {
+            defSeenBareParam = true
+        }
+        val topLambda = activeTopLambdaAtBase()
+        if (topLambda != null && topLambda.expectingParams) {
+            lhsCandidates.clear()
+            expectingLhsAfterComma = false
+            expectingRescueVar = false
+            inDefHeader = false
+            pendingBlockParamScope = null
+            awaitingEndlessDefEq = false
+            defParamCanContinueNewline = false
+            topLambda.expectingParams = false
+            topLambda.collectingParams = true
+            topLambda.hasParens = false
+            topLambda.inParamDefault = false
+            exprState = ExprState.BEG
+            sawSpaceSinceLastToken = false
+            return
+        }
+        clearTransientHeaderStatesOnOperator()
+        defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
+        exprState = ExprState.BEG
+        sawSpaceSinceLastToken = false
+    }
+
     protected fun onDefOperatorToken() {
         if (isDefMethodNameContext()) {
-            inDefHeader = false
-            collectingDefParams = true
-            defParamParenDepth = 0
-            inDefParamDefault = false
-            awaitingEndlessDefEq = true
+            startDefParams(allowEndlessEq = true)
             exprState = ExprState.END
         } else {
             clearTransientHeaderStatesOnOperator()
+            defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
             exprState = ExprState.BEG
         }
         sawSpaceSinceLastToken = false
@@ -608,9 +783,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
         awaitingEndlessDefEq = false
+        defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
         exprState = ExprState.DOT
         sawSpaceSinceLastToken = false
     }
@@ -618,18 +794,20 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     protected fun onIdentifierOrKeyword(lexeme: String) {
         val prevState = exprState
         val wasInDefHeader = inDefHeader
-        val wasPendingBlockParamStart = pendingBlockParamStart
-        pendingBlockParamStart = false
-        expectingLambdaParams = false
+        pendingBlockParamScope = null
+        defParamCanContinueNewline = false
 
         if (prevState == ExprState.DOT) {
             if (wasInDefHeader) {
                 inDefHeader = isDotOrScopeAhead()
                 if (!inDefHeader) {
-                    collectingDefParams = true
-                    defParamParenDepth = 0
-                    inDefParamDefault = false
-                    awaitingEndlessDefEq = true
+                    if (isBareSetterEqualsAhead()) {
+                        inDefNameBrackets = true
+                        collectingDefParams = false
+                        awaitingEndlessDefEq = false
+                    } else {
+                        startDefParams(allowEndlessEq = true)
+                    }
                 }
             }
             exprState = ExprState.END
@@ -640,12 +818,13 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         if (prevState == ExprState.DEF) {
             if (isDotOrScopeAhead()) {
                 inDefHeader = true
-            } else {
+            } else if (isBareSetterEqualsAhead()) {
                 inDefHeader = false
-                collectingDefParams = true
-                defParamParenDepth = 0
-                inDefParamDefault = false
-                awaitingEndlessDefEq = true
+                inDefNameBrackets = true
+                collectingDefParams = false
+                awaitingEndlessDefEq = false
+            } else {
+                startDefParams(allowEndlessEq = true)
             }
             exprState = ExprState.END
             sawSpaceSinceLastToken = false
@@ -665,13 +844,15 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "def" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 inDefHeader = true
                 collectingDefParams = false
-                defParamParenDepth = 0
+                defParamsHaveParens = false
+                defSeenBareParam = false
                 inDefParamDefault = false
                 awaitingEndlessDefEq = false
                 ternaryDepth = 0
-                pushEndScope(EndScopeKind.ISOLATED)
+                defParamOwnerScope = pushEndScope(EndScopeKind.ISOLATED)
                 exprState = ExprState.DEF
                 sawSpaceSinceLastToken = false
                 return
@@ -680,6 +861,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "class", "module" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 ternaryDepth = 0
                 pushEndScope(EndScopeKind.ISOLATED)
                 exprState = ExprState.CLASS
@@ -690,11 +872,14 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "do" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
-                if (expectingLoopDo && delimiterDepth <= loopHeaderDelimDepth) {
+                val topLambda = activeTopLambdaAtBase()
+                if (topLambda != null) {
+                    lambdaHeaderStack.removeAt(lambdaHeaderStack.lastIndex)
+                    endScopeStack.add(EndScopeEntry(EndScopeKind.BLOCK, topLambda.scope))
+                } else if (expectingLoopDo && delimiterDepth <= loopHeaderDelimDepth) {
                     expectingLoopDo = false
                 } else {
-                    pushEndScope(EndScopeKind.PLAIN)
-                    pendingBlockParamStart = true
+                    pendingBlockParamScope = pushEndScope(EndScopeKind.BLOCK)
                 }
                 exprState = ExprState.BEG
                 sawSpaceSinceLastToken = false
@@ -704,6 +889,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "begin", "case" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 pushEndScope(EndScopeKind.PLAIN)
                 exprState = ExprState.BEG
                 sawSpaceSinceLastToken = false
@@ -713,6 +899,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "for" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 expectingForVar = true
                 expectingLoopDo = true
                 loopHeaderDelimDepth = delimiterDepth
@@ -725,6 +912,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "while", "until" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 if (prevState == ExprState.BEG) {
                     expectingLoopDo = true
                     loopHeaderDelimDepth = delimiterDepth
@@ -738,6 +926,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "if", "unless" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 if (prevState == ExprState.BEG) {
                     pushEndScope(EndScopeKind.PLAIN)
                 }
@@ -749,6 +938,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "rescue" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 inRescueHeader = true
                 expectingRescueVar = false
                 exprState = ExprState.MID
@@ -759,6 +949,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "in" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 expectingForVar = false
                 exprState = ExprState.BEG
                 sawSpaceSinceLastToken = false
@@ -768,16 +959,28 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "return", "yield", "break", "next" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 exprState = ExprState.MID
                 sawSpaceSinceLastToken = false
                 return
             }
 
             "elsif", "else", "ensure", "when", "then",
-            "and", "or", "not", "alias", "undef", "defined?",
+            "alias", "undef", "defined?",
             -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
+                exprState = ExprState.BEG
+                sawSpaceSinceLastToken = false
+                return
+            }
+
+            "and", "or", "not" -> {
+                lhsCandidates.clear()
+                expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
+                defParamCanContinueNewline = isAtBareDefParamDefaultContinuation()
                 exprState = ExprState.BEG
                 sawSpaceSinceLastToken = false
                 return
@@ -789,6 +992,20 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
                 expectingLoopDo = false
                 inRescueHeader = false
                 expectingRescueVar = false
+                if (collectingDefParams && endScopeStack.size <= defParamBaseEndScopeDepth) {
+                    collectingDefParams = false
+                    defParamsHaveParens = false
+                    defSeenBareParam = false
+                    inDefParamDefault = false
+                    defParamOwnerScope = null
+                }
+                while (lambdaHeaderStack.isNotEmpty() &&
+                    lambdaHeaderStack.last().baseEndScopeDepth >= endScopeStack.size &&
+                    lambdaHeaderStack.last().baseDelimDepth >= delimiterDepth
+                ) {
+                    abortTopLambdaHeader()
+                }
+                popCompletedEndlessDefs()
                 popEndScope()
                 exprState = ExprState.END
                 sawSpaceSinceLastToken = false
@@ -800,6 +1017,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                abortNonCollectingLambdaAtBase()
                 exprState = ExprState.END
                 sawSpaceSinceLastToken = false
                 return
@@ -809,6 +1027,21 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         // Plain identifier or constant.
         awaitingEndlessDefEq = false
         val isLocalCandidate = isBindableLocalName(lexeme)
+        val topLambda = activeTopLambdaAtBase()
+        if (topLambda != null) {
+            if (topLambda.expectingParams) {
+                if (isLocalCandidate) {
+                    topLambda.expectingParams = false
+                    topLambda.collectingParams = true
+                    topLambda.hasParens = false
+                    topLambda.inParamDefault = false
+                } else {
+                    abortTopLambdaHeader()
+                }
+            } else if (!topLambda.collectingParams) {
+                abortTopLambdaHeader()
+            }
+        }
 
         if (expectingForVar && isLocalCandidate) {
             bindLocalVar(lexeme)
@@ -816,11 +1049,12 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             bindLocalVar(lexeme)
             expectingRescueVar = false
             inRescueHeader = false
-        } else if (collectingDefParams && defParamParenDepth <= 1 && !inDefParamDefault && isLocalCandidate) {
+        } else if (isCollectingDefParamName() && isLocalCandidate) {
             bindLocalVar(lexeme)
-        } else if (collectingLambdaParams && lambdaParamParenDepth == 1 && isLocalCandidate) {
+            if (!defParamsHaveParens) defSeenBareParam = true
+        } else if (isCollectingLambdaParamName() && isLocalCandidate) {
             bindLocalVar(lexeme)
-        } else if (inPipeBlockParams && isLocalCandidate) {
+        } else if (isCollectingPipeParamName() && isLocalCandidate) {
             bindLocalVar(lexeme)
         } else if (isLocalCandidate) {
             when {
@@ -846,10 +1080,6 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             expectingLhsAfterComma = false
         }
 
-        if (wasPendingBlockParamStart) {
-            pendingBlockParamStart = false
-        }
-
         exprState = if (isLocalCandidate && isLocalVar(lexeme)) {
             ExprState.END
         } else {
@@ -863,9 +1093,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         expectingLhsAfterComma = false
         expectingRescueVar = false
         inDefHeader = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
         awaitingEndlessDefEq = false
+        defParamCanContinueNewline = false
     }
 
     private fun clearTransientHeaderStatesOnValue() {
@@ -873,55 +1104,251 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         expectingLhsAfterComma = false
         expectingRescueVar = false
         inDefHeader = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
+        abortNonCollectingLambdaAtBase()
+        pendingBlockParamScope = null
         awaitingEndlessDefEq = false
+        defParamCanContinueNewline = false
     }
 
-    private fun pushEndScope(kind: EndScopeKind) {
-        endScopeStack.add(kind)
-        if (kind == EndScopeKind.ISOLATED) {
-            localScopeStack.add(LocalScope(isIsolated = true))
+    private fun startDefParams(allowEndlessEq: Boolean) {
+        inDefHeader = false
+        collectingDefParams = true
+        defParamsHaveParens = false
+        defSeenBareParam = false
+        defParamBaseDelimDepth = delimiterDepth
+        defParamBaseEndScopeDepth = endScopeStack.size
+        inDefParamDefault = false
+        defParamCanContinueNewline = false
+        awaitingEndlessDefEq = allowEndlessEq
+    }
+
+    private fun isBareSetterEqualsAhead(): Boolean {
+        if (_input.LA(1) != '='.code) return false
+        val c2 = _input.LA(2)
+        return c2 != '='.code && c2 != '~'.code && c2 != '>'.code
+    }
+
+    private fun isAtDefParamCommaLevel(): Boolean =
+        collectingDefParams &&
+            topLocalScope === defParamOwnerScope &&
+            delimiterDepth == defParamBaseDelimDepth &&
+            endScopeStack.size == defParamBaseEndScopeDepth
+
+    private fun isAtBareDefParamDefaultContinuation(): Boolean =
+        !defParamsHaveParens && inDefParamDefault && isAtDefParamCommaLevel()
+
+    private fun isCollectingDefParamName(): Boolean =
+        collectingDefParams &&
+            !inDefParamDefault &&
+            topLocalScope === defParamOwnerScope &&
+            endScopeStack.size == defParamBaseEndScopeDepth &&
+            delimiterDepth >= defParamBaseDelimDepth
+
+    private fun activeTopLambdaAtBase(): LambdaHeaderState? {
+        val top = lambdaHeaderStack.lastOrNull() ?: return null
+        return if (delimiterDepth == top.baseDelimDepth && endScopeStack.size == top.baseEndScopeDepth) {
+            top
+        } else {
+            null
         }
     }
 
-    private fun pushBlockLocalScope() {
-        if (braceHasBlockScope.isNotEmpty() && !braceHasBlockScope.last()) {
-            braceHasBlockScope[braceHasBlockScope.lastIndex] = true
-            localScopeStack.add(LocalScope(isIsolated = false))
-        } else if (endScopeStack.isNotEmpty() && endScopeStack.last() == EndScopeKind.PLAIN) {
-            endScopeStack[endScopeStack.lastIndex] = EndScopeKind.BLOCK
-            localScopeStack.add(LocalScope(isIsolated = false))
+    private fun isCollectingLambdaParamName(): Boolean {
+        val top = lambdaHeaderStack.lastOrNull() ?: return false
+        if (!top.collectingParams || top.inParamDefault) return false
+        if (endScopeStack.size != top.baseEndScopeDepth) return false
+        return if (top.hasParens) {
+            delimiterDepth > top.baseDelimDepth
+        } else {
+            delimiterDepth >= top.baseDelimDepth
         }
+    }
+
+    private fun isAtLambdaParamCommaLevel(top: LambdaHeaderState): Boolean {
+        if (!top.collectingParams || endScopeStack.size != top.baseEndScopeDepth) return false
+        return if (top.hasParens) {
+            delimiterDepth == top.baseDelimDepth + 1
+        } else {
+            delimiterDepth == top.baseDelimDepth
+        }
+    }
+
+    private fun activePipeParam(): PipeParamState? {
+        while (pipeParamStack.isNotEmpty() && !pipeParamStack.last().ownerScope.attached) {
+            pipeParamStack.removeAt(pipeParamStack.lastIndex)
+        }
+        return pipeParamStack.lastOrNull()
+    }
+
+    private fun isCollectingPipeParamName(): Boolean {
+        val top = activePipeParam() ?: return false
+        if (top.inParamDefault) return false
+        return topLocalScope === top.ownerScope &&
+            endScopeStack.size == top.baseEndScopeDepth &&
+            delimiterDepth >= top.baseDelimDepth
+    }
+
+    private fun isAtPipeParamCommaLevel(top: PipeParamState): Boolean =
+        topLocalScope === top.ownerScope &&
+            delimiterDepth == top.baseDelimDepth &&
+            endScopeStack.size == top.baseEndScopeDepth
+
+    private fun pushLocalScope(isIsolated: Boolean): LocalScope {
+        val owner = if (isIsolated) null else topLocalScope.isolatedOwner
+        val scope = LocalScope(isIsolated = isIsolated, isolatedOwner = owner)
+        scope.prev = topLocalScope
+        topLocalScope.next = scope
+        topLocalScope = scope
+        return scope
+    }
+
+    private fun unlinkLocalScope(scope: LocalScope) {
+        if (scope === rootLocalScope || !scope.attached) return
+        scope.attached = false
+        if (scope.isIsolated) {
+            // Detach any unclosed non-isolated child blocks owned by this isolated scope so
+            // closed method/class locals cannot remain visible after malformed unclosed braces.
+            var child = scope.next
+            while (child != null && !child.isIsolated) {
+                val nextChild = child.next
+                child.attached = false
+                child.prev = null
+                child.next = null
+                child = nextChild
+            }
+            val prev = scope.prev
+            if (prev != null) {
+                prev.next = child
+            }
+            if (child != null) {
+                child.prev = prev
+            } else {
+                topLocalScope = prev ?: rootLocalScope
+            }
+            scope.prev = null
+            scope.next = null
+            return
+        }
+        if (scope.vars.isNotEmpty()) {
+            val counts = scope.isolatedOwner.visibleVarCounts
+            if (counts != null) {
+                for (name in scope.vars) {
+                    val remaining = (counts[name] ?: 0) - 1
+                    if (remaining <= 0) {
+                        counts.remove(name)
+                    } else {
+                        counts[name] = remaining
+                    }
+                }
+            }
+        }
+        val prev = scope.prev
+        val next = scope.next
+        if (prev != null) {
+            prev.next = next
+        }
+        if (next != null) {
+            next.prev = prev
+        } else {
+            topLocalScope = prev ?: rootLocalScope
+        }
+        scope.prev = null
+        scope.next = null
+    }
+
+    private fun abortTopLambdaHeader() {
+        if (lambdaHeaderStack.isEmpty()) return
+        val header = lambdaHeaderStack.removeAt(lambdaHeaderStack.lastIndex)
+        unlinkLocalScope(header.scope)
+    }
+
+    private fun abortNonCollectingLambdaAtBase() {
+        val top = activeTopLambdaAtBase()
+        if (top != null && !top.collectingParams) {
+            abortTopLambdaHeader()
+        }
+    }
+
+    private fun abortLambdaHeadersAboveDelimDepth(depth: Int) {
+        while (lambdaHeaderStack.isNotEmpty()) {
+            val top = lambdaHeaderStack.last()
+            if (top.baseDelimDepth > depth && top.baseEndScopeDepth >= endScopeStack.size) {
+                abortTopLambdaHeader()
+            } else {
+                break
+            }
+        }
+    }
+
+    private fun abortLambdaHeadersOnNewline(delimDepth: Int, endDepth: Int, stateBeforeNewline: ExprState) {
+        while (lambdaHeaderStack.isNotEmpty()) {
+            val top = lambdaHeaderStack.last()
+            if (top.baseDelimDepth >= delimDepth && top.baseEndScopeDepth >= endDepth) {
+                // Keep unparenthesized lambda params alive across line continuations such as `-> a,\n b { ... }`.
+                if (top.collectingParams && stateBeforeNewline == ExprState.BEG) {
+                    break
+                }
+                abortTopLambdaHeader()
+            } else {
+                break
+            }
+        }
+    }
+
+    private fun abortLambdaHeadersAtOrAboveBase(delimDepth: Int, endDepth: Int) {
+        while (lambdaHeaderStack.isNotEmpty()) {
+            val top = lambdaHeaderStack.last()
+            if (top.baseDelimDepth >= delimDepth && top.baseEndScopeDepth >= endDepth) {
+                abortTopLambdaHeader()
+            } else {
+                break
+            }
+        }
+    }
+
+    private fun pushEndScope(kind: EndScopeKind): LocalScope? {
+        val scope = if (kind == EndScopeKind.ISOLATED || kind == EndScopeKind.BLOCK) {
+            pushLocalScope(isIsolated = kind == EndScopeKind.ISOLATED)
+        } else {
+            null
+        }
+        endScopeStack.add(EndScopeEntry(kind, scope))
+        return scope
     }
 
     private fun popEndScope() {
         if (endScopeStack.isEmpty()) return
-        val kind = endScopeStack.removeAt(endScopeStack.lastIndex)
-        if ((kind == EndScopeKind.ISOLATED || kind == EndScopeKind.BLOCK) && localScopeStack.size > 1) {
-            localScopeStack.removeAt(localScopeStack.lastIndex)
+        val entry = endScopeStack.removeAt(endScopeStack.lastIndex)
+        if (entry.scope != null) {
+            unlinkLocalScope(entry.scope)
         }
     }
 
-    private fun popEndlessDefScope() {
-        endlessDefBaseDelimDepth = -1
-        if (endScopeStack.isNotEmpty() && endScopeStack.last() == EndScopeKind.ISOLATED) {
-            popEndScope()
+    private fun popCompletedEndlessDefs() {
+        while (endlessDefStack.isNotEmpty()) {
+            val top = endlessDefStack.last()
+            if (delimiterDepth <= top.baseDelimDepth && endScopeStack.size <= top.baseEndScopeDepth) {
+                endlessDefStack.removeAt(endlessDefStack.lastIndex)
+                if (endScopeStack.isNotEmpty() && endScopeStack.last().kind == EndScopeKind.ISOLATED) {
+                    popEndScope()
+                }
+            } else {
+                break
+            }
         }
     }
 
     private fun bindLocalVar(name: String) {
         if (name.isEmpty() || !isBindableLocalName(name)) return
-        localScopeStack.last().vars.add(name)
+        if (topLocalScope.vars.add(name)) {
+            val counts = topLocalScope.isolatedOwner.visibleVarCounts ?: return
+            counts[name] = (counts[name] ?: 0) + 1
+        }
     }
 
     private fun isLocalVar(name: String): Boolean {
-        for (i in localScopeStack.lastIndex downTo 0) {
-            val scope = localScopeStack[i]
-            if (name in scope.vars) return true
-            if (scope.isIsolated) break
-        }
-        return false
+        val counts = topLocalScope.isolatedOwner.visibleVarCounts ?: return false
+        return name in counts
     }
 
     private fun isBindableLocalName(name: String): Boolean {
@@ -979,11 +1406,18 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     // ---------------- Braces & #{...} interpolation ----------------
 
     protected fun onLBrace() {
+        val prevState = exprState
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        expectingLambdaParams = false
         awaitingEndlessDefEq = false
+        defParamCanContinueNewline = false
+
+        val adoptedLambda = activeTopLambdaAtBase()
+        if (adoptedLambda != null) {
+            lambdaHeaderStack.removeAt(lambdaHeaderStack.lastIndex)
+        }
+        val isBlockBrace = adoptedLambda != null || prevState == ExprState.END || prevState == ExprState.CMDARG
 
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
@@ -994,8 +1428,18 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         if (interpBraceDepths.isNotEmpty()) {
             interpBraceDepths[interpBraceDepths.lastIndex]++
         }
-        braceHasBlockScope.add(false)
-        pendingBlockParamStart = true
+        if (adoptedLambda != null) {
+            // Adopt the LocalScope pushed on `->` without opening a duplicate scope.
+            braceBlockScopes.add(adoptedLambda.scope)
+            pendingBlockParamScope = null
+        } else if (isBlockBrace) {
+            val scope = pushLocalScope(isIsolated = false)
+            braceBlockScopes.add(scope)
+            pendingBlockParamScope = scope
+        } else {
+            braceBlockScopes.add(null)
+            pendingBlockParamScope = null
+        }
         exprState = ExprState.BEG
         sawSpaceSinceLastToken = false
     }
@@ -1004,10 +1448,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingRescueVar = false
-        expectingLambdaParams = false
-        pendingBlockParamStart = false
-        inPipeBlockParams = false
+        pendingBlockParamScope = null
+        defParamCanContinueNewline = false
         if (delimiterDepth > 0) delimiterDepth--
+        abortLambdaHeadersAboveDelimDepth(delimiterDepth)
         ternaryDepth = if (savedDelimiterTernaryDepths.isNotEmpty()) {
             savedDelimiterTernaryDepths.removeAt(savedDelimiterTernaryDepths.lastIndex)
         } else {
@@ -1038,10 +1482,10 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private fun popBraceBlockScope() {
-        if (braceHasBlockScope.isEmpty()) return
-        val openedScope = braceHasBlockScope.removeAt(braceHasBlockScope.lastIndex)
-        if (openedScope && localScopeStack.size > 1) {
-            localScopeStack.removeAt(localScopeStack.lastIndex)
+        if (braceBlockScopes.isEmpty()) return
+        val scope = braceBlockScopes.removeAt(braceBlockScopes.lastIndex)
+        if (scope != null) {
+            unlinkLocalScope(scope)
         }
     }
 
@@ -1098,6 +1542,11 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         }
         exprState = ExprState.END
         sawSpaceSinceLastToken = false
+    }
+
+    protected fun enterBacktick(backtickMode: Int) {
+        clearTransientHeaderStatesOnValue()
+        pushMode(backtickMode)
     }
 
     protected fun exitBacktick() {
@@ -1255,13 +1704,14 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             isQuoted = false
             delimiter = rawDelim
         }
-        pendingHeredocs.add(
+        val depth = interpBraceDepths.size
+        pendingHeredocsByDepth.getOrPut(depth) { ArrayDeque() }.addLast(
             HeredocSpec(
                 delimiter = delimiter,
                 delimiterCodePoints = toCodePoints(delimiter),
                 allowIndent = allowIndent,
                 isQuoted = isQuoted,
-                interpDepth = interpBraceDepths.size,
+                interpDepth = depth,
             ),
         )
         exprState = ExprState.END
@@ -1270,12 +1720,12 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     private fun dequeuePendingHeredocAtCurrentDepth(): HeredocSpec? {
         val depth = interpBraceDepths.size
-        for (i in pendingHeredocs.indices) {
-            if (pendingHeredocs[i].interpDepth == depth) {
-                return pendingHeredocs.removeAt(i)
-            }
+        val queue = pendingHeredocsByDepth[depth] ?: return null
+        val spec = queue.removeFirstOrNull()
+        if (queue.isEmpty()) {
+            pendingHeredocsByDepth.remove(depth)
         }
-        return null
+        return spec
     }
 
     protected fun consumeHeredocLiteralLine(

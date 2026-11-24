@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.TimeSource
 
 class RubySyntaxLexerTest {
 
@@ -534,6 +535,325 @@ class RubySyntaxLexerTest {
 
         // `return /foo/` inside `loop_test` must still lex `/foo/` as a regex literal.
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "foo" }.kind)
+    }
+
+    @Test
+    fun isolatesParameterlessBlocksWithoutIsolatingHashLiterals() {
+        val code = """
+            1.times { puts = 1 }; puts /a/
+            1.times do warn = 1 end; warn /b/
+            1.times { || print = 1 }; print /c/
+            puts { local_p = 1 }; local_p /e/
+            h = { a: (y = 1) }; z = y /2
+            puts({ a: (hash_v = 1) }); r1 = hash_v /2
+            def m; return { a: (ret_v = 1) }; ret_v /2; end
+            outer_v = 1; 1.times { outer_v = 2; inner_v = 3 }; r = outer_v /2; inner_v /d/
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-parameterless-blocks")
+
+        // Assignments inside parameterless blocks (including bare method calls) must not leak.
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "a" && it.startIndex > code.indexOf("; puts") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "b" && it.startIndex > code.indexOf("; warn") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "c" && it.startIndex > code.indexOf("; print") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "e" && it.startIndex > code.indexOf("; local_p") }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "d" && it.startIndex > code.indexOf("; inner_v") }.kind)
+
+        // Assignments inside hash literals and outer vars modified inside blocks stay bound in outer scope.
+        val ySlash = tokens.first { it.slice(code) == "/" && it.startIndex > code.indexOf("z = y") }
+        assertEquals(SyntaxTokenKind.Operator, ySlash.kind)
+        val hashSlash = tokens.first { it.slice(code) == "/" && it.startIndex > code.indexOf("r1 = hash_v") }
+        assertEquals(SyntaxTokenKind.Operator, hashSlash.kind)
+        val retSlash = tokens.first { it.slice(code) == "/" && it.startIndex > code.indexOf("; ret_v") }
+        assertEquals(SyntaxTokenKind.Operator, retSlash.kind)
+        val outerSlash = tokens.first { it.slice(code) == "/" && it.startIndex > code.indexOf("r = outer_v") }
+        assertEquals(SyntaxTokenKind.Operator, outerSlash.kind)
+    }
+
+    @Test
+    fun scopesStabbyLambdaParamsBothBareAndParenthesized() {
+        val code = """
+            f1 = ->x { x /2/3 }; x /rx1/
+            f2 = ->x, y = 1 { x /y }; y /rx2/
+            f3 = ->x do x /2/3 end; x /rx3/
+            f4 = ->*a { a /2 }; a /rx4/
+            f5 = ->**kw { kw /2 }; kw /rx5/
+            f6 = ->&b { b /2 }; b /rx6/
+            f7 = ->k: { k /2 }; k /rx7/
+            f8 = ->k: 1 { k /2 }; k /rx8/
+            f9 = ->puts { puts /2 }; puts /rx9/
+            f10 = ->(puts) { puts /2 }; puts /rx10/
+            f11 = ->(x = { m: (z = 1) }) { x /z }; z /rx11/
+            f12 = ->(x = ->y { y /2 }) { x /3 }; y /rx12/
+            f13 = ->(x; local_b) { x /local_b }; local_b /rx13/
+            f14 = -> { p = 1 }; p /rx14/
+            f15 = -> do p = 1 end; p /rx15/
+            f16 = ->x = [{ a: 1 }] { x /2 }; x /rx16/
+            f17 = ->x = if cond then 1 else 2 end { x /2 }; x /rx17/
+            f18 = -> a, (b, c) { a /b /c }; b /rx18/
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-stabby-lambda-scopes")
+
+        // Inside every lambda body, every `/` is division (Operator), never a regex delimiter.
+        val bodyLines = listOf("f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f16", "f17", "f18")
+        for (prefix in bodyLines) {
+            val lineStart = code.indexOf("$prefix = ")
+            val lineEnd = code.indexOf('\n', lineStart).let { if (it < 0) code.length else it }
+            val bodyEnd = listOf(code.indexOf("}; ", lineStart), code.indexOf("end; ", lineStart))
+                .filter { it in lineStart until lineEnd }
+                .minOrNull()
+                ?: lineEnd
+            val bodySlashes = tokens.filter { it.startIndex in lineStart until bodyEnd && it.slice(code) == "/" }
+            assertTrue(bodySlashes.isNotEmpty(), "Expected division slash in $prefix body")
+            for (slash in bodySlashes) {
+                assertEquals(SyntaxTokenKind.Operator, slash.kind, "Expected Operator '/' inside $prefix body")
+            }
+        }
+
+        // After every lambda body closes, its params and body assignments do not leak to outer scope.
+        for (rx in (1..18).map { "rx$it" }) {
+            val rxToken = tokens.first { it.slice(code) == rx }
+            assertEquals(SyntaxTokenKind.String, rxToken.kind, "Expected regex literal /$rx/ after lambda closes")
+        }
+    }
+
+    @Test
+    fun handlesMultilineLambdaParamsComplexPipeDefaultsAndMalformedRecovery() {
+        val multilineCode = """
+            m1 = -> a,
+              b { a /b }; a /mr1/; b /mr2/
+            m2 = -> a = 1 +
+              2 { a /2 }; a /mr3/
+            m3 = ->(
+              a,
+              b
+            ) { a /b }; a /mr4/; b /mr5/
+            1.times { |pa; pb| pa /pb }; pb /mr6/
+            1.times do |pa = (begin; 1; end), pb| pa /pb end; pb /mr7/
+            1.times { |pa = ->{ 0 }, pb| pa /pb }; pb /mr8/
+            1.times { |pa = bar { |px| px /2 }, pb| pa /pb }; px /mr9/; pb /mr10/
+            1.times { |pa = (1 | 2), pb| pa /pb }; pb /mr11/
+            def with_lambda_default(cb = ->(x) { x }, y = 1)
+              y /2
+            end
+            def endless_lambda = ->(x) { x }
+            puts /mr12/
+        """.trimIndent()
+
+        val multiTokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, multilineCode, "ruby-multiline-and-pipe-params")
+        for (marker in listOf("{ a /b }", "{ a /2 }", "pa /pb", "px /2", "y /2")) {
+            var pos = 0
+            var count = 0
+            while (true) {
+                val idx = multilineCode.indexOf(marker, pos)
+                if (idx < 0) break
+                val slashIdx = multilineCode.indexOf('/', idx)
+                val slashToken = multiTokens.first { it.startIndex == slashIdx }
+                assertEquals(SyntaxTokenKind.Operator, slashToken.kind, "Expected division in '$marker'")
+                pos = idx + marker.length
+                count++
+            }
+            assertTrue(count > 0, "Expected at least one occurrence of '$marker'")
+        }
+        for (rx in (1..12).map { "mr$it" }) {
+            assertEquals(SyntaxTokenKind.String, multiTokens.first { it.slice(multilineCode) == rx }.kind, "Expected regex /$rx/")
+        }
+
+        // Malformed stabby lambdas and mismatched delimiters must unwind their lambda scopes cleanly.
+        val malformedCases = listOf(
+            "v = 1\n-> x\nx /rx/\nv /2",
+            "v = 1\n->(x\n)\nx /rx/\nv /2",
+            "v = 1\nfoo(->)\nv /2",
+            "v = 1\n-> end\nv /2",
+            "v = 1\nf = ->(x = foo { ))\n}\nx /rx/\nv /2",
+        )
+        for ((index, sample) in malformedCases.withIndex()) {
+            val tokens = assertLosslessInvariants(RubySyntaxLexer, sample, "ruby-malformed-lambda-$index")
+            val slashIdx = sample.lastIndexOf('/')
+            val slashToken = tokens.first { it.startIndex == slashIdx }
+            assertEquals(SyntaxTokenKind.Operator, slashToken.kind, "Outer local `v` should survive malformed case $index")
+            if ("/rx/" in sample) {
+                assertEquals(
+                    SyntaxTokenKind.String,
+                    tokens.first { it.slice(sample) == "rx" }.kind,
+                    "Aborted lambda parameter `x` must not leak in malformed case $index",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun isolatesDefHeaderDefaultsEndlessDoDefsAndSetterDefs() {
+        val code = """
+            def with_nested_defaults(cb = ->(a, b) { puts /dn1/ }, opts = { k: 1, j: 2 }, z = 1)
+              j /dn2/
+              z /2
+            end
+            def with_proc_default(cb = proc { |a, b| puts /dn3/ }, w = 1)
+              w /2
+            end
+            def with_block_local_semi(cb = ->(x; y) { y /2 }, p1 = proc { |a; b| b /2 }, z = 1)
+              z /2
+            end
+            def foo=(val)
+              val /2
+            end
+            val /dn4/
+            outer_endless = 1
+            def endless_lambda_do = -> do
+              1
+            end
+            r1 = outer_endless /2
+            def endless_map_do = xs.map do |item|
+              item /2
+            end
+            r2 = outer_endless /2
+            def outer_nested_endless = items.each do |i|
+              def inner_nested_endless = i
+            end
+            r3 = outer_endless /2
+            def chained_outer = def chained_inner = 1
+            r4 = outer_endless /2
+            class InlineEndlessInIf
+              if cond then def inline_x = 1 end
+            end
+            r5 = outer_endless /2
+            def outer_inline_do = items.each do |i| def inner_inline_do = i end
+            r6 = outer_endless /2
+            def bare_kw k:
+              puts /dn5/
+            end
+            def bare_empty_arr a = []
+              puts /dn6/
+            end
+            def bare_empty_hash a = {}
+              puts /dn7/
+            end
+            def bare_backtick_default cmd = `whoami`
+              puts a_arg, b_arg
+              b_arg /dn8/
+            end
+            def bare_cont a,
+              # comment line between bare params
+
+              b
+              b /2
+            end
+            def bare_op_cont a = 1 +
+              # comment line after operator
+
+              2, b_op
+              b_op /2
+            end
+            def bare_pipe_cont a = FLAG_A |
+              FLAG_B, b_pipe
+              b_pipe /2
+            end
+            1.times { `ls` | pipe_rhs; pipe_rhs /dn9/ }
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-def-header-and-endless-do")
+
+        for (rx in listOf("dn1", "dn2", "dn3", "dn4", "dn5", "dn6", "dn7", "dn8", "dn9")) {
+            assertEquals(
+                SyntaxTokenKind.String,
+                tokens.first { it.slice(code) == rx }.kind,
+                "Expected regex literal /$rx/",
+            )
+        }
+        for (marker in listOf(
+            "z /2",
+            "w /2",
+            "y /2",
+            "b /2",
+            "b_op /2",
+            "b_pipe /2",
+            "val /2",
+            "r1 = outer_endless /2",
+            "item /2",
+            "r2 = outer_endless /2",
+            "r3 = outer_endless /2",
+            "r4 = outer_endless /2",
+            "r5 = outer_endless /2",
+            "r6 = outer_endless /2",
+        )) {
+            var pos = 0
+            var count = 0
+            while (true) {
+                val idx = code.indexOf(marker, pos)
+                if (idx < 0) break
+                val slashIdx = code.indexOf('/', idx)
+                assertEquals(
+                    SyntaxTokenKind.Operator,
+                    tokens.first { it.startIndex == slashIdx }.kind,
+                    "Expected division operator in '$marker'",
+                )
+                pos = idx + marker.length
+                count++
+            }
+            assertTrue(count > 0, "Expected marker '$marker'")
+        }
+
+        // Anonymous `*` / `**` / `&` at the end of a paren-less `def` must not keep collecting into the body.
+        for (sig in listOf("*", "**", "&")) {
+            val sample = "def anon_prefix $sig\n  puts /rx/\nend"
+            val sampleTokens = assertLosslessInvariants(RubySyntaxLexer, sample, "ruby-anon-prefix-$sig")
+            assertEquals(
+                SyntaxTokenKind.String,
+                sampleTokens.first { it.slice(sample) == "rx" }.kind,
+                "Expected /rx/ regex in body after `def anon_prefix $sig`",
+            )
+        }
+
+        // Closing a `def` while an inner `{` is left unclosed must not leak the def's locals past `end`.
+        val unclosedBraceInDef = "v = 1\ndef m\n  x = 1\n  foo {\nend\nx /rx/\nv /2"
+        val unclosedTokens = assertLosslessInvariants(RubySyntaxLexer, unclosedBraceInDef, "ruby-unclosed-brace-in-def")
+        assertEquals(SyntaxTokenKind.String, unclosedTokens.first { it.slice(unclosedBraceInDef) == "rx" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, unclosedTokens.first { it.startIndex == unclosedBraceInDef.lastIndexOf('/') }.kind)
+    }
+
+    @Test
+    fun staysLinearOnDeepUnclosedBlocks() {
+        assertLinearScaling(label = "deep-unclosed-blocks") { count -> "a { ".repeat(count) }
+    }
+
+    @Test
+    fun staysLinearOnOrphanedInterpHeredocs() {
+        assertLinearScaling(label = "orphaned-interp-heredocs") { count -> "\"#{<<A}\"\n".repeat(count) }
+    }
+
+    private fun assertLinearScaling(
+        label: String,
+        smallCount: Int = 4_000,
+        largeCount: Int = 16_000,
+        maxLargeMillis: Long = 1_500L,
+        buildInput: (Int) -> String,
+    ) {
+        // Warm up JIT/runtime before timing the 4x growth ratio (O(N) ~4x vs O(N^2) ~16x).
+        RubySyntaxLexer.lex(buildInput(500))
+
+        val smallInput = buildInput(smallCount)
+        val smallMark = TimeSource.Monotonic.markNow()
+        val smallTokens = RubySyntaxLexer.lex(smallInput)
+        val smallMs = smallMark.elapsedNow().inWholeMilliseconds
+        assertLosslessInvariants(code = smallInput, tokens = smallTokens, label = "ruby:scale-small:$label")
+
+        val largeInput = buildInput(largeCount)
+        val largeMark = TimeSource.Monotonic.markNow()
+        val largeTokens = RubySyntaxLexer.lex(largeInput)
+        val largeMs = largeMark.elapsedNow().inWholeMilliseconds
+        assertLosslessInvariants(code = largeInput, tokens = largeTokens, label = "ruby:scale-large:$label")
+
+        assertTrue(
+            largeMs <= maxLargeMillis,
+            "[$label] Lexing $largeCount repeats took ${largeMs}ms (limit: ${maxLargeMillis}ms)",
+        )
+        val maxScaledMillis = maxOf(smallMs * 10L, 250L)
+        assertTrue(
+            largeMs <= maxScaledMillis,
+            "[$label] 4x input growth ($smallCount -> $largeCount) scaled superlinearly: ${smallMs}ms -> ${largeMs}ms (limit: ${maxScaledMillis}ms)",
+        )
     }
 
     @Test
