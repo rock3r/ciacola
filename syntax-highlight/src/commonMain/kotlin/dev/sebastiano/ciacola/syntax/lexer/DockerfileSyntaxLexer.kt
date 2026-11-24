@@ -182,6 +182,8 @@ private fun emitRawDfToken(
         DfTokens.HE_DOLLAR,
         -> out += RawDfToken(type, start, end, SyntaxTokenKind.String, isHidden = false)
 
+        DfTokens.DQ_CONT_BS,
+        DfTokens.DQ_CONT_BT,
         DfTokens.DQ_ESC_BS,
         DfTokens.DQ_ESC_BT,
         DfTokens.PE_ESC_BS,

@@ -68,6 +68,8 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun isEscapeBacktick(): Boolean = escapeChar == '`'
 
+    protected fun isInsideHeredocBody(): Boolean = heredocStack.isNotEmpty()
+
     protected fun isCommentStart(): Boolean = atLineStart
 
     protected fun isDqAtLineStart(): Boolean = dqAtLineStart
@@ -195,9 +197,8 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         pushMode(dquoteMode)
     }
 
-    protected fun onDQuoteEscape(lexeme: String) {
-        val endsWithNewline = lexeme.endsWith("\n") || lexeme.endsWith("\r")
-        dqAtLineStart = endsWithNewline
+    protected fun onDQuoteLineCont() {
+        dqAtLineStart = true
         dqAfterComment = false
     }
 
@@ -234,6 +235,7 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun consumeSingleString() {
+        val allowLineContinuations = !isInsideHeredocBody()
         var atContLineStart = false
         while (true) {
             val ch = _input.LA(1)
@@ -265,7 +267,7 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
                 continue
             }
             atContLineStart = false
-            if (ch == escapeChar.code) {
+            if (allowLineContinuations && ch == escapeChar.code) {
                 var offset = 2
                 while (_input.LA(offset) == ' '.code || _input.LA(offset) == '\t'.code) {
                     offset++

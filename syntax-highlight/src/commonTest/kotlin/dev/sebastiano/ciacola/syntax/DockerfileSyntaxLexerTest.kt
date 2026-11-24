@@ -416,6 +416,49 @@ class DockerfileSyntaxLexerTest {
         )
         assertEquals(SyntaxTokenKind.Comment, nestedContTokens.first { it.slice(nestedContWithDqComment) == "# c" }.kind)
         assertEquals(SyntaxTokenKind.Keyword, nestedContTokens.first { it.slice(nestedContWithDqComment) == "FROM" }.kind)
+
+        // Heredoc bodies are taken verbatim line-by-line: disable Dockerfile continuation/comment skipping inside them.
+        val heredocParamContCode =
+            "RUN <<EOF\n" +
+                "echo \"\${MSG:-line1 \\\n" +
+                "# not a comment}\"\n" +
+                "EOF\n" +
+                "FROM alpine\n"
+        val heredocParamContTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            heredocParamContCode,
+            "dockerfile-heredoc-no-pe-cont",
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            heredocParamContTokens.last { it.slice(heredocParamContCode) == "EOF" }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            heredocParamContTokens.first { it.slice(heredocParamContCode) == "FROM" }.kind,
+        )
+        assertFalse(heredocParamContTokens.any { it.kind == SyntaxTokenKind.Comment })
+
+        val heredocSingleQuoteContCode =
+            "RUN <<EOF\n" +
+                "echo \${MSG:-'line1 \\\n" +
+                "# not a comment'}\n" +
+                "EOF\n" +
+                "FROM alpine\n"
+        val heredocSingleQuoteTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            heredocSingleQuoteContCode,
+            "dockerfile-heredoc-no-sq-cont",
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            heredocSingleQuoteTokens.last { it.slice(heredocSingleQuoteContCode) == "EOF" }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            heredocSingleQuoteTokens.first { it.slice(heredocSingleQuoteContCode) == "FROM" }.kind,
+        )
+        assertFalse(heredocSingleQuoteTokens.any { it.kind == SyntaxTokenKind.Comment })
     }
 
     @Test

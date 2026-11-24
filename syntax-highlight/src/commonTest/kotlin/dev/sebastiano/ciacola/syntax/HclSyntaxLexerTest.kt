@@ -138,7 +138,7 @@ class HclSyntaxLexerTest {
                 no
                 %{ endif ~}
               INNER
-              ]})}"
+              ]})} tail"
               plain_heredoc = <<EOF
             line 1 ${'$'}${'$'}escaped
             ${'$'}{var.x}
@@ -166,11 +166,19 @@ class HclSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Keyword, delimTok.kind)
         assertEquals("INNER", delimTok.slice(code))
 
-        // Verify the outer `nested` template closes cleanly before `plain_heredoc` and `locals`.
-        val outerClosePos = code.indexOf("]})}\"")
+        // Verify the outer `nested` template closes cleanly with trailing literal text before `plain_heredoc` and `locals`.
+        val outerClosePos = code.indexOf("]})} tail\"")
         assertEquals(SyntaxTokenKind.Punctuation, tokens.first { it.startIndex == outerClosePos + 2 }.kind)
         assertEquals(SyntaxTokenKind.Punctuation, tokens.first { it.startIndex == outerClosePos + 3 }.kind)
-        assertEquals(SyntaxTokenKind.String, tokens.first { it.startIndex == outerClosePos + 4 }.kind)
+        val tailTextTok = tokens.first { it.startIndex == outerClosePos + 4 }
+        assertEquals(SyntaxTokenKind.String, tailTextTok.kind)
+        assertEquals(" tail", tailTextTok.slice(code))
+        val closingQuoteTok = tokens.first { it.startIndex == outerClosePos + 9 }
+        assertEquals(SyntaxTokenKind.String, closingQuoteTok.kind)
+        assertEquals("\"", closingQuoteTok.slice(code))
+        val postQuoteNewlineTok = tokens.first { it.startIndex == outerClosePos + 10 }
+        assertEquals(SyntaxTokenKind.Whitespace, postQuoteNewlineTok.kind)
+        assertEquals("\n", postQuoteNewlineTok.slice(code))
 
         val plainHeredocTok = tokens.first { it.slice(code) == "plain_heredoc" }
         assertEquals(SyntaxTokenKind.Property, plainHeredocTok.kind)

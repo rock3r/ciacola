@@ -137,12 +137,20 @@ DQ_COMMENT
     : [ \t]* '#' { isDqCommentStart() }? ~[\r\n]* { onDQuoteComment(); }
     ;
 
+DQ_CONT_BS
+    : '\\' { isEscapeBackslash() && !isInsideHeredocBody() }? [ \t]* ( '\r'? '\n' | '\r' ) { onDQuoteLineCont(); }
+    ;
+
+DQ_CONT_BT
+    : '`' { isEscapeBacktick() && !isInsideHeredocBody() }? [ \t]* ( '\r'? '\n' | '\r' ) { onDQuoteLineCont(); }
+    ;
+
 DQ_ESC_BS
-    : '\\' { isEscapeBackslash() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )? { onDQuoteEscape(text); }
+    : '\\' { isEscapeBackslash() }? ~[\r\n]? { onDQuoteNonComment(); }
     ;
 
 DQ_ESC_BT
-    : '`' { isEscapeBacktick() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )? { onDQuoteEscape(text); }
+    : '`' { isEscapeBacktick() }? ~[\r\n]? { onDQuoteNonComment(); }
     ;
 
 DQ_PARAM_EXP_OPEN
@@ -186,11 +194,11 @@ PE_WS
     ;
 
 PE_BACKSLASH_LINE_CONT
-    : '\\' { isEscapeBackslash() }? [ \t]* ( '\r'? '\n' | '\r' ) { onPeLineCont(); }
+    : '\\' { isEscapeBackslash() && !isInsideHeredocBody() }? [ \t]* ( '\r'? '\n' | '\r' ) { onPeLineCont(); }
     ;
 
 PE_BACKTICK_LINE_CONT
-    : '`' { isEscapeBacktick() }? [ \t]* ( '\r'? '\n' | '\r' ) { onPeLineCont(); }
+    : '`' { isEscapeBacktick() && !isInsideHeredocBody() }? [ \t]* ( '\r'? '\n' | '\r' ) { onPeLineCont(); }
     ;
 
 PE_CONT_NEWLINE
