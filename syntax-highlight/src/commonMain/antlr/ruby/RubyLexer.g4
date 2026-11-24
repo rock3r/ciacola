@@ -391,24 +391,16 @@ RE_BACKSLASH
     : '\\'
     ;
 
-RE_LBRACK
-    : '[' { onRegexLBracket(); }
-    ;
-
-RE_RBRACK
-    : ']' { onRegexRBracket(); }
-    ;
-
 RE_SLASH
-    : '/' { onRegexSlash(Tokens.RE_TEXT, Tokens.RE_SLASH); }
+    : '/' { exitRegexMode(); }
     ;
 
 RE_TEXT
-    : ~[/\\#[\]]+
+    : ~[/\\#]+
     ;
 
 RE_HASH
-    : '#' { onRegexHash(Tokens.RE_TEXT); }
+    : '#' -> type(RE_TEXT)
     ;
 
 // ---------------- Percent Literal Mode (Non-Interpolating) ----------------

@@ -153,8 +153,6 @@ private fun emitRawRubyToken(
         RubyTokens.REGEX_OPEN,
         RubyTokens.RE_ESCAPE,
         RubyTokens.RE_BACKSLASH,
-        RubyTokens.RE_LBRACK,
-        RubyTokens.RE_RBRACK,
         RubyTokens.RE_SLASH,
         RubyTokens.RE_TEXT,
         RubyTokens.CHAR_LITERAL,

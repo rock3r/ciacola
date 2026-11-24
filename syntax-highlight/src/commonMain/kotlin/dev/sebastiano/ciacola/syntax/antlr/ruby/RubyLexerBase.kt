@@ -7,12 +7,11 @@ import org.antlr.v4.kotlinruntime.Lexer
 /**
  * Pure Kotlin Multiplatform base lexer for [RubyLexer], handling:
  * - Column-0 `=begin ... =end` embedded documentation and `__END__` data sections.
- * - Ruby expression-state tracking (`BEG`, `END`, `CMDARG`, `CLASS`, `DEF`, `DOT`) with
+ * - Ruby expression-state tracking (`BEG`, `MID`, `END`, `CMDARG`, `CLASS`, `DEF`, `DOT`) with
  *   local-variable scoping and space-sensitivity for disambiguating `/regex/` vs `/`, `%w[]` vs `%`,
  *   `<<EOF` vs `<<`, `?a` vs `?`, `:sym` vs `:`, and compact ternary `? a:b` vs `HASH_KEY`.
  * - Paired and arbitrary-delimiter `%` literals with nested delimiter counting.
- * - Multi-line `/regex/[imxouesn]*` literals with `[...]` character-class tracking, `/x` comment
- *   lines (memoized in O(N) time), and `#{...}` interpolation.
+ * - Multi-line `/regex/[imxouesn]*` literals with `\/` escapes and `#{...}` interpolation.
  * - FIFO-queued `<<`, `<<-`, and `<<~` heredocs scoped by interpolation depth (bare, double-quoted,
  *   single-quoted, backtick) with backslash newline continuations and `#{...}` interpolation.
  * - Iterative brace-depth tracking for nested `#{...}` interpolations in O(N) time.
@@ -21,6 +20,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     protected enum class ExprState {
         BEG,
+        MID,
         END,
         CMDARG,
         CLASS,
@@ -52,12 +52,6 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         val isSymbol: Boolean,
     )
 
-    private class RegexFrame(
-        val openSlashPos: Int,
-        var inCharClass: Boolean = false,
-        var hasExtendedFlag: Boolean? = null,
-    )
-
     private class HeredocSpec(
         val delimiter: String,
         val delimiterCodePoints: IntArray,
@@ -78,9 +72,6 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     private val interpBraceDepths = ArrayList<Int>()
     private val percentStack = ArrayList<DelimitedFrame>()
     private val dquoteStack = ArrayList<DQuoteFrame>()
-    private val regexStack = ArrayList<RegexFrame>()
-    private val regexExtendedCache = HashMap<Int, Boolean>()
-    private val braceCloseMap = HashMap<Int, Int>()
     private val pendingHeredocs = ArrayList<HeredocSpec>()
     private val heredocStack = ArrayList<HeredocFrame>()
 
@@ -92,6 +83,9 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     private val lhsCandidates = ArrayList<String>()
     private var expectingLhsAfterComma = false
     private var expectingForVar = false
+    private var expectingLoopDo = false
+    private var loopHeaderDelimDepth = 0
+    private val savedLoopDoState = ArrayList<Pair<Boolean, Int>>()
     private var inRescueHeader = false
     private var expectingRescueVar = false
     private var inDefHeader = false
@@ -118,9 +112,6 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         interpBraceDepths.clear()
         percentStack.clear()
         dquoteStack.clear()
-        regexStack.clear()
-        regexExtendedCache.clear()
-        braceCloseMap.clear()
         pendingHeredocs.clear()
         heredocStack.clear()
         localScopeStack.clear()
@@ -130,6 +121,9 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingForVar = false
+        expectingLoopDo = false
+        loopHeaderDelimDepth = 0
+        savedLoopDoState.clear()
         inRescueHeader = false
         expectingRescueVar = false
         inDefHeader = false
@@ -226,10 +220,12 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     // ---------------- Expression-state disambiguation ----------------
 
     protected fun isArgLiteralStart(): Boolean =
-        exprState == ExprState.BEG || (exprState == ExprState.CMDARG && sawSpaceSinceLastToken)
+        exprState == ExprState.BEG ||
+            exprState == ExprState.MID ||
+            (exprState == ExprState.CMDARG && sawSpaceSinceLastToken)
 
     protected fun isRegexStart(): Boolean {
-        if (exprState == ExprState.BEG) return true
+        if (exprState == ExprState.BEG || exprState == ExprState.MID) return true
         if (exprState == ExprState.CMDARG && sawSpaceSinceLastToken) {
             val next = _input.LA(1)
             return next != IntStream.EOF && !isRubySpaceOrEol(next) && next != '='.code
@@ -246,7 +242,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
     protected fun isUntypedPercentStart(): Boolean {
         val delim = _input.LA(-1)
         if (delim == IntStream.EOF || isAsciiAlnum(delim) || isRubySpaceOrEol(delim)) return false
-        if (exprState == ExprState.BEG) return true
+        if (exprState == ExprState.BEG || exprState == ExprState.MID) return true
         return exprState == ExprState.CMDARG && sawSpaceSinceLastToken && delim != '='.code
     }
 
@@ -299,6 +295,9 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         }
         if (endlessDefBaseDelimDepth >= 0 && delimiterDepth <= endlessDefBaseDelimDepth && exprState != ExprState.BEG) {
             popEndlessDefScope()
+        }
+        if (expectingLoopDo && delimiterDepth <= loopHeaderDelimDepth && exprState != ExprState.BEG) {
+            expectingLoopDo = false
         }
 
         if (exprState != ExprState.DOT && exprState != ExprState.DEF && exprState != ExprState.CLASS) {
@@ -361,6 +360,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         lhsCandidates.clear()
         expectingLhsAfterComma = false
         expectingForVar = false
+        expectingLoopDo = false
         inRescueHeader = false
         expectingRescueVar = false
         inDefHeader = false
@@ -459,6 +459,8 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         inDefNameBrackets = false
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
+        savedLoopDoState.add(expectingLoopDo to loopHeaderDelimDepth)
+        expectingLoopDo = false
         delimiterDepth++
 
         if (expectingLambdaParams) {
@@ -493,6 +495,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         } else {
             0
         }
+        restoreLoopDoState()
 
         if (collectingLambdaParams) {
             lambdaParamParenDepth--
@@ -521,6 +524,8 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         pendingBlockParamStart = false
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
+        savedLoopDoState.add(expectingLoopDo to loopHeaderDelimDepth)
+        expectingLoopDo = false
         delimiterDepth++
 
         if (isDefMethodNameContext()) {
@@ -543,6 +548,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         } else {
             0
         }
+        restoreLoopDoState()
         if (inDefNameBrackets) {
             // `def []` or `def []=` — wait one token for optional `=`.
             inDefNameBrackets = _input.LA(1) == '='.code
@@ -684,8 +690,12 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "do" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
-                pushEndScope(EndScopeKind.PLAIN)
-                pendingBlockParamStart = true
+                if (expectingLoopDo && delimiterDepth <= loopHeaderDelimDepth) {
+                    expectingLoopDo = false
+                } else {
+                    pushEndScope(EndScopeKind.PLAIN)
+                    pendingBlockParamStart = true
+                }
                 exprState = ExprState.BEG
                 sawSpaceSinceLastToken = false
                 return
@@ -704,13 +714,28 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
                 expectingForVar = true
+                expectingLoopDo = true
+                loopHeaderDelimDepth = delimiterDepth
                 pushEndScope(EndScopeKind.PLAIN)
                 exprState = ExprState.BEG
                 sawSpaceSinceLastToken = false
                 return
             }
 
-            "if", "unless", "while", "until" -> {
+            "while", "until" -> {
+                lhsCandidates.clear()
+                expectingLhsAfterComma = false
+                if (prevState == ExprState.BEG) {
+                    expectingLoopDo = true
+                    loopHeaderDelimDepth = delimiterDepth
+                    pushEndScope(EndScopeKind.PLAIN)
+                }
+                exprState = ExprState.BEG
+                sawSpaceSinceLastToken = false
+                return
+            }
+
+            "if", "unless" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
                 if (prevState == ExprState.BEG) {
@@ -726,7 +751,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
                 expectingLhsAfterComma = false
                 inRescueHeader = true
                 expectingRescueVar = false
-                exprState = ExprState.BEG
+                exprState = ExprState.MID
                 sawSpaceSinceLastToken = false
                 return
             }
@@ -740,8 +765,16 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
                 return
             }
 
-            "elsif", "else", "ensure", "when", "then", "return", "yield",
-            "break", "next", "and", "or", "not", "alias", "undef", "defined?",
+            "return", "yield", "break", "next" -> {
+                lhsCandidates.clear()
+                expectingLhsAfterComma = false
+                exprState = ExprState.MID
+                sawSpaceSinceLastToken = false
+                return
+            }
+
+            "elsif", "else", "ensure", "when", "then",
+            "and", "or", "not", "alias", "undef", "defined?",
             -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
@@ -753,6 +786,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
             "end" -> {
                 lhsCandidates.clear()
                 expectingLhsAfterComma = false
+                expectingLoopDo = false
                 inRescueHeader = false
                 expectingRescueVar = false
                 popEndScope()
@@ -953,6 +987,8 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
+        savedLoopDoState.add(expectingLoopDo to loopHeaderDelimDepth)
+        expectingLoopDo = false
         delimiterDepth++
 
         if (interpBraceDepths.isNotEmpty()) {
@@ -977,6 +1013,7 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         } else {
             0
         }
+        restoreLoopDoState()
 
         if (interpBraceDepths.isNotEmpty()) {
             val lastIdx = interpBraceDepths.lastIndex
@@ -1008,9 +1045,22 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
         }
     }
 
+    private fun restoreLoopDoState() {
+        if (savedLoopDoState.isNotEmpty()) {
+            val saved = savedLoopDoState.removeAt(savedLoopDoState.lastIndex)
+            expectingLoopDo = saved.first
+            loopHeaderDelimDepth = saved.second
+        } else {
+            expectingLoopDo = false
+            loopHeaderDelimDepth = 0
+        }
+    }
+
     protected fun enterInterp(defaultMode: Int) {
         savedDelimiterTernaryDepths.add(ternaryDepth)
         ternaryDepth = 0
+        savedLoopDoState.add(expectingLoopDo to loopHeaderDelimDepth)
+        expectingLoopDo = false
         delimiterDepth++
         interpBraceDepths.add(0)
         exprState = ExprState.BEG
@@ -1062,225 +1112,16 @@ internal abstract class RubyLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun enterRegexMode(regexMode: Int) {
         clearTransientHeaderStatesOnValue()
-        regexStack.add(RegexFrame(openSlashPos = _tokenStartCharIndex))
         pushMode(regexMode)
     }
 
-    protected fun onRegexLBracket() {
-        val frame = regexStack.lastOrNull() ?: return
-        if (!frame.inCharClass) {
-            frame.inCharClass = true
-        }
-    }
-
-    protected fun onRegexRBracket() {
-        val frame = regexStack.lastOrNull() ?: return
-        if (frame.inCharClass) {
-            frame.inCharClass = false
-        }
-    }
-
-    protected fun onRegexHash(textToken: Int) {
-        val frame = regexStack.lastOrNull()
-        type = textToken
-        if (frame == null || frame.inCharClass) return
-        val hasX = frame.hasExtendedFlag ?: scanRegexExtendedFlag(frame.openSlashPos).also {
-            frame.hasExtendedFlag = it
-        }
-        if (hasX) {
-            consumeRestOfLine()
-        }
-    }
-
-    protected fun onRegexSlash(textToken: Int, closeToken: Int) {
-        val frame = regexStack.lastOrNull()
-        if (frame != null && frame.inCharClass) {
-            type = textToken
-            return
-        }
+    protected fun exitRegexMode() {
         consumeRegexFlags()
-        if (regexStack.isNotEmpty()) {
-            regexStack.removeAt(regexStack.lastIndex)
-        }
         if (!_modeStack.isEmpty) {
             popMode()
         }
-        type = closeToken
         exprState = ExprState.END
         sawSpaceSinceLastToken = false
-    }
-
-    private fun scanRegexExtendedFlag(openSlashPos: Int): Boolean {
-        regexExtendedCache[openSlashPos]?.let { return it }
-        val savedPos = _input.index()
-        _input.seek(openSlashPos + 1)
-
-        var inCC = false
-        var result = false
-
-        while (_input.LA(1) != IntStream.EOF) {
-            val ch = _input.LA(1)
-            when (ch) {
-                '\\'.code -> {
-                    _input.consume()
-                    val esc = _input.LA(1)
-                    if (esc != IntStream.EOF) {
-                        if (esc == '\r'.code && _input.LA(2) == '\n'.code) {
-                            _input.consume()
-                        }
-                        _input.consume()
-                    }
-                }
-
-                '['.code -> {
-                    inCC = true
-                    _input.consume()
-                }
-
-                ']'.code -> {
-                    inCC = false
-                    _input.consume()
-                }
-
-                '#'.code -> {
-                    val afterHash = _input.LA(2)
-                    if (afterHash == '{'.code) {
-                        val openBracePos = _input.index() + 1
-                        _input.consume() // '#'
-                        val closed = skipBalancedBracesMemoized(openBracePos)
-                        if (!closed) {
-                            result = false
-                            break
-                        }
-                    } else if (!inCC && afterHash != '@'.code && afterHash != '$'.code) {
-                        _input.consume()
-                        consumeRestOfLine()
-                    } else {
-                        _input.consume()
-                    }
-                }
-
-                '/'.code -> {
-                    _input.consume()
-                    if (!inCC) {
-                        while (isRegexFlag(_input.LA(1))) {
-                            if (_input.LA(1) == 'x'.code) {
-                                result = true
-                            }
-                            _input.consume()
-                        }
-                        break
-                    }
-                }
-
-                else -> _input.consume()
-            }
-        }
-
-        _input.seek(savedPos)
-        regexExtendedCache[openSlashPos] = result
-        return result
-    }
-
-    /**
-     * Skips a balanced `{ ... }` interpolation block starting at [openBracePos], memoizing every
-     * visited `{` position in [braceCloseMap] so nested regex scans stay strictly O(N).
-     */
-    private fun skipBalancedBracesMemoized(openBracePos: Int): Boolean {
-        braceCloseMap[openBracePos]?.let { cachedClose ->
-            if (cachedClose < 0) {
-                while (_input.LA(1) != IntStream.EOF) _input.consume()
-                return false
-            }
-            _input.seek(cachedClose + 1)
-            return true
-        }
-
-        val braceStack = ArrayList<Int>()
-        // Consume initial '{'.
-        braceStack.add(_input.index())
-        _input.consume()
-
-        while (braceStack.isNotEmpty() && _input.LA(1) != IntStream.EOF) {
-            when (_input.LA(1)) {
-                '{'.code -> {
-                    val pos = _input.index()
-                    val cached = braceCloseMap[pos]
-                    if (cached != null) {
-                        if (cached < 0) {
-                            while (_input.LA(1) != IntStream.EOF) _input.consume()
-                            break
-                        }
-                        _input.seek(cached + 1)
-                    } else {
-                        braceStack.add(pos)
-                        _input.consume()
-                    }
-                }
-
-                '}'.code -> {
-                    val matchedOpen = braceStack.removeAt(braceStack.lastIndex)
-                    braceCloseMap[matchedOpen] = _input.index()
-                    _input.consume()
-                }
-
-                '\''.code -> {
-                    _input.consume()
-                    while (_input.LA(1) != IntStream.EOF) {
-                        val c = _input.LA(1)
-                        _input.consume()
-                        if (c == '\\'.code && _input.LA(1) != IntStream.EOF) {
-                            _input.consume()
-                        } else if (c == '\''.code) {
-                            break
-                        }
-                    }
-                }
-
-                '"'.code -> {
-                    _input.consume()
-                    while (_input.LA(1) != IntStream.EOF) {
-                        val c = _input.LA(1)
-                        if (c == '\\'.code) {
-                            _input.consume()
-                            if (_input.LA(1) != IntStream.EOF) _input.consume()
-                        } else if (c == '#'.code && _input.LA(2) == '{'.code) {
-                            _input.consume() // '#'
-                            val innerPos = _input.index()
-                            val cached = braceCloseMap[innerPos]
-                            if (cached != null) {
-                                if (cached < 0) {
-                                    while (_input.LA(1) != IntStream.EOF) _input.consume()
-                                    break
-                                }
-                                _input.seek(cached + 1)
-                            } else {
-                                braceStack.add(innerPos)
-                                _input.consume()
-                            }
-                        } else {
-                            _input.consume()
-                            if (c == '"'.code) break
-                        }
-                    }
-                }
-
-                '#'.code -> {
-                    _input.consume()
-                    consumeRestOfLine()
-                }
-
-                else -> _input.consume()
-            }
-        }
-
-        if (braceStack.isNotEmpty()) {
-            for (unclosedPos in braceStack) {
-                braceCloseMap[unclosedPos] = -1
-            }
-            return false
-        }
-        return true
     }
 
     private fun consumeRegexFlags() {

@@ -186,7 +186,7 @@ class RubySyntaxLexerTest {
     @Test
     fun disambiguatesRegexLiteralsFromDivisionAndHandlesCharClasses() {
         val code = """
-            r1 = /a\/b[c\/d][e/f]#{x}/imxouesn
+            r1 = /a\/b[c\/d][e\/f]#{x}/imxouesn
             r2 = /=bar/
             puts /foo/
             def check
@@ -316,7 +316,7 @@ class RubySyntaxLexerTest {
             =end
             class A < B::C
               def run(x, k: :ok)
-                re = /a[b/c]#{x}/i
+                re = /a[b\/c]#{x}/i
                 arr = %w[one [two] three]
                 msg = <<~EOS
                   hello #{k}
@@ -450,6 +450,8 @@ class RubySyntaxLexerTest {
             re_lit = /a # [b]/
             re_cc = /[a
             b]/
+            skip = line =~ /^#/
+            path = "src/xml"
             after_re = 99
 
             class M
@@ -475,9 +477,11 @@ class RubySyntaxLexerTest {
         assertFalse(tokens.any { it.slice(code) == "?a" })
         assertTrue(tokens.count { it.slice(code) == "ab" && it.kind == SyntaxTokenKind.Plain } >= 3)
 
-        // Multiline `/.../x` with `# range [0, 10)` closes cleanly at `/x`, so `msg = "hello"` follows.
+        // Multiline `/.../x` with `# range [0, 10)` closes cleanly at `/x`, and `/^#/` closes on line 1.
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "/x" }.kind)
         assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "hello" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "path" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "src/xml" }.kind)
         assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "99" }.kind)
 
         // `def `(cmd)` and `def self.`(cmd)` lex `` ` `` as Function and do not swallow `shell_out`.
@@ -492,6 +496,44 @@ class RubySyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Constant, aInHash.kind)
         val bInHash = tokens.first { it.slice(code) == "b" && it.startIndex > code.indexOf("{ b: 2 }") }
         assertEquals(SyntaxTokenKind.Constant, bInHash.kind)
+    }
+
+    @Test
+    fun preservesLocalVariableScopesAcrossModifiersAndLoopDoHeaders() {
+        val code = """
+            count = 10
+            def log(m)
+              return if m.empty?
+            end
+            half = count /2
+
+            def loop_test(xs)
+              while false do
+                break unless xs.empty?
+              end
+              until true do
+                next if xs.nil?
+              end
+              for x in xs do
+                next if x.nil?
+              end
+              return /foo/
+            end
+            quarter = count /4
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-scope-balance")
+
+        val halfSlash = tokens.first { it.slice(code) == "/" && it.startIndex > code.indexOf("half =") }
+        assertEquals(SyntaxTokenKind.Operator, halfSlash.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "2" }.kind)
+
+        val quarterSlash = tokens.first { it.slice(code) == "/" && it.startIndex > code.indexOf("quarter =") }
+        assertEquals(SyntaxTokenKind.Operator, quarterSlash.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "4" }.kind)
+
+        // `return /foo/` inside `loop_test` must still lex `/foo/` as a regex literal.
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "foo" }.kind)
     }
 
     @Test
