@@ -203,6 +203,63 @@ class DocumentTimelinePlannerCache {
         val perNode: Boolean,
     )
 
+    private sealed interface CachedBeatTrackTemplate {
+        val trackId: String
+        val blockId: String
+        val rowLabel: String
+        val category: TrackCategory
+        val trackPlan: TrackPlan
+
+        data class Specimen(
+            override val trackId: String,
+            override val blockId: String,
+            override val rowLabel: String,
+            override val trackPlan: TrackPlan,
+            val specimenRef: String,
+            val trackName: String,
+            val blockLabel: String,
+        ) : CachedBeatTrackTemplate {
+            override val category: TrackCategory get() = TrackCategory.Build
+        }
+
+        data class SlideBuild(
+            override val trackId: String,
+            override val blockId: String,
+            override val rowLabel: String,
+            override val category: TrackCategory,
+            override val trackPlan: TrackPlan,
+            val nodeKind: NodeKind?,
+            val buildIndex: Int,
+            val buildId: String?,
+            val blockLabel: String,
+            val isTextMorph: Boolean,
+            val isTextDelivery: Boolean,
+            val isUnsequenced: Boolean,
+            val staggerCount: Int?,
+        ) : CachedBeatTrackTemplate
+    }
+
+    private data class CachedBeatTemplate(
+        val beatIndex: Int,
+        val segmentMs: Int,
+        val beatSpec: BeatSpec,
+        val participatingNodeIds: List<String>,
+        val tracks: List<CachedBeatTrackTemplate>,
+    )
+
+    private data class CachedTransitionTrackTemplate(
+        val trackId: String,
+        val blockId: String,
+        val trackPlan: TrackPlan,
+        val nodeKind: NodeKind?,
+        val isTextMorph: Boolean,
+        val category: TrackCategory,
+        val fixedLabel: String?,
+        val labelSuffix: String,
+        val sharedKey: String?,
+        val staggerCount: Int?,
+    )
+
     private data class CachedSlideEntry(
         val slide: SlideSpec,
         val theme: DeckThemeSpec?,
@@ -215,6 +272,9 @@ class DocumentTimelinePlannerCache {
         val beatPlans: List<SegmentPlan>,
         val nodesById: Map<String, NodeSpec>,
         val loopDecls: List<CachedLoopDecl>,
+        val beatTemplates: List<CachedBeatTemplate>,
+        val totalBeatTrackCount: Int,
+        val estimatedBytes: Long,
     )
 
     private data class CachedTransitionEntry(
@@ -227,6 +287,11 @@ class DocumentTimelinePlannerCache {
         val specimens: DeckSpecimenRegistry,
         val effects: BuildEffectRegistry,
         val plan: SegmentPlan,
+        val effectiveSpec: TransitionSpec,
+        val segmentMs: Int,
+        val participatingNodeIds: List<String>,
+        val tracks: List<CachedTransitionTrackTemplate>,
+        val estimatedBytes: Long,
     )
 
     private val slideCache = LinkedHashMap<String, CachedSlideEntry>()
@@ -291,6 +356,12 @@ class DocumentTimelinePlannerCache {
                 }
                 val nodesById = flattenNodesById(slide.nodes)
                 val loops = collectSlideLoops(slide, nodesById, specimens)
+                val beatTemplates = buildBeatTemplates(slide, beatPlans, nodesById, specimens)
+                val totalBeatTracks = beatTemplates.sumOf { it.tracks.size }
+                var entryBytes = 256L + nodesById.size * 64L + loops.size * 128L + totalBeatTracks * 96L
+                for (plan in beatPlans) {
+                    entryBytes += estimateSegmentPlanBytes(plan)
+                }
                 CachedSlideEntry(
                     slide = slide,
                     theme = activeTheme,
@@ -303,12 +374,17 @@ class DocumentTimelinePlannerCache {
                     beatPlans = beatPlans,
                     nodesById = nodesById,
                     loopDecls = loops,
+                    beatTemplates = beatTemplates,
+                    totalBeatTrackCount = totalBeatTracks,
+                    estimatedBytes = entryBytes,
                 ).also { slideCache[slide.id] = it }
             }
             slideEntries += entry
         }
         // Evict removed/skipped slides to keep memory bounded.
-        slideCache.keys.retainAll(activeSlideIds)
+        if (slideCache.size > activeSlideIds.size) {
+            slideCache.keys.retainAll(activeSlideIds)
+        }
 
         // 2. Re-plan ONLY transitions whose adjacent slide inputs changed.
         val activeTransitionKeys = HashSet<Pair<String, String>>(activeSlides.size * 2)
@@ -342,6 +418,23 @@ class DocumentTimelinePlannerCache {
                     effects = effects,
                     themeName = themeName,
                 )
+                val effectiveSpec = fromSlide.transition
+                    ?: activeTheme?.motion?.transition
+                    ?: TransitionSpec(type = TransitionType.Dissolve)
+                val participatingNodes = plan.tracks
+                    .filter { it.kind != TrackKind.TransitionSlide }
+                    .map { it.nodeId }
+                    .distinct()
+                val trackTemplates = buildTransitionTemplates(
+                    fromSlide = fromSlide,
+                    toSlide = toSlide,
+                    fromNodesById = slideEntries[i].nodesById,
+                    toNodesById = slideEntries[i + 1].nodesById,
+                    plan = plan,
+                    effectiveSpec = effectiveSpec,
+                    specimens = specimens,
+                )
+                val entryBytes = 192L + trackTemplates.size * 96L + estimateSegmentPlanBytes(plan)
                 CachedTransitionEntry(
                     fromSlide = fromSlide,
                     toSlide = toSlide,
@@ -352,23 +445,38 @@ class DocumentTimelinePlannerCache {
                     specimens = specimens,
                     effects = effects,
                     plan = plan,
+                    effectiveSpec = effectiveSpec,
+                    segmentMs = plan.segmentMs.coerceAtLeast(0),
+                    participatingNodeIds = participatingNodes,
+                    tracks = trackTemplates,
+                    estimatedBytes = entryBytes,
                 ).also { transitionCache[key] = it }
             }
             transitionEntries += entry
         }
-        transitionCache.keys.retainAll(activeTransitionKeys)
+        if (transitionCache.size > activeTransitionKeys.size) {
+            transitionCache.keys.retainAll(activeTransitionKeys)
+        }
 
         // 3. Recompute master-timeline prefix sums and assemble track rows.
+        var expectedTracks = 0
+        var expectedBeats = 0
+        for (entry in slideEntries) {
+            expectedTracks += entry.totalBeatTrackCount + entry.loopDecls.size
+            expectedBeats += entry.beatTemplates.size
+        }
+        for (entry in transitionEntries) {
+            expectedTracks += entry.tracks.size
+        }
         val slideBars = ArrayList<SlideSectionBar>(activeSlides.size)
-        val eventBeats = ArrayList<EventBeatLine>(activeSlides.size * 2)
-        val stateSpans = ArrayList<StateTimeSpan>(activeSlides.size * 4)
-        val trackRows = ArrayList<TimelineTrackRow>(activeSlides.size * 6)
-        val beatHeaders = ArrayList<DocumentBeatHeaderInfo>(activeSlides.size * 2)
+        val eventBeats = ArrayList<EventBeatLine>(expectedBeats)
+        val stateSpans = ArrayList<StateTimeSpan>(expectedBeats * 2 + transitionEntries.size)
+        val trackRows = ArrayList<TimelineTrackRow>(expectedTracks)
+        val beatHeaders = ArrayList<DocumentBeatHeaderInfo>(expectedBeats)
         val transitionHeaders = ArrayList<DocumentTransitionHeaderInfo>(transitionEntries.size)
-        val trackRefsByTrackId = LinkedHashMap<String, DocumentTimelineTrackRef>()
-        val blockRefsByBlockId = LinkedHashMap<String, DocumentTimelineTrackRef>()
-        val slideBeatPlansOut = LinkedHashMap<String, List<SegmentPlan>>(activeSlides.size)
-        val transitionPlansOut = LinkedHashMap<Pair<String, String>, SegmentPlan>(transitionEntries.size)
+        val trackRefsByTrackId = LinkedHashMap<String, DocumentTimelineTrackRef>(hashMapCapacity(expectedTracks))
+        val slideBeatPlansOut = LinkedHashMap<String, List<SegmentPlan>>(hashMapCapacity(activeSlides.size))
+        val transitionPlansOut = LinkedHashMap<Pair<String, String>, SegmentPlan>(hashMapCapacity(transitionEntries.size))
 
         var cursorMs = 0
         var globalStateIndex = 0
@@ -387,7 +495,7 @@ class DocumentTimelinePlannerCache {
         for ((sceneIdx, entry) in slideEntries.withIndex()) {
             val slide = entry.slide
             val overlapInMs = if (sceneIdx > 0) {
-                transitionEntries[sceneIdx - 1].plan.segmentMs.coerceAtLeast(0)
+                transitionEntries[sceneIdx - 1].segmentMs
             } else {
                 0
             }
@@ -398,15 +506,10 @@ class DocumentTimelinePlannerCache {
             // Match Animatic.buildStates: scenes after Scene 0 start with a Frame.Start boundary state.
             val sceneStartStateIdx: Int? = if (sceneIdx > 0) globalStateIndex++ else null
 
-            for (beatIdx in slide.beats.indices) {
-                val beatPlan = entry.beatPlans.getOrElse(beatIdx) { SegmentPlan.Empty }
+            for (beatTemplate in entry.beatTemplates) {
+                val beatIdx = beatTemplate.beatIndex
                 val beatStartMs = cursorMs
-                val segmentMs = beatPlan.segmentMs.coerceAtLeast(0)
-
-                val participatingNodeIds = beatPlan.tracks
-                    .filter { it.kind != TrackKind.SpecimenTrack }
-                    .map { it.nodeId }
-                    .distinct()
+                val segmentMs = beatTemplate.segmentMs
 
                 beatHeaders += DocumentBeatHeaderInfo(
                     slideId = slide.id,
@@ -414,8 +517,8 @@ class DocumentTimelinePlannerCache {
                     beatIndex = beatIdx,
                     startMs = beatStartMs,
                     segmentMs = segmentMs,
-                    beatSpec = slide.beats[beatIdx],
-                    participatingNodeIds = participatingNodeIds,
+                    beatSpec = beatTemplate.beatSpec,
+                    participatingNodeIds = beatTemplate.participatingNodeIds,
                 )
 
                 // Emit segment animation span (if any) before resting click hold, aligned 1:1 with Animatic.buildStates:
@@ -476,91 +579,81 @@ class DocumentTimelinePlannerCache {
                 )
                 cursorMs += CLICK_HOLD_MS
 
-                // Emit track rows for every planned track in this beat.
-                for ((tIdx, trackPlan) in beatPlan.tracks.withIndex()) {
-                    val node = entry.nodesById[trackPlan.nodeId]
+                // Emit track rows for every planned track in this beat using cached templates.
+                for (tpl in beatTemplate.tracks) {
+                    val trackPlan = tpl.trackPlan
                     val absStart = beatStartMs + trackPlan.startMs
                     val dur = trackPlan.durationMs
-                    if (trackPlan.kind == TrackKind.SpecimenTrack) {
-                        val trackName = trackPlan.buildId ?: "track$tIdx"
-                        val trackId = "doc:${slide.id}:b$beatIdx:specimen:${trackPlan.nodeId}:$trackName"
-                        val blockId = "$trackId#0"
-                        val ref = DocumentTimelineTrackRef.SpecimenTrackBar(
-                            trackId = trackId,
-                            slideId = slide.id,
-                            sceneIndex = sceneIdx,
-                            beatIndex = beatIdx,
-                            nodeId = trackPlan.nodeId,
-                            specimenRef = node?.specimen?.ref.orEmpty(),
-                            trackName = trackName,
-                            segmentStartMs = beatStartMs,
-                            trackPlan = trackPlan,
-                        )
-                        val block = TimelineBlockBar(
-                            id = blockId,
-                            trackId = trackId,
-                            label = TimelineDisplayNames.humanizeId(trackName),
-                            category = TrackCategory.Build,
-                            sceneIndex = sceneIdx,
-                            triggerBeatInScene = beatIdx,
-                            startMs = absStart,
-                            durationMs = dur,
-                            delayMs = trackPlan.startMs,
-                        )
-                        trackRows += TimelineTrackRow(
-                            trackId = trackId,
-                            label = TimelineDisplayNames.specimenTrackLabel(beatIdx, node, trackPlan.nodeId, trackName, specimens),
-                            category = TrackCategory.Build,
-                            sceneIndex = sceneIdx,
-                            blocks = listOf(block),
-                        )
-                        trackRefsByTrackId[trackId] = ref
-                        blockRefsByBlockId[blockId] = ref
-                    } else {
-                        val buildIndex = trackPlan.buildIndex ?: 0
-                        val build = node?.builds?.getOrNull(buildIndex)
-                        val isTextMorph = node?.text != null && build is Build.Change && trackPlan.pieces != null
-                        val isTextDelivery = node?.text != null && build !is Build.Change && trackPlan.pieces != null
-                        val isUnsequenced = !trackPlan.isSequenced
-                        val category = classifyTrackCategory(trackPlan, node, isTextMorph, isTextDelivery)
-                        val trackId = "doc:${slide.id}:b$beatIdx:${trackPlan.nodeId}:$buildIndex"
-                        val blockId = "$trackId#0"
-                        val ref = DocumentTimelineTrackRef.SlideBuildTrack(
-                            trackId = trackId,
-                            slideId = slide.id,
-                            sceneIndex = sceneIdx,
-                            beatIndex = beatIdx,
-                            nodeId = trackPlan.nodeId,
-                            nodeKind = node?.kind,
-                            buildIndex = buildIndex,
-                            buildId = trackPlan.buildId,
-                            segmentStartMs = beatStartMs,
-                            trackPlan = trackPlan,
-                            isTextMorph = isTextMorph,
-                            isTextDelivery = isTextDelivery,
-                            isUnsequenced = isUnsequenced,
-                        )
-                        val block = TimelineBlockBar(
-                            id = blockId,
-                            trackId = trackId,
-                            label = formatBuildLabel(trackPlan, build),
-                            category = category,
-                            sceneIndex = sceneIdx,
-                            triggerBeatInScene = beatIdx,
-                            startMs = absStart,
-                            durationMs = dur,
-                            delayMs = trackPlan.startMs,
-                            staggerCount = trackPlan.pieces?.slots?.count { it.address != dev.sebastiano.ciacola.document.Slot.SIZE_ADDRESS },
-                        )
-                        trackRows += TimelineTrackRow(
-                            trackId = trackId,
-                            label = TimelineDisplayNames.buildTrackLabel(beatIdx, node, trackPlan.nodeId, specimens),
-                            category = category,
-                            sceneIndex = sceneIdx,
-                            blocks = listOf(block),
-                        )
-                        trackRefsByTrackId[trackId] = ref
-                        blockRefsByBlockId[blockId] = ref
+                    when (tpl) {
+                        is CachedBeatTrackTemplate.Specimen -> {
+                            val ref = DocumentTimelineTrackRef.SpecimenTrackBar(
+                                trackId = tpl.trackId,
+                                slideId = slide.id,
+                                sceneIndex = sceneIdx,
+                                beatIndex = beatIdx,
+                                nodeId = trackPlan.nodeId,
+                                specimenRef = tpl.specimenRef,
+                                trackName = tpl.trackName,
+                                segmentStartMs = beatStartMs,
+                                trackPlan = trackPlan,
+                            )
+                            val block = TimelineBlockBar(
+                                id = tpl.blockId,
+                                trackId = tpl.trackId,
+                                label = tpl.blockLabel,
+                                category = TrackCategory.Build,
+                                sceneIndex = sceneIdx,
+                                triggerBeatInScene = beatIdx,
+                                startMs = absStart,
+                                durationMs = dur,
+                                delayMs = trackPlan.startMs,
+                            )
+                            trackRows += TimelineTrackRow(
+                                trackId = tpl.trackId,
+                                label = tpl.rowLabel,
+                                category = TrackCategory.Build,
+                                sceneIndex = sceneIdx,
+                                blocks = listOf(block),
+                            )
+                            trackRefsByTrackId[tpl.trackId] = ref
+                        }
+                        is CachedBeatTrackTemplate.SlideBuild -> {
+                            val ref = DocumentTimelineTrackRef.SlideBuildTrack(
+                                trackId = tpl.trackId,
+                                slideId = slide.id,
+                                sceneIndex = sceneIdx,
+                                beatIndex = beatIdx,
+                                nodeId = trackPlan.nodeId,
+                                nodeKind = tpl.nodeKind,
+                                buildIndex = tpl.buildIndex,
+                                buildId = tpl.buildId,
+                                segmentStartMs = beatStartMs,
+                                trackPlan = trackPlan,
+                                isTextMorph = tpl.isTextMorph,
+                                isTextDelivery = tpl.isTextDelivery,
+                                isUnsequenced = tpl.isUnsequenced,
+                            )
+                            val block = TimelineBlockBar(
+                                id = tpl.blockId,
+                                trackId = tpl.trackId,
+                                label = tpl.blockLabel,
+                                category = tpl.category,
+                                sceneIndex = sceneIdx,
+                                triggerBeatInScene = beatIdx,
+                                startMs = absStart,
+                                durationMs = dur,
+                                delayMs = trackPlan.startMs,
+                                staggerCount = tpl.staggerCount,
+                            )
+                            trackRows += TimelineTrackRow(
+                                trackId = tpl.trackId,
+                                label = tpl.rowLabel,
+                                category = tpl.category,
+                                sceneIndex = sceneIdx,
+                                blocks = listOf(block),
+                            )
+                            trackRefsByTrackId[tpl.trackId] = ref
+                        }
                     }
                 }
             }
@@ -608,7 +701,6 @@ class DocumentTimelinePlannerCache {
                     blocks = listOf(block),
                 )
                 trackRefsByTrackId[trackId] = ref
-                blockRefsByBlockId[blockId] = ref
             }
 
             // Cross-slide transition to next active slide (Animatic Frame.End -> next Frame.Start).
@@ -622,16 +714,8 @@ class DocumentTimelinePlannerCache {
                 transitionPlansOut[transKey] = transPlan
 
                 val transStartMs = cursorMs
-                val transDurationMs = transPlan.segmentMs.coerceAtLeast(0)
+                val transDurationMs = transEntry.segmentMs
                 overlapOutMs = transDurationMs
-                val effectiveSpec = slide.transition
-                    ?: activeTheme?.motion?.transition
-                    ?: TransitionSpec(type = TransitionType.Dissolve)
-
-                val transNodes = transPlan.tracks
-                    .filter { it.kind != TrackKind.TransitionSlide }
-                    .map { it.nodeId }
-                    .distinct()
 
                 transitionHeaders += DocumentTransitionHeaderInfo(
                     fromSlideId = slide.id,
@@ -640,8 +724,8 @@ class DocumentTimelinePlannerCache {
                     toSceneIndex = sceneIdx + 1,
                     startMs = transStartMs,
                     segmentMs = transDurationMs,
-                    transitionSpec = effectiveSpec,
-                    participatingNodeIds = transNodes,
+                    transitionSpec = transEntry.effectiveSpec,
+                    participatingNodeIds = transEntry.participatingNodeIds,
                 )
 
                 if (transDurationMs > 0) {
@@ -657,61 +741,44 @@ class DocumentTimelinePlannerCache {
                     cursorMs += transDurationMs
                 }
 
-                val nextNodesById = slideEntries[sceneIdx + 1].nodesById
-                for ((tIdx, trackPlan) in transPlan.tracks.withIndex()) {
-                    val node = nextNodesById[trackPlan.nodeId] ?: entry.nodesById[trackPlan.nodeId]
-                    val isTextMorph = trackPlan.kind == TrackKind.TransitionMove && trackPlan.pieces != null
-                    val category = when {
-                        isTextMorph -> TrackCategory.MagicText
-                        trackPlan.kind == TrackKind.TransitionMove -> TrackCategory.SharedElement
-                        else -> TrackCategory.Build
-                    }
-                    val trackId = "doc:trans:${slide.id}->${nextSlide.id}:${trackPlan.nodeId}:$tIdx"
-                    val blockId = "$trackId#0"
+                val triggerBeat = slide.beats.lastIndex.coerceAtLeast(0)
+                for (tpl in transEntry.tracks) {
+                    val trackPlan = tpl.trackPlan
                     val ref = DocumentTimelineTrackRef.TransitionTrackBar(
-                        trackId = trackId,
+                        trackId = tpl.trackId,
                         fromSlideId = slide.id,
                         toSlideId = nextSlide.id,
                         fromSceneIndex = sceneIdx,
                         toSceneIndex = sceneIdx + 1,
                         nodeId = trackPlan.nodeId,
-                        nodeKind = node?.kind,
+                        nodeKind = tpl.nodeKind,
                         segmentStartMs = transStartMs,
                         trackPlan = trackPlan,
-                        isTextMorph = isTextMorph,
+                        isTextMorph = tpl.isTextMorph,
                     )
-                    val transLabel = TimelineDisplayNames.transitionTrackLabel(
-                        kind = trackPlan.kind,
-                        toSlide = nextSlide,
-                        toSceneIndex = sceneIdx + 1,
-                        node = node,
-                        nodeId = trackPlan.nodeId,
-                        transitionType = effectiveSpec.type,
-                        specimens = specimens,
-                    )
+                    val transLabel = tpl.fixedLabel ?: "→ Slide ${sceneIdx + 2} · ${tpl.labelSuffix}"
                     val block = TimelineBlockBar(
-                        id = blockId,
-                        trackId = trackId,
+                        id = tpl.blockId,
+                        trackId = tpl.trackId,
                         label = transLabel,
-                        category = category,
+                        category = tpl.category,
                         sceneIndex = sceneIdx,
                         endSceneIndex = sceneIdx + 1,
-                        triggerBeatInScene = slide.beats.lastIndex.coerceAtLeast(0),
+                        triggerBeatInScene = triggerBeat,
                         startMs = transStartMs + trackPlan.startMs,
                         durationMs = trackPlan.durationMs,
                         delayMs = trackPlan.startMs,
-                        sharedKey = if (trackPlan.kind == TrackKind.TransitionMove) trackPlan.nodeId else null,
-                        staggerCount = trackPlan.pieces?.slots?.count { it.address != dev.sebastiano.ciacola.document.Slot.SIZE_ADDRESS },
+                        sharedKey = tpl.sharedKey,
+                        staggerCount = tpl.staggerCount,
                     )
                     trackRows += TimelineTrackRow(
-                        trackId = trackId,
+                        trackId = tpl.trackId,
                         label = transLabel,
-                        category = category,
+                        category = tpl.category,
                         sceneIndex = sceneIdx,
                         blocks = listOf(block),
                     )
-                    trackRefsByTrackId[trackId] = ref
-                    blockRefsByBlockId[blockId] = ref
+                    trackRefsByTrackId[tpl.trackId] = ref
                 }
             }
 
@@ -740,7 +807,7 @@ class DocumentTimelinePlannerCache {
             beatHeaders = beatHeaders,
             transitionHeaders = transitionHeaders,
             trackRefsByTrackId = trackRefsByTrackId,
-            blockRefsByBlockId = blockRefsByBlockId,
+            blockRefsByBlockId = BlockRefMapView(trackRefsByTrackId),
             slideBeatPlans = slideBeatPlansOut,
             transitionPlans = transitionPlansOut,
             diagnostics = DocumentTimelinePlanDiagnostics(
@@ -761,15 +828,143 @@ class DocumentTimelinePlannerCache {
     fun estimateCacheMemoryBytes(): Long {
         var bytes = 256L
         for (entry in slideCache.values) {
-            bytes += 256L + entry.nodesById.size * 64L + entry.loopDecls.size * 128L
-            for (plan in entry.beatPlans) {
-                bytes += estimateSegmentPlanBytes(plan)
-            }
+            bytes += entry.estimatedBytes
         }
         for (entry in transitionCache.values) {
-            bytes += 192L + estimateSegmentPlanBytes(entry.plan)
+            bytes += entry.estimatedBytes
         }
         return bytes
+    }
+
+    private fun buildBeatTemplates(
+        slide: SlideSpec,
+        beatPlans: List<SegmentPlan>,
+        nodesById: Map<String, NodeSpec>,
+        specimens: DeckSpecimenRegistry,
+    ): List<CachedBeatTemplate> = List(slide.beats.size) { beatIdx ->
+        val beatPlan = beatPlans.getOrElse(beatIdx) { SegmentPlan.Empty }
+        val participatingNodeIds = beatPlan.tracks
+            .filter { it.kind != TrackKind.SpecimenTrack }
+            .map { it.nodeId }
+            .distinct()
+        val trackTemplates = ArrayList<CachedBeatTrackTemplate>(beatPlan.tracks.size)
+        for ((tIdx, trackPlan) in beatPlan.tracks.withIndex()) {
+            val node = nodesById[trackPlan.nodeId]
+            if (trackPlan.kind == TrackKind.SpecimenTrack) {
+                val trackName = trackPlan.buildId ?: "track$tIdx"
+                val trackId = "doc:${slide.id}:b$beatIdx:specimen:${trackPlan.nodeId}:$trackName"
+                trackTemplates += CachedBeatTrackTemplate.Specimen(
+                    trackId = trackId,
+                    blockId = "$trackId#0",
+                    rowLabel = TimelineDisplayNames.specimenTrackLabel(beatIdx, node, trackPlan.nodeId, trackName, specimens),
+                    trackPlan = trackPlan,
+                    specimenRef = node?.specimen?.ref.orEmpty(),
+                    trackName = trackName,
+                    blockLabel = TimelineDisplayNames.humanizeId(trackName),
+                )
+            } else {
+                val buildIndex = trackPlan.buildIndex ?: 0
+                val build = node?.builds?.getOrNull(buildIndex)
+                val isTextMorph = node?.text != null && build is Build.Change && trackPlan.pieces != null
+                val isTextDelivery = node?.text != null && build !is Build.Change && trackPlan.pieces != null
+                val isUnsequenced = !trackPlan.isSequenced
+                val category = classifyTrackCategory(trackPlan, node, isTextMorph, isTextDelivery)
+                val trackId = "doc:${slide.id}:b$beatIdx:${trackPlan.nodeId}:$buildIndex"
+                trackTemplates += CachedBeatTrackTemplate.SlideBuild(
+                    trackId = trackId,
+                    blockId = "$trackId#0",
+                    rowLabel = TimelineDisplayNames.buildTrackLabel(beatIdx, node, trackPlan.nodeId, specimens),
+                    category = category,
+                    trackPlan = trackPlan,
+                    nodeKind = node?.kind,
+                    buildIndex = buildIndex,
+                    buildId = trackPlan.buildId,
+                    blockLabel = formatBuildLabel(trackPlan, build),
+                    isTextMorph = isTextMorph,
+                    isTextDelivery = isTextDelivery,
+                    isUnsequenced = isUnsequenced,
+                    staggerCount = trackPlan.pieces?.slots?.count { it.address != dev.sebastiano.ciacola.document.Slot.SIZE_ADDRESS },
+                )
+            }
+        }
+        CachedBeatTemplate(
+            beatIndex = beatIdx,
+            segmentMs = beatPlan.segmentMs.coerceAtLeast(0),
+            beatSpec = slide.beats[beatIdx],
+            participatingNodeIds = participatingNodeIds,
+            tracks = trackTemplates,
+        )
+    }
+
+    private fun buildTransitionTemplates(
+        fromSlide: SlideSpec,
+        toSlide: SlideSpec,
+        fromNodesById: Map<String, NodeSpec>,
+        toNodesById: Map<String, NodeSpec>,
+        plan: SegmentPlan,
+        effectiveSpec: TransitionSpec,
+        specimens: DeckSpecimenRegistry,
+    ): List<CachedTransitionTrackTemplate> {
+        val fixedTargetTitle = toSlide.title?.trim()?.takeIf { it.isNotEmpty() }
+        val templates = ArrayList<CachedTransitionTrackTemplate>(plan.tracks.size)
+        for ((tIdx, trackPlan) in plan.tracks.withIndex()) {
+            val node = toNodesById[trackPlan.nodeId] ?: fromNodesById[trackPlan.nodeId]
+            val isTextMorph = trackPlan.kind == TrackKind.TransitionMove && trackPlan.pieces != null
+            val category = when {
+                isTextMorph -> TrackCategory.MagicText
+                trackPlan.kind == TrackKind.TransitionMove -> TrackCategory.SharedElement
+                else -> TrackCategory.Build
+            }
+            val trackId = "doc:trans:${fromSlide.id}->${toSlide.id}:${trackPlan.nodeId}:$tIdx"
+            val labelSuffix = if (trackPlan.nodeId.startsWith("@transition") || trackPlan.kind == TrackKind.TransitionSlide) {
+                TimelineDisplayNames.transitionTypeName(effectiveSpec.type)
+            } else {
+                val phase = when (trackPlan.kind) {
+                    TrackKind.TransitionMove -> "Move"
+                    TrackKind.TransitionExit -> "Exit"
+                    TrackKind.TransitionEnter -> "Enter"
+                    else -> TimelineDisplayNames.humanizeId(trackPlan.kind.name)
+                }
+                "$phase · ${TimelineDisplayNames.nodeName(node, trackPlan.nodeId, specimens)}"
+            }
+            templates += CachedTransitionTrackTemplate(
+                trackId = trackId,
+                blockId = "$trackId#0",
+                trackPlan = trackPlan,
+                nodeKind = node?.kind,
+                isTextMorph = isTextMorph,
+                category = category,
+                fixedLabel = fixedTargetTitle?.let { "→ $it · $labelSuffix" },
+                labelSuffix = labelSuffix,
+                sharedKey = if (trackPlan.kind == TrackKind.TransitionMove) trackPlan.nodeId else null,
+                staggerCount = trackPlan.pieces?.slots?.count { it.address != dev.sebastiano.ciacola.document.Slot.SIZE_ADDRESS },
+            )
+        }
+        return templates
+    }
+
+    private fun hashMapCapacity(expectedSize: Int): Int = ((expectedSize / 0.75f).toInt() + 1).coerceAtLeast(16)
+
+    /**
+     * Zero-allocation view mapping each single-block track's `"<trackId>#0"` block id to its
+     * [DocumentTimelineTrackRef] in [byTrackId], avoiding duplicating a 900+ entry hash map on
+     * every snapshot rebuild.
+     */
+    private class BlockRefMapView(
+        private val byTrackId: Map<String, DocumentTimelineTrackRef>,
+    ) : AbstractMap<String, DocumentTimelineTrackRef>() {
+        override val size: Int get() = byTrackId.size
+
+        override fun containsKey(key: String): Boolean =
+            key.endsWith("#0") && byTrackId.containsKey(key.substring(0, key.length - 2))
+
+        override fun get(key: String): DocumentTimelineTrackRef? =
+            if (key.endsWith("#0")) byTrackId[key.substring(0, key.length - 2)] else null
+
+        override val entries: Set<Map.Entry<String, DocumentTimelineTrackRef>>
+            get() = byTrackId.entries.mapTo(LinkedHashSet(byTrackId.size * 2)) { (trackId, ref) ->
+                java.util.AbstractMap.SimpleImmutableEntry("$trackId#0", ref)
+            }
     }
 
     private fun estimateSegmentPlanBytes(plan: SegmentPlan): Long {

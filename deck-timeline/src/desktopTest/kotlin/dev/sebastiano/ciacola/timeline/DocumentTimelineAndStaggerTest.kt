@@ -819,6 +819,91 @@ class DocumentTimelineAndStaggerTest {
         )
     }
 
+    @Test
+    fun cachedTransitionTemplatesUpdateUntitledSlideIndexAndBlockRefViewMatchesTrackRefs() {
+        val doc = DeckDocument(
+            id = "cached-template-test",
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark")),
+            defaultTheme = "dark",
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    title = null,
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "h1",
+                            frame = FrameSpec(100.0, 100.0, 600.0, 100.0),
+                            text = TextPayload(value = RichTextValue.Plain("**Bold** `code` ~~old~~")),
+                            builds = listOf(Build.Enter(beat = 1, effect = "fade", durationMs = 300)),
+                        ),
+                    ),
+                    transition = TransitionSpec(type = TransitionType.Dissolve, durationMs = 350),
+                ),
+                SlideSpec(
+                    id = "s2",
+                    title = null,
+                    beats = listOf(BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "h2",
+                            frame = FrameSpec(100.0, 100.0, 600.0, 100.0),
+                            text = TextPayload(value = RichTextValue.Plain("Plain title")),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val store = DeckDocumentStore()
+        store.loadInitial(doc)
+        val controller = DocumentTimelineController(store = store)
+
+        // Initial snapshot: s1 -> s2 targets untitled scene index 1 ("Slide 2").
+        val snapBefore = controller.snapshot
+        val transRowBefore = snapBefore.snapshot.tracks.single { it.trackId.startsWith("doc:trans:s1->s2:") }
+        assertEquals("→ Slide 2 · Dissolve", transRowBefore.label)
+        assertEquals("→ Slide 2 · Dissolve", transRowBefore.blocks.single().label)
+
+        // Verify markdown stripping matches both markdown and plain strings.
+        val buildRow = snapBefore.snapshot.tracks.single { it.trackId.startsWith("doc:s1:b1:h1:") }
+        assertTrue(buildRow.label.contains("Bold code old"), "Expected stripped markdown label, got '${buildRow.label}'")
+        assertEquals("Plain title", TimelineDisplayNames.stripMarkdownPunctuation("  Plain title  "))
+        assertEquals("Heading bold code", TimelineDisplayNames.stripMarkdownPunctuation("## Heading **bold** `code`"))
+
+        // Verify BlockRefMapView exposes exact 1:1 `"$trackId#0"` entries and rejects non-block keys.
+        assertEquals(snapBefore.trackRefsByTrackId.size, snapBefore.blockRefsByBlockId.size)
+        for ((trackId, ref) in snapBefore.trackRefsByTrackId) {
+            val blockId = "$trackId#0"
+            assertTrue(blockId in snapBefore.blockRefsByBlockId)
+            assertEquals(ref, snapBefore.blockRefsByBlockId[blockId])
+        }
+        assertFalse("missing#0" in snapBefore.blockRefsByBlockId)
+        assertNull(snapBefore.blockRefsByBlockId["doc:s1:b1:h1:0"])
+        assertEquals(snapBefore.trackRefsByTrackId.size, snapBefore.blockRefsByBlockId.entries.size)
+
+        // Prepend a new slide s0 BEFORE s1->s2: s1->s2 remains cached (NOT replanned!), yet its untitled label updates to Slide 3!
+        assertTrue(
+            store.edit("Prepend s0") { d ->
+                val s0 = SlideSpec(
+                    id = "s0",
+                    title = "Intro",
+                    beats = listOf(BeatSpec()),
+                    nodes = listOf(NodeSpec(id = "n0", text = TextPayload(value = RichTextValue.Plain("Intro")))),
+                )
+                d.copy(slides = listOf(s0) + d.slides)
+            },
+        )
+        val snapAfter = controller.refreshSnapshot()
+        assertFalse(
+            ("s1" to "s2") in snapAfter.diagnostics.replannedTransitions,
+            "s1->s2 transition should stay cached when s0 is prepended",
+        )
+        val transRowAfter = snapAfter.snapshot.tracks.single { it.trackId.startsWith("doc:trans:s1->s2:") }
+        assertEquals("→ Slide 3 · Dissolve", transRowAfter.label)
+        assertEquals("→ Slide 3 · Dissolve", transRowAfter.blocks.single().label)
+    }
+
     private fun collectAllSemanticTexts(root: SemanticsNode): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {

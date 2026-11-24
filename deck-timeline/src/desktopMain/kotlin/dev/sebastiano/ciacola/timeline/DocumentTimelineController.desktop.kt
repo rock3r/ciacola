@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -63,7 +64,7 @@ class DocumentTimelineController(
 ) {
     val plannerCache: DocumentTimelinePlannerCache = DocumentTimelinePlannerCache()
 
-    var snapshot: DocumentTimelineSnapshot by mutableStateOf(DocumentTimelineSnapshot.Empty)
+    var snapshot: DocumentTimelineSnapshot by mutableStateOf(DocumentTimelineSnapshot.Empty, referentialEqualityPolicy())
         private set
 
     var selection: DocumentTimelineSelection by mutableStateOf(DocumentTimelineSelection.None)

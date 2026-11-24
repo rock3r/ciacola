@@ -240,7 +240,47 @@ object DeckDocumentCodec {
         assetExists: ((String) -> Boolean)? = null,
     ): List<DocumentIssue> {
         val issues = mutableListOf<DocumentIssue>()
+        val declaredFonts = validateDocumentHeader(document, issues)
 
+        val seenSlideIds = HashSet<String>(document.slides.size * 2)
+        var firstNonSkippedIdx: Int? = null
+        var lastNonSkippedIdx: Int? = null
+        for (idx in document.slides.indices) {
+            if (!document.slides[idx].skipped) {
+                if (firstNonSkippedIdx == null) firstNonSkippedIdx = idx
+                lastNonSkippedIdx = idx
+            }
+        }
+
+        for ((slideIdx, slide) in document.slides.withIndex()) {
+            val slideAddr = slide.id.ifBlank { "slide[$slideIdx]" }
+            if (slide.id.isBlank()) {
+                issues += loadError("BLANK_SLIDE_ID", slideAddr, "Slide id must not be blank.")
+            } else if (!seenSlideIds.add(slide.id)) {
+                issues += loadError("DUPLICATE_SLIDE_ID", slideAddr, "Duplicate slide id '${slide.id}'.")
+            }
+
+            validateSlideBody(
+                slide = slide,
+                slideAddr = slideAddr,
+                isFirstNonSkipped = slideIdx == firstNonSkippedIdx,
+                isLastNonSkipped = slideIdx == lastNonSkippedIdx,
+                paletteKnown = slide.palette == null || slide.palette in document.palettes,
+                declaredFonts = declaredFonts,
+                specimens = specimens,
+                effects = effects,
+                assetExists = assetExists,
+                issues = issues,
+            )
+        }
+
+        return issues
+    }
+
+    internal fun validateDocumentHeader(
+        document: DeckDocument,
+        issues: MutableList<DocumentIssue>,
+    ): Set<String> {
         if (document.id.isBlank()) {
             issues += loadError("BLANK_DECK_ID", "<root>", "Deck 'id' must not be blank.")
         }
@@ -277,7 +317,11 @@ object DeckDocumentCodec {
                 message = fontIssue.message,
             )
         }
-        val declaredFonts = document.fonts.mapTo(hashSetOf()) { it.family }
+        val declaredFonts: Set<String> = if (document.fonts.isEmpty()) {
+            emptySet()
+        } else {
+            document.fonts.mapTo(hashSetOf()) { it.family }
+        }
 
         // Validate theme code schemes, typography font references, and motion curves
         for ((themeName, themeSpec) in document.themes) {
@@ -317,58 +361,67 @@ object DeckDocumentCodec {
                 )
             }
         }
+        return declaredFonts
+    }
 
-        val seenSlideIds = hashSetOf<String>()
-        val nonSkippedIndices = document.slides.indices.filter { !document.slides[it].skipped }
-        val firstNonSkippedIdx = nonSkippedIndices.firstOrNull()
-        val lastNonSkippedIdx = nonSkippedIndices.lastOrNull()
-
-        for ((slideIdx, slide) in document.slides.withIndex()) {
-            val slideAddr = slide.id.ifBlank { "slide[$slideIdx]" }
-            if (slide.id.isBlank()) {
-                issues += loadError("BLANK_SLIDE_ID", slideAddr, "Slide id must not be blank.")
-            } else if (!seenSlideIds.add(slide.id)) {
-                issues += loadError("DUPLICATE_SLIDE_ID", slideAddr, "Duplicate slide id '${slide.id}'.")
-            }
-
-            if (slide.palette != null && slide.palette !in document.palettes) {
-                issues += lintError("UNKNOWN_PALETTE", slideAddr, "Slide references unknown palette '${slide.palette}'.")
-            }
-            if (slide.background is Fill.Image && assetExists != null && !assetExists(slide.background.image.src)) {
+    /**
+     * Validates a single slide's body (excluding deck-wide blank/duplicate slide-ID checks).
+     * Returns `true` if the slide references any image asset (background or node image) whose
+     * validation depends on [assetExists].
+     */
+    internal fun validateSlideBody(
+        slide: SlideSpec,
+        slideAddr: String,
+        isFirstNonSkipped: Boolean,
+        isLastNonSkipped: Boolean,
+        paletteKnown: Boolean,
+        declaredFonts: Set<String>,
+        specimens: DeckSpecimenRegistry,
+        effects: BuildEffectRegistry,
+        assetExists: ((String) -> Boolean)?,
+        issues: MutableList<DocumentIssue>,
+    ): Boolean {
+        var hasImageRefs = false
+        if (slide.palette != null && !paletteKnown) {
+            issues += lintError("UNKNOWN_PALETTE", slideAddr, "Slide references unknown palette '${slide.palette}'.")
+        }
+        if (slide.background is Fill.Image) {
+            hasImageRefs = true
+            if (assetExists != null && !assetExists(slide.background.image.src)) {
                 issues += lintError("MISSING_ASSET", slideAddr, "Background image asset '${slide.background.image.src}' not found.")
             }
+        }
 
-            if (slide.beats.isEmpty()) {
-                issues += loadError("EMPTY_BEATS", slideAddr, "Slide '${slide.id}' must have at least one beat.")
-                continue
+        if (slide.beats.isEmpty()) {
+            issues += loadError("EMPTY_BEATS", slideAddr, "Slide '${slide.id}' must have at least one beat.")
+            return hasImageRefs
+        }
+
+        for ((beatIdx, beat) in slide.beats.withIndex()) {
+            val beatAddr = "$slideAddr@beat$beatIdx"
+            if (beat.autoAdvanceMs != null && beat.autoAdvanceMs < 0) {
+                issues += loadError("NEGATIVE_AUTO_ADVANCE", beatAddr, "autoAdvanceMs must be >= 0, got ${beat.autoAdvanceMs}.")
             }
+            validatePhases(beat.phases, beatAddr, issues)
+            validateStagger(beat.stagger, beatAddr, isTextContext = false, issues = issues)
+        }
 
-            for ((beatIdx, beat) in slide.beats.withIndex()) {
-                val beatAddr = "$slideAddr@beat$beatIdx"
-                if (beat.autoAdvanceMs != null && beat.autoAdvanceMs < 0) {
-                    issues += loadError("NEGATIVE_AUTO_ADVANCE", beatAddr, "autoAdvanceMs must be >= 0, got ${beat.autoAdvanceMs}.")
-                }
-                validatePhases(beat.phases, beatAddr, issues)
-                validateStagger(beat.stagger, beatAddr, isTextContext = false, issues = issues)
+        if (slide.transition != null) {
+            if (isLastNonSkipped) {
+                issues += lintWarning(
+                    "TRANSITION_ON_LAST_SLIDE",
+                    slideAddr,
+                    "Last non-skipped slide '${slide.id}' declares a transition, which has no target slide.",
+                )
             }
+            validateTransition(slide.transition, slideAddr, issues)
+        }
 
-            if (slide.transition != null) {
-                if (slideIdx == lastNonSkippedIdx) {
-                    issues += lintWarning(
-                        "TRANSITION_ON_LAST_SLIDE",
-                        slideAddr,
-                        "Last non-skipped slide '${slide.id}' declares a transition, which has no target slide.",
-                    )
-                }
-                validateTransition(slide.transition, slideAddr, issues)
-            }
-
-            val allNodesById = LinkedHashMap<String, NodeSpec>()
-            collectAndValidateNodes(
+        val allNodesById = LinkedHashMap<String, NodeSpec>()
+        if (collectAndValidateNodes(
                 nodes = slide.nodes,
                 slide = slide,
-                slideIdx = slideIdx,
-                firstNonSkippedIdx = firstNonSkippedIdx,
+                isFirstNonSkipped = isFirstNonSkipped,
                 declaredFonts = declaredFonts,
                 specimens = specimens,
                 effects = effects,
@@ -376,30 +429,31 @@ object DeckDocumentCodec {
                 allNodesById = allNodesById,
                 issues = issues,
             )
-
-            // Post-pass over all nodes on the slide for cross-node references (connectors, after, transition.text)
-            validateSlideReferences(
-                slide = slide,
-                allNodesById = allNodesById,
-                issues = issues,
-            )
+        ) {
+            hasImageRefs = true
         }
 
-        return issues
+        // Post-pass over all nodes on the slide for cross-node references (connectors, after, transition.text)
+        validateSlideReferences(
+            slide = slide,
+            allNodesById = allNodesById,
+            issues = issues,
+        )
+        return hasImageRefs
     }
 
     private fun collectAndValidateNodes(
         nodes: List<NodeSpec>,
         slide: SlideSpec,
-        slideIdx: Int,
-        firstNonSkippedIdx: Int?,
+        isFirstNonSkipped: Boolean,
         declaredFonts: Set<String>,
         specimens: DeckSpecimenRegistry,
         effects: BuildEffectRegistry,
         assetExists: ((String) -> Boolean)?,
         allNodesById: LinkedHashMap<String, NodeSpec>,
         issues: MutableList<DocumentIssue>,
-    ) {
+    ): Boolean {
+        var hasImageRefs = false
         for (node in nodes) {
             val addr = "${slide.id}/${node.id}"
             if (node.id.isBlank()) {
@@ -452,6 +506,7 @@ object DeckDocumentCodec {
             }
 
             node.image?.let { img ->
+                hasImageRefs = true
                 if (assetExists != null && !assetExists(img.src)) {
                     issues += lintError("MISSING_ASSET", addr, "Image asset '${img.src}' not found.")
                 }
@@ -470,8 +525,7 @@ object DeckDocumentCodec {
                 node = node,
                 kind = kind,
                 slide = slide,
-                slideIdx = slideIdx,
-                firstNonSkippedIdx = firstNonSkippedIdx,
+                isFirstNonSkipped = isFirstNonSkipped,
                 specimens = specimens,
                 effects = effects,
                 addr = addr,
@@ -480,20 +534,23 @@ object DeckDocumentCodec {
 
             // Recurse into children
             if (node.children.isNotEmpty()) {
-                collectAndValidateNodes(
-                    nodes = node.children,
-                    slide = slide,
-                    slideIdx = slideIdx,
-                    firstNonSkippedIdx = firstNonSkippedIdx,
-                    declaredFonts = declaredFonts,
-                    specimens = specimens,
-                    effects = effects,
-                    assetExists = assetExists,
-                    allNodesById = allNodesById,
-                    issues = issues,
-                )
+                if (collectAndValidateNodes(
+                        nodes = node.children,
+                        slide = slide,
+                        isFirstNonSkipped = isFirstNonSkipped,
+                        declaredFonts = declaredFonts,
+                        specimens = specimens,
+                        effects = effects,
+                        assetExists = assetExists,
+                        allNodesById = allNodesById,
+                        issues = issues,
+                    )
+                ) {
+                    hasImageRefs = true
+                }
             }
         }
+        return hasImageRefs
     }
 
     private fun validateSpecimenNode(
@@ -571,8 +628,7 @@ object DeckDocumentCodec {
         node: NodeSpec,
         kind: NodeKind?,
         slide: SlideSpec,
-        slideIdx: Int,
-        firstNonSkippedIdx: Int?,
+        isFirstNonSkipped: Boolean,
         specimens: DeckSpecimenRegistry,
         effects: BuildEffectRegistry,
         addr: String,
@@ -610,7 +666,7 @@ object DeckDocumentCodec {
 
             when (build) {
                 is Build.Enter -> {
-                    if (slideIdx == firstNonSkippedIdx && build.beat == 0) {
+                    if (isFirstNonSkipped && build.beat == 0) {
                         issues += lintWarning(
                             "FIRST_SLIDE_BEAT0_ENTER",
                             buildAddr,
