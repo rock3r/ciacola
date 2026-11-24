@@ -1065,11 +1065,6 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         return true
     }
 
-    private fun skipBqMarkerOptionalSpace(idx: Int): Int {
-        val size = _input.size()
-        return if (idx < size && codePointAtIndex(idx) == ' '.code) idx + 1 else idx
-    }
-
     // -------------------------------------------------------------------------
     // Strictly O(N) inline code spans (precomputed backtick run index)
     // -------------------------------------------------------------------------
@@ -1530,9 +1525,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             while (pos < size && spaces < 4) {
                 val ch = codePointAtIndex(pos)
                 if (ch == ' '.code) {
-                    spaces++
+                    if (firstAfterMarker) firstAfterMarker = false else spaces++
                     streamCol++
-                    firstAfterMarker = false
                     pos++
                 } else if (ch == '\t'.code) {
                     val step = 4 - (streamCol % 4)
@@ -2542,18 +2536,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private fun isBlankBqLineAt(idx: Int, requiredDepth: Int, size: Int): Boolean {
-        var pos = idx
-        for (d in 0 until requiredDepth) {
-            var spaces = 0
-            while (pos < size && spaces < 4 && codePointAtIndex(pos) == ' '.code) {
-                spaces++
-                pos++
-            }
-            if (spaces > 3 || pos >= size || codePointAtIndex(pos) != '>'.code) return false
-            pos++
-            if (pos < size && codePointAtIndex(pos) == ' '.code) pos++
-        }
-        return isBlankLineAt(pos, size)
+        val afterPrefix = matchBlockquotePrefixEnd(idx, requiredDepth, size)
+        return afterPrefix >= 0 && isBlankLineAt(afterPrefix, size)
     }
 
     private fun skipHtmlBlockForBacktickIndex(
@@ -2602,7 +2586,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         return -1
     }
 
-    private fun skipBlockquotePrefix(lineStart: Int, requiredDepth: Int, size: Int): Int {
+    private fun matchBlockquotePrefixEnd(lineStart: Int, requiredDepth: Int, size: Int): Int {
         var idx = lineStart
         var streamCol = 0
         var firstAfterBq = false
@@ -2624,13 +2608,18 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     break
                 }
             }
-            if (spaces > 3 || idx >= size || codePointAtIndex(idx) != '>'.code) return idx
+            if (spaces > 3 || idx >= size || codePointAtIndex(idx) != '>'.code) return -1
             idx++
             streamCol++
             firstAfterBq = true
         }
-        if (idx < size && codePointAtIndex(idx) == ' '.code) idx++
+        if (requiredDepth > 0 && idx < size && codePointAtIndex(idx) == ' '.code) idx++
         return idx
+    }
+
+    private fun skipBlockquotePrefix(lineStart: Int, requiredDepth: Int, size: Int): Int {
+        val end = matchBlockquotePrefixEnd(lineStart, requiredDepth, size)
+        return if (end >= 0) end else lineStart
     }
 
     private fun skipRawHtmlLinesForBacktickIndex(

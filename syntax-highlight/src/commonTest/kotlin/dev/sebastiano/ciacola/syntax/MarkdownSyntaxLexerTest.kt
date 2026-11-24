@@ -1059,5 +1059,23 @@ class MarkdownSyntaxLexerTest {
             },
         )
         assertFalse(multilineHtmlBlockTokens.any { it.kind == SyntaxTokenKind.Property })
+
+        // P2-A: optional space after last '>' before 3-space closing fence in backtick-index pre-scan
+        val bqFenceFourSpacesClose = "> ```\n> a\n>    ```\n> `x`\n"
+        val bqFenceFourSpacesTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            bqFenceFourSpacesClose,
+            "md-p2a-bq-fence-four-spaces-close",
+        )
+        assertTrue(bqFenceFourSpacesTokens.any { it.slice(bqFenceFourSpacesClose) == "`x`" && it.kind == SyntaxTokenKind.String })
+
+        // P2-B: tab-separated nested blockquote blank line terminates HTML block
+        val tabBlankBqHtmlEnd = "> > <div>\n> > a\n>${'\t'}>\n> > *em*\n"
+        val tabBlankBqHtmlTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            tabBlankBqHtmlEnd,
+            "md-p2b-tab-blank-bq-html-end",
+        )
+        assertTrue(tabBlankBqHtmlTokens.any { it.slice(tabBlankBqHtmlEnd) == "em" && it.kind == SyntaxTokenKind.Property })
     }
 }
