@@ -199,6 +199,25 @@ class ReviewCommentStore(
         return "agentapi"
     }
 
+    private var pushBinChecked: String? = null
+    private var pushBinAvailable: Boolean = false
+
+    /**
+     * Whether there is a command on this machine to push a comment to at all.
+     *
+     * Without one, Send can only ever end where Queue already put the comment, so offering it is
+     * a dead end dressed up as an action. The queue is the real path: an agent on
+     * `:deck:reviewWait` collects from it.
+     */
+    fun agentPushAvailable(): Boolean {
+        val bin = effectiveAgentApiBin()
+        if (bin != pushBinChecked) {
+            pushBinChecked = bin
+            pushBinAvailable = isExecutableAvailable(bin, envProvider("PATH"))
+        }
+        return pushBinAvailable
+    }
+
     @Synchronized
     fun reloadFromDisk(): Boolean {
         config = readConfigInternal()

@@ -411,6 +411,7 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 item = item,
                                 statusColor = statusPalette.colorFor(item.status),
                                 agentConfigured = effectiveConvId.isNotBlank(),
+                                pushAvailable = store.agentPushAvailable(),
                                 delivering = item.id in store.deliveringIds,
                                 onJumpToSlide = {
                                     scope.launch {
@@ -454,6 +455,7 @@ private fun ReviewCommentRowCard(
     item: SlideReviewComment,
     statusColor: Color,
     agentConfigured: Boolean,
+    pushAvailable: Boolean,
     delivering: Boolean,
     onJumpToSlide: () -> Unit,
     onMarkApplied: () -> Unit,
@@ -604,7 +606,9 @@ private fun ReviewCommentRowCard(
                             Text("Mark Applied", style = JewelTheme.typography.small)
                         }
                     }
-                    if (agentConfigured) {
+                    if (!pushAvailable) {
+                        // See AnchoredSelectedPinPopup: no push command, so no Send to offer.
+                    } else if (agentConfigured) {
                         val isQueued = item.status == ReviewCommentStatus.Queued
                         val label = if (isQueued) "Send Now" else "Retry Send"
                         val tip = if (isQueued) {

@@ -48,3 +48,29 @@ class ReviewActivityNoticeTest {
         assertTrue(queuedNotice(listOf(1, 2), agentConfigured = false).first.contains("comments #1 and #2"))
     }
 }
+
+class PushAvailabilityTest {
+
+    private val present = setOf("/usr/bin/agentapi", "/opt/tools/agentapi", "/tmp/fake-agentapi.sh")
+    private val isExecutable: (java.nio.file.Path) -> Boolean = { it.toString() in present }
+
+    @Test
+    fun aBareNameIsLookedUpOnPath() {
+        assertTrue(isExecutableAvailable("agentapi", "/usr/local/bin:/usr/bin", isExecutable))
+        assertTrue(!isExecutableAvailable("agentapi", "/usr/local/bin:/sbin", isExecutable))
+    }
+
+    @Test
+    fun anExplicitPathIsCheckedDirectlyAndNotSearched() {
+        assertTrue(isExecutableAvailable("/tmp/fake-agentapi.sh", null, isExecutable))
+        assertTrue(!isExecutableAvailable("/tmp/missing.sh", "/usr/bin", isExecutable))
+    }
+
+    @Test
+    fun nothingConfiguredIsNotSomethingToPushTo() {
+        assertTrue(!isExecutableAvailable("", "/usr/bin", isExecutable))
+        assertTrue(!isExecutableAvailable("  ", "/usr/bin", isExecutable))
+        assertTrue(!isExecutableAvailable("agentapi", null, isExecutable))
+        assertTrue(!isExecutableAvailable("agentapi", "", isExecutable))
+    }
+}

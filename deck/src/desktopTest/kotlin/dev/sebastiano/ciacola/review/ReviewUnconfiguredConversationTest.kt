@@ -21,6 +21,8 @@ import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
+import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -33,10 +35,16 @@ class ReviewUnconfiguredConversationTest {
     fun blankConversationIdValidatesInlineOnSendAndHudOpensReviewConfigurationPanel() = runComposeUiTest {
         val tempRoot = Files.createTempDirectory("ciacola-review-unconfigured")
         val storyboardDir = Files.createDirectories(tempRoot.resolve(".storyboard"))
+        // A push command exists here: this test is about a blank Conversation ID, not about having
+        // nothing to push to (which hides Send altogether).
+        val fakeAgentApi = tempRoot.resolve("fake-agentapi.sh").apply {
+            writeText("#!/bin/sh\nexit 0\n")
+            Files.setPosixFilePermissions(this, PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
         val store = ReviewCommentStore(
             storyboardDir = storyboardDir,
             workspaceRoot = tempRoot,
-            envProvider = { null },
+            envProvider = { key -> if (key == "CIACOLA_AGENTAPI_BIN") fakeAgentApi.toAbsolutePath().toString() else null },
             systemPropertyProvider = { null },
         )
         assertEquals("", store.effectiveConversationId(), "Precondition: fresh store must have blank Conversation ID")

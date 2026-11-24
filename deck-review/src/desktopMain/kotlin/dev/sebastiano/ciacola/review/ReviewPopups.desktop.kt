@@ -133,6 +133,7 @@ internal fun AnchoredCommentComposerPopup(
         clickPointPx
     }
 
+    val pushAvailable = store.agentPushAvailable()
     val convIdState = rememberTextFieldState(initialText = store.effectiveConversationId())
     var submitting by remember(pending) { mutableStateOf(false) }
     var validationError by remember(pending) { mutableStateOf<String?>(null) }
@@ -225,7 +226,7 @@ internal fun AnchoredCommentComposerPopup(
             (ev.key == Key.Enter || ev.key == Key.NumPadEnter) &&
             (ev.isMetaPressed || ev.isCtrlPressed)
         ) {
-            submit(dispatchImmediate = !ev.isShiftPressed)
+            submit(dispatchImmediate = pushAvailable && !ev.isShiftPressed)
             return true
         }
         return false
@@ -392,19 +393,36 @@ internal fun AnchoredCommentComposerPopup(
                         },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(
-                            enabled = hasNote && !submitting,
-                            onClick = { submit(dispatchImmediate = false) },
-                            modifier = Modifier.testTag("ciacola-review-queue-button"),
-                        ) {
-                            Text("Queue")
+                        if (pushAvailable) {
+                            OutlinedButton(
+                                enabled = hasNote && !submitting,
+                                onClick = { submit(dispatchImmediate = false) },
+                                modifier = Modifier.testTag("ciacola-review-queue-button"),
+                            ) {
+                                Text("Queue")
+                            }
+                            CiacolaPrimaryButton(
+                                text = "Send",
+                                enabled = hasNote && !submitting,
+                                onClick = { submit(dispatchImmediate = true) },
+                                modifier = Modifier.testTag("ciacola-review-send-button"),
+                            )
+                        } else {
+                            // Nothing to push to, so Send would be Queue with a different word on
+                            // it and a notice afterwards explaining why it was not a send.
+                            Tooltip(
+                                tooltip = {
+                                    Text("An agent on :deck:reviewWait picks this up within seconds")
+                                },
+                            ) {
+                                CiacolaPrimaryButton(
+                                    text = "Queue for agent",
+                                    enabled = hasNote && !submitting,
+                                    onClick = { submit(dispatchImmediate = false) },
+                                    modifier = Modifier.testTag("ciacola-review-queue-button"),
+                                )
+                            }
                         }
-                        CiacolaPrimaryButton(
-                            text = "Send",
-                            enabled = hasNote && !submitting,
-                            onClick = { submit(dispatchImmediate = true) },
-                            modifier = Modifier.testTag("ciacola-review-send-button"),
-                        )
                     }
                 }
             }
@@ -498,6 +516,7 @@ internal fun AnchoredSelectedPinPopup(
     stageBoundsInRoot: Rect?,
     stageFormatSize: IntSize,
     agentConfigured: Boolean = true,
+    pushAvailable: Boolean = true,
     delivering: Boolean = false,
     onClose: (fromEscapeKey: Boolean) -> Unit,
     onDelete: () -> Unit,
@@ -732,7 +751,10 @@ internal fun AnchoredSelectedPinPopup(
                                         Text("Mark Applied")
                                     }
                                 }
-                                if (agentConfigured) {
+                                if (!pushAvailable) {
+                                    // Nothing to push to: the queue is the path, and an agent on
+                                    // :deck:reviewWait is already watching it.
+                                } else if (agentConfigured) {
                                     val isQueued = comment.status == ReviewCommentStatus.Queued
                                     val label = if (isQueued) "Send Now" else "Retry Send"
                                     val tip = if (isQueued) {

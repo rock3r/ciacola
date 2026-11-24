@@ -52,6 +52,7 @@ internal fun BoxScope.ReviewHudToolbar(
     inspectPinned: Boolean,
     timelineDocked: Boolean = false,
     agentConfigured: Boolean = true,
+    pushAvailable: Boolean = true,
     queuedCount: Int,
     applyingCount: Int,
     deliveringCount: Int = 0,
@@ -222,26 +223,31 @@ internal fun BoxScope.ReviewHudToolbar(
                     )
                 }
             }
-            if (agentConfigured) {
-                Tooltip(tooltip = { Text("Push $queuedCount waiting comment(s) to the agent now") }) {
-                    DefaultButton(
-                        onClick = onFlushQueued,
-                        modifier = Modifier.testTag("ciacola-hud-send-queued"),
-                    ) {
-                        Text("Send now", style = JewelTheme.typography.small)
+            // No push command on this machine means Send can only land the comment back where
+            // Queue already put it. Offering the button anyway is the dead end that made Send and
+            // Queue feel like the same click with different wording.
+            if (pushAvailable) {
+                if (agentConfigured) {
+                    Tooltip(tooltip = { Text("Push $queuedCount waiting comment(s) to the agent now") }) {
+                        DefaultButton(
+                            onClick = onFlushQueued,
+                            modifier = Modifier.testTag("ciacola-hud-send-queued"),
+                        ) {
+                            Text("Send now", style = JewelTheme.typography.small)
+                        }
                     }
-                }
-            } else {
-                Tooltip(
-                    tooltip = {
-                        Text("No Conversation ID configured — open Review panel (F4) to push instead of waiting")
-                    },
-                ) {
-                    OutlinedButton(
-                        onClick = onOpenReviewPanel,
-                        modifier = Modifier.testTag("ciacola-hud-send-queued"),
+                } else {
+                    Tooltip(
+                        tooltip = {
+                            Text("No Conversation ID configured — open Review panel (F4) to push instead of waiting")
+                        },
                     ) {
-                        Text("Set Agent", style = JewelTheme.typography.small)
+                        OutlinedButton(
+                            onClick = onOpenReviewPanel,
+                            modifier = Modifier.testTag("ciacola-hud-send-queued"),
+                        ) {
+                            Text("Set Agent", style = JewelTheme.typography.small)
+                        }
                     }
                 }
             }

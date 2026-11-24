@@ -189,3 +189,23 @@ internal fun BoxScope.ReviewActivityNoticeBar(
         }
     }
 }
+
+/**
+ * Whether [bin] names something executable: an absolute or relative path that is executable, or a
+ * bare name found on [path].
+ */
+internal fun isExecutableAvailable(
+    bin: String,
+    path: String?,
+    isExecutable: (java.nio.file.Path) -> Boolean = {
+        java.nio.file.Files.isExecutable(it) && !java.nio.file.Files.isDirectory(it)
+    },
+): Boolean {
+    val trimmed = bin.trim()
+    if (trimmed.isEmpty()) return false
+    if (trimmed.contains('/')) return isExecutable(java.nio.file.Path.of(trimmed))
+    return path.orEmpty()
+        .split(java.io.File.pathSeparatorChar)
+        .filter { it.isNotBlank() }
+        .any { isExecutable(java.nio.file.Path.of(it, trimmed)) }
+}

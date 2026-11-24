@@ -105,13 +105,14 @@ class SlideReviewWindow(
         }
         Separator()
         val agentConfigured = store.effectiveConversationId().isNotBlank()
+        val pushAvailable = store.agentPushAvailable()
         Item(
-            text = if (agentConfigured || queuedCount == 0) {
-                "Send Queued Comments ($queuedCount)"
-            } else {
-                "Configure Agent to Send ($queuedCount)…"
+            text = when {
+                !pushAvailable -> "Waiting for an Agent ($queuedCount)"
+                agentConfigured || queuedCount == 0 -> "Send Queued Comments ($queuedCount)"
+                else -> "Configure Agent to Send ($queuedCount)…"
             },
-            enabled = queuedCount > 0,
+            enabled = queuedCount > 0 && pushAvailable,
             onClick = {
                 if (store.effectiveConversationId().isBlank()) {
                     openForAgentConfiguration()
@@ -351,6 +352,7 @@ private fun ReviewOuterWindowOverlay(
             coordinator.hudBoundsInRoot = null
         }
         val agentConfigured = store.effectiveConversationId().isNotBlank()
+        val pushAvailable = store.agentPushAvailable()
         CiacolaJewelTheme(isDark = isDark) {
             Box(Modifier.fillMaxSize()) {
                 if (showHud) {
@@ -365,6 +367,7 @@ private fun ReviewOuterWindowOverlay(
                         inspectPinned = coordinator.inspectModeEnabled,
                         timelineDocked = windowController.timelineDockedProvider(),
                         agentConfigured = agentConfigured,
+                        pushAvailable = pushAvailable,
                         queuedCount = queuedCount,
                         applyingCount = applyingCount,
                         deliveringCount = store.deliveringIds.size,
@@ -458,6 +461,7 @@ private fun ReviewOuterWindowOverlay(
                         stageBoundsInRoot = coordinator.stageBoundsInRoot,
                         stageFormatSize = coordinator.stageFormatSize,
                         agentConfigured = agentConfigured,
+                        pushAvailable = pushAvailable,
                         delivering = activePinComment.id in store.deliveringIds,
                         onClose = { fromEsc ->
                             coordinator.dismissActivePopups(fromEscapeKey = fromEsc)
