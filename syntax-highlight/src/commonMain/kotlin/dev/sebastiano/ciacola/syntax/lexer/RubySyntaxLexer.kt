@@ -236,9 +236,10 @@ private fun classifyRubyTokens(code: String, raw: List<RawRubyToken>) {
             }
         }
 
-        if (tok.type == RubyTokens.UNARY_OP_DEF) {
+        if (tok.type == RubyTokens.UNARY_OP_DEF || tok.type == RubyTokens.BACKTICK_OP_DEF) {
             tok.kind = SyntaxTokenKind.Function
             expectingDefName = false
+            defExpectingMethodAfterReceiver = false
             i++
             continue
         }

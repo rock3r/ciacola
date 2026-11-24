@@ -331,6 +331,8 @@ class RubySyntaxLexerTest {
 
         val deepInterpOpen = "#{".repeat(2_000)
         val deepInterpClose = "}".repeat(2_000)
+        val deepRegexOpen = "/#\n#{".repeat(1_000)
+        val deepRegexClose = "}/x".repeat(1_000)
         val pathological = listOf(
             "unclosed-dquote" to ("\"abc \\\" " + "x".repeat(25_000)),
             "unclosed-squote" to ("'abc \\' " + "x".repeat(25_000)),
@@ -339,12 +341,157 @@ class RubySyntaxLexerTest {
             "unclosed-heredoc" to ("puts <<EOF\n" + "line\n".repeat(5_000)),
             "unclosed-embdoc" to ("=begin\n" + "line\n".repeat(5_000)),
             "unclosed-regex" to ("x = /" + "a[b/c]".repeat(4_000)),
+            "unclosed-regex-hash" to ("x = /\n" + "# comment [unclosed\n".repeat(5_000)),
+            "deep-regex-interp" to ("x = $deepRegexOpen 1 $deepRegexClose"),
             "division-chain" to ("a" + " / b".repeat(6_000)),
             "ternary-chain" to ("a" + " ? b : c".repeat(4_000)),
             "deep-interp" to ("\"$deepInterpOpen 1 $deepInterpClose\""),
             "false-embdoc" to ("x " + "=begin_id + ".repeat(4_000) + "1"),
         )
         assertLinearPerformance(RubySyntaxLexer, pathological, maxMillisPerInput = 2_000L)
+    }
+
+    @Test
+    fun handlesMultiHeredocWithMultilineInterpolationAndEscapedNewlines() {
+        val code = """
+            pair = [<<~FIRST, <<~SECOND]
+              hello #{
+                1 + 2
+              }
+            FIRST
+              second body
+            SECOND
+            x = 42
+
+            s = <<~SQL
+              hello \
+            SQL
+              still_heredoc
+            SQL
+
+            crlf = <<~EOS${"\r\n"}  line1 ${'\\'}${"\r\n"}EOS${"\r\n"}  line2${"\r\n"}EOS${"\r\n"}
+            cr = <<~CRDOC${"\r"}  line1 ${'\\'}${"\r"}CRDOC${"\r"}  line2${"\r"}CRDOC${"\r"}
+            after = true
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-heredoc-interp-escape")
+
+        // `x = 42` after both heredocs must be lexed as Ruby code, not inside `SECOND`.
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "42" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, tokens.first { it.slice(code) == "x" }.kind)
+
+        // First `SQL` after `hello \` is escaped continuation -> stays String body; final `SQL` closes.
+        val sqlTokens = tokens.filter { it.slice(code) == "SQL" }
+        assertEquals(1, sqlTokens.size)
+        assertTrue(tokens.any { it.slice(code).contains("still_heredoc") && it.kind == SyntaxTokenKind.String })
+
+        // CRLF and CR escaped newlines must not prematurely close the heredoc.
+        assertTrue(tokens.any { it.slice(code).contains("line2") && it.kind == SyntaxTokenKind.String })
+        assertEquals(SyntaxTokenKind.Constant, tokens.first { it.slice(code) == "true" }.kind)
+    }
+
+    @Test
+    fun disambiguatesLocalVariablesFromCommandCalls() {
+        val code = """
+            arr = []
+            item = 1
+            arr <<item
+
+            x = 10
+            y = 2
+            z = x /y
+            q = [3]
+            w = x %q[0]
+
+            flag = true
+            msg = flag ?"yes" : "no"
+
+            def inner_scope(puts)
+              puts + 1
+            end
+            def endless_shadow(puts) = puts + 2
+            puts <<EOF
+            dsl_ok
+            EOF
+            puts /foo/
+            puts %q[hi]
+            puts ?a
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-local-vars")
+
+        // `arr <<item`, `x /y`, `x %q[0]`, `flag ?"yes" : "no"` must lex as operators, not literals.
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "<<" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "/" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "%" }.kind)
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "?" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "yes" }.kind)
+
+        // Outer `puts` is not shadowed by `inner_scope(puts)` or `endless_shadow(puts)`.
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "<<EOF" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "foo" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "%q[" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "?a" }.kind)
+    }
+
+    @Test
+    fun handlesMultiCharAfterQuestionAndExtendedRegexCommentsAndBacktickDefAndCompactTernary() {
+        val code = """
+            ab = 1
+            cd = 2
+            t1 = [1].empty? ?ab : cd
+            t2 = empty? ?ab : cd
+
+            re_ext = /
+              \d+ # range [0, 10)
+            /x
+            msg = "hello"
+
+            re_lit = /a # [b]/
+            re_cc = /[a
+            b]/
+            after_re = 99
+
+            class M
+              def `(cmd)
+                cmd
+              end
+            end
+            def self.`(cmd)
+              cmd
+            end
+            shell_out = `echo ok`
+
+            cond = true
+            a = 1
+            b = 2
+            x = cond ? a:b
+            h = cond ? { a: 1 } : { b: 2 }
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(RubySyntaxLexer, code, "ruby-audit-regressions")
+
+        // `?ab` must be Operator `?` + Plain `ab`, not CHAR_LITERAL `?a` + `b`.
+        assertFalse(tokens.any { it.slice(code) == "?a" })
+        assertTrue(tokens.count { it.slice(code) == "ab" && it.kind == SyntaxTokenKind.Plain } >= 3)
+
+        // Multiline `/.../x` with `# range [0, 10)` closes cleanly at `/x`, so `msg = "hello"` follows.
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "/x" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "hello" }.kind)
+        assertEquals(SyntaxTokenKind.Number, tokens.first { it.slice(code) == "99" }.kind)
+
+        // `def `(cmd)` and `def self.`(cmd)` lex `` ` `` as Function and do not swallow `shell_out`.
+        val backtickDefs = tokens.filter { it.slice(code) == "`" && it.kind == SyntaxTokenKind.Function }
+        assertEquals(2, backtickDefs.size)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "echo ok" }.kind)
+
+        // Compact ternary `cond ? a:b` lexes `a` as Plain and `:` as Punctuation, while `{ a: 1 }` keeps hash key Constant.
+        val aAfterCond = tokens.first { it.slice(code) == "a" && it.startIndex > code.indexOf("x = cond ?") }
+        assertEquals(SyntaxTokenKind.Plain, aAfterCond.kind)
+        val aInHash = tokens.first { it.slice(code) == "a" && it.startIndex > code.indexOf("h = cond ?") }
+        assertEquals(SyntaxTokenKind.Constant, aInHash.kind)
+        val bInHash = tokens.first { it.slice(code) == "b" && it.startIndex > code.indexOf("{ b: 2 }") }
+        assertEquals(SyntaxTokenKind.Constant, bInHash.kind)
     }
 
     @Test

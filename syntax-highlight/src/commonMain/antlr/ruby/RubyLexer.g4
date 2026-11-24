@@ -66,6 +66,10 @@ DQUOTE_OPEN
     : '"' { enterDQuote(Modes.DQUOTE, isSymbol = false); }
     ;
 
+BACKTICK_OP_DEF
+    : '`' { isDefMethodNameContext() }? { onEndToken(); }
+    ;
+
 BACKTICK_OPEN
     : '`' -> pushMode(BACKTICK)
     ;
@@ -145,7 +149,7 @@ SYM_IDENT
     ;
 
 HASH_KEY
-    : IDENT_START IDENT_CONT* [?!]? ':' { _input.LA(1) != ':'.code }? { onBegToken(); }
+    : IDENT_START IDENT_CONT* [?!]? ':' { _input.LA(1) != ':'.code && isHashKeyAllowed() }? { onHashKey(text); }
     ;
 
 // ---------------- Variables ----------------
@@ -206,8 +210,8 @@ fragment DEC_DIGITS
 
 // ---------------- Operators & Punctuation ----------------
 
-SPACESHIP      : '<=>' { onBegToken(); };
-TRIPLE_EQ      : '===' { onBegToken(); };
+SPACESHIP      : '<=>' { onDefOperatorToken(); };
+TRIPLE_EQ      : '===' { onDefOperatorToken(); };
 ELLIPSIS       : '...' { onBegToken(); };
 POW_ASSIGN     : '**=' { onBegToken(); };
 LSHIFT_ASSIGN  : '<<=' { onBegToken(); };
@@ -216,23 +220,23 @@ AND_AND_ASSIGN : '&&=' { onBegToken(); };
 OR_OR_ASSIGN   : '||=' { onBegToken(); };
 
 UNARY_OP_DEF
-    : ( '+@' | '-@' | '~@' | '!@' ) { isDefContext() }? { onEndToken(); }
+    : ( '+@' | '-@' | '~@' | '!@' ) { isDefMethodNameContext() }? { onDefOperatorToken(); }
     ;
 
 RANGE_INC      : '..' { onBegToken(); };
 SAFE_NAV       : '&.' { onDotToken(); };
 COLON_COLON    : '::' { onDotToken(); };
-HASH_ROCKET    : '=>' { onBegToken(); };
-STABBY_LAMBDA  : '->' { onBegToken(); };
-POW            : '**' { onBegToken(); };
-LSHIFT         : '<<' { onBegToken(); };
-RSHIFT         : '>>' { onBegToken(); };
-EQ_EQ          : '==' { onBegToken(); };
-NOT_EQ         : '!=' { onBegToken(); };
-MATCH          : '=~' { onBegToken(); };
-NOT_MATCH      : '!~' { onBegToken(); };
-LE             : '<=' { onBegToken(); };
-GE             : '>=' { onBegToken(); };
+HASH_ROCKET    : '=>' { onHashRocket(); };
+STABBY_LAMBDA  : '->' { onStabbyLambda(); };
+POW            : '**' { onDefOperatorToken(); };
+LSHIFT         : '<<' { onDefOperatorToken(); };
+RSHIFT         : '>>' { onDefOperatorToken(); };
+EQ_EQ          : '==' { onDefOperatorToken(); };
+NOT_EQ         : '!=' { onDefOperatorToken(); };
+MATCH          : '=~' { onDefOperatorToken(); };
+NOT_MATCH      : '!~' { onDefOperatorToken(); };
+LE             : '<=' { onDefOperatorToken(); };
+GE             : '>=' { onDefOperatorToken(); };
 AND_AND        : '&&' { onBegToken(); };
 OR_OR          : '||' { onBegToken(); };
 PLUS_ASSIGN    : '+=' { onBegToken(); };
@@ -244,30 +248,30 @@ AMP_ASSIGN     : '&=' { onBegToken(); };
 PIPE_ASSIGN    : '|=' { onBegToken(); };
 CARET_ASSIGN   : '^=' { onBegToken(); };
 
-LPAREN   : '(' { onBegToken(); };
-RPAREN   : ')' { onEndToken(); };
-LBRACK   : '[' { onBegToken(); };
-RBRACK   : ']' { onEndToken(); };
+LPAREN   : '(' { onLParen(); };
+RPAREN   : ')' { onRParen(); };
+LBRACK   : '[' { onLBrack(); };
+RBRACK   : ']' { onRBrack(); };
 LBRACE   : '{' { onLBrace(); };
 RBRACE   : '}' { onRBrace(Tokens.INTERP_CLOSE); };
-COMMA    : ',' { onBegToken(); };
-SEMI     : ';' { onBegToken(); };
+COMMA    : ',' { onComma(); };
+SEMI     : ';' { onSemi(); };
 DOT      : '.' { onDotToken(); };
-COLON    : ':' { onBegToken(); };
-QUESTION : '?' { onBegToken(); };
-ASSIGN   : '=' { onBegToken(); };
-PLUS     : '+' { onBegToken(); };
-MINUS    : '-' { onBegToken(); };
-STAR     : '*' { onBegToken(); };
-SLASH    : '/' { onBegToken(); };
-PERCENT  : '%' { onBegToken(); };
-LT       : '<' { onBegToken(); };
-GT       : '>' { onBegToken(); };
-BANG     : '!' { onBegToken(); };
-TILDE    : '~' { onBegToken(); };
-AMP      : '&' { onBegToken(); };
-PIPE     : '|' { onBegToken(); };
-CARET    : '^' { onBegToken(); };
+COLON    : ':' { onColon(); };
+QUESTION : '?' { onQuestion(); };
+ASSIGN   : '=' { onAssign(); };
+PLUS     : '+' { onDefOperatorToken(); };
+MINUS    : '-' { onDefOperatorToken(); };
+STAR     : '*' { onDefOperatorToken(); };
+SLASH    : '/' { onDefOperatorToken(); };
+PERCENT  : '%' { onDefOperatorToken(); };
+LT       : '<' { onDefOperatorToken(); };
+GT       : '>' { onDefOperatorToken(); };
+BANG     : '!' { onDefOperatorToken(); };
+TILDE    : '~' { onDefOperatorToken(); };
+AMP      : '&' { onDefOperatorToken(); };
+PIPE     : '|' { onPipe(); };
+CARET    : '^' { onDefOperatorToken(); };
 AT       : '@' { onEndToken(); };
 DOLLAR   : '$' { onEndToken(); };
 BACKSLASH : '\\' { onBegToken(); };
@@ -404,7 +408,7 @@ RE_TEXT
     ;
 
 RE_HASH
-    : '#' -> type(RE_TEXT)
+    : '#' { onRegexHash(Tokens.RE_TEXT); }
     ;
 
 // ---------------- Percent Literal Mode (Non-Interpolating) ----------------
@@ -493,7 +497,7 @@ HE_SHORTHAND_VAR
     ;
 
 HE_ESCAPE
-    : '\\' ~[\r\n] { markHeredocBody(); }
+    : '\\' ( '\r'? '\n' | '\r' | ~[\r\n] ) { markHeredocBody(); }
     ;
 
 HE_BACKSLASH
