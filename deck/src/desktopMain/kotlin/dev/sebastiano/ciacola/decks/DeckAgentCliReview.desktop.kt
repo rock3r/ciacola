@@ -1,8 +1,18 @@
 package dev.sebastiano.ciacola.decks
 
 import dev.bnorm.storyboard.easel.resolveDefaultStoryboardDir
+import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.studio.storyboardDirForDeck
 import java.nio.file.Path
+
+/** Accepts the subset of statuses an agent may set on a comment it has acted on. */
+internal fun parseReviewStatus(raw: String): ReviewCommentStatus =
+    when (raw.trim().lowercase()) {
+        "applied" -> ReviewCommentStatus.Applied
+        "failed" -> ReviewCommentStatus.Failed
+        "queued" -> ReviewCommentStatus.Queued
+        else -> error("Invalid --review-status '$raw' (expected applied, failed or queued)")
+    }
 
 /**
  * Wiring for the review modes of [DeckAgentCli], kept out of that file so it stays under the
@@ -43,6 +53,22 @@ internal fun runReviewWaitMode(storyboardDirArg: String?, deckId: String, timeou
         commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
         takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME),
         timeoutMillis = timeoutMillis,
+    )
+}
+
+internal fun runReviewResolveMode(
+    storyboardDirArg: String?,
+    deckId: String,
+    commentId: String,
+    resolution: String,
+    status: ReviewCommentStatus,
+): Int {
+    val dir = reviewDirFor(storyboardDirArg, deckId)
+    return DeckReviewCli.runResolve(
+        commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
+        commentId = commentId,
+        resolution = resolution,
+        status = status,
     )
 }
 

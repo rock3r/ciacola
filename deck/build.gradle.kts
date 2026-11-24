@@ -279,6 +279,28 @@ tasks.register<JavaExec>("reviewExport") {
     }
 }
 
+val requestedCommentProp = ciacolaArgProp("ciacola.comment")
+val requestedResolutionProp = ciacolaArgProp("ciacola.resolution")
+val requestedReviewStatusProp = ciacolaArgProp("ciacola.reviewStatus")
+
+tasks.register<JavaExec>("reviewResolve") {
+    description =
+        "Writes a verdict back onto a review comment, which the running deck picks up within " +
+            "250ms (use -Pciacola.comment=<id> -Pciacola.resolution=<text>)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    outputs.upToDateWhen { false }
+    requestedCommentProp.orNull?.let { args("--review-resolve=$it") }
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedResolutionProp.orNull?.let { args("--resolution=$it") }
+    requestedReviewStatusProp.orNull?.let { args("--review-status=$it") }
+    requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
+}
+
 tasks.named("check") {
     dependsOn(verifyDecksCanonical)
 }

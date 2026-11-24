@@ -245,6 +245,85 @@ class DeckReviewCliTest {
     }
 
     @Test
+    fun resolvingWritesTheVerdictBackAndClearsAStaleDeliveryError() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(
+            dir,
+            comment("rc-1", status = ReviewCommentStatus.Failed),
+            comment("rc-2"),
+        )
+        val printed = mutableListOf<String>()
+
+        val exit = DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-1",
+            resolution = "removed the accent bar",
+            out = printed::add,
+        )
+
+        assertEquals(DeckReviewCli.EXIT_OK, exit)
+        val after = DeckReviewCli.readComments(commentsFile)
+        val resolved = after.single { it.id == "rc-1" }
+        assertEquals(ReviewCommentStatus.Applied, resolved.status)
+        assertEquals("removed the accent bar", resolved.resolution)
+        // The old failure is not the comment's state any more.
+        assertEquals(null, resolved.deliveryError)
+        // Everything else is left exactly as it was.
+        assertEquals(ReviewCommentStatus.Queued, after.single { it.id == "rc-2" }.status)
+        assertEquals(2, after.size)
+        assertTrue(printed.single().contains("rc-1"), printed.single())
+    }
+
+    @Test
+    fun resolvingAnUnknownIdReportsItInsteadOfRewritingTheQueue() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+        val before = Files.readString(commentsFile)
+        val printed = mutableListOf<String>()
+
+        val exit = DeckReviewCli.runResolve(commentsFile, "rc-nope", "done", out = printed::add)
+
+        assertEquals(DeckReviewCli.EXIT_NOT_FOUND, exit)
+        assertEquals(before, Files.readString(commentsFile))
+        assertTrue(printed.single().contains("rc-nope"), printed.single())
+    }
+
+    @Test
+    fun resolvingCanAlsoRecordAFailureWithoutDiscardingItsError() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-1",
+            resolution = "could not find the node",
+            status = ReviewCommentStatus.Failed,
+            out = {},
+        )
+
+        val resolved = DeckReviewCli.readComments(commentsFile).single()
+        assertEquals(ReviewCommentStatus.Failed, resolved.status)
+        assertEquals("could not find the node", resolved.resolution)
+    }
+
+    @Test
+    fun aResolvedCommentIsNoLongerPendingForAnAgent() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+
+        DeckReviewCli.runResolve(commentsFile, "rc-1", "done", out = {})
+
+        var now = 0L
+        val printed = mutableListOf<String>()
+        assertEquals(
+            DeckReviewCli.EXIT_TIMEOUT,
+            DeckReviewCli.runWait(commentsFile, takenFile, 3_000L, 1_000L, printed::add, { now }, { now += it }),
+        )
+        assertTrue(printed.isEmpty())
+    }
+
+    @Test
     fun aFormattedCommentCarriesEnoughToActOn() {
         val line = DeckReviewCli.formatComment(comment("rc-9", note = "wrong job title"))
         assertTrue(line.contains("rc-9"), line)
