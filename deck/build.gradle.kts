@@ -226,6 +226,59 @@ tasks.register<JavaExec>("exportVideo") {
     requestedThemeProp.orNull?.let { args("--theme=$it") }
 }
 
+val requestedTimeoutProp = ciacolaArgProp("ciacola.timeout")
+val requestedStoryboardDirProp = ciacolaArgProp("ciacola.storyboardDir")
+
+tasks.register<JavaExec>("reviewWait") {
+    description =
+        "Blocks until the author queues a review comment, prints it, and records it taken " +
+            "(exit 3 on timeout; use -Pciacola.deck=<id> -Pciacola.timeout=30m)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    // Waiting for a person is not a cacheable, up-to-date-able thing.
+    outputs.upToDateWhen { false }
+    args("--review-wait")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedTimeoutProp.orNull?.let { args("--timeout=$it") }
+    requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
+    // A timeout is an ordinary outcome, not a crash: report it as one sentence the caller can act
+    // on rather than letting Gradle print a process-exited-3 stack trace over it. The build still
+    // fails, so `until ./gradlew :deck:reviewWait; do :; done` keeps working.
+    isIgnoreExitValue = true
+    doLast {
+        val exit = executionResult.get().exitValue
+        if (exit == 3) {
+            throw GradleException("No review comment was queued before the timeout. Run this task again to keep waiting.")
+        }
+        if (exit != 0) {
+            throw GradleException("reviewWait failed with exit code $exit.")
+        }
+    }
+}
+
+tasks.register<JavaExec>("reviewExport") {
+    description =
+        "Prints the review comments the author has queued, without blocking " +
+            "(use -Pciacola.deck=<id> -Pciacola.json=true)."
+    group = "verification"
+    javaLauncher.set(jbr25)
+    mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
+    classpath = files(desktopMainCompilation.output.allOutputs, desktopMainCompilation.runtimeDependencyFiles)
+    jvmArgs("-Dapple.awt.UIElement=true")
+    systemProperty("apple.awt.UIElement", "true")
+    outputs.upToDateWhen { false }
+    args("--review-export")
+    requestedDeckProp.orNull?.let { args("--deck=$it") }
+    requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
+    if (requestedJsonProp.orNull.equals("true", ignoreCase = true)) {
+        args("--json")
+    }
+}
+
 tasks.named("check") {
     dependsOn(verifyDecksCanonical)
 }

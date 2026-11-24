@@ -60,11 +60,13 @@ import org.jetbrains.skia.ImageInfo
 
 /**
  * Headless CLI entry point for agentic `.deck.json` workflows backing `:deck:lintDeck`,
- * `:deck:renderSlides`, and `:deck:exportVideo`.
+ * `:deck:renderSlides`, `:deck:exportVideo`, `:deck:reviewWait` and `:deck:reviewExport`.
  */
 object DeckAgentCli {
 
     private val Mp4ExtensionRegex = Regex("""(?i)\.mp4$""")
+
+    internal const val DEFAULT_REVIEW_TIMEOUT_MILLIS = 30 * 60 * 1_000L
 
     internal val defaultVideoExporterFactory: (
         fps: Int,
@@ -111,6 +113,12 @@ object DeckAgentCli {
             CliMode.Lint -> runLint(parsed)
             CliMode.RenderSlides -> runRenderSlides(parsed)
             CliMode.ExportVideo -> runExportVideo(parsed)
+            CliMode.ReviewWait ->
+                runReviewWaitMode(parsed.storyboardDirArg, parsed.deckArg, parsed.reviewTimeoutMillis)
+            CliMode.ReviewExport ->
+                runReviewExportMode(
+                    parsed.storyboardDirArg, parsed.deckArg, parsed.includeTaken, parsed.jsonOutput,
+                )
         }
     }
 
@@ -118,6 +126,11 @@ object DeckAgentCli {
         Lint,
         RenderSlides,
         ExportVideo,
+        ReviewWait,
+        ReviewExport,
+        ;
+
+        val isReviewMode: Boolean get() = this == ReviewWait || this == ReviewExport
     }
 
     private data class CliOptions(
@@ -132,6 +145,9 @@ object DeckAgentCli {
         val theme: String?,
         val jsonOutput: Boolean,
         val failOnWarning: Boolean,
+        val includeTaken: Boolean = false,
+        val storyboardDirArg: String? = null,
+        val reviewTimeoutMillis: Long = DEFAULT_REVIEW_TIMEOUT_MILLIS,
     )
 
     private fun parseArgs(args: Array<String>): CliOptions {
@@ -146,6 +162,9 @@ object DeckAgentCli {
         var theme: String? = null
         var jsonOutput = false
         var failOnWarning = false
+        var includeTaken = false
+        var storyboardDirArg: String? = null
+        var reviewTimeoutMillis = DEFAULT_REVIEW_TIMEOUT_MILLIS
 
         fun setMode(next: CliMode) {
             if (mode != null && mode != next) {
@@ -156,6 +175,14 @@ object DeckAgentCli {
 
         for (arg in args) {
             when {
+                arg == "--review-wait" -> setMode(CliMode.ReviewWait)
+                arg == "--review-export" -> setMode(CliMode.ReviewExport)
+                arg == "--include-taken" -> includeTaken = true
+                arg.startsWith("--storyboard-dir=") ->
+                    storyboardDirArg = arg.removePrefix("--storyboard-dir=").trim()
+                arg.startsWith("--timeout=") -> {
+                    reviewTimeoutMillis = parseReviewTimeout(arg.removePrefix("--timeout=").trim())
+                }
                 arg == "--lint" -> setMode(CliMode.Lint)
                 arg == "--render-slides" -> setMode(CliMode.RenderSlides)
                 arg == "--export-video" -> setMode(CliMode.ExportVideo)
@@ -185,9 +212,18 @@ object DeckAgentCli {
             }
         }
 
-        val resolvedMode = mode ?: error("Specify one mode: --lint, --render-slides, or --export-video")
+        val resolvedMode = mode
+            ?: error(
+                "Specify one mode: --lint, --render-slides, --export-video, --review-wait or --review-export",
+            )
+        // The review modes read the deck's review queue, not the deck document, so they only need
+        // an ID to pick the right .storyboard/decks/<id>/ folder.
         val resolvedDeck = deckArg?.takeIf { it.isNotEmpty() }
-            ?: error("Missing --deck=<id|path> (or -Pciacola.deck=<id|path>)")
+            ?: if (resolvedMode.isReviewMode) {
+                DeckCatalog.FOUNDATION_ID
+            } else {
+                error("Missing --deck=<id|path> (or -Pciacola.deck=<id|path>)")
+            }
 
         return CliOptions(
             mode = resolvedMode,
@@ -201,6 +237,9 @@ object DeckAgentCli {
             theme = theme,
             jsonOutput = jsonOutput,
             failOnWarning = failOnWarning,
+            includeTaken = includeTaken,
+            storyboardDirArg = storyboardDirArg?.takeIf { it.isNotEmpty() },
+            reviewTimeoutMillis = reviewTimeoutMillis,
         )
     }
 
@@ -1029,7 +1068,8 @@ object DeckAgentCli {
     private fun printUsage() {
         println(
             """
-            Usage: DeckAgentCli <--lint | --render-slides | --export-video> --deck=<id|path> [options]
+            Usage: DeckAgentCli <--lint | --render-slides | --export-video | --review-wait |
+                                 --review-export> --deck=<id|path> [options]
 
             Options:
               --deck=<id|path>       Deck ID (e.g. foundation) or path to a .deck.json file
@@ -1040,8 +1080,19 @@ object DeckAgentCli {
               --fps=<30|60>          Frame rate for --export-video (default: 30)
               --size=<WxH>           Pixel resolution (default: 1280x720)
               --theme=<name>         Theme override (e.g. dark or light)
-              --json                 Machine-readable JSON report (--lint only)
+              --json                 Machine-readable JSON report (--lint, --review-export)
               --fail-on=<error|warning>  Exit non-zero threshold for --lint (default: error)
+              --timeout=<30m|45s|ms> Deadline for --review-wait (default: 30m)
+              --include-taken        Also list comments already handed to an agent
+                                     (--review-export only)
+              --storyboard-dir=<dir> Override the .storyboard root holding the review queue
+
+            Review modes read .storyboard/decks/<deckId>/review-comments.json, the queue the deck
+            writes when the author presses Queue. --review-wait blocks until a comment is queued,
+            prints it and records it taken, exiting 3 if the timeout passes with nothing queued so
+            the caller can just run it again; --review-export prints and returns. Neither writes
+            review-comments.json (the deck rewrites that wholesale), so what an agent has taken is
+            kept beside it in review-agent-taken.json.
             """.trimIndent(),
         )
     }
