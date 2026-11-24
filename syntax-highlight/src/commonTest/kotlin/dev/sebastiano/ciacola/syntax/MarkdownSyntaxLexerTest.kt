@@ -416,12 +416,17 @@ class MarkdownSyntaxLexerTest {
             ```
         """.trimIndent() + "\n"
         val diffTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, diffFence, "md-diff-fence-no-recurse")
-        if (SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Diff) != null) {
-            assertTrue(diffTokens.any { it.slice(diffFence).startsWith("@@") && it.kind == SyntaxTokenKind.Type })
-        }
+        assertTrue(diffTokens.any { it.slice(diffFence) == "@@" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(diffTokens.any { it.slice(diffFence) == "-1,1 +1,1" && it.kind == SyntaxTokenKind.Number })
+        assertTrue(diffTokens.any { it.slice(diffFence) == "val oldVal = 1" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(diffTokens.any { it.slice(diffFence) == "val newVal = 2" && it.kind == SyntaxTokenKind.String })
         assertFalse(
             diffTokens.any { it.slice(diffFence) == "val" && it.kind == SyntaxTokenKind.Keyword },
             "Diff inside Markdown must NOT recurse into Kotlin highlighting",
+        )
+        assertFalse(
+            diffTokens.any { it.slice(diffFence) in setOf("1", "2") && it.kind == SyntaxTokenKind.Number },
+            "Diff inside Markdown must NOT highlight Kotlin Number literals",
         )
 
         // Indented code after heading, thematic break, fence close, and blank blockquote line

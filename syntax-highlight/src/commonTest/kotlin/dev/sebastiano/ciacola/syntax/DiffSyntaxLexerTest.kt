@@ -699,7 +699,7 @@ class DiffSyntaxLexerTest {
         assertTrue(octoTokens.any { it.slice(richDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
         assertTrue(octoTokens.any { it.slice(richDiff) == "7" && it.kind == SyntaxTokenKind.Number })
 
-        // Markdown diff: lossless in isolation; 1-level non-recursive when Markdown lexer is registered
+        // Markdown diff: 1-level Markdown sub-highlighting without 2nd-level Kotlin fence recursion
         val mdDiff = "diff --git a/README.md b/README.md\n" +
             "--- a/README.md\n" +
             "+++ b/README.md\n" +
@@ -710,9 +710,9 @@ class DiffSyntaxLexerTest {
             "+val new = 2\n" +
             " ```\n"
         val mdTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, mdDiff, "diff-of-markdown")
-        if (SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Markdown) != null) {
-            assertTrue(mdTokens.none { it.slice(mdDiff) == "2" && it.kind == SyntaxTokenKind.Number })
-        }
+        assertTrue(mdTokens.any { it.slice(mdDiff) == "Title" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(mdTokens.none { it.slice(mdDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(mdTokens.none { it.slice(mdDiff) == "2" && it.kind == SyntaxTokenKind.Number })
     }
 
     @Test
