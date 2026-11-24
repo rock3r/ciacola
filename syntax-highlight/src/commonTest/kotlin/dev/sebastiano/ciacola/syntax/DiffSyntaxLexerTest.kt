@@ -613,4 +613,14 @@ class DiffSyntaxLexerTest {
             maxMillisPerInput = 1_500L,
         )
     }
+
+    @Test
+    fun linearPerformanceOnRepeatedPrefixGitHeader() {
+        val repeatedGitHeader = "diff --git a/" + " b/".repeat(12_000) + "\n"
+        assertLinearPerformance(
+            lexer = DiffSyntaxLexer,
+            pathologicalInputs = listOf("12k-repeated-git-prefixes" to repeatedGitHeader),
+            maxMillisPerInput = 300L,
+        )
+    }
 }

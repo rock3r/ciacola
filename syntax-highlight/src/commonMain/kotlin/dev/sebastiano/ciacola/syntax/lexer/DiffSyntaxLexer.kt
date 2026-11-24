@@ -1265,37 +1265,27 @@ private fun parseGitDiffPair(text: String, from: Int): Pair<String?, String?> {
 private fun splitUnquotedGitPaths(remainder: String): Pair<String, String>? {
     val prefixes = arrayOf("a/", "b/", "i/", "w/", "c/", "o/")
     val startsWithPrefix = prefixes.any { remainder.startsWith(it) }
-    if (startsWithPrefix) {
-        val leftBody = remainder.substring(2)
-        // Prefer an exact symmetrical split `<p1>/<same> <p2>/<same>` when paths have spaces.
-        for (p2 in prefixes) {
-            val sep = " $p2"
-            var searchFrom = 1
-            while (searchFrom < remainder.length) {
-                val idx = remainder.indexOf(sep, searchFrom)
-                if (idx < 0) break
-                val p1Str = remainder.substring(0, idx)
-                val p2Str = remainder.substring(idx + 1)
-                if (p1Str.substring(2) == p2Str.substring(2)) {
-                    return p1Str to p2Str
-                }
-                searchFrom = idx + 1
-            }
+    val len = remainder.length
+    val mid = len / 2
+    if (len >= 3 && len % 2 == 1 && remainder[mid] == ' ') {
+        if (startsWithPrefix &&
+            len >= 5 &&
+            prefixes.any { remainder.startsWith(it, mid + 1) } &&
+            remainder.regionMatches(2, remainder, mid + 3, mid - 2)
+        ) {
+            return remainder.substring(0, mid) to remainder.substring(mid + 1)
         }
-        // Fallback for renames with spaces (`a/old dir/A.kt b/new dir/B.kt`): split at `" b/"` (or other prefix).
-        for (p2 in prefixes) {
-            val sep = " $p2"
-            val idx = remainder.indexOf(sep, startIndex = 2)
-            if (idx > 0 && leftBody.isNotEmpty()) {
-                return remainder.substring(0, idx) to remainder.substring(idx + 1)
-            }
+        if (remainder.regionMatches(0, remainder, mid + 1, mid)) {
+            return remainder.substring(0, mid) to remainder.substring(mid + 1)
         }
     }
-    val len = remainder.length
-    if (len >= 3 && len % 2 == 1) {
-        val mid = len / 2
-        if (remainder[mid] == ' ' && remainder.substring(0, mid) == remainder.substring(mid + 1)) {
-            return remainder.substring(0, mid) to remainder.substring(mid + 1)
+    if (startsWithPrefix && len > 2) {
+        // Linear fallback for renames with spaces (`a/old dir/A.kt b/new dir/B.kt`).
+        for (p2 in prefixes) {
+            val idx = remainder.indexOf(" $p2", startIndex = 2)
+            if (idx > 2) {
+                return remainder.substring(0, idx) to remainder.substring(idx + 1)
+            }
         }
     }
     return null
