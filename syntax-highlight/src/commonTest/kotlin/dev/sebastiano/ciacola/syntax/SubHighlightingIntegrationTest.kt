@@ -136,7 +136,17 @@ class SubHighlightingIntegrationTest {
         assertTrue(gitHeader.any { it.slice(md).startsWith("diff") && it.kind == SyntaxTokenKind.Keyword })
 
         val hunkHeader = tokensWithin(md, tokens, "@@ -1,3 +1,3 @@")
-        assertTrue(hunkHeader.any { it.kind != SyntaxTokenKind.String || it.slice(md) != "@@ -1,3 +1,3 @@" })
+        val hunkHeaderVisible = hunkHeader
+            .filter { it.kind != SyntaxTokenKind.Whitespace }
+            .map { it.slice(md) to it.kind }
+        assertEquals(
+            listOf(
+                "@@" to SyntaxTokenKind.Punctuation,
+                "-1,3 +1,3" to SyntaxTokenKind.Number,
+                "@@" to SyntaxTokenKind.Punctuation,
+            ),
+            hunkHeaderVisible,
+        )
 
         val deletedLine = tokensWithin(md, tokens, "-val oldVal = 1")
         assertEquals("-", deletedLine.first().slice(md))
