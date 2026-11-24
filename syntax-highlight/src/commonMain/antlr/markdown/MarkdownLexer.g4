@@ -33,6 +33,7 @@ tokens {
     AUTOLINK,
     HTML_TAG_OPEN,
     HTML_BLOCK_TAG_OPEN,
+    HTML_TAG_CLOSE,
     HTML_NAME,
     HTML_ATTR_NAME,
     HTML_ATTR_VALUE,
@@ -69,6 +70,7 @@ tokens {
     override fun autolinkTokenType(): Int = Tokens.AUTOLINK
     override fun htmlTagOpenTokenType(): Int = Tokens.HTML_TAG_OPEN
     override fun htmlBlockTagOpenTokenType(): Int = Tokens.HTML_BLOCK_TAG_OPEN
+    override fun htmlTagCloseTokenType(): Int = Tokens.HTML_TAG_CLOSE
     override fun htmlNameTokenType(): Int = Tokens.HTML_NAME
     override fun htmlAttrNameTokenType(): Int = Tokens.HTML_ATTR_NAME
     override fun htmlAttrValueTokenType(): Int = Tokens.HTML_ATTR_VALUE
@@ -440,23 +442,27 @@ BFB_FALLBACK
 mode HTML_TAG_MODE;
 
 HTML_TAG_WS
-    : [ \t\r\n]+ -> type(WS)
+    : [ \t]+ -> type(WS)
+    ;
+
+HTML_TAG_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onHtmlTagNewline(); } -> type(NEWLINE)
     ;
 
 HTML_TAG_SLASH
-    : '/'
+    : '/' { onHtmlTagNonWs(); }
     ;
 
 HTML_TAG_EQ
-    : '='
+    : '=' { onHtmlTagNonWs(); }
     ;
 
-HTML_TAG_CLOSE
-    : '>' -> popMode
+HTML_TAG_BQ
+    : '>' { handleHtmlTagGt(); }
     ;
 
 HTML_TAG_STRING
-    : ( '"' ~["]* '"' | '\'' ~[']* '\'' ) -> type(HTML_ATTR_VALUE)
+    : ( '"' ~["]* '"' | '\'' ~[']* '\'' ) { onHtmlTagNonWs(); } -> type(HTML_ATTR_VALUE)
     ;
 
 HTML_TAG_NAME_OR_ATTR
@@ -464,11 +470,11 @@ HTML_TAG_NAME_OR_ATTR
     ;
 
 HTML_TAG_UNQUOTED
-    : ~[ \t\r\n/>='"<&]+ -> type(HTML_ATTR_VALUE)
+    : ~[ \t\r\n/>='"<&]+ { onHtmlTagNonWs(); } -> type(HTML_ATTR_VALUE)
     ;
 
 HTML_TAG_ERROR
-    : .
+    : . { onHtmlTagNonWs(); }
     ;
 
 // =========================================================================

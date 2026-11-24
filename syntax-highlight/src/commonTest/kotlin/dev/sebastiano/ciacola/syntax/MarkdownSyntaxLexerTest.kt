@@ -960,4 +960,104 @@ class MarkdownSyntaxLexerTest {
         val matchingTabTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, matchingTabBq, "md-tab-bq-match")
         assertTrue(matchingTabTokens.any { it.slice(matchingTabBq) == "`a\n> > b`" && it.kind == SyntaxTokenKind.String })
     }
+
+    @Test
+    fun handlesTabBlockquoteFencesNonColZeroMarkerTabsAndMultilineBlockquoteHtmlTags() {
+        // N-1: fenced code block inside tab-separated blockquote must not let inner backticks leak into paragraph backtick pairing
+        val tabBqFence = ">${'\t'}> ```\n>${'\t'}> a\n>${'\t'}> ```\n`x`\n"
+        val tabBqFenceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, tabBqFence, "md-n1-tab-bq-fence")
+        assertTrue(tabBqFenceTokens.any { it.slice(tabBqFence) == "`x`" && it.kind == SyntaxTokenKind.String })
+
+        // N-2: tab column expansion after non-col-0 '>' markers
+        val leadingTwoSpacesThenTab = "  >${'\t'}  code\n"
+        val twoSpaceTabTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            leadingTwoSpacesThenTab,
+            "md-n2-two-space-tab",
+        )
+        assertTrue(twoSpaceTabTokens.any { it.slice(leadingTwoSpacesThenTab) == "code" && it.kind == SyntaxTokenKind.Plain })
+
+        val nestedMarkerTab = "> >${'\t'}  code\n"
+        val nestedMarkerTabTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            nestedMarkerTab,
+            "md-n2-nested-marker-tab",
+        )
+        assertTrue(nestedMarkerTabTokens.any { it.slice(nestedMarkerTab) == "code" && it.kind == SyntaxTokenKind.Plain })
+
+        val threeSpaceTab = "   >${'\t'} code\n"
+        val threeSpaceTabTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            threeSpaceTab,
+            "md-n2-three-space-tab",
+        )
+        assertTrue(threeSpaceTabTokens.any { it.slice(threeSpaceTab) == "code" && it.kind == SyntaxTokenKind.String })
+
+        val nestedFenceClosingTab = "> > ```kotlin\n> > val x = 1\n> >${'\t'}  ```\nAfter `ok`.\n"
+        val nestedFenceClosingTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            nestedFenceClosingTab,
+            "md-n2-nested-fence-close-tab",
+        )
+        assertTrue(nestedFenceClosingTokens.any { it.slice(nestedFenceClosingTab) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(nestedFenceClosingTokens.any { it.slice(nestedFenceClosingTab) == "After" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(nestedFenceClosingTokens.any { it.slice(nestedFenceClosingTab) == "`ok`" && it.kind == SyntaxTokenKind.String })
+
+        // N-3: multiline HTML tags & unclosed '<' inside blockquotes
+        val unclosedLtInBq = "> if a <b\n> then\n"
+        val unclosedLtTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            unclosedLtInBq,
+            "md-n3-unclosed-lt-bq",
+        )
+        assertFalse(unclosedLtTokens.any { it.kind == SyntaxTokenKind.Tag })
+        assertTrue(unclosedLtTokens.any { it.slice(unclosedLtInBq) == ">" && it.startIndex == 0 && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(
+            unclosedLtTokens.any {
+                it.slice(unclosedLtInBq) == ">" &&
+                    it.startIndex == unclosedLtInBq.indexOf("> then") &&
+                    it.kind == SyntaxTokenKind.Punctuation
+            },
+        )
+        assertTrue(unclosedLtTokens.any { it.slice(unclosedLtInBq).contains("then") && it.kind == SyntaxTokenKind.Plain })
+
+        val multilineInlineTagInBq = "> <a\n> href=\"x\">hi</a>\n"
+        val multilineInlineTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            multilineInlineTagInBq,
+            "md-n3-multiline-inline-tag-bq",
+        )
+        val secondLineMarkerIdx = multilineInlineTagInBq.indexOf("> href")
+        assertTrue(
+            multilineInlineTokens.any {
+                it.slice(multilineInlineTagInBq) == ">" &&
+                    it.startIndex == secondLineMarkerIdx &&
+                    it.kind == SyntaxTokenKind.Punctuation
+            },
+        )
+        assertTrue(multilineInlineTokens.any { it.slice(multilineInlineTagInBq) == "href" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(multilineInlineTokens.any { it.slice(multilineInlineTagInBq) == "\"x\"" && it.kind == SyntaxTokenKind.String })
+        assertTrue(multilineInlineTokens.any { it.slice(multilineInlineTagInBq) == "hi" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(multilineInlineTokens.any { it.slice(multilineInlineTagInBq) == "a" && it.kind == SyntaxTokenKind.Tag })
+
+        val multilineHtmlBlockTagInBq = "> <div\n> class=\"x\">\n> *not em*\n"
+        val multilineHtmlBlockTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            multilineHtmlBlockTagInBq,
+            "md-n3-multiline-block-tag-bq",
+        )
+        assertTrue(multilineHtmlBlockTokens.any { it.slice(multilineHtmlBlockTagInBq) == "div" && it.kind == SyntaxTokenKind.Tag })
+        assertTrue(multilineHtmlBlockTokens.any { it.slice(multilineHtmlBlockTagInBq) == "class" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(multilineHtmlBlockTokens.any { it.slice(multilineHtmlBlockTagInBq) == "\"x\"" && it.kind == SyntaxTokenKind.String })
+        assertTrue(multilineHtmlBlockTokens.any { it.slice(multilineHtmlBlockTagInBq) == "*not" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(multilineHtmlBlockTokens.any { it.slice(multilineHtmlBlockTagInBq) == "em*" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(
+            multilineHtmlBlockTokens.any {
+                it.slice(multilineHtmlBlockTagInBq) == ">" &&
+                    it.startIndex == multilineHtmlBlockTagInBq.indexOf("> class") &&
+                    it.kind == SyntaxTokenKind.Punctuation
+            },
+        )
+        assertFalse(multilineHtmlBlockTokens.any { it.kind == SyntaxTokenKind.Property })
+    }
 }

@@ -56,9 +56,13 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
 
     private var bqFenceSpacesAfterLastMarker: Int = 0
     private var bqFenceJustSawMarker: Boolean = false
+    private var bqFenceStreamCol: Int = 0
 
-    // HTML tag attribute-name vs tag-name state
+    // HTML tag attribute-name vs tag-name and blockquote continuation state
     private var htmlExpectingTagName: Boolean = false
+    private var htmlTagBqDepth: Int = 0
+    private var htAtLineStart: Boolean = false
+    private var htBqConsumed: Int = 0
 
     // HTML block state (CommonMark §4.6 types 1-7)
     private var htmlBlockType: Int = 0
@@ -118,7 +122,11 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         fenceLangEmitted = false
         bqFenceSpacesAfterLastMarker = 0
         bqFenceJustSawMarker = false
+        bqFenceStreamCol = 0
         htmlExpectingTagName = false
+        htmlTagBqDepth = 0
+        htAtLineStart = false
+        htBqConsumed = 0
         htmlBlockType = 0
         htmlBlockClosed = false
         htmlRawCloseTag = ""
@@ -165,6 +173,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected abstract fun autolinkTokenType(): Int
     protected abstract fun htmlTagOpenTokenType(): Int
     protected abstract fun htmlBlockTagOpenTokenType(): Int
+    protected abstract fun htmlTagCloseTokenType(): Int
     protected abstract fun htmlNameTokenType(): Int
     protected abstract fun htmlAttrNameTokenType(): Int
     protected abstract fun htmlAttrValueTokenType(): Int
@@ -265,7 +274,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         val start = _tokenStartCharIndex
         val end = _input.index()
         val afterMarker = afterListMarker
-        var streamCol = if (justSawBlockquoteMarker) 1 else lineStreamCol
+        var streamCol = lineStreamCol
         var col = 0
         var first = justSawBlockquoteMarker || afterMarker
         for (cp in start until end) {
@@ -904,6 +913,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             blockquoteDepth = 0
             bqFenceSpacesAfterLastMarker = 0
             bqFenceJustSawMarker = false
+            bqFenceStreamCol = 0
             mode(bqFenceBodyModeId())
         }
     }
@@ -911,7 +921,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected fun onBqFenceWs() {
         val start = _tokenStartCharIndex
         val end = _input.index()
-        var streamCol = if (bqFenceJustSawMarker) 1 else bqFenceSpacesAfterLastMarker
+        var streamCol = bqFenceStreamCol
         var spaces = 0
         var first = bqFenceJustSawMarker
         for (cp in start until end) {
@@ -930,6 +940,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 }
             }
         }
+        bqFenceStreamCol = streamCol
         bqFenceJustSawMarker = false
         bqFenceSpacesAfterLastMarker += spaces
     }
@@ -940,6 +951,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             return
         }
         blockquoteDepth++
+        bqFenceStreamCol++
         bqFenceSpacesAfterLastMarker = 0
         bqFenceJustSawMarker = true
         type = blockquoteMarkerTokenType()
@@ -1018,6 +1030,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             blockquoteDepth = 0
             bqFenceSpacesAfterLastMarker = 0
             bqFenceJustSawMarker = false
+            bqFenceStreamCol = 0
         }
     }
 
@@ -1484,25 +1497,36 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         var idx = advancePastLine(afterOpenerChars, size)
         while (idx < size) {
             var pos = idx
-            var consumedMarkerSpace = false
+            var streamCol = 0
+            var firstAfterMarker = false
             if (bqDepth > 0) {
                 if (!hasBlockquotePrefixAhead(pos, bqDepth)) {
                     return idx
                 }
                 for (d in 0 until bqDepth) {
-                    while (pos < size && codePointAtIndex(pos) == ' '.code) pos++
-                    pos++ // '>'
-                    if (pos < size && codePointAtIndex(pos) == ' '.code) {
-                        consumedMarkerSpace = true
-                        pos++
-                    } else {
-                        consumedMarkerSpace = false
+                    var bqSpaces = 0
+                    while (pos < size && bqSpaces < 4) {
+                        val ch = codePointAtIndex(pos)
+                        if (ch == ' '.code) {
+                            streamCol++
+                            if (firstAfterMarker) firstAfterMarker = false else bqSpaces++
+                            pos++
+                        } else if (ch == '\t'.code) {
+                            val step = 4 - (streamCol % 4)
+                            streamCol += step
+                            bqSpaces += if (firstAfterMarker) step - 1 else step
+                            firstAfterMarker = false
+                            pos++
+                        } else {
+                            break
+                        }
                     }
+                    pos++ // '>'
+                    streamCol++
+                    firstAfterMarker = true
                 }
             }
             var spaces = 0
-            var streamCol = if (consumedMarkerSpace) 2 else if (bqDepth > 0) 1 else 0
-            var firstAfterMarker = bqDepth > 0 && !consumedMarkerSpace
             while (pos < size && spaces < 4) {
                 val ch = codePointAtIndex(pos)
                 if (ch == ' '.code) {
@@ -1709,9 +1733,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             return
         }
         if (hasValidHtmlTagClose(start)) {
-            htmlExpectingTagName = true
             type = htmlTagOpenTokenType()
-            pushMode(htmlTagModeId())
+            pushHtmlTagMode(blockquoteDepth)
             return
         }
         type = textTokenType()
@@ -1739,10 +1762,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             hbrAtLineStart = false
             hbrBqConsumed = blockquoteDepth
             if (hasValidHtmlTagClose(start)) {
-                htmlExpectingTagName = true
                 type = htmlBlockTagOpenTokenType()
                 mode(htmlBlockRawModeId())
-                pushMode(htmlTagModeId())
+                pushHtmlTagMode(blockquoteDepth)
             } else {
                 type = htmlBlockTextTokenType()
                 mode(htmlBlockRawModeId())
@@ -1799,10 +1821,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             return
         }
         if (hasValidHtmlTagClose(start)) {
-            htmlExpectingTagName = true
             type = htmlTagOpenTokenType()
             mode(inlineModeId())
-            pushMode(htmlTagModeId())
+            pushHtmlTagMode(blockquoteDepth)
             return
         }
         type = textTokenType()
@@ -1842,10 +1863,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         hbAtLineStart = false
         hbBqConsumed = blockquoteDepth
         if (hasValidHtmlTagClose(ltStart)) {
-            htmlExpectingTagName = true
             type = htmlBlockTagOpenTokenType()
             mode(htmlBlockModeId())
-            pushMode(htmlTagModeId())
+            pushHtmlTagMode(blockquoteDepth)
         } else {
             type = htmlBlockTextTokenType()
             mode(htmlBlockModeId())
@@ -1870,9 +1890,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         hbAtLineStart = false
         val start = _tokenStartCharIndex
         if (hasValidHtmlTagClose(start)) {
-            htmlExpectingTagName = true
             type = htmlBlockTagOpenTokenType()
-            pushMode(htmlTagModeId())
+            pushHtmlTagMode(htmlBlockBqDepth)
         } else {
             type = htmlBlockTextTokenType()
         }
@@ -1933,9 +1952,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         if (htmlBlockType == 1 && matchesRawCloseTagAt(start)) {
             htmlBlockClosed = true
             if (hasValidHtmlTagClose(start)) {
-                htmlExpectingTagName = true
                 type = htmlBlockTagOpenTokenType()
-                pushMode(htmlTagModeId())
+                pushHtmlTagMode(htmlBlockBqDepth)
                 return
             }
         }
@@ -2055,6 +2073,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         }
 
         // Deterministic 3-state automaton: 0 = outside quotes, 1 = double-quoted, 2 = single-quoted
+        val activeBqDepth =
+            if (_mode == htmlBlockModeId() || _mode == htmlBlockRawModeId()) htmlBlockBqDepth else blockquoteDepth
         var quoteState = 0
         var steps = 0
         val cache = failedHtmlTagStates
@@ -2087,7 +2107,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                             recordFailedHtmlStates(visited)
                             return false
                         }
-                        idx = afterNl
+                        idx = if (activeBqDepth > 0) skipBlockquotePrefix(afterNl, activeBqDepth, size) else afterNl
                         continue
                     }
                 }
@@ -2099,7 +2119,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                             recordFailedHtmlStates(visited)
                             return false
                         }
-                        idx = afterNl
+                        idx = if (activeBqDepth > 0) skipBlockquotePrefix(afterNl, activeBqDepth, size) else afterNl
                         continue
                     }
                 }
@@ -2111,7 +2131,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                             recordFailedHtmlStates(visited)
                             return false
                         }
-                        idx = afterNl
+                        idx = if (activeBqDepth > 0) skipBlockquotePrefix(afterNl, activeBqDepth, size) else afterNl
                         continue
                     }
                 }
@@ -2247,7 +2267,36 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         cache.addAll(visited)
     }
 
+    private fun pushHtmlTagMode(bqDepth: Int) {
+        htmlExpectingTagName = true
+        htmlTagBqDepth = bqDepth
+        htAtLineStart = false
+        htBqConsumed = bqDepth
+        pushMode(htmlTagModeId())
+    }
+
+    protected fun onHtmlTagNewline() {
+        htAtLineStart = true
+        htBqConsumed = 0
+    }
+
+    protected fun onHtmlTagNonWs() {
+        htAtLineStart = false
+    }
+
+    protected fun handleHtmlTagGt() {
+        if (htAtLineStart && htmlTagBqDepth > 0 && htBqConsumed < htmlTagBqDepth) {
+            htBqConsumed++
+            type = blockquoteMarkerTokenType()
+            return
+        }
+        htAtLineStart = false
+        type = htmlTagCloseTokenType()
+        popMode()
+    }
+
     protected fun onHtmlName() {
+        htAtLineStart = false
         if (htmlExpectingTagName) {
             htmlExpectingTagName = false
             type = htmlNameTokenType()
