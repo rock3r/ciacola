@@ -112,7 +112,9 @@ fun ReviewCommentStatus.iconKey(): IconKey = when (this) {
 }
 
 fun ReviewCommentStatus.labelText(): String = when (this) {
-    ReviewCommentStatus.Queued -> "Queued"
+    // "Queued" read as something the author still had to do; the comment is in fact already
+    // waiting where an agent reads it, which is the whole point when nothing is being pushed to.
+    ReviewCommentStatus.Queued -> "Waiting for an agent"
     ReviewCommentStatus.Applying -> "Applying…"
     ReviewCommentStatus.Applied -> "Applied"
     ReviewCommentStatus.Failed -> "Delivery failed"
