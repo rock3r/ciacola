@@ -264,7 +264,13 @@ val verifySyntaxHighlightSourcesJar = tasks.register("verifySyntaxHighlightSourc
             "UNICODE LICENSE V3",
             "Permission is hereby granted, free of charge, to any person obtaining",
             "IntelliJ Platform Color Schemes",
+            "This software includes code from IntelliJ IDEA",
+            "Copyright (C) JetBrains s.r.o.",
+            "https://www.jetbrains.com/idea/",
             "GitHub Primer Color Themes",
+            "Copyright (c) 2020 Primer",
+            "Copyright (c) 2021 Pine Wu",
+            "Copyright (c) 2023 Anthony Fu <https://github.com/antfu>",
             "MIT License",
         )
 

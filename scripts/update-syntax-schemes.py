@@ -215,9 +215,15 @@ def strip_jsonc(text: str) -> str:
             continue
         if ch == "/" and i + 1 < n and text[i + 1] == "*":
             i += 2
-            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+            closed = False
+            while i + 1 < n:
+                if text[i] == "*" and text[i + 1] == "/":
+                    i += 2
+                    closed = True
+                    break
                 i += 1
-            i = i + 2 if i + 1 < n else n
+            if not closed:
+                raise ValueError("Unterminated block comment")
             continue
         out.append(ch)
         i += 1
@@ -310,10 +316,12 @@ def parse_ij_schemes(xml_text: str) -> list[IjScheme]:
     elements = [root] if root.tag == "scheme" else root.findall(".//scheme")
     parsed: list[IjScheme] = []
     for el in elements:
-        name = el.attrib.get("name", "").strip()
+        raw_name = el.attrib.get("name")
+        name = raw_name.strip() if raw_name is not None else ""
         if not name:
-            continue
-        parent = el.attrib.get("parent_scheme")
+            raise ValueError("IntelliJ <scheme> element is missing a non-empty 'name' attribute")
+        raw_parent = el.attrib.get("parent_scheme")
+        parent = raw_parent.strip() if raw_parent is not None and raw_parent.strip() else None
         colors: dict[str, str] = {}
         for opt in el.findall("./colors/option"):
             cname = opt.attrib.get("name")
@@ -337,6 +345,14 @@ def parse_ij_schemes(xml_text: str) -> list[IjScheme]:
             attributes[aname] = IjAttributeEntry(base_attributes=base_attr, value=val_dict)
         parsed.append(IjScheme(name=name, parent_scheme=parent, colors=colors, attributes=attributes))
     return parsed
+
+
+def _effective_ij_parent(scheme: IjScheme) -> str | None:
+    if scheme.parent_scheme is not None:
+        return scheme.parent_scheme
+    if scheme.name.lower() != "default":
+        return "Default"
+    return None
 
 
 def resolve_ij_attr(
@@ -368,7 +384,7 @@ def resolve_ij_attr(
                 resolved = resolve_ij_attr(schemes, scheme_name, entry.base_attributes, visited)
                 if resolved is not None:
                     return resolved
-        cur_name = scheme.parent_scheme
+        cur_name = _effective_ij_parent(scheme)
     return None
 
 
@@ -385,8 +401,26 @@ def resolve_ij_color(schemes: dict[str, IjScheme], scheme_name: str, color_name:
             hex_val = normalize_ij_hex(raw)
             if hex_val is not None:
                 return hex_val
-        cur_name = scheme.parent_scheme
+        cur_name = _effective_ij_parent(scheme)
     return None
+
+
+def _has_high_contrast_in_chain(schemes: dict[str, IjScheme], scheme_name: str, display_name: str) -> bool:
+    if "high contrast" in display_name.lower():
+        return True
+    cur_name: str | None = scheme_name
+    seen: set[str] = set()
+    while cur_name and cur_name not in seen:
+        if "high contrast" in cur_name.lower():
+            return True
+        seen.add(cur_name)
+        scheme = schemes.get(cur_name)
+        if scheme is None:
+            break
+        if scheme.parent_scheme and "high contrast" in scheme.parent_scheme.lower():
+            return True
+        cur_name = _effective_ij_parent(scheme)
+    return False
 
 
 def _pick_ij_style(
@@ -417,9 +451,9 @@ def _pick_ij_style(
         if bg_color == bg:
             bg_color = None
         font_raw = opts.get("FONT_TYPE")
-        font_type = int(font_raw) if font_raw and font_raw.isdigit() else 0
+        font_type = int(font_raw) if font_raw and font_raw.isascii() and font_raw.isdigit() else 0
         effect_raw = opts.get("EFFECT_TYPE")
-        effect_type = int(effect_raw) if effect_raw and effect_raw.isdigit() else 0
+        effect_type = int(effect_raw) if effect_raw and effect_raw.isascii() and effect_raw.isdigit() else 0
         effect_color = normalize_ij_hex(opts.get("EFFECT_COLOR"))
         has_effect = effect_color is not None
         return StyleEntry(
@@ -445,7 +479,7 @@ def convert_ij_scheme(
     fg = normalize_ij_hex(text_opts.get("FOREGROUND")) or "#000000"
 
     is_light = relative_luminance(bg) >= 0.5
-    is_hc = "high contrast" in xml_scheme_name.lower() or "high contrast" in display_name.lower()
+    is_hc = _has_high_contrast_in_chain(schemes, xml_scheme_name, display_name)
     if is_hc:
         appearance = "high-contrast-light" if is_light else "high-contrast-dark"
     else:
@@ -552,7 +586,7 @@ def convert_ij_scheme(
             schemes,
             xml_scheme_name,
             bg,
-            ["DEFAULT_BRACES", "DEFAULT_COMMA", "DEFAULT_PARENTHS", "TEXT"],
+            ["DEFAULT_BRACES", "DEFAULT_PARENTHS", "DEFAULT_OPERATION_SIGN", "TEXT"],
         )
         or plain_style
     )
@@ -700,11 +734,12 @@ def _match_semantic_tokens(candidates: list[str], semantic_colors: dict[str, Any
                 return StyleEntry(fg=fg)
         elif isinstance(val, dict):
             fg = normalize_css_hex(val.get("foreground"))
-            fs = str(val.get("fontStyle") or "").lower().split()
-            bold = bool(val.get("bold")) or ("bold" in fs)
-            italic = bool(val.get("italic")) or ("italic" in fs)
-            underline = bool(val.get("underline")) or ("underline" in fs)
-            strikethrough = bool(val.get("strikethrough")) or ("strikethrough" in fs)
+            raw_fs = val.get("fontStyle")
+            fs = raw_fs.lower().split() if isinstance(raw_fs, str) else []
+            bold = (val.get("bold") is True) or ("bold" in fs)
+            italic = (val.get("italic") is True) or ("italic" in fs)
+            underline = (val.get("underline") is True) or ("underline" in fs)
+            strikethrough = (val.get("strikethrough") is True) or ("strikethrough" in fs)
             if fg is not None:
                 return StyleEntry(
                     fg=fg,
@@ -984,7 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
             target.write_text(content, encoding="utf-8")
             print(f"Wrote {target.name} ({len(content.encode('utf-8'))} bytes)")
         return 0
-    except (RuntimeError, OSError, ET.ParseError, json.JSONDecodeError) as exc:
+    except (RuntimeError, ValueError, OSError, ET.ParseError, json.JSONDecodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

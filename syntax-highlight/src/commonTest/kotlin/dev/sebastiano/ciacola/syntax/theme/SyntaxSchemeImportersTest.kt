@@ -203,9 +203,35 @@ class SyntaxSchemeImportersTest {
             </scheme>
         """.trimIndent()
         val importedHcChild = SyntaxSchemeImporters.importIntelliJXml(childOfHc)
+        assertEquals(SyntaxSchemeAppearance.HighContrastDark, importedHcChild.appearance)
         assertEquals("#000000", importedHcChild.background.toHexRgb())
         assertEquals("#ED864A", importedHcChild.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
         assertEquals("#00FFCC", importedHcChild.foregroundFor(SyntaxTokenKind.Number).toHexRgb())
+
+        // Bare <scheme> without parent_scheme defaults to IntelliJ Default scheme
+        val bareScheme = """<scheme name="Bare"><attributes/></scheme>"""
+        val importedBare = SyntaxSchemeImporters.importIntelliJXml(bareScheme)
+        val bareKeyword = importedBare.styleFor(SyntaxTokenKind.Keyword)
+        assertEquals("#000080", bareKeyword.foreground?.toHexRgb())
+        assertTrue(bareKeyword.bold)
+
+        // Signed FONT_TYPE values ("+1", "-1") are ignored like non-digit strings
+        val signedFontType = """
+            <scheme name="Signed Font">
+              <attributes>
+                <option name="DEFAULT_KEYWORD">
+                  <value><option name="FOREGROUND" value="123456" /><option name="FONT_TYPE" value="+1" /></value>
+                </option>
+                <option name="DEFAULT_STRING">
+                  <value><option name="FOREGROUND" value="123456" /><option name="FONT_TYPE" value="-1" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val importedSigned = SyntaxSchemeImporters.importIntelliJXml(signedFontType)
+        assertFalse(importedSigned.styleFor(SyntaxTokenKind.Keyword).bold)
+        assertFalse(importedSigned.styleFor(SyntaxTokenKind.String).bold)
+        assertFalse(importedSigned.styleFor(SyntaxTokenKind.String).italic)
 
         // _@user_* user-modified IntelliJ export carrying metaInfo/originalScheme
         val userModifiedLight = """
@@ -569,6 +595,10 @@ class SyntaxSchemeImportersTest {
                   "settings": { "fontStyle": "" }
                 },
                 {
+                  "scope": "string",
+                  "settings": { "foreground": "#A5D6FF", "fontStyle": "\n  bold\t italic \r" }
+                },
+                {
                   "scope": "entity.name.function",
                   "settings": { "foreground": "#D2A8FF" }
                 }
@@ -591,6 +621,12 @@ class SyntaxSchemeImportersTest {
         assertEquals("#FF7B72", kw.foreground?.toHexRgb())
         assertFalse(kw.bold)
         assertFalse(kw.italic)
+
+        // Multiline / whitespace fontStyle tokens parse identically to single-space tokens
+        val strStyle = imported.styleFor(SyntaxTokenKind.String)
+        assertEquals("#A5D6FF", strStyle.foreground?.toHexRgb())
+        assertTrue(strStyle.bold)
+        assertTrue(strStyle.italic)
 
         // Generic entity.name.function must not shadow semanticTokenColors["function.declaration"]
         assertEquals("#D2A8FF", imported.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
@@ -627,30 +663,63 @@ class SyntaxSchemeImportersTest {
 
     @Test
     fun parsersScaleLinearlyOnLargeInputs() {
-        val largeXml = buildString {
+        // Warm up bundled scheme lazy initialization before measuring parser scaling
+        assertTrue(SyntaxColorSchemes.intelliJ.isNotEmpty())
+        assertTrue(SyntaxColorSchemes.gitHub.isNotEmpty())
+
+        fun buildXml(count: Int): String = buildString {
             append("<scheme name=\"Large\" parent_scheme=\"Darcula\"><attributes>")
-            repeat(1500) { i ->
+            repeat(count) { i ->
                 append("<option name=\"OPT_$i\"><value><option name=\"FOREGROUND\" value=\"abcdef\"/></value></option>")
             }
             append("</attributes></scheme>")
         }
-        val xmlStart = TimeSource.Monotonic.markNow()
-        val xmlScheme = SyntaxSchemeImporters.importIntelliJXml(largeXml)
-        val xmlElapsedMs = xmlStart.elapsedNow().toDouble(DurationUnit.MILLISECONDS)
-        assertNotNull(xmlScheme)
-        assertTrue(xmlElapsedMs < 500.0, "XML import took ${xmlElapsedMs}ms")
+        val xmlN = buildXml(500)
+        val xml4N = buildXml(2000)
+        val xmlNStart = TimeSource.Monotonic.markNow()
+        assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xmlN))
+        val tXmlN = xmlNStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
 
-        val largeJsonc = buildString {
+        val xml4NStart = TimeSource.Monotonic.markNow()
+        assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xml4N))
+        val tXml4N = xml4NStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
+        assertTrue(tXml4N < 500L, "4N XML import took ${tXml4N}ms")
+        assertTrue(tXml4N <= maxOf(tXmlN * 10L, 150L), "XML scaling super-linear: N=${tXmlN}ms, 4N=${tXml4N}ms")
+
+        fun buildJsonc(count: Int): String = buildString {
             append("{\n\"name\":\"LargeVS\",\n\"type\":\"dark\",\n\"colors\":{\"editor.background\":\"#000000\",\"editor.foreground\":\"#FFFFFF\"},\n\"tokenColors\":[\n")
-            repeat(1500) { i ->
+            repeat(count) { i ->
                 append("/* comment $i */ {\"scope\":\"meta.custom.$i\",\"settings\":{\"foreground\":\"#abcdef\"}},\n")
             }
             append("{\"scope\":\"keyword\",\"settings\":{\"foreground\":\"#ff7b72\"}}\n]}")
         }
-        val jsonStart = TimeSource.Monotonic.markNow()
-        val jsonScheme = SyntaxSchemeImporters.importVsCodeJson(largeJsonc)
-        val jsonElapsedMs = jsonStart.elapsedNow().toDouble(DurationUnit.MILLISECONDS)
-        assertEquals("#FF7B72", jsonScheme.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
-        assertTrue(jsonElapsedMs < 500.0, "JSONC import took ${jsonElapsedMs}ms")
+        val jsonN = buildJsonc(500)
+        val json4N = buildJsonc(2000)
+        val jsonNStart = TimeSource.Monotonic.markNow()
+        assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(jsonN).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        val tJsonN = jsonNStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
+
+        val json4NStart = TimeSource.Monotonic.markNow()
+        assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(json4N).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        val tJson4N = json4NStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
+        assertTrue(tJson4N < 500L, "4N JSONC import took ${tJson4N}ms")
+        assertTrue(tJson4N <= maxOf(tJsonN * 10L, 150L), "JSONC scaling super-linear: N=${tJsonN}ms, 4N=${tJson4N}ms")
+
+        // Pathological stress inputs: 20,000 XML entities and 2,000 DOCTYPE comments
+        val manyEntities = "<scheme name=\"" + "&amp;".repeat(20_000) + "\" parent_scheme=\"Darcula\"/>"
+        val entStart = TimeSource.Monotonic.markNow()
+        assertTrue(SyntaxSchemeImporters.importIntelliJXml(manyEntities).name.length == 20_000)
+        val entMs = entStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
+        assertTrue(entMs < 500L, "20k XML entities took ${entMs}ms")
+
+        val manyDoctypeComments = buildString {
+            append("<!DOCTYPE scheme [")
+            repeat(2_000) { i -> append("<!-- comment $i -->") }
+            append("]><scheme name=\"ManyComments\" parent_scheme=\"Darcula\"/>")
+        }
+        val docStart = TimeSource.Monotonic.markNow()
+        assertEquals("#CC7832", SyntaxSchemeImporters.importIntelliJXml(manyDoctypeComments).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        val docMs = docStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
+        assertTrue(docMs < 500L, "2k DOCTYPE comments took ${docMs}ms")
     }
 }

@@ -51,17 +51,20 @@ class BundledSyntaxSchemesTest {
         assertEquals("#2B2B2B", darcula.background.toHexRgb())
         assertEquals("#CC7832", darcula.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
         assertEquals("#FFC66D", darcula.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
+        assertEquals("#A9B7C6", darcula.foregroundFor(SyntaxTokenKind.Punctuation).toHexRgb())
         assertEquals("#BC3F3C", darcula.foregroundFor(SyntaxTokenKind.Invalid).toHexRgb())
 
         val darculaContrast = SyntaxColorSchemes.IntelliJDarculaContrast
         assertEquals("#1E1F22", darculaContrast.background.toHexRgb())
         assertEquals("#CC7832", darculaContrast.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#A9B7C6", darculaContrast.foregroundFor(SyntaxTokenKind.Punctuation).toHexRgb())
 
         val ijHc = SyntaxColorSchemes.IntelliJHighContrast
         assertEquals("#000000", ijHc.background.toHexRgb())
         assertEquals("#ED864A", ijHc.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
         assertEquals("#FFCF40", ijHc.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
         assertEquals("#FFFFFF", ijHc.foregroundFor(SyntaxTokenKind.Attribute).toHexRgb())
+        assertEquals("#EBEBEB", ijHc.foregroundFor(SyntaxTokenKind.Punctuation).toHexRgb())
         assertEquals("#FA3232", ijHc.foregroundFor(SyntaxTokenKind.Invalid).toHexRgb())
         assertEquals(SyntaxSchemeAppearance.HighContrastDark, ijHc.appearance)
 

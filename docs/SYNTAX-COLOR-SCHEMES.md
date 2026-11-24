@@ -155,7 +155,7 @@ Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importIntelli
    - `EFFECT_TYPE` applies when `EFFECT_COLOR` is present: `1`, `2`, `4`, `5` -> `underline = true`; `3` -> `strikethrough = true`.
 6. **Exact `SyntaxTokenKind` priority mapping:**
    - `plain`: `TEXT` foreground (`bg` omitted)
-   - `whitespace`: `<colors>` `WHITESPACES` -> `DEFAULT_LINE_COMMENT` -> `TEXT`
+   - `whitespace`: `<colors>` `WHITESPACES` -> `DEFAULT_LINE_COMMENT` -> `DEFAULT_BLOCK_COMMENT` -> `TEXT`
    - `keyword`: `DEFAULT_KEYWORD`
    - `string`: `DEFAULT_STRING`
    - `comment`: `DEFAULT_LINE_COMMENT` -> `DEFAULT_BLOCK_COMMENT` -> `DEFAULT_DOC_COMMENT`
@@ -170,7 +170,7 @@ Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importIntelli
    - `tag`: `XML_TAG_NAME` -> `HTML_TAG_NAME` -> `DEFAULT_TAG` (foreground only, ignoring `Default`'s `#EFEFEF` background) -> `DEFAULT_KEYWORD`
    - `operator`: `DEFAULT_OPERATION_SIGN` -> `TEXT` (ignoring canvas background)
    - `preprocessor`: `OC.DIRECTIVE` -> `PREPROCESSOR_DIRECTIVE` -> `DEFAULT_METADATA` -> `DEFAULT_KEYWORD`
-   - `punctuation`: `DEFAULT_BRACES` -> `DEFAULT_COMMA` -> `DEFAULT_PARENTHS` -> `TEXT` (ignoring canvas background)
+   - `punctuation`: `DEFAULT_BRACES` -> `DEFAULT_PARENTHS` -> `DEFAULT_OPERATION_SIGN` -> `TEXT` (ignoring canvas background)
    - `invalid`: `BAD_CHARACTER` (only when `FOREGROUND` is set, avoiding `Default`'s `#FFCCCC` background-only entry) -> `WRONG_REFERENCES_ATTRIBUTES` -> `CONSOLE_ERROR_OUTPUT` -> `LOG_ERROR_OUTPUT` -> `ERRORS_ATTRIBUTES`
    - Chrome colors: `SELECTION_BACKGROUND`, `CARET_ROW_COLOR`, `LINE_NUMBERS_COLOR`, `ADDED_LINES_COLOR`, `DELETED_LINES_COLOR`, `MODIFIED_LINES_COLOR`.
 
@@ -180,10 +180,10 @@ Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importIntelli
 
 Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importVsCodeJson` support standard VS Code themes:
 
-1. **JSONC support:**
-   - Pure-Kotlin O(N) parser handles `//` line comments, `/* */` block comments, trailing commas, full JSON string escapes (including `\uXXXX`), and enforces a nesting depth limit.
-2. **`include` chaining:**
-   - Resolves parent themes recursively via `includeResolver` with cycle detection; child `colors` and `semanticTokenColors` override parent entries, and child `tokenColors` append after parent rules.
+1. **JSONC support (Kotlin importer):**
+   - `SyntaxSchemeImporters.importVsCodeJson` uses a pure-Kotlin O(N) JSONC parser supporting `//` line comments, `/* */` block comments, trailing commas, and full JSON string escapes (including `\uXXXX`), with a 128-level nesting depth limit. (The Python updater script strips JSONC comments and trailing commas using `json.loads`.)
+2. **`include` chaining (Kotlin importer):**
+   - `SyntaxSchemeImporters.importVsCodeJson` (and `importAuto` when supplied an `includeResolver`) resolves parent themes recursively with cycle detection (up to depth 32); child `colors` and `semanticTokenColors` override parent entries, and child `tokenColors` append after parent rules. (Standalone single-file themes in `scripts/update-syntax-schemes.py` do not resolve `include`.)
 3. **Appearance detection:**
    - Inspects `type` (`"light"`, `"dark"`, `"hcLight"`, `"hcDark"`, `"hc"`, `"hc-black"`, `"hc-light"`) and `"high contrast"` / `"high-contrast"` in the theme name, falling back to `background.relativeLuminance() >= 0.5`.
 4. **Specificity-weighted TextMate matching & `semanticTokenColors` fallback:**
@@ -232,7 +232,7 @@ val lightScheme = SyntaxColorSchemes.defaultFor(isLight = true)
 val ghDimmed = SyntaxColorSchemes.findById("github-dark-dimmed")!!
 
 // 2. Style tokens from SyntaxHighlighter
-val tokens = SyntaxHighlighter.highlight("fun main() = println(\"hi\")", SyntaxLanguage.Kotlin)
+val tokens = SyntaxHighlighter.lex("fun main() = println(\"hi\")", SyntaxLanguage.Kotlin)
 for (token in tokens) {
     val style = darkScheme.styleFor(token.kind)
     val fgArgb = (style.foreground ?: darkScheme.foreground).argb

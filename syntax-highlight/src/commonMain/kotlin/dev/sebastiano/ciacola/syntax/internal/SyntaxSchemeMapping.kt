@@ -295,7 +295,8 @@ internal object IntelliJSchemeMapper {
         schemes: Map<String, IjSchemeData>,
         fallbackParent: SyntaxColorScheme?,
     ): SyntaxColorScheme {
-        val textOpts = resolveAttr(schemes, primaryName, "TEXT")
+        val defaultToDefault = fallbackParent == null
+        val textOpts = resolveAttr(schemes, primaryName, "TEXT", defaultToDefault = defaultToDefault)
         val bg = textOpts?.get("BACKGROUND")?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             ?: fallbackParent?.background
             ?: SyntaxColor(0xFFFFFFFF.toInt())
@@ -304,7 +305,8 @@ internal object IntelliJSchemeMapper {
             ?: SyntaxColor(0xFF000000.toInt())
 
         val isLight = bg.relativeLuminance() >= 0.5
-        val isHc = primaryName.contains("high contrast", ignoreCase = true)
+        val isHc = fallbackParent?.appearance?.isHighContrast == true ||
+            hasHighContrastInChain(primaryName, schemes, defaultToDefault)
         val appearance = when {
             isHc && isLight -> SyntaxSchemeAppearance.HighContrastLight
             isHc -> SyntaxSchemeAppearance.HighContrastDark
@@ -313,20 +315,21 @@ internal object IntelliJSchemeMapper {
         }
 
         val plainStyle = SyntaxTokenStyle(foreground = fg)
-        val whitespaceFg = resolveColor(schemes, primaryName, "WHITESPACES")
+        val whitespaceFg = resolveColor(schemes, primaryName, "WHITESPACES", defaultToDefault = defaultToDefault)
             ?: fallbackParent?.styles?.get(SyntaxTokenKind.Whitespace)?.foreground
             ?: pickStyle(
                 schemes,
                 primaryName,
                 bg,
                 listOf("DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT"),
+                defaultToDefault = defaultToDefault,
             )?.foreground
             ?: fg
 
-        val keywordStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"))
+        val keywordStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"), defaultToDefault = defaultToDefault)
             ?: fallbackParent?.styles?.get(SyntaxTokenKind.Keyword)
             ?: plainStyle
-        val stringStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_STRING"))
+        val stringStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_STRING"), defaultToDefault = defaultToDefault)
             ?: fallbackParent?.styles?.get(SyntaxTokenKind.String)
             ?: plainStyle
         val commentStyle = pickStyle(
@@ -334,9 +337,10 @@ internal object IntelliJSchemeMapper {
             primaryName,
             bg,
             listOf("DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT", "DEFAULT_DOC_COMMENT"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Comment)
             ?: plainStyle
-        val numberStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_NUMBER"))
+        val numberStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_NUMBER"), defaultToDefault = defaultToDefault)
             ?: fallbackParent?.styles?.get(SyntaxTokenKind.Number)
             ?: plainStyle
         val constantStyle = pickStyle(
@@ -344,9 +348,10 @@ internal object IntelliJSchemeMapper {
             primaryName,
             bg,
             listOf("DEFAULT_CONSTANT", "DEFAULT_STATIC_FIELD"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Constant)
             ?: plainStyle
-        val fnDeclStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_FUNCTION_DECLARATION"))
+        val fnDeclStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_FUNCTION_DECLARATION"), defaultToDefault = defaultToDefault)
             ?: fallbackParent?.functionDeclaration
         val functionStyle = pickStyle(
             schemes,
@@ -358,6 +363,7 @@ internal object IntelliJSchemeMapper {
                 "DEFAULT_STATIC_METHOD",
                 "DEFAULT_FUNCTION_CALL",
             ),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Function)
             ?: plainStyle
         val typeStyle = pickStyle(
@@ -366,19 +372,22 @@ internal object IntelliJSchemeMapper {
             bg,
             listOf("DEFAULT_CLASS_NAME", "CLASS_NAME_ATTRIBUTES", "DEFAULT_INTERFACE_NAME"),
             diffFrom = fg,
+            defaultToDefault = defaultToDefault,
         ) ?: pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("TYPE_PARAMETER_NAME_ATTRIBUTES", "DEFAULT_CLASS_NAME"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Type)
-            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"))
+            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"), defaultToDefault = defaultToDefault)
             ?: plainStyle
         val propertyStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("DEFAULT_INSTANCE_FIELD", "DEFAULT_STATIC_FIELD", "KOTLIN_NAMED_ARGUMENT"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Property)
             ?: plainStyle
         val annotationStyle = pickStyle(
@@ -386,6 +395,7 @@ internal object IntelliJSchemeMapper {
             primaryName,
             bg,
             listOf("ANNOTATION_NAME_ATTRIBUTES", "DEFAULT_METADATA"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Annotation)
             ?: plainStyle
         val attributeStyle = pickStyle(
@@ -394,6 +404,7 @@ internal object IntelliJSchemeMapper {
             bg,
             listOf("HTML_ATTRIBUTE_NAME", "XML_ATTRIBUTE_NAME", "DEFAULT_ATTRIBUTE"),
             minContrast = 2.5,
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Attribute)
             ?: plainStyle
         val tagStyle = pickStyle(
@@ -402,32 +413,36 @@ internal object IntelliJSchemeMapper {
             bg,
             listOf("XML_TAG_NAME", "HTML_TAG_NAME", "DEFAULT_TAG"),
             fgOnly = true,
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Tag)
-            ?: pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"), fgOnly = true)
+            ?: pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"), fgOnly = true, defaultToDefault = defaultToDefault)
             ?: keywordStyle
         val operatorStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("DEFAULT_OPERATION_SIGN"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Operator)
-            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"))
+            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"), defaultToDefault = defaultToDefault)
             ?: plainStyle
         val preprocessorStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("OC.DIRECTIVE", "PREPROCESSOR_DIRECTIVE", "DEFAULT_METADATA"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Preprocessor)
-            ?: pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"))
+            ?: pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"), defaultToDefault = defaultToDefault)
             ?: keywordStyle
         val punctuationStyle = pickStyle(
             schemes,
             primaryName,
             bg,
-            listOf("DEFAULT_BRACES", "DEFAULT_COMMA", "DEFAULT_PARENTHS"),
+            listOf("DEFAULT_BRACES", "DEFAULT_PARENTHS", "DEFAULT_OPERATION_SIGN"),
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Punctuation)
-            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"))
+            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"), defaultToDefault = defaultToDefault)
             ?: plainStyle
         val invalidStyle = pickStyle(
             schemes,
@@ -439,12 +454,14 @@ internal object IntelliJSchemeMapper {
                 "CONSOLE_ERROR_OUTPUT",
                 "LOG_ERROR_OUTPUT",
             ),
+            defaultToDefault = defaultToDefault,
         ) ?: pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("ERRORS_ATTRIBUTES"),
             requireFg = false,
+            defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Invalid)
             ?: plainStyle
 
@@ -474,19 +491,19 @@ internal object IntelliJSchemeMapper {
             appearance = appearance,
             background = bg,
             foreground = fg,
-            selectionBackground = resolveColor(schemes, primaryName, "SELECTION_BACKGROUND")
+            selectionBackground = resolveColor(schemes, primaryName, "SELECTION_BACKGROUND", defaultToDefault = defaultToDefault)
                 ?: fallbackParent?.selectionBackground,
-            lineHighlightBackground = resolveColor(schemes, primaryName, "CARET_ROW_COLOR")
+            lineHighlightBackground = resolveColor(schemes, primaryName, "CARET_ROW_COLOR", defaultToDefault = defaultToDefault)
                 ?: fallbackParent?.lineHighlightBackground,
-            lineNumberForeground = resolveColor(schemes, primaryName, "LINE_NUMBERS_COLOR")
+            lineNumberForeground = resolveColor(schemes, primaryName, "LINE_NUMBERS_COLOR", defaultToDefault = defaultToDefault)
                 ?: fallbackParent?.lineNumberForeground,
             styles = styles,
             functionDeclaration = fnDeclStyle,
-            diffInserted = resolveColor(schemes, primaryName, "ADDED_LINES_COLOR")
+            diffInserted = resolveColor(schemes, primaryName, "ADDED_LINES_COLOR", defaultToDefault = defaultToDefault)
                 ?: fallbackParent?.diffInserted,
-            diffDeleted = resolveColor(schemes, primaryName, "DELETED_LINES_COLOR")
+            diffDeleted = resolveColor(schemes, primaryName, "DELETED_LINES_COLOR", defaultToDefault = defaultToDefault)
                 ?: fallbackParent?.diffDeleted,
-            diffChanged = resolveColor(schemes, primaryName, "MODIFIED_LINES_COLOR")
+            diffChanged = resolveColor(schemes, primaryName, "MODIFIED_LINES_COLOR", defaultToDefault = defaultToDefault)
                 ?: fallbackParent?.diffChanged,
             metadata = SyntaxSchemeMetadata(family = "IntelliJ"),
         )
@@ -497,6 +514,7 @@ internal object IntelliJSchemeMapper {
         schemeName: String,
         attrName: String,
         visited: MutableSet<Pair<String, String>> = HashSet(),
+        defaultToDefault: Boolean = true,
     ): Map<String, String?>? {
         val key = schemeName to attrName
         if (!visited.add(key)) return null
@@ -511,11 +529,11 @@ internal object IntelliJSchemeMapper {
                     return entry.value
                 }
                 if (entry.baseAttributes != null) {
-                    val resolved = resolveAttr(schemes, schemeName, entry.baseAttributes, visited)
+                    val resolved = resolveAttr(schemes, schemeName, entry.baseAttributes, visited, defaultToDefault)
                     if (resolved != null) return resolved
                 }
             }
-            curName = effectiveParentKey(scheme, schemes)
+            curName = effectiveParentKey(scheme, schemes, defaultToDefault)
         }
         return null
     }
@@ -524,6 +542,7 @@ internal object IntelliJSchemeMapper {
         schemes: Map<String, IjSchemeData>,
         schemeName: String,
         colorName: String,
+        defaultToDefault: Boolean = true,
     ): SyntaxColor? {
         var curName: String? = lookupSchemeKey(schemeName, schemes) ?: schemeName
         val seen = HashSet<String>()
@@ -534,15 +553,36 @@ internal object IntelliJSchemeMapper {
                 val parsed = SyntaxColor.parseIntelliJHexOrNull(raw)
                 if (parsed != null) return parsed
             }
-            curName = effectiveParentKey(scheme, schemes)
+            curName = effectiveParentKey(scheme, schemes, defaultToDefault)
         }
         return null
     }
 
-    fun resolveEffectiveParentKey(scheme: IjSchemeData, schemes: Map<String, IjSchemeData>): String? =
-        effectiveParentKey(scheme, schemes)
+    private fun hasHighContrastInChain(
+        schemeName: String,
+        schemes: Map<String, IjSchemeData>,
+        defaultToDefault: Boolean,
+    ): Boolean {
+        var curName: String? = lookupSchemeKey(schemeName, schemes) ?: schemeName
+        val seen = HashSet<String>()
+        while (curName != null && seen.add(curName)) {
+            if (curName.contains("high contrast", ignoreCase = true)) return true
+            val scheme = schemes[curName] ?: break
+            if (scheme.originalScheme?.contains("high contrast", ignoreCase = true) == true) return true
+            if (scheme.parentScheme?.contains("high contrast", ignoreCase = true) == true) return true
+            curName = effectiveParentKey(scheme, schemes, defaultToDefault)
+        }
+        return false
+    }
 
-    private fun effectiveParentKey(scheme: IjSchemeData, schemes: Map<String, IjSchemeData>): String? {
+    fun resolveEffectiveParentKey(scheme: IjSchemeData, schemes: Map<String, IjSchemeData>): String? =
+        effectiveParentKey(scheme, schemes, defaultToDefault = true)
+
+    private fun effectiveParentKey(
+        scheme: IjSchemeData,
+        schemes: Map<String, IjSchemeData>,
+        defaultToDefault: Boolean,
+    ): String? {
         val orig = scheme.originalScheme
         if (orig != null &&
             (scheme.name.startsWith("_@user_") || scheme.parentScheme == null ||
@@ -553,8 +593,14 @@ internal object IntelliJSchemeMapper {
                 return origKey
             }
         }
-        val parent = scheme.parentScheme ?: return null
-        return lookupSchemeKey(parent, schemes)
+        val parent = scheme.parentScheme
+        if (parent != null) {
+            return lookupSchemeKey(parent, schemes)
+        }
+        if (defaultToDefault && !scheme.name.equals("Default", ignoreCase = true)) {
+            return lookupSchemeKey("Default", schemes)
+        }
+        return null
     }
 
     private fun lookupSchemeKey(rawName: String, schemes: Map<String, IjSchemeData>): String? {
@@ -578,9 +624,10 @@ internal object IntelliJSchemeMapper {
         diffFrom: SyntaxColor? = null,
         requireFg: Boolean = true,
         fgOnly: Boolean = false,
+        defaultToDefault: Boolean = true,
     ): SyntaxTokenStyle? {
         for (attrName in candidates) {
-            val opts = resolveAttr(schemes, schemeName, attrName) ?: continue
+            val opts = resolveAttr(schemes, schemeName, attrName, defaultToDefault = defaultToDefault) ?: continue
             val fg = opts["FOREGROUND"]?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             if (requireFg && fg == null) continue
             if (diffFrom != null && fg == diffFrom) continue
@@ -595,8 +642,8 @@ internal object IntelliJSchemeMapper {
                 opts["BACKGROUND"]?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             }
             val bg = if (rawBg == canvasBg) null else rawBg
-            val fontType = opts["FONT_TYPE"]?.toIntOrNull() ?: 0
-            val effectType = opts["EFFECT_TYPE"]?.toIntOrNull() ?: 0
+            val fontType = parseUnsignedIntOrZero(opts["FONT_TYPE"])
+            val effectType = parseUnsignedIntOrZero(opts["EFFECT_TYPE"])
             val effectColor = opts["EFFECT_COLOR"]?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             val hasEffect = effectColor != null
             return SyntaxTokenStyle(
@@ -609,6 +656,11 @@ internal object IntelliJSchemeMapper {
             )
         }
         return null
+    }
+
+    private fun parseUnsignedIntOrZero(raw: String?): Int {
+        if (raw.isNullOrEmpty() || !raw.all { it in '0'..'9' }) return 0
+        return raw.toIntOrNull() ?: 0
     }
 }
 
@@ -951,11 +1003,7 @@ internal object VsCodeThemeMapper {
                 if (m.fg != null) fg = m.fg
                 if (m.bg != null) bg = m.bg
                 if (m.hasFontStyle) {
-                    val fontTokens = m.fontStyle
-                        .lowercase()
-                        .split(' ', '\t')
-                        .filter { it.isNotEmpty() }
-                        .toSet()
+                    val fontTokens = splitWhitespaceTokens(m.fontStyle)
                     bold = "bold" in fontTokens
                     italic = "italic" in fontTokens
                     underline = "underline" in fontTokens
@@ -991,11 +1039,7 @@ internal object VsCodeThemeMapper {
                     val fg = (raw.entries["foreground"] as? JsonString)?.value?.let {
                         SyntaxColor.parseCssHexOrNull(it)
                     } ?: continue
-                    val fontTokens = ((raw.entries["fontStyle"] as? JsonString)?.value ?: "")
-                        .lowercase()
-                        .split(' ', '\t')
-                        .filter { it.isNotEmpty() }
-                        .toSet()
+                    val fontTokens = splitWhitespaceTokens((raw.entries["fontStyle"] as? JsonString)?.value ?: "")
                     val bold = (raw.entries["bold"] as? JsonBoolean)?.value == true || "bold" in fontTokens
                     val italic = (raw.entries["italic"] as? JsonBoolean)?.value == true || "italic" in fontTokens
                     val underline =
@@ -1014,6 +1058,25 @@ internal object VsCodeThemeMapper {
             }
         }
         return null
+    }
+
+    private fun splitWhitespaceTokens(raw: String): Set<String> {
+        val tokens = HashSet<String>()
+        var start = -1
+        for (i in raw.indices) {
+            if (raw[i].isWhitespace()) {
+                if (start >= 0) {
+                    tokens += raw.substring(start, i).lowercase()
+                    start = -1
+                }
+            } else if (start < 0) {
+                start = i
+            }
+        }
+        if (start >= 0) {
+            tokens += raw.substring(start).lowercase()
+        }
+        return tokens
     }
 }
 

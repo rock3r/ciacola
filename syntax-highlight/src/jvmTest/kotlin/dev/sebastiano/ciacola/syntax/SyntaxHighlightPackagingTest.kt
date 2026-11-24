@@ -149,7 +149,16 @@ class SyntaxHighlightPackagingTest {
             "NOTICE.txt must contain the Unicode License v3 permission notice",
         )
         assertTrue(noticeText.contains("IntelliJ Platform Color Schemes"), "NOTICE.txt must cite IntelliJ Platform Color Schemes")
+        assertTrue(noticeText.contains("This software includes code from IntelliJ IDEA"), "NOTICE.txt must include JetBrains NOTICE text")
+        assertTrue(noticeText.contains("Copyright (C) JetBrains s.r.o."), "NOTICE.txt must cite JetBrains s.r.o. copyright")
+        assertTrue(noticeText.contains("https://www.jetbrains.com/idea/"), "NOTICE.txt must cite JetBrains IDEA URL")
         assertTrue(noticeText.contains("GitHub Primer Color Themes"), "NOTICE.txt must cite GitHub Primer Color Themes")
+        assertTrue(noticeText.contains("Copyright (c) 2020 Primer"), "NOTICE.txt must cite Primer MIT copyright")
+        assertTrue(noticeText.contains("Copyright (c) 2021 Pine Wu"), "NOTICE.txt must cite Pine Wu MIT copyright")
+        assertTrue(
+            noticeText.contains("Copyright (c) 2023 Anthony Fu <https://github.com/antfu>"),
+            "NOTICE.txt must cite Anthony Fu MIT copyright",
+        )
         assertTrue(noticeText.contains("MIT License"), "NOTICE.txt must contain MIT License text")
 
         val expectedUnicodeGrammars = listOf(

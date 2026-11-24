@@ -100,16 +100,20 @@ Third-Party Grammar and Data Notices
    authorization of the copyright holder.
 
 4. IntelliJ Platform Color Schemes (intellij-*.scheme.json)
+   This software includes code from IntelliJ IDEA
+   Copyright (C) JetBrains s.r.o.
+   https://www.jetbrains.com/idea/
    Derived from IntelliJ Platform color scheme definitions in
    JetBrains/intellij-community (https://github.com/JetBrains/intellij-community).
-   Copyright 2000-2026 JetBrains s.r.o. and contributors.
    Licensed under the Apache License, Version 2.0.
 
 5. GitHub Primer Color Themes (github-*.scheme.json)
    Derived from GitHub Primer VS Code themes (https://github.com/primer/github-vscode-theme)
    via shikijs/textmate-grammars-themes
    (https://github.com/shikijs/textmate-grammars-themes).
-   Copyright GitHub, Inc. and contributors.
+   Copyright (c) 2020 Primer
+   Copyright (c) 2021 Pine Wu
+   Copyright (c) 2023 Anthony Fu <https://github.com/antfu>
 
    MIT License
 
