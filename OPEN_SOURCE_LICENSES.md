@@ -14,6 +14,7 @@ license.
 | Component | Copyright / Attribution | License | Upstream |
 |---|---|---|---|
 | **Storyboard** (derived from revision `499cda890a7591c8fc56044726531f6f38a82e35`) | Copyright the Storyboard contributors (Brian Norman et al.) | Apache-2.0 | <https://github.com/bnorm/storyboard> |
+| **Warp** (`:storyboard-warp`, animated code snippet diffing/rendering incorporated into Storyboard) | Copyright Rahul Ravikumar | Apache-2.0 | <https://github.com/tikurahul/warp> |
 
 ---
 

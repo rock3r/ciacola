@@ -36,9 +36,19 @@ For live Kotlin specimen editing without restarting the app:
 
 - **Present like Keynote:** Clean audience Show Mode, companion **Presenter View** (`F2`) with speaker notes, timer, Quick Jump, display routing, **Blackout / Whiteout** stage curtains (`B` / `W`), and an **Overview** grid (`Esc`, filterable via `⌘K` / `Ctrl+K`).
 - **Visual Studio authoring:** Centered **`Edit` | `Review` | `Present`** modes with direct stage drag/snap/nudge, inline text editing, **`Design | Animate`** inspector tabs, after-effects-style **Timeline** (`F5` / `F6`), live **Deck Theme** editor (`F7`), full-deck **Issues** linter (`F8`), and unified Undo/Redo (`⌘Z` / `⇧⌘Z`) synced atomically to `.deck.json`.
-- **Single-canvas text & code motion:** Paragraph-measured **`MagicText v2`** behind the application-level `DeckTextRenderer` boundary (emoji/grapheme-safe morphs and builds, zero per-token composables) alongside animated code morphs powered by **`:syntax-highlight`** (pure-KMP ANTLR4 lexers across 32 languages with zero extra runtime dependencies).
+- **Single-canvas text & code motion:** Paragraph-measured **`MagicText v2`** behind the application-level `DeckTextRenderer` boundary (emoji/grapheme-safe morphs and builds, zero per-token composables) alongside animated Heckel-diff code morphs built on Rahul Ravikumar's **[Warp](https://github.com/tikurahul/warp)** (`storyboard-warp`) and **`:syntax-highlight`** (pure-KMP ANTLR4 lexers across 32 languages with zero extra runtime dependencies).
 - **Shaders & Keynote effects:** 3-tier build effects (Layer, multi-contour SVG Path trimming, SkSL Content shaders), 9 slide transitions including cross-slide Magic Move, interactive SkSL specimens, and reduced-motion / paused-loop modes.
 - **Export & CLI workflows:** Interactive and headless export to **selectable-text PDF** and **60 fps H.264 MP4 video** (via `ffmpeg`), headless deck linting/still rendering, and a zero-dependency Python 3 Apple Keynote (`.kpf`) converter (`tools/kpf_to_deck_json.py`).
+
+## Screenshots
+
+| Studio — Dark theme, Timeline & Animate inspector | Studio — Light theme & Design inspector |
+|---|---|
+| ![Ciacola Studio in dark theme showing Timeline tracks and the Animate inspector](https://static.sebastiano.dev/public/2c7712cc-3f29-4c99-bf71-6fff0ad27eb1.png) | ![Ciacola Studio in light theme showing the stage canvas and Design inspector](https://static.sebastiano.dev/public/51217aa0-4e64-401c-aeb4-ab9d1c4234d3.png) |
+
+| Presenter View (`F2`) | Slide Overview & Quick Jump (`Esc`, `⌘K` / `Ctrl+K`) |
+|---|---|
+| ![Ciacola Presenter View showing current and next slide previews, speaker notes, timer, and stage controls](https://static.sebastiano.dev/public/6abbf902-3ec9-4d8a-b3aa-d78b0be19041.png) | ![Ciacola Overview strip view with jump-to-slide search bar](https://static.sebastiano.dev/public/76410e1d-6069-4cf7-8436-c62c5945e3ac.png) |
 
 ---
 
@@ -65,7 +75,7 @@ For live Kotlin specimen editing without restarting the app:
 | [`deck-review/`](deck-review/) | `Ctrl+Click` slide review overlay, comment store, and `agentapi` dispatch |
 | [`deck-timeline/`](deck-timeline/) | Docked/detached Timeline Studio, analytical track planner cache, stagger and phase sculpting |
 | [`deck-inspector/`](deck-inspector/) | Unified Studio inspector (`Design | Animate`), direct stage overlay, Deck Theme sheet, and Deck Linter |
-| [`storyboard-text/`](storyboard-text/), [`storyboard-warp/`](storyboard-warp/), [`storyboard-easel/`](storyboard-easel/), [`storyboard/`](storyboard/), [`storyboard-layout/`](storyboard-layout/) | Upstream Storyboard core modules with `MagicTextDiff`, 32-language `:syntax-highlight` integration, and deterministic PDF/video export hooks |
+| [`storyboard-text/`](storyboard-text/), [`storyboard-warp/`](storyboard-warp/), [`storyboard-easel/`](storyboard-easel/), [`storyboard/`](storyboard/), [`storyboard-layout/`](storyboard-layout/) | Storyboard core modules with `MagicTextDiff`, [Warp](https://github.com/tikurahul/warp)-derived code-morph diffing wired to 32 `:syntax-highlight` languages, and deterministic PDF/video export hooks |
 | [`tools/`](tools/) | Apple Keynote `.kpf` -> `.deck.json` Python 3 converter (`kpf_to_deck_json.py`) |
 
 The [`examples/`](examples/) modules are retained from upstream Storyboard.
@@ -91,7 +101,7 @@ See [Architecture & Foundation Notes](docs/DECK-FOUNDATION.md#verification-recor
 
 ## Upstream and licence
 
-Ciacola is derived from Brian Norman's [Storyboard](https://github.com/bnorm/storyboard) (revision `499cda890a7591c8fc56044726531f6f38a82e35`), retains its Git history, and is distributed under the [Apache License 2.0](LICENSE.txt). See [NOTICE](NOTICE) for attribution.
+Ciacola is derived from Brian Norman's [Storyboard](https://github.com/bnorm/storyboard) (revision `499cda890a7591c8fc56044726531f6f38a82e35`, which incorporates Rahul Ravikumar's [Warp](https://github.com/tikurahul/warp) for animated code snippet transitions in `:storyboard-warp`). This repository retains Storyboard's Git history and is distributed under the [Apache License 2.0](LICENSE.txt). See [NOTICE](NOTICE) for attribution.
 
 ### Open-source licences and bundled fonts
 
