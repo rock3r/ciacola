@@ -266,11 +266,13 @@ internal object DeckReviewCli {
                             status = status,
                             resolution = resolution,
                             // The old failure is no longer the comment's state; leaving it behind
-                            // would keep showing the author a stale error next to a resolved pin.
-                            deliveryError = if (status == ReviewCommentStatus.Applied) {
-                                null
-                            } else {
+                            // would keep showing the author a stale error next to a resolved pin,
+                            // or next to one an agent has just put back in the queue. Only a
+                            // fresh failure keeps its own message.
+                            deliveryError = if (status == ReviewCommentStatus.Failed) {
                                 comment.deliveryError
+                            } else {
+                                null
                             },
                         )
                     }
@@ -281,11 +283,21 @@ internal object DeckReviewCli {
                 //
                 // Requeued or resolved, the comment is no longer with this agent: holding the
                 // claim past an Applied verdict leaves the deck's HUD counting it as in progress
-                // for ever. Only `--review-status=failed` keeps it, because that says the agent
-                // tried and could not, and handing it straight back would have the next wait
-                // deliver the same comment to the same agent for ever.
-                if (takenFile != null && status != ReviewCommentStatus.Failed) {
-                    release(takenFile, listOf(commentId))
+                // for ever.
+                //
+                // Failure is the other way round, and takes a claim rather than releasing one.
+                // Only a wait records claims, so an agent that got the comment from Send or from
+                // a copied prompt has none, and the status alone would read as a push that never
+                // arrived: Retry Send and the next wait would both hand it straight back out.
+                // Claiming says who holds it, which is what tells "the agent could not do this"
+                // apart from "this never reached anybody". An existing claim keeps its original
+                // time.
+                if (takenFile != null) {
+                    if (status == ReviewCommentStatus.Failed) {
+                        claim(takenFile, listOf(commentId))
+                    } else {
+                        release(takenFile, listOf(commentId))
+                    }
                 }
                 ReviewQueueFile.writeAtomically(commentsFile, encodeComments(updated) + "\n")
                 true

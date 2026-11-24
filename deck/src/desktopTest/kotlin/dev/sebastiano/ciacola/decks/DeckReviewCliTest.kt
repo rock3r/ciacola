@@ -554,6 +554,54 @@ class DeckReviewCliTest {
     }
 
     @Test
+    fun anAgentReportingItCouldNotActTakesTheClaimEvenWithoutAWait() {
+        val dir = Files.createTempDirectory("review-cli-failed-claim")
+        val commentsFile = writeComments(dir, comment("rc-pushed"))
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+
+        // This agent was handed the comment by Send or by a copied prompt, so nothing claimed it.
+        // Without a claim, Failed means "the push never arrived": the deck would offer Retry Send
+        // and the next wait would hand the comment straight back out.
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-pushed",
+            resolution = "the slide has no such element",
+            status = ReviewCommentStatus.Failed,
+            takenFile = takenFile,
+            out = {},
+        )
+
+        assertEquals(setOf("rc-pushed"), DeckReviewCli.readTaken(takenFile) {})
+        assertEquals(
+            ReviewCommentStatus.Failed,
+            DeckReviewCli.readComments(commentsFile).single().status,
+        )
+    }
+
+    @Test
+    fun requeuingFromTheCliDropsAStalePushError() {
+        val dir = Files.createTempDirectory("review-cli-requeue")
+        val commentsFile = writeComments(
+            dir,
+            comment("rc-back", status = ReviewCommentStatus.Failed)
+                .copy(deliveryError = "agentapi exited with 1"),
+        )
+
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-back",
+            resolution = "",
+            status = ReviewCommentStatus.Queued,
+            out = {},
+        )
+
+        val after = DeckReviewCli.readComments(commentsFile).single()
+        assertEquals(ReviewCommentStatus.Queued, after.status)
+        // A comment waiting for an agent again must not still show the old delivery error.
+        assertEquals(null, after.deliveryError)
+    }
+
+    @Test
     fun claimingAFailedCommentPutsItBackToQueuedSoTheDeckSaysWithAnAgent() {
         val dir = Files.createTempDirectory("review-wait-failed")
         val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
