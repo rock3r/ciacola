@@ -193,6 +193,41 @@ object PowerShell : Language {
     }
 }
 
+/** Containerfiles and Dockerfiles. */
+object Dockerfile : Language {
+    override fun scopeName(): String {
+        return "source.dockerfile"
+    }
+}
+
+/** Unified, context, and git diff/patch files. */
+object Diff : Language {
+    override fun scopeName(): String {
+        return "source.diff"
+    }
+}
+
+/** CommonMark and GitHub Flavored Markdown documents. */
+object Markdown : Language {
+    override fun scopeName(): String {
+        return "text.html.markdown"
+    }
+}
+
+/** Protocol Buffers (proto2, proto3, and Editions) schema files. */
+object Protobuf : Language {
+    override fun scopeName(): String {
+        return "source.proto"
+    }
+}
+
+/** HashiCorp Configuration Language (HCL2) and Terraform files. */
+object Hcl : Language {
+    override fun scopeName(): String {
+        return "source.hcl"
+    }
+}
+
 /** A custom language that is [Parser] aware */
 class Custom(val parser: Parser) : Language {
     override fun scopeName(): String {

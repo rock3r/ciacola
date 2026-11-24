@@ -77,6 +77,11 @@ class LanguageHighlightTest {
             SyntaxLanguage.Dart to "sealed class Result { final int code = 1; }",
             SyntaxLanguage.Groovy to "def greet(String s) { return \"hi ${'$'}s\" }",
             SyntaxLanguage.PowerShell to "function Get-Count { return 42 }",
+            SyntaxLanguage.Dockerfile to "FROM alpine:3.19 AS base\nRUN echo \"hi\"",
+            SyntaxLanguage.Diff to "--- a/Main.kt\n+++ b/Main.kt\n@@ -1 +1 @@\n-val x = 1\n+val x = 2",
+            SyntaxLanguage.Markdown to "# Heading\n\nParagraph with *em* and `code`.",
+            SyntaxLanguage.Protobuf to "syntax = \"proto3\";\nmessage Ping { int32 id = 1; }",
+            SyntaxLanguage.Hcl to "resource \"aws_s3_bucket\" \"app\" { count = 1 }",
         )
         assertEquals(SyntaxLanguage.entries.toSet(), samples.keys)
         for ((language, snippet) in samples) {

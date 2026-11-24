@@ -12,7 +12,7 @@ class SyntaxHighlighterTest {
     @Test
     fun resolvesAllLanguagesByIdAndAliases() {
         assertEquals(SyntaxLanguage.entries.size, SyntaxLanguage.entries.toSet().size)
-        assertEquals(27, SyntaxLanguage.entries.size)
+        assertEquals(32, SyntaxLanguage.entries.size)
 
         for (lang in SyntaxLanguage.entries) {
             assertEquals(lang, SyntaxLanguage.fromNameOrAlias(lang.id))
@@ -34,6 +34,11 @@ class SyntaxHighlighterTest {
         assertEquals(SyntaxLanguage.Ruby, SyntaxLanguage.fromNameOrAlias("gemspec"))
         assertEquals(SyntaxLanguage.Groovy, SyntaxLanguage.fromNameOrAlias("gradle"))
         assertEquals(SyntaxLanguage.PowerShell, SyntaxLanguage.fromNameOrAlias("pwsh"))
+        assertEquals(SyntaxLanguage.Dockerfile, SyntaxLanguage.fromNameOrAlias("containerfile"))
+        assertEquals(SyntaxLanguage.Diff, SyntaxLanguage.fromNameOrAlias("patch"))
+        assertEquals(SyntaxLanguage.Markdown, SyntaxLanguage.fromNameOrAlias("mdx"))
+        assertEquals(SyntaxLanguage.Protobuf, SyntaxLanguage.fromNameOrAlias("proto3"))
+        assertEquals(SyntaxLanguage.Hcl, SyntaxLanguage.fromNameOrAlias("terraform"))
         assertNull(SyntaxLanguage.fromNameOrAlias(""))
         assertNull(SyntaxLanguage.fromNameOrAlias("   "))
         assertNull(SyntaxLanguage.fromNameOrAlias("brainfuck"))
@@ -81,8 +86,13 @@ class SyntaxHighlighterTest {
             "dart" to "sealed class Result {}",
             "gradle" to "plugins { id 'java' }",
             "pwsh" to "Get-ChildItem -Path .",
+            "docker" to "FROM alpine:3.19\nRUN echo hi",
+            "patch" to "--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old\n+new\n",
+            "md" to "# Hello *world*",
+            "proto" to "syntax = \"proto3\";\nmessage Ping {}",
+            "tf" to "resource \"null_resource\" \"x\" {}",
         )
-        assertEquals(27, aliasSamples.size)
+        assertEquals(32, aliasSamples.size)
         assertEquals(SyntaxLanguage.entries.size, aliasSamples.size)
         for ((alias, snippet) in aliasSamples) {
             val aliasTokens = SyntaxHighlighter.lex(snippet, alias)
@@ -290,6 +300,36 @@ class SyntaxHighlighterTest {
                 [CmdletBinding()]
                 param([string]${'$'}Name = 'World')
                 Write-Output "Hello, ${'$'}Name!"
+            """.trimIndent(),
+            SyntaxLanguage.Dockerfile to """
+                # syntax=docker/dockerfile:1
+                FROM alpine:3.19 AS base
+                RUN echo "hello ${'$'}USER"
+            """.trimIndent(),
+            SyntaxLanguage.Diff to """
+                diff --git a/Main.kt b/Main.kt
+                --- a/Main.kt
+                +++ b/Main.kt
+                @@ -1,2 +1,2 @@ fun greet()
+                 fun greet() {
+                -    println("old")
+                +    println("new")
+            """.trimIndent(),
+            SyntaxLanguage.Markdown to """
+                # Heading
+
+                Paragraph with *em*, **strong**, `code`, and [link](https://example.com).
+            """.trimIndent(),
+            SyntaxLanguage.Protobuf to """
+                syntax = "proto3";
+                package acme.v1;
+                message Hello { string name = 1; }
+            """.trimIndent(),
+            SyntaxLanguage.Hcl to """
+                resource "aws_s3_bucket" "app" {
+                  bucket = "my-${'$'}{var.env}"
+                  count  = 1
+                }
             """.trimIndent(),
         )
         assertEquals(SyntaxLanguage.entries.toSet(), validSnippets.keys)
@@ -517,6 +557,46 @@ class SyntaxHighlighterTest {
                     "@\"\nexp\n\"@" to null,
                 ) to listOf("<# b #>", " 'next'", " \"other\"", " #>", " ${'$'}x = 1")
                 ),
+            SyntaxLanguage.Dockerfile to (
+                listOf(
+                    "# comment\n" to null,
+                    "\"double\"" to null,
+                    "'single'" to SyntaxTokenKind.String,
+                    "RUN <<EOF\nhi\nEOF\n" to null,
+                ) to listOf("\nFROM alpine\n", "\n# tail\n", " \"next\"")
+                ),
+            SyntaxLanguage.Diff to (
+                listOf(
+                    "@@ -1,1 +1,1 @@ ctx\n-old\n+new\n" to null,
+                    "# comment\n" to null,
+                    "-old\n" to null,
+                    "+new\n" to null,
+                ) to listOf("@@ -2,1 +2,1 @@\n-a\n+b\n", "-other\n", "+more\n", "--- a/notes.txt\n")
+                ),
+            SyntaxLanguage.Markdown to (
+                listOf(
+                    "`inline`" to SyntaxTokenKind.String,
+                    "<!-- a -->" to SyntaxTokenKind.Comment,
+                    "```plain\ncode\n```\n" to null,
+                ) to listOf(" after", " `next`", "<!-- b -->", "\n# H1\n")
+                ),
+            SyntaxLanguage.Protobuf to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "// line\n" to null,
+                    "\"hello\"" to SyntaxTokenKind.String,
+                    "'world'" to SyntaxTokenKind.String,
+                ) to listOf("/* b */", "\"c\"", "*/", "message M {}")
+                ),
+            SyntaxLanguage.Hcl to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "# line\n" to null,
+                    "// line\n" to null,
+                    "\"hello\"" to null,
+                    "a = <<EOF\nbody\nEOF\n" to null,
+                ) to listOf("/* b */", "\"c\"", "*/", "\nresource \"x\" \"y\" {}")
+                ),
         )
         assertEquals(SyntaxLanguage.entries.toSet(), cases.keys)
         for ((language, pair) in cases) {
@@ -570,6 +650,8 @@ class SyntaxHighlighterTest {
             SyntaxLanguage.Swift,
             SyntaxLanguage.Dart,
             SyntaxLanguage.Groovy,
+            SyntaxLanguage.Protobuf,
+            SyntaxLanguage.Hcl,
         )) {
             val tokens = assertValidSnippetHasNoInvalidTokens(
                 SyntaxHighlighter.lexer(language),
@@ -588,6 +670,8 @@ class SyntaxHighlighterTest {
             SyntaxLanguage.Shell,
             SyntaxLanguage.Ruby,
             SyntaxLanguage.PowerShell,
+            SyntaxLanguage.Dockerfile,
+            SyntaxLanguage.Hcl,
         )) {
             val tokens = assertValidSnippetHasNoInvalidTokens(
                 SyntaxHighlighter.lexer(language),

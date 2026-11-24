@@ -7,17 +7,22 @@ import dev.bnorm.storyboard.CSharp
 import dev.bnorm.storyboard.Cpp
 import dev.bnorm.storyboard.Css
 import dev.bnorm.storyboard.Dart
+import dev.bnorm.storyboard.Diff
+import dev.bnorm.storyboard.Dockerfile
 import dev.bnorm.storyboard.Glsl
 import dev.bnorm.storyboard.Go
 import dev.bnorm.storyboard.Groovy
+import dev.bnorm.storyboard.Hcl
 import dev.bnorm.storyboard.Html
 import dev.bnorm.storyboard.Java
 import dev.bnorm.storyboard.JavaScript
 import dev.bnorm.storyboard.Json
 import dev.bnorm.storyboard.Kotlin
 import dev.bnorm.storyboard.Language
+import dev.bnorm.storyboard.Markdown
 import dev.bnorm.storyboard.Php
 import dev.bnorm.storyboard.PowerShell
+import dev.bnorm.storyboard.Protobuf
 import dev.bnorm.storyboard.Python
 import dev.bnorm.storyboard.Ruby
 import dev.bnorm.storyboard.Rust
@@ -70,8 +75,13 @@ class WarpLanguageResolutionTest {
             SyntaxLanguage.Dart to Dart,
             SyntaxLanguage.Groovy to Groovy,
             SyntaxLanguage.PowerShell to PowerShell,
+            SyntaxLanguage.Dockerfile to Dockerfile,
+            SyntaxLanguage.Diff to Diff,
+            SyntaxLanguage.Markdown to Markdown,
+            SyntaxLanguage.Protobuf to Protobuf,
+            SyntaxLanguage.Hcl to Hcl,
         )
-        assertEquals(27, expectedBySyntaxLanguage.size)
+        assertEquals(32, expectedBySyntaxLanguage.size)
         assertEquals(SyntaxLanguage.entries.toSet(), expectedBySyntaxLanguage.keys)
 
         for ((syntaxLang, expectedWarpLang) in expectedBySyntaxLanguage) {
@@ -131,8 +141,13 @@ class WarpLanguageResolutionTest {
             "dart" to "sealed class Result { final int code = 200; }",
             "gradle" to "@CompileStatic def greet(String s) { return \"hi ${'$'}s\" }",
             "pwsh" to "function Get-Status { param([string]${'$'}Env = 'prod') return ${'$'}Env }",
+            "docker" to "FROM alpine:3.19 AS base\nRUN echo \"hi\"",
+            "patch" to "--- a/Main.kt\n+++ b/Main.kt\n@@ -1 +1 @@\n-val x = 1\n+val x = 2",
+            "md" to "# Heading\n\nParagraph with *em* and `code`.",
+            "proto3" to "syntax = \"proto3\";\nmessage Ping { int32 id = 1; }",
+            "tf" to "resource \"aws_s3_bucket\" \"app\" { count = 1 }",
         )
-        assertEquals(27, snippetsById.size)
+        assertEquals(32, snippetsById.size)
 
         for ((langId, code) in snippetsById) {
             val warpLang = resolveWarpLanguage(langId)
