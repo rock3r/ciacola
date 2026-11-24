@@ -644,6 +644,284 @@ class DockerfileSyntaxLexerTest {
     }
 
     @Test
+    fun consumesCompleteShellWordHeredocDelimitersWithDotsQuotesAndEscapes() {
+        val code =
+            "RUN <<EOF.sh\n" +
+                "echo \$VAR\n" +
+                "EOF.sh\n" +
+                "FROM alpine AS s1\n" +
+                "COPY <<-requirements.txt /app/requirements.txt\n" +
+                "\tflask==3.0\n" +
+                "\trequirements.txt\n" +
+                "RUN <<E'O'F.sh\n" +
+                "echo \$LITERAL1\n" +
+                "EOF.sh\n" +
+                "RUN <<\\EOF.txt\n" +
+                "echo \$LITERAL2\n" +
+                "EOF.txt\n" +
+                "RUN <<\"E\\\"O\\\"F\"\n" +
+                "echo \$LITERAL3\n" +
+                "E\"O\"F\n" +
+                "RUN cat <<< \"here-string\"\n" +
+                "FROM busybox AS final\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            code,
+            "dockerfile-shell-word-heredoc-delims",
+        )
+
+        fun tokensOnLine(line: String, fromIndex: Int = 0): List<SyntaxToken> {
+            val s = code.indexOf(line, fromIndex)
+            assertTrue(s >= fromIndex, "Line not found: $line")
+            return tokens.filter { it.startIndex >= s && it.endIndex <= s + line.length }
+        }
+
+        // 1. Unquoted `<<EOF.sh` keeps expansion active and closes at `EOF.sh`, resuming `FROM alpine AS s1`
+        val open1 = tokensOnLine("RUN <<EOF.sh")
+        assertTrue(open1.any { it.slice(code) == "EOF.sh" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tokensOnLine("echo \$VAR").any { it.slice(code) == "\$VAR" && it.kind == SyntaxTokenKind.Property })
+        val close1 = tokensOnLine("EOF.sh", code.indexOf("echo \$VAR"))
+        assertEquals(listOf("EOF.sh"), close1.map { it.slice(code) })
+        assertEquals(SyntaxTokenKind.Keyword, close1.single().kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokensOnLine("FROM alpine AS s1").first().kind)
+
+        // 2. `COPY <<-requirements.txt /app/requirements.txt` strips leading tab on closing `requirements.txt`
+        val copyOpen = tokensOnLine("COPY <<-requirements.txt /app/requirements.txt")
+        assertTrue(copyOpen.any { it.slice(code) == "requirements.txt" && it.kind == SyntaxTokenKind.Keyword })
+        val copyClose = tokensOnLine("\trequirements.txt")
+        assertTrue(copyClose.any { it.slice(code) == "requirements.txt" && it.kind == SyntaxTokenKind.Keyword })
+
+        // 3. Partially quoted `<<E'O'F.sh`, backslash-escaped `<<\EOF.txt`, and escaped double-quoted `<<"E\"O\"F"` suppress expansion
+        assertTrue(tokensOnLine("echo \$LITERAL1").none { it.kind == SyntaxTokenKind.Property })
+        val close3 = tokensOnLine("EOF.sh", code.indexOf("echo \$LITERAL1"))
+        assertEquals(SyntaxTokenKind.Keyword, close3.single().kind)
+
+        assertTrue(tokensOnLine("echo \$LITERAL2").none { it.kind == SyntaxTokenKind.Property })
+        val close4 = tokensOnLine("EOF.txt", code.indexOf("echo \$LITERAL2"))
+        assertEquals(SyntaxTokenKind.Keyword, close4.single().kind)
+
+        assertTrue(tokensOnLine("echo \$LITERAL3").none { it.kind == SyntaxTokenKind.Property })
+        val close5 = tokensOnLine("E\"O\"F", code.indexOf("echo \$LITERAL3"))
+        assertEquals(SyntaxTokenKind.Keyword, close5.single().kind)
+
+        // 4. Bash here-string `<<<` is not mistaken for a heredoc, and final `FROM` resumes as Keyword
+        val hereString = tokensOnLine("RUN cat <<< \"here-string\"")
+        assertTrue(hereString.any { it.slice(code) == "<<" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(hereString.any { it.slice(code) == "<" && it.kind == SyntaxTokenKind.Operator })
+        val finalFrom = tokensOnLine("FROM busybox AS final")
+        assertEquals("FROM", finalFrom.first().slice(code))
+        assertEquals(SyntaxTokenKind.Keyword, finalFrom.first().kind)
+
+        // 5. Bare `<<-` followed by space, operator, or EOF must stay OP_MULTI (never queue an empty heredoc delimiter)
+        val bareDashHeredoc =
+            "RUN cat <<- EOF\n" +
+                "\tbody line\n" +
+                "\tEOF\n" +
+                "FROM alpine AS after_bare_dash\n"
+        val bareDashTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            bareDashHeredoc,
+            "dockerfile-bare-heredoc-dash-space",
+        )
+        assertTrue(bareDashTokens.any { it.slice(bareDashHeredoc) == "<<-" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(bareDashTokens.any { it.slice(bareDashHeredoc) == "FROM" && it.kind == SyntaxTokenKind.Keyword })
+
+        val bareDashBeforeOp =
+            "RUN cat <<-; echo ok\n" +
+                "FROM alpine AS after_bare_dash_op\n"
+        val bareDashOpTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            bareDashBeforeOp,
+            "dockerfile-bare-heredoc-dash-before-op",
+        )
+        assertTrue(bareDashOpTokens.any { it.slice(bareDashBeforeOp) == "<<-" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(bareDashOpTokens.any { it.slice(bareDashBeforeOp) == ";" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(bareDashOpTokens.any { it.slice(bareDashBeforeOp) == "FROM" && it.kind == SyntaxTokenKind.Keyword })
+
+        val bareDashAtEof = "RUN cat <<-"
+        val bareDashEofTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            bareDashAtEof,
+            "dockerfile-bare-heredoc-dash-eof",
+        )
+        assertTrue(bareDashEofTokens.any { it.slice(bareDashAtEof) == "<<-" && it.kind == SyntaxTokenKind.Operator })
+
+        // 6. Leading-dash delimiters: `<<--EOF` strips tabs and expands; `<<"-EOF"` and `<<\-EOF` do not strip tabs and stay literal
+        val leadingDashHeredoc =
+            "RUN cat <<--EOF\n" +
+                "\techo \$EXPANDED\n" +
+                "\t-EOF\n" +
+                "FROM alpine AS after_double_dash\n" +
+                "RUN cat <<\"-EOF\"\n" +
+                "\t-EOF\n" +
+                "echo \$NO_EXPAND_DQ\n" +
+                "-EOF\n" +
+                "FROM alpine AS after_quoted_dash\n" +
+                "RUN cat <<\\-EOF\n" +
+                "\t-EOF\n" +
+                "echo \$NO_EXPAND_ESC\n" +
+                "-EOF\n" +
+                "FROM scratch AS after_escaped_dash\n"
+        val leadingDashTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            leadingDashHeredoc,
+            "dockerfile-leading-dash-heredoc-delimiters",
+        )
+        fun leadingDashLineTokens(prefix: String): List<SyntaxToken> {
+            val start = leadingDashHeredoc.indexOf(prefix)
+            val end = leadingDashHeredoc.indexOf('\n', start).let { if (it < 0) leadingDashHeredoc.length else it }
+            return leadingDashTokens.filter { it.startIndex >= start && it.endIndex <= end }
+        }
+        val doubleDashOpen = leadingDashLineTokens("RUN cat <<--EOF")
+        assertTrue(doubleDashOpen.any { it.slice(leadingDashHeredoc) == "<<-" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(doubleDashOpen.any { it.slice(leadingDashHeredoc) == "-EOF" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(leadingDashTokens.any { it.slice(leadingDashHeredoc) == "\$EXPANDED" && it.kind == SyntaxTokenKind.Property })
+        val doubleDashCloseIdx = leadingDashHeredoc.indexOf("\t-EOF\n") + 1
+        assertTrue(
+            leadingDashTokens.any {
+                it.startIndex == doubleDashCloseIdx &&
+                    it.slice(leadingDashHeredoc) == "-EOF" &&
+                    it.kind == SyntaxTokenKind.Keyword
+            },
+        )
+        val quotedDashOpen = leadingDashLineTokens("RUN cat <<\"-EOF\"")
+        assertTrue(quotedDashOpen.any { it.slice(leadingDashHeredoc) == "<<" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(quotedDashOpen.any { it.slice(leadingDashHeredoc) == "\"-EOF\"" && it.kind == SyntaxTokenKind.Keyword })
+        val quotedFakeCloseIdx = leadingDashHeredoc.indexOf("\t-EOF\n", startIndex = leadingDashHeredoc.indexOf("RUN cat <<\"-EOF\""))
+        assertTrue(
+            leadingDashTokens.any {
+                it.startIndex == quotedFakeCloseIdx &&
+                    it.slice(leadingDashHeredoc) == "\t-EOF" &&
+                    it.kind == SyntaxTokenKind.String
+            },
+        )
+        assertTrue(leadingDashTokens.none { it.slice(leadingDashHeredoc) == "\$NO_EXPAND_DQ" && it.kind == SyntaxTokenKind.Property })
+        val escapedDashOpen = leadingDashLineTokens("RUN cat <<\\-EOF")
+        assertTrue(escapedDashOpen.any { it.slice(leadingDashHeredoc) == "<<" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(escapedDashOpen.any { it.slice(leadingDashHeredoc) == "\\-EOF" && it.kind == SyntaxTokenKind.Keyword })
+        val escapedFakeCloseIdx = leadingDashHeredoc.indexOf("\t-EOF\n", startIndex = leadingDashHeredoc.indexOf("RUN cat <<\\-EOF"))
+        assertTrue(
+            leadingDashTokens.any {
+                it.startIndex == escapedFakeCloseIdx &&
+                    it.slice(leadingDashHeredoc) == "\t-EOF" &&
+                    it.kind == SyntaxTokenKind.String
+            },
+        )
+        assertTrue(leadingDashTokens.none { it.slice(leadingDashHeredoc) == "\$NO_EXPAND_ESC" && it.kind == SyntaxTokenKind.Property })
+        assertEquals(
+            3,
+            leadingDashTokens.count { it.slice(leadingDashHeredoc) == "FROM" && it.kind == SyntaxTokenKind.Keyword },
+        )
+
+        // 7. Backslash + trailing spaces + LF/CRLF/CR right after unquoted or quoted heredoc delimiter stays a line continuation
+        val trailingContHeredoc =
+            "RUN cat <<EOF\\   \n" +
+                "    && echo chained\n" +
+                "body1\n" +
+                "EOF\n" +
+                "FROM alpine AS after_unquoted_cont\n" +
+                "RUN cat <<\"QUOTED\"\\ \t\n" +
+                "    && echo chained2\n" +
+                "body2\n" +
+                "QUOTED\n" +
+                "FROM scratch AS after_quoted_cont\n" +
+                "RUN cat <<EOF_CRLF\\  \r\n" +
+                "    && echo chained_crlf\r\n" +
+                "body_crlf\r\n" +
+                "EOF_CRLF\r\n" +
+                "FROM alpine AS after_crlf_cont\r\n" +
+                "RUN cat <<EOF_CR\\ \t\r" +
+                "    && echo chained_cr\r" +
+                "body_cr\r" +
+                "EOF_CR\r" +
+                "FROM scratch AS after_cr_cont\r"
+        val trailingContTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            trailingContHeredoc,
+            "dockerfile-heredoc-trailing-ws-backslash-cont",
+        )
+        val eofOpenLineStart = trailingContHeredoc.indexOf("RUN cat <<EOF\\")
+        val eofOpenLineEnd = trailingContHeredoc.indexOf('\n', eofOpenLineStart)
+        val eofOpenLineTokens = trailingContTokens.filter { it.startIndex >= eofOpenLineStart && it.endIndex <= eofOpenLineEnd + 1 }
+        assertTrue(eofOpenLineTokens.any { it.slice(trailingContHeredoc) == "EOF" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(eofOpenLineTokens.any { it.slice(trailingContHeredoc) == "\\   \n" && it.kind == SyntaxTokenKind.Whitespace })
+        val quotedOpenLineStart = trailingContHeredoc.indexOf("RUN cat <<\"QUOTED\"")
+        val quotedOpenLineEnd = trailingContHeredoc.indexOf('\n', quotedOpenLineStart)
+        val quotedOpenLineTokens = trailingContTokens.filter { it.startIndex >= quotedOpenLineStart && it.endIndex <= quotedOpenLineEnd + 1 }
+        assertTrue(quotedOpenLineTokens.any { it.slice(trailingContHeredoc) == "\"QUOTED\"" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(quotedOpenLineTokens.any { it.slice(trailingContHeredoc) == "\\ \t\n" && it.kind == SyntaxTokenKind.Whitespace })
+        val crlfOpenLineStart = trailingContHeredoc.indexOf("RUN cat <<EOF_CRLF\\")
+        val crlfOpenLineEnd = trailingContHeredoc.indexOf("\r\n", crlfOpenLineStart) + 2
+        val crlfOpenLineTokens = trailingContTokens.filter { it.startIndex >= crlfOpenLineStart && it.endIndex <= crlfOpenLineEnd }
+        assertTrue(crlfOpenLineTokens.any { it.slice(trailingContHeredoc) == "EOF_CRLF" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(crlfOpenLineTokens.any { it.slice(trailingContHeredoc) == "\\  \r\n" && it.kind == SyntaxTokenKind.Whitespace })
+        val crOpenLineStart = trailingContHeredoc.indexOf("RUN cat <<EOF_CR\\")
+        val crOpenLineEnd = trailingContHeredoc.indexOf('\r', crOpenLineStart) + 1
+        val crOpenLineTokens = trailingContTokens.filter { it.startIndex >= crOpenLineStart && it.endIndex <= crOpenLineEnd }
+        assertTrue(crOpenLineTokens.any { it.slice(trailingContHeredoc) == "EOF_CR" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(crOpenLineTokens.any { it.slice(trailingContHeredoc) == "\\ \t\r" && it.kind == SyntaxTokenKind.Whitespace })
+        assertEquals(
+            4,
+            trailingContTokens.count { it.slice(trailingContHeredoc) == "FROM" && it.kind == SyntaxTokenKind.Keyword },
+        )
+        assertTrue(
+            trailingContTokens.any {
+                it.slice(trailingContHeredoc) == "QUOTED" &&
+                    it.startIndex == trailingContHeredoc.indexOf("\nQUOTED\n") + 1 &&
+                    it.kind == SyntaxTokenKind.Keyword
+            },
+        )
+
+        // 8. Under `# escape=\``, backtick+ws+newline stays BACKTICK_LINE_CONT while `\ ` is part of the shell-word delimiter
+        val backtickEscapeHeredoc =
+            "# escape=`\n" +
+                "RUN cat <<EOF`   \n" +
+                "    && echo chained_bt\n" +
+                "body_bt\n" +
+                "EOF\n" +
+                "FROM alpine AS after_bt_cont\n" +
+                "RUN cat <<EOF\\ \n" +
+                "EOF\n" +
+                "EOF \n" +
+                "FROM scratch AS after_bt_esc_space\n"
+        val btTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            backtickEscapeHeredoc,
+            "dockerfile-heredoc-backtick-escape",
+        )
+        val btContLineStart = backtickEscapeHeredoc.indexOf("RUN cat <<EOF`")
+        val btContLineEnd = backtickEscapeHeredoc.indexOf('\n', btContLineStart) + 1
+        val btContLineTokens = btTokens.filter { it.startIndex >= btContLineStart && it.endIndex <= btContLineEnd }
+        assertTrue(btContLineTokens.any { it.slice(backtickEscapeHeredoc) == "EOF" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(btContLineTokens.any { it.slice(backtickEscapeHeredoc) == "`   \n" && it.kind == SyntaxTokenKind.Whitespace })
+        val btEscSpaceOpenStart = backtickEscapeHeredoc.indexOf("RUN cat <<EOF\\ ")
+        val btEscSpaceOpenEnd = backtickEscapeHeredoc.indexOf('\n', btEscSpaceOpenStart) + 1
+        val btEscSpaceOpenTokens = btTokens.filter { it.startIndex >= btEscSpaceOpenStart && it.endIndex <= btEscSpaceOpenEnd }
+        assertTrue(btEscSpaceOpenTokens.any { it.slice(backtickEscapeHeredoc) == "EOF\\ " && it.kind == SyntaxTokenKind.Keyword })
+        val innerNonClosingEofIdx = backtickEscapeHeredoc.indexOf("\nEOF\n", startIndex = btEscSpaceOpenStart) + 1
+        assertTrue(
+            btTokens.any {
+                it.startIndex == innerNonClosingEofIdx &&
+                    it.slice(backtickEscapeHeredoc) == "EOF" &&
+                    it.kind == SyntaxTokenKind.String
+            },
+        )
+        val closingEofSpaceIdx = backtickEscapeHeredoc.indexOf("\nEOF \n") + 1
+        assertTrue(
+            btTokens.any {
+                it.startIndex == closingEofSpaceIdx &&
+                    it.slice(backtickEscapeHeredoc) == "EOF " &&
+                    it.kind == SyntaxTokenKind.Keyword
+            },
+        )
+        assertEquals(
+            2,
+            btTokens.count { it.slice(backtickEscapeHeredoc) == "FROM" && it.kind == SyntaxTokenKind.Keyword },
+        )
+    }
+
+    @Test
     fun satisfiesPrefixTruncationAndFuzzSafety() {
         val sample = DockerfileOracleFixtures.multistageFlagsAndHeredoc.code
         assertPrefixTruncationSafety(DockerfileSyntaxLexer, sample, maxStep = 4)
@@ -665,6 +943,8 @@ class DockerfileSyntaxLexerTest {
                 "unclosed-heredoc-4k" to ("RUN <<EOF\n" + "echo \${VAR:-a/b/c}\n".repeat(2_000)),
                 "unclosed-dquote-4k" to ("LABEL a=\"" + "hello \${X} ".repeat(2_000)),
                 "unclosed-param-exp-4k" to unclosedParam,
+                "unclosed-heredoc-squote-4k" to ("RUN cat <<'" + "a".repeat(4_000) + "\nFROM alpine\n"),
+                "unclosed-heredoc-dquote-4k" to ("RUN cat <<\"" + "a".repeat(4_000) + "\nFROM alpine\n"),
                 "continuations-4k" to ("RUN echo 1 \\\n" + "    # comment\n    && echo 2 \\\n".repeat(1_000) + "    && true\n"),
             ),
             maxMillisPerInput = 300L,

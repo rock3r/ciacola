@@ -43,7 +43,25 @@ SINGLE_STRING
     ;
 
 HEREDOC_OPEN
-    : '<<' '-'? { isHeredocAllowed() }? ( '\'' ~['\r\n]+ '\'' | '"' ~["\r\n]+ '"' | [a-zA-Z_][a-zA-Z0-9_-]* ) { enqueueHeredoc(text); }
+    : '<<' { isHeredocAllowed() }?
+      ( '-' HEREDOC_WORD_PART+
+      | HEREDOC_FIRST_NON_DASH_PART HEREDOC_WORD_PART*
+      )
+      { enqueueHeredoc(text); }
+    ;
+
+fragment HEREDOC_WORD_PART
+    : '\'' ~['\r\n]+ '\''
+    | '"' ( '\\' ~[\r\n] | ~["\\\r\n] )+ '"'
+    | '\\' { !isBackslashLineContAhead() }? ~[\r\n]
+    | ~[ \t\r\n\uFEFF"'`\\$;<>&|()]
+    ;
+
+fragment HEREDOC_FIRST_NON_DASH_PART
+    : '\'' ~['\r\n]+ '\''
+    | '"' ( '\\' ~[\r\n] | ~["\\\r\n] )+ '"'
+    | '\\' { !isBackslashLineContAhead() }? ~[\r\n]
+    | ~[ \t\r\n\uFEFF"'`\\$;<>&|()-]
     ;
 
 PARAM_EXP_OPEN

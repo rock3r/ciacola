@@ -93,6 +93,16 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         return matchLineContinuationEnd(1) > 0
     }
 
+    protected fun isBackslashLineContAhead(): Boolean {
+        if (escapeChar != '\\') return false
+        var offset = 1
+        while (_input.LA(offset) == ' '.code || _input.LA(offset) == '\t'.code) {
+            offset++
+        }
+        val eol = _input.LA(offset)
+        return eol == '\r'.code || eol == '\n'.code
+    }
+
     protected fun isInsideHeredocBody(): Boolean = heredocStack.isNotEmpty()
 
     protected fun isCommentStart(): Boolean = atLineStart
@@ -638,10 +648,7 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
             idx++
         }
         val rawDelim = lexeme.substring(idx)
-        val isQuoted = rawDelim.length >= 2 &&
-            ((rawDelim.startsWith("'") && rawDelim.endsWith("'")) ||
-                (rawDelim.startsWith("\"") && rawDelim.endsWith("\"")))
-        val delimiter = if (isQuoted) rawDelim.substring(1, rawDelim.length - 1) else rawDelim
+        val (delimiter, isQuoted) = normalizeHeredocDelimiter(rawDelim)
         pendingHeredocs.addLast(
             HeredocSpec(
                 delimiter = delimiter,
@@ -650,6 +657,58 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
                 isQuoted = isQuoted,
             ),
         )
+    }
+
+    // Normalizes a BuildKit/POSIX shell-word heredoc delimiter (stripping single/double quotes and
+    // backslash escapes) and reports whether any quoting/escaping was present to suppress expansion.
+    private fun normalizeHeredocDelimiter(raw: String): Pair<String, Boolean> {
+        val out = StringBuilder(raw.length)
+        var isQuoted = false
+        var i = 0
+        while (i < raw.length) {
+            when (val ch = raw[i]) {
+                '\'' -> {
+                    isQuoted = true
+                    i++
+                    while (i < raw.length && raw[i] != '\'') {
+                        out.append(raw[i])
+                        i++
+                    }
+                    if (i < raw.length) i++ // skip closing '\''
+                }
+                '"' -> {
+                    isQuoted = true
+                    i++
+                    while (i < raw.length && raw[i] != '"') {
+                        if (raw[i] == '\\' && i + 1 < raw.length) {
+                            val next = raw[i + 1]
+                            if (next == '"' || next == '\\' || next == '$' || next == '`') {
+                                out.append(next)
+                                i += 2
+                                continue
+                            }
+                        }
+                        out.append(raw[i])
+                        i++
+                    }
+                    if (i < raw.length) i++ // skip closing '"'
+                }
+                '\\' -> {
+                    isQuoted = true
+                    if (i + 1 < raw.length) {
+                        out.append(raw[i + 1])
+                        i += 2
+                    } else {
+                        i++
+                    }
+                }
+                else -> {
+                    out.append(ch)
+                    i++
+                }
+            }
+        }
+        return out.toString() to isQuoted
     }
 
     protected fun pushParamExp(paramExpMode: Int) {
