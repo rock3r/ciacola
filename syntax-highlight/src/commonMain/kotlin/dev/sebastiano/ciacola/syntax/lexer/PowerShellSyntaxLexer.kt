@@ -234,6 +234,17 @@ private class PsBracketFrame(
     var inAttrHeader: Boolean = kind == PsBracketKind.ATTRIBUTE,
 )
 
+private enum class PsDelimKind {
+    BRACE,
+    HASH,
+    PAREN,
+}
+
+private class PsDelimFrame(
+    val kind: PsDelimKind,
+    val savedInCommandArgs: Boolean,
+)
+
 private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
     val visible = ArrayList<Int>(raw.size)
     for (idx in raw.indices) {
@@ -241,8 +252,11 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
     }
 
     val bracketStack = ArrayList<PsBracketFrame>()
+    val delimStack = ArrayList<PsDelimFrame>()
     var expectingTypeName = false
     var expectingFuncName = false
+    var inStmtStart = true
+    var inCommandArgs = false
 
     for (i in visible.indices) {
         val tok = raw[visible[i]]
@@ -250,40 +264,89 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
         val next = if (i + 1 < visible.size) raw[visible[i + 1]] else null
         val topBracket = bracketStack.lastOrNull()
 
+        val sawNewline = i > 0 && hasPowerShellNewlineBetween(raw, visible[i - 1], visible[i])
+        if (sawNewline && !continuesAcrossNewline(prev?.type)) {
+            inCommandArgs = false
+            inStmtStart = true
+        }
+
         when (tok.type) {
             PsTokens.LBRACK -> {
                 val kind = classifyOpenBracket(raw, visible, i, prev, topBracket)
                 bracketStack.add(PsBracketFrame(kind = kind))
                 expectingTypeName = false
                 expectingFuncName = false
+                inStmtStart = false
                 continue
             }
 
             PsTokens.RBRACK -> {
-                if (bracketStack.isNotEmpty()) {
+                val popped = if (bracketStack.isNotEmpty()) {
                     bracketStack.removeAt(bracketStack.lastIndex)
+                } else {
+                    null
                 }
                 expectingTypeName = false
                 expectingFuncName = false
+                if (popped?.kind == PsBracketKind.ATTRIBUTE) {
+                    inStmtStart = true
+                    inCommandArgs = false
+                } else {
+                    inStmtStart = false
+                }
                 continue
             }
 
-            PsTokens.LPAREN -> {
-                if (topBracket != null) {
+            PsTokens.LPAREN,
+            PsTokens.SUBEXPR_START,
+            PsTokens.DQ_SUBEXPR_START,
+            PsTokens.HE_SUBEXPR_START,
+            PsTokens.ARRAY_SUBEXPR_START,
+            -> {
+                if (tok.type == PsTokens.LPAREN && topBracket != null) {
                     topBracket.parenDepth++
                     if (topBracket.kind == PsBracketKind.ATTRIBUTE) {
                         topBracket.inAttrHeader = false
                     }
                 }
+                delimStack.add(PsDelimFrame(kind = PsDelimKind.PAREN, savedInCommandArgs = inCommandArgs))
+                inCommandArgs = false
+                inStmtStart = true
                 expectingTypeName = false
                 expectingFuncName = false
                 continue
             }
 
-            PsTokens.RPAREN -> {
-                if (topBracket != null && topBracket.parenDepth > 0) {
+            PsTokens.RPAREN,
+            PsTokens.SUBEXPR_CLOSE,
+            -> {
+                if (tok.type == PsTokens.RPAREN && topBracket != null && topBracket.parenDepth > 0) {
                     topBracket.parenDepth--
                 }
+                val frame = popMatchingDelim(delimStack, isBraceClose = false)
+                inCommandArgs = frame?.savedInCommandArgs ?: false
+                inStmtStart = false
+                expectingTypeName = false
+                expectingFuncName = false
+                continue
+            }
+
+            PsTokens.LBRACE,
+            PsTokens.HASH_LITERAL_START,
+            -> {
+                val kind = if (tok.type == PsTokens.HASH_LITERAL_START) PsDelimKind.HASH else PsDelimKind.BRACE
+                delimStack.add(PsDelimFrame(kind = kind, savedInCommandArgs = inCommandArgs))
+                inCommandArgs = false
+                inStmtStart = true
+                expectingTypeName = false
+                expectingFuncName = false
+                continue
+            }
+
+            PsTokens.RBRACE -> {
+                val frame = popMatchingDelim(delimStack, isBraceClose = true)
+                inCommandArgs = frame?.savedInCommandArgs ?: false
+                inStmtStart = !inCommandArgs
                 expectingTypeName = false
                 expectingFuncName = false
                 continue
@@ -295,6 +358,7 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
             if (prev != null && prev.end == tok.start && prev.kind != SyntaxTokenKind.Whitespace) {
                 tok.kind = SyntaxTokenKind.Plain
             }
+            inStmtStart = false
             continue
         }
 
@@ -302,6 +366,22 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
             if (tok.type != PsTokens.DOT && tok.type != PsTokens.BACKSLASH) {
                 expectingTypeName = false
                 expectingFuncName = false
+            }
+            when (tok.type) {
+                PsTokens.SEMI,
+                PsTokens.PIPE,
+                PsTokens.AND_AND,
+                PsTokens.OR_OR,
+                -> {
+                    inCommandArgs = false
+                    inStmtStart = true
+                }
+
+                PsTokens.AMP -> if (!inStmtStart) inStmtStart = false
+
+                else -> if (topBracket == null || topBracket.kind == PsBracketKind.INDEX) {
+                    inStmtStart = false
+                }
             }
             continue
         }
@@ -338,6 +418,7 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
             }
             expectingTypeName = false
             expectingFuncName = false
+            inStmtStart = false
             continue
         }
 
@@ -346,28 +427,52 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
             tok.kind = SyntaxTokenKind.Function
             expectingTypeName = false
             expectingFuncName = false
+            inCommandArgs = true
+            inStmtStart = false
             continue
         }
 
         if (expectingTypeName) {
             tok.kind = SyntaxTokenKind.Type
             expectingTypeName = false
+            inStmtStart = false
             continue
         }
 
         if (expectingFuncName) {
             tok.kind = SyntaxTokenKind.Function
             expectingFuncName = false
+            inStmtStart = false
+            continue
+        }
+
+        // Unquoted hashtable keys (`@{ Begin = 1; Data = $x }`) take precedence over PS_KEYWORDS.
+        val inHashContext = delimStack.lastOrNull()?.kind == PsDelimKind.HASH
+        if (
+            next?.type == PsTokens.ASSIGN &&
+            (
+                (inHashContext && inStmtStart) ||
+                    prev?.type == PsTokens.HASH_LITERAL_START ||
+                    prev?.type == PsTokens.SEMI ||
+                    prev?.type == PsTokens.LBRACE ||
+                    prev == null
+                )
+        ) {
+            tok.kind = SyntaxTokenKind.Property
+            inStmtStart = false
             continue
         }
 
         if (tok.type == PsTokens.CMDLET_NAME) {
             tok.kind = SyntaxTokenKind.Function
+            inCommandArgs = true
+            inStmtStart = false
             continue
         }
 
-        if (lower in PS_KEYWORDS) {
+        if (!inCommandArgs && lower in PS_KEYWORDS) {
             tok.kind = SyntaxTokenKind.Keyword
+            inStmtStart = false
             when (lower) {
                 "class", "enum" -> expectingTypeName = true
                 "function", "filter", "workflow" -> expectingFuncName = true
@@ -377,22 +482,85 @@ private fun classifyPowerShellTokens(code: String, raw: List<RawPsToken>) {
 
         if (next?.type == PsTokens.LPAREN) {
             tok.kind = SyntaxTokenKind.Function
-            continue
-        }
-
-        // Unquoted hashtable keys (`@{ Key = 'value' }`) or named attribute arguments
-        if (next?.type == PsTokens.ASSIGN && (prev?.type == PsTokens.HASH_LITERAL_START || prev?.type == PsTokens.SEMI || prev?.type == PsTokens.LBRACE || prev == null)) {
-            tok.kind = SyntaxTokenKind.Property
+            inStmtStart = false
             continue
         }
 
         if (looksLikeTypeName(text) && (next?.type == PsTokens.COLONCOLON || prev?.type == PsTokens.COLON)) {
             tok.kind = SyntaxTokenKind.Type
+            inStmtStart = false
             continue
         }
 
+        if (inStmtStart && isPowerShellCommandFollower(next?.type)) {
+            inCommandArgs = true
+        }
+        inStmtStart = false
         tok.kind = SyntaxTokenKind.Plain
     }
+}
+
+private fun hasPowerShellNewlineBetween(raw: List<RawPsToken>, prevVisIdx: Int, curVisIdx: Int): Boolean {
+    for (idx in prevVisIdx + 1 until curVisIdx) {
+        if (raw[idx].type == PsTokens.NEWLINE) return true
+    }
+    return false
+}
+
+private fun continuesAcrossNewline(prevType: Int?): Boolean = when (prevType) {
+    PsTokens.PIPE,
+    PsTokens.AND_AND,
+    PsTokens.OR_OR,
+    PsTokens.COMMA,
+    PsTokens.ASSIGN,
+    -> true
+    else -> false
+}
+
+private fun popMatchingDelim(stack: ArrayList<PsDelimFrame>, isBraceClose: Boolean): PsDelimFrame? {
+    for (idx in stack.lastIndex downTo 0) {
+        val kind = stack[idx].kind
+        val matches = if (isBraceClose) {
+            kind == PsDelimKind.BRACE || kind == PsDelimKind.HASH
+        } else {
+            kind == PsDelimKind.PAREN
+        }
+        if (matches) {
+            val frame = stack[idx]
+            while (stack.lastIndex >= idx) {
+                stack.removeAt(stack.lastIndex)
+            }
+            return frame
+        }
+    }
+    return null
+}
+
+private fun isPowerShellCommandFollower(nextType: Int?): Boolean = when (nextType) {
+    null,
+    PsTokens.SEMI,
+    PsTokens.PIPE,
+    PsTokens.AND_AND,
+    PsTokens.OR_OR,
+    PsTokens.RBRACE,
+    PsTokens.RPAREN,
+    PsTokens.SUBEXPR_CLOSE,
+    PsTokens.DOT,
+    PsTokens.NULL_COND_DOT,
+    PsTokens.COLONCOLON,
+    PsTokens.LBRACK,
+    PsTokens.ASSIGN,
+    PsTokens.ADD_ASSIGN,
+    PsTokens.SUB_ASSIGN,
+    PsTokens.MUL_ASSIGN,
+    PsTokens.DIV_ASSIGN,
+    PsTokens.MOD_ASSIGN,
+    PsTokens.NULL_COALESCE_ASSIGN,
+    PsTokens.INC,
+    PsTokens.DEC,
+    PsTokens.COLON,
+    -> false
+    else -> true
 }
 
 private fun classifyOpenBracket(

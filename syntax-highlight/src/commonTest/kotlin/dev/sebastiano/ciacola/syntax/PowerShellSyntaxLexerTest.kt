@@ -308,6 +308,75 @@ class PowerShellSyntaxLexerTest {
     }
 
     @Test
+    fun handlesHashtableKeywordKeysAndCommandArgumentWords() {
+        val code = """
+            ${'$'}h = @{ Begin = 1; Data = ${'$'}x; From = 'a'; Process = 2; End = 3 }
+            ${'$'}m = @{
+                Begin = 'first'
+                Process = 'second'
+            }
+            Write-Output process
+            Get-Item begin
+            Set-Content data
+            echo from
+            function Foo {
+                param([string]${'$'}Name)
+                begin { Write-Output process }
+                process { ${'$'}_ }
+                end { return ${'$'}true }
+            }
+            if (${'$'}true) { 1 } else { 2 }
+            foreach (${'$'}x in ${'$'}xs) {}
+            try { throw "x" } catch {} finally {}
+            switch (1) { 1 { break } }
+            using namespace System
+            class C { hidden [int]${'$'}x }
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(PowerShellSyntaxLexer, code, "powershell-keyword-context")
+
+        for (hashKey in listOf("Begin", "Data", "From", "Process", "End")) {
+            assertTrue(
+                tokens.any { it.slice(code) == hashKey && it.kind == SyntaxTokenKind.Property },
+                "Expected hashtable key '$hashKey' to be Property",
+            )
+            assertFalse(
+                tokens.any { it.slice(code) == hashKey && it.kind == SyntaxTokenKind.Keyword },
+                "Did not expect hashtable key '$hashKey' to be Keyword",
+            )
+        }
+        assertEquals(2, tokens.count { it.slice(code) == "Begin" && it.kind == SyntaxTokenKind.Property })
+        assertEquals(2, tokens.count { it.slice(code) == "Process" && it.kind == SyntaxTokenKind.Property })
+
+        val cmdStart = code.indexOf("Write-Output process")
+        val funcStart = code.indexOf("function Foo")
+        val cmdArgTokens = tokens.filter { it.startIndex in cmdStart until funcStart }
+        for (arg in listOf("process", "begin", "data", "from")) {
+            assertEquals(
+                SyntaxTokenKind.Plain,
+                cmdArgTokens.first { it.slice(code) == arg }.kind,
+                "Expected bare command argument '$arg' to be Plain",
+            )
+        }
+
+        val funcBodyTokens = tokens.filter { it.startIndex >= funcStart }
+        assertEquals(SyntaxTokenKind.Keyword, funcBodyTokens.first { it.slice(code) == "function" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, funcBodyTokens.first { it.slice(code) == "param" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, funcBodyTokens.first { it.slice(code) == "begin" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, funcBodyTokens.first { it.slice(code) == "process" && it.startIndex > code.indexOf("Write-Output process", funcStart) }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, funcBodyTokens.first { it.slice(code) == "process" && it.startIndex >= code.indexOf("process {") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, funcBodyTokens.first { it.slice(code) == "end" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, funcBodyTokens.first { it.slice(code) == "return" }.kind)
+        for (kw in listOf("if", "else", "foreach", "in", "try", "throw", "catch", "finally", "switch", "break", "using", "class", "hidden")) {
+            assertEquals(
+                SyntaxTokenKind.Keyword,
+                funcBodyTokens.first { it.slice(code) == kw }.kind,
+                "Expected block/statement keyword '$kw' to remain Keyword",
+            )
+        }
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         for (fixture in PowerShellOracleFixtures.all) {
             assertMatchesOracleFixture(fixture)

@@ -329,6 +329,7 @@ class GroovySyntaxLexerTest {
                 "repeated-slashes-10k" to "/".repeat(10_000),
                 "repeated-slash-lines-5k" to "/a\n".repeat(5_000),
                 "nested-unclosed-slashy-interp-2k" to ("/\${".repeat(2_000) + "a".repeat(2_000)),
+                "offset-unclosed-slashy-interp-5k" to "x = /a\${\n".repeat(5_000),
                 "unclosed-dollar-slashy-10k" to ("def d = $/" + "a".repeat(12_000)),
                 "unclosed-block-comment-10k" to ("/* " + "*".repeat(12_000)),
                 "chained-division-2k" to ("10" + " / 2".repeat(2_500)),
