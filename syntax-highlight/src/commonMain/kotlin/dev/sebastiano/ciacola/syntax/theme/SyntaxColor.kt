@@ -74,6 +74,17 @@ public value class SyntaxColor(public val argb: Int) {
 
     internal fun toCompactHex(): String = if (alpha == 0xFF) toHexRgb() else toHexRgba()
 
+    internal fun compositeOver(background: SyntaxColor): SyntaxColor {
+        if (alpha == 0xFF) return this
+        if (alpha == 0) return background
+        val a = alpha / 255.0
+        val inv = 1.0 - a
+        val r = (red * a + background.red * inv + 0.5).toInt().coerceIn(0, 255)
+        val g = (green * a + background.green * inv + 0.5).toInt().coerceIn(0, 255)
+        val b = (blue * a + background.blue * inv + 0.5).toInt().coerceIn(0, 255)
+        return fromRgb(r, g, b, 0xFF)
+    }
+
     public companion object {
 
         /** Creates a [SyntaxColor] from 8-bit `0..255` channel values. */

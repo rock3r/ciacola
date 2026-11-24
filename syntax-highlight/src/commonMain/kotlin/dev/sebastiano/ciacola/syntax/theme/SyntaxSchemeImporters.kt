@@ -30,11 +30,19 @@ public object SyntaxSchemeImporters {
     ): SyntaxColorScheme {
         val schemeMap = LinkedHashMap<String, IjSchemeData>()
         schemeMap[IjEmbeddedBaseSchemes.defaultScheme.name] = IjEmbeddedBaseSchemes.defaultScheme
+        schemeMap["Classic Light"] = IjEmbeddedBaseSchemes.defaultScheme
         schemeMap[IjEmbeddedBaseSchemes.darculaScheme.name] = IjEmbeddedBaseSchemes.darculaScheme
 
         for (bundled in SyntaxColorSchemes.intelliJ) {
+            val ijData = IjEmbeddedBaseSchemes.toIjSchemeData(bundled)
             if (bundled.name !in schemeMap) {
-                schemeMap[bundled.name] = IjEmbeddedBaseSchemes.toIjSchemeData(bundled)
+                schemeMap[bundled.name] = ijData
+            }
+            when (bundled) {
+                SyntaxColorSchemes.IntelliJDark -> schemeMap["Dark"] = ijData
+                SyntaxColorSchemes.IntelliJLight -> schemeMap["Light"] = ijData
+                SyntaxColorSchemes.IntelliJHighContrast -> schemeMap["High contrast"] = ijData
+                else -> Unit
             }
         }
 
@@ -53,10 +61,12 @@ public object SyntaxSchemeImporters {
             schemeMap[scheme.name] = scheme
         }
 
-        val primaryName = parsedPrimary.first().name
+        val primaryScheme = parsedPrimary.first()
+        val primaryName = primaryScheme.name
         val resolvedFallback = fallbackParent ?: run {
-            val parentName = parsedPrimary.first().parentScheme
-            if (parentName != null) SyntaxColorSchemes.findById(parentName) else null
+            val effectiveParent = IntelliJSchemeMapper.resolveEffectiveParentKey(primaryScheme, schemeMap)
+                ?: primaryScheme.parentScheme?.removePrefix("_@user_")
+            if (effectiveParent != null) SyntaxColorSchemes.findById(effectiveParent) else null
         }
         return IntelliJSchemeMapper.convert(
             primaryName = primaryName,
@@ -92,6 +102,7 @@ public object SyntaxSchemeImporters {
     public fun importAuto(
         content: String,
         fileName: String? = null,
+        includeResolver: ((String) -> String?)? = null,
     ): SyntaxColorScheme {
         val trimmed = content.trimStart { it == '\uFEFF' || it == ' ' || it == '\t' || it == '\r' || it == '\n' }
         if (trimmed.isEmpty()) {
@@ -106,10 +117,14 @@ public object SyntaxSchemeImporters {
                 ?: throw SyntaxSchemeParseException("Expected top-level JSON object")
             val format = (obj.entries["format"] as? JsonString)?.value
             if (format == "ciacola-syntax-scheme") {
-                return SyntaxColorScheme.fromCompactJson(content)
+                return SyntaxColorScheme.fromCompactJsonObject(obj)
             }
             val fallbackName = deriveFallbackName(fileName)
-            return importVsCodeJson(content, fallbackName = fallbackName)
+            return VsCodeThemeMapper.importParsed(
+                root = obj,
+                fallbackName = fallbackName,
+                includeResolver = includeResolver,
+            )
         }
         throw SyntaxSchemeParseException("Unrecognized syntax color scheme format")
     }

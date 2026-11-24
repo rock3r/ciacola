@@ -6,6 +6,7 @@ internal data class XmlElement(
     val name: String,
     val attributes: Map<String, String>,
     val children: List<XmlElement>,
+    val text: String = "",
 ) {
     fun firstChildOrNull(childName: String): XmlElement? {
         for (child in children) {
@@ -30,8 +31,25 @@ internal object MiniXml {
         val name: String,
         val attributes: Map<String, String>,
         val children: MutableList<XmlElement> = ArrayList(),
+        var textBuilder: StringBuilder? = null,
     ) {
-        fun freeze(): XmlElement = XmlElement(name, attributes, children)
+        fun appendChar(ch: Char) {
+            val sb = textBuilder ?: StringBuilder().also { textBuilder = it }
+            sb.append(ch)
+        }
+
+        fun appendStr(s: String) {
+            if (s.isEmpty()) return
+            val sb = textBuilder ?: StringBuilder().also { textBuilder = it }
+            sb.append(s)
+        }
+
+        fun freeze(): XmlElement = XmlElement(
+            name = name,
+            attributes = attributes,
+            children = children,
+            text = textBuilder?.toString() ?: "",
+        )
     }
 
     private class Parser(private val input: String) {
@@ -48,10 +66,19 @@ internal object MiniXml {
             while (pos < len) {
                 if (input[pos] != '<') {
                     val ch = input[pos]
-                    if (stack.isEmpty() && !isWhitespace(ch)) {
-                        fail("Unexpected character data outside root XML element")
+                    if (stack.isEmpty()) {
+                        if (!isWhitespace(ch)) {
+                            fail("Unexpected character data outside root XML element")
+                        }
+                        pos++
+                    } else if (ch == '&') {
+                        stack.last().appendStr(readEntity())
+                    } else {
+                        if (!isWhitespace(ch) || stack.last().textBuilder != null) {
+                            stack.last().appendChar(ch)
+                        }
+                        pos++
                     }
-                    pos++
                     continue
                 }
 
@@ -65,8 +92,12 @@ internal object MiniXml {
                             skipComment()
                         } else if (input.startsWith("<![CDATA[", pos)) {
                             if (stack.isEmpty()) fail("CDATA section outside root XML element")
-                            skipCdata()
-                        } else if (input.startsWith("<!DOCTYPE", pos, ignoreCase = true)) {
+                            skipCdata(stack.last())
+                        } else if (
+                            input.startsWith("<!DOCTYPE", pos, ignoreCase = true) &&
+                            pos + 9 < len &&
+                            isWhitespace(input[pos + 9])
+                        ) {
                             if (stack.isNotEmpty()) fail("DOCTYPE inside XML element")
                             skipDoctype()
                         } else {
@@ -153,10 +184,11 @@ internal object MiniXml {
             pos = end + 3
         }
 
-        private fun skipCdata() {
+        private fun skipCdata(owner: MutableElement) {
             pos += 9 // '<![CDATA['
             val end = input.indexOf("]]>", startIndex = pos)
             if (end < 0) fail("Unterminated CDATA section")
+            owner.appendStr(input.substring(pos, end))
             pos = end + 3
         }
 
@@ -169,6 +201,10 @@ internal object MiniXml {
                 if (quote != null) {
                     if (ch == quote) quote = null
                     pos++
+                    continue
+                }
+                if (ch == '<' && input.startsWith("<!--", pos)) {
+                    skipComment()
                     continue
                 }
                 if (ch == '"' || ch == '\'') {
@@ -263,13 +299,21 @@ internal object MiniXml {
                 entity == "quot" -> "\""
                 entity == "apos" -> "'"
                 entity.startsWith("#x") || entity.startsWith("#X") -> {
-                    val code = entity.substring(2).toIntOrNull(16)
-                        ?: fail("Invalid hexadecimal character reference '&#$entity;'")
+                    val hexDigits = entity.substring(2)
+                    if (hexDigits.isEmpty() || !hexDigits.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                        fail("Invalid hexadecimal character reference '&$entity;'")
+                    }
+                    val code = hexDigits.toIntOrNull(16)
+                        ?: fail("Invalid hexadecimal character reference '&$entity;'")
                     codePointToString(code)
                 }
                 entity.startsWith('#') -> {
-                    val code = entity.substring(1).toIntOrNull(10)
-                        ?: fail("Invalid numeric character reference '&#$entity;'")
+                    val decDigits = entity.substring(1)
+                    if (decDigits.isEmpty() || !decDigits.all { it in '0'..'9' }) {
+                        fail("Invalid numeric character reference '&$entity;'")
+                    }
+                    val code = decDigits.toIntOrNull(10)
+                        ?: fail("Invalid numeric character reference '&$entity;'")
                     codePointToString(code)
                 }
                 else -> fail("Unsupported XML entity '&$entity;'")

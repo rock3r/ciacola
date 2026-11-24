@@ -100,7 +100,7 @@ The `tokens` object maps lowerCamelCase `SyntaxTokenKind` keys (`plain`, `whites
     "family": "IntelliJ",
     "upstream": "https://github.com/JetBrains/intellij-community",
     "license": "Apache-2.0",
-    "revision": "60eb770dd92040"
+    "revision": "60eb770dd920"
   }
 }
 ```
@@ -200,17 +200,17 @@ Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importVsCodeJ
 The Python 3 stdlib-only updater script regenerates or verifies the 11 checked-in `*.scheme.json` files in `syntax-highlight/src/commonMain/schemes/`:
 
 ```bash
-# Regenerate all 11 schemes from upstream GitHub (JetBrains/intellij-community + shikijs/textmate-grammars-themes)
+# Regenerate all 11 schemes from pinned upstream commits (JetBrains/intellij-community + shikijs/textmate-grammars-themes)
 python3 scripts/update-syntax-schemes.py
 
-# Use a local intellij-community checkout (records short git SHA, never local paths)
+# Use a local intellij-community checkout (records 12-char git SHA, never local paths)
 python3 scripts/update-syntax-schemes.py --ijpl-dir /path/to/intellij-community
 
 # Pin specific upstream Git refs or use a local VS Code themes directory
 python3 scripts/update-syntax-schemes.py --ijpl-ref master --github-ref main
 python3 scripts/update-syntax-schemes.py --source github --github-dir /path/to/themes
 
-# Verify checked-in *.scheme.json files match generated output (non-zero exit on mismatch)
+# Verify checked-in *.scheme.json files match pinned upstream sources (non-zero exit on mismatch)
 python3 scripts/update-syntax-schemes.py --check
 ```
 
@@ -247,7 +247,11 @@ val restored = SyntaxColorScheme.fromCompactJson(compactJson)
 // 4. Import external IntelliJ XML or VS Code JSON/JSONC
 val importedXml = SyntaxSchemeImporters.importIntelliJXml(xmlString)
 val importedVsCode = SyntaxSchemeImporters.importVsCodeJson(jsoncString)
-val autoImported = SyntaxSchemeImporters.importAuto(rawFileContent, fileName = "custom.icls")
+val autoImported = SyntaxSchemeImporters.importAuto(
+    content = rawFileContent,
+    fileName = "custom.icls",
+    includeResolver = { relPath -> loadRelativeFile(relPath) },
+)
 
 // 5. Color utilities
 val accent = SyntaxColor.parseCssHexOrNull("#56A8F5")!!

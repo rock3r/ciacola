@@ -28,8 +28,10 @@ FORMAT_VERSION = 1
 
 IJPL_REPO_URL = "https://github.com/JetBrains/intellij-community"
 IJPL_RAW_BASE = "https://raw.githubusercontent.com/JetBrains/intellij-community/{ref}/platform/platform-resources/src/"
+DEFAULT_IJPL_REF = "60eb770dd92040f3f7d99dcd4359a1003ccd48c7"
 GITHUB_THEMES_REPO_URL = "https://github.com/shikijs/textmate-grammars-themes"
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/shikijs/textmate-grammars-themes/{ref}/packages/tm-themes/themes/"
+DEFAULT_GITHUB_REF = "8f1828ebccc57930cf0adde9b35ae929584fe191"
 
 TOKEN_ORDER = [
     "plain",
@@ -157,6 +159,24 @@ def relative_luminance(hex_color: str) -> float:
     return 0.2126 * _srgb_to_linear(r) + 0.7152 * _srgb_to_linear(g) + 0.0722 * _srgb_to_linear(b)
 
 
+def composite_over(fg_hex: str, bg_hex: str) -> str:
+    fg = fg_hex.lstrip("#")
+    if len(fg) != 8:
+        return fg_hex
+    alpha = int(fg[6:8], 16)
+    if alpha == 0xFF:
+        return "#" + fg[:6]
+    if alpha == 0:
+        return bg_hex
+    bg = bg_hex.lstrip("#")
+    a = alpha / 255.0
+    inv = 1.0 - a
+    r = min(255, max(0, int(int(fg[0:2], 16) * a + int(bg[0:2], 16) * inv + 0.5)))
+    g = min(255, max(0, int(int(fg[2:4], 16) * a + int(bg[2:4], 16) * inv + 0.5)))
+    b = min(255, max(0, int(int(fg[4:6], 16) * a + int(bg[4:6], 16) * inv + 0.5)))
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
 def contrast_ratio(c1: str, c2: str) -> float:
     l1 = relative_luminance(c1)
     l2 = relative_luminance(c2)
@@ -245,7 +265,7 @@ def fetch_url(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "ciacola-scheme-updater/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read().decode("utf-8")
+            return resp.read().decode("utf-8-sig")
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Failed to fetch {url}: {exc}") from exc
 
@@ -253,7 +273,7 @@ def fetch_url(url: str) -> str:
 def git_short_sha(directory: pathlib.Path) -> str | None:
     try:
         res = subprocess.run(
-            ["git", "-C", str(directory), "rev-parse", "--short", "HEAD"],
+            ["git", "-C", str(directory), "rev-parse", "--short=12", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
@@ -262,6 +282,13 @@ def git_short_sha(directory: pathlib.Path) -> str | None:
         return sha or None
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def format_revision(ref: str) -> str:
+    s = ref.strip()
+    if len(s) >= 12 and all(c in "0123456789abcdefABCDEF" for c in s):
+        return s[:12].lower()
+    return s
 
 
 @dataclass
@@ -382,8 +409,10 @@ def _pick_ij_style(
             continue
         if diff_from is not None and fg == diff_from:
             continue
-        if min_contrast is not None and fg is not None and contrast_ratio(fg, bg) < min_contrast:
-            continue
+        if min_contrast is not None and fg is not None:
+            effective_fg = composite_over(fg, bg)
+            if contrast_ratio(effective_fg, bg) < min_contrast:
+                continue
         bg_color = None if (fg_only or attr_name == "TEXT") else normalize_ij_hex(opts.get("BACKGROUND"))
         if bg_color == bg:
             bg_color = None
@@ -592,9 +621,14 @@ def convert_ij_scheme(
     return out
 
 
-def _match_textmate_scopes(candidates: list[str], token_colors: list[dict[str, Any]]) -> StyleEntry | None:
+def _match_textmate_scopes(
+    candidates: list[str],
+    token_colors: list[dict[str, Any]],
+    *,
+    exact_only: bool = False,
+) -> StyleEntry | None:
     for target in candidates:
-        best: tuple[int, int, dict[str, Any]] | None = None
+        matches: list[tuple[int, int, str | None, str | None, bool, str]] = []
         for idx, rule in enumerate(token_colors):
             raw_scope = rule.get("scope")
             if not raw_scope:
@@ -607,34 +641,53 @@ def _match_textmate_scopes(candidates: list[str], token_colors: list[dict[str, A
                 continue
             fg = normalize_css_hex(settings.get("foreground"))
             bg = normalize_css_hex(settings.get("background"))
-            font_style = settings.get("fontStyle")
-            if fg is None and bg is None and not font_style:
+            raw_font_style = settings.get("fontStyle")
+            has_font_style = isinstance(raw_font_style, str)
+            if fg is None and bg is None and not has_font_style:
                 continue
+            max_depth = -1
             for s in scopes:
                 if not isinstance(s, str):
                     continue
                 scope = s.strip()
                 if not scope or " " in scope:
                     continue
-                if target == scope or target.startswith(scope + "."):
+                is_match = (target == scope) if exact_only else (target == scope or target.startswith(scope + "."))
+                if is_match:
                     depth = len(scope.split("."))
-                    cand = (depth, idx, settings)
-                    if best is None or (depth, idx) > (best[0], best[1]):
-                        best = cand
-        if best is not None:
-            st = best[2]
-            fg = normalize_css_hex(st.get("foreground"))
-            bg = normalize_css_hex(st.get("background"))
-            fs_tokens = str(st.get("fontStyle") or "").lower().split()
-            if fg is not None or bg is not None:
-                return StyleEntry(
-                    fg=fg,
-                    bg=bg,
-                    bold="bold" in fs_tokens,
-                    italic="italic" in fs_tokens,
-                    underline="underline" in fs_tokens,
-                    strikethrough="strikethrough" in fs_tokens,
-                )
+                    if depth > max_depth:
+                        max_depth = depth
+            if max_depth >= 0:
+                matches.append((max_depth, idx, fg, bg, has_font_style, raw_font_style if has_font_style else ""))
+        if not matches:
+            continue
+        matches.sort(key=lambda item: (item[0], item[1]))
+        eff_fg: str | None = None
+        eff_bg: str | None = None
+        bold = False
+        italic = False
+        underline = False
+        strikethrough = False
+        for _, _, m_fg, m_bg, m_has_fs, m_fs in matches:
+            if m_fg is not None:
+                eff_fg = m_fg
+            if m_bg is not None:
+                eff_bg = m_bg
+            if m_has_fs:
+                fs_tokens = set(m_fs.lower().split())
+                bold = "bold" in fs_tokens
+                italic = "italic" in fs_tokens
+                underline = "underline" in fs_tokens
+                strikethrough = "strikethrough" in fs_tokens
+        if eff_fg is not None or eff_bg is not None or bold or italic or underline or strikethrough:
+            return StyleEntry(
+                fg=eff_fg,
+                bg=eff_bg,
+                bold=bold,
+                italic=italic,
+                underline=underline,
+                strikethrough=strikethrough,
+            )
     return None
 
 
@@ -755,6 +808,14 @@ def convert_vscode_theme(
         )
         tokens[kind_name] = matched.to_json()
 
+    fn_decl_style = _match_textmate_scopes(
+        ["entity.name.function.declaration"],
+        token_colors,
+        exact_only=True,
+    ) or _match_semantic_tokens(["function.declaration"], semantic_colors)
+    if fn_decl_style is not None:
+        tokens["functionDeclaration"] = fn_decl_style.to_json()
+
     out: dict[str, Any] = {
         "format": FORMAT_ID,
         "version": FORMAT_VERSION,
@@ -799,9 +860,9 @@ def generate_intellij_schemes(ijpl_dir: pathlib.Path | None, ijpl_ref: str) -> d
             path = base_dir / rel
             if not path.is_file():
                 raise RuntimeError(f"Missing IntelliJ scheme file: {path}")
-            return path.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8-sig")
     else:
-        revision = ijpl_ref
+        revision = format_revision(ijpl_ref)
         base_url = IJPL_RAW_BASE.format(ref=ijpl_ref)
 
         def read_ij(rel: str) -> str:
@@ -843,9 +904,9 @@ def generate_github_schemes(github_dir: pathlib.Path | None, github_ref: str) ->
                 p = github_dir / "packages" / "tm-themes" / "themes" / filename
             if not p.is_file():
                 raise RuntimeError(f"Missing GitHub theme file: {filename}")
-            return p.read_text(encoding="utf-8")
+            return p.read_text(encoding="utf-8-sig")
     else:
-        revision = github_ref
+        revision = format_revision(github_ref)
         base_url = GITHUB_RAW_BASE.format(ref=github_ref)
 
         def read_gh(filename: str) -> str:
@@ -870,9 +931,17 @@ def serialize_compact(scheme: dict[str, Any]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Update or verify bundled syntax color schemes.")
     parser.add_argument("--ijpl-dir", type=pathlib.Path, default=None, help="Path to local intellij-community checkout")
-    parser.add_argument("--ijpl-ref", default="master", help="GitHub ref for JetBrains/intellij-community (default: master)")
+    parser.add_argument(
+        "--ijpl-ref",
+        default=DEFAULT_IJPL_REF,
+        help=f"GitHub ref for JetBrains/intellij-community (default: {DEFAULT_IJPL_REF})",
+    )
     parser.add_argument("--github-dir", type=pathlib.Path, default=None, help="Path to local GitHub VS Code themes directory")
-    parser.add_argument("--github-ref", default="main", help="GitHub ref for shikijs/textmate-grammars-themes (default: main)")
+    parser.add_argument(
+        "--github-ref",
+        default=DEFAULT_GITHUB_REF,
+        help=f"GitHub ref for shikijs/textmate-grammars-themes (default: {DEFAULT_GITHUB_REF})",
+    )
     parser.add_argument("--source", choices=["all", "intellij", "github"], default="all", help="Which scheme family to update/check")
     parser.add_argument(
         "--out-dir",
@@ -883,37 +952,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="Verify checked-in files match generated output without writing")
     args = parser.parse_args(argv)
 
-    generated: dict[str, dict[str, Any]] = {}
-    if args.source in ("all", "intellij"):
-        generated.update(generate_intellij_schemes(args.ijpl_dir, args.ijpl_ref))
-    if args.source in ("all", "github"):
-        generated.update(generate_github_schemes(args.github_dir, args.github_ref))
+    try:
+        generated: dict[str, dict[str, Any]] = {}
+        if args.source in ("all", "intellij"):
+            generated.update(generate_intellij_schemes(args.ijpl_dir, args.ijpl_ref))
+        if args.source in ("all", "github"):
+            generated.update(generate_github_schemes(args.github_dir, args.github_ref))
 
-    if args.check:
-        mismatches: list[str] = []
+        if args.check:
+            mismatches: list[str] = []
+            for scheme_id, payload in sorted(generated.items()):
+                target = args.out_dir / f"{scheme_id}.scheme.json"
+                expected = serialize_compact(payload)
+                if not target.is_file():
+                    mismatches.append(f"Missing scheme file: {target}")
+                    continue
+                actual = target.read_text(encoding="utf-8")
+                if actual != expected:
+                    mismatches.append(f"Out-of-date scheme file: {target}")
+            if mismatches:
+                for msg in mismatches:
+                    print(msg, file=sys.stderr)
+                return 1
+            print(f"Verified {len(generated)} syntax color scheme(s) in {args.out_dir}")
+            return 0
+
+        args.out_dir.mkdir(parents=True, exist_ok=True)
         for scheme_id, payload in sorted(generated.items()):
             target = args.out_dir / f"{scheme_id}.scheme.json"
-            expected = serialize_compact(payload)
-            if not target.is_file():
-                mismatches.append(f"Missing scheme file: {target}")
-                continue
-            actual = target.read_text(encoding="utf-8")
-            if actual != expected:
-                mismatches.append(f"Out-of-date scheme file: {target}")
-        if mismatches:
-            for msg in mismatches:
-                print(msg, file=sys.stderr)
-            return 1
-        print(f"Verified {len(generated)} syntax color scheme(s) in {args.out_dir}")
+            content = serialize_compact(payload)
+            target.write_text(content, encoding="utf-8")
+            print(f"Wrote {target.name} ({len(content.encode('utf-8'))} bytes)")
         return 0
-
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    for scheme_id, payload in sorted(generated.items()):
-        target = args.out_dir / f"{scheme_id}.scheme.json"
-        content = serialize_compact(payload)
-        target.write_text(content, encoding="utf-8")
-        print(f"Wrote {target.name} ({len(content.encode('utf-8'))} bytes)")
-    return 0
+    except (RuntimeError, OSError, ET.ParseError, json.JSONDecodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

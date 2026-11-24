@@ -161,6 +161,88 @@ class SyntaxSchemeImportersTest {
         val lightImported = SyntaxSchemeImporters.importIntelliJXml(lightXml)
         assertEquals(SyntaxSchemeAppearance.Light, lightImported.appearance)
         assertEquals("#174AD4", lightImported.foregroundFor(SyntaxTokenKind.Attribute).toHexRgb())
+
+        // Canonical IntelliJ parent_scheme names: "Light", "Dark", "High contrast", and _@user_*
+        val childOfLight = """
+            <scheme name="Custom Light" parent_scheme="Light">
+              <attributes>
+                <option name="DEFAULT_ATTRIBUTE">
+                  <value><option name="FOREGROUND" value="aa1122" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val importedLightChild = SyntaxSchemeImporters.importIntelliJXml(childOfLight)
+        assertEquals(SyntaxSchemeAppearance.Light, importedLightChild.appearance)
+        assertEquals("#0033B3", importedLightChild.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#067D17", importedLightChild.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+        assertEquals("#00627A", importedLightChild.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
+        assertEquals("#AA1122", importedLightChild.foregroundFor(SyntaxTokenKind.Attribute).toHexRgb())
+
+        val childOfDark = """
+            <scheme name="Custom Dark" parent_scheme="Dark">
+              <attributes>
+                <option name="DEFAULT_STRING">
+                  <value><option name="FOREGROUND" value="55cc88" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val importedDarkChild = SyntaxSchemeImporters.importIntelliJXml(childOfDark)
+        assertEquals("#1E1F22", importedDarkChild.background.toHexRgb())
+        assertEquals("#CF8E6D", importedDarkChild.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#55CC88", importedDarkChild.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+
+        val childOfHc = """
+            <scheme name="Custom HC" parent_scheme="High contrast">
+              <attributes>
+                <option name="DEFAULT_NUMBER">
+                  <value><option name="FOREGROUND" value="00ffcc" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val importedHcChild = SyntaxSchemeImporters.importIntelliJXml(childOfHc)
+        assertEquals("#000000", importedHcChild.background.toHexRgb())
+        assertEquals("#ED864A", importedHcChild.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#00FFCC", importedHcChild.foregroundFor(SyntaxTokenKind.Number).toHexRgb())
+
+        // _@user_* user-modified IntelliJ export carrying metaInfo/originalScheme
+        val userModifiedLight = """
+            <scheme name="_@user_Light" parent_scheme="Default">
+              <metaInfo>
+                <property name="originalScheme">Light</property>
+              </metaInfo>
+              <attributes>
+                <option name="DEFAULT_KEYWORD">
+                  <value><option name="FOREGROUND" value="990044" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val importedUserLight = SyntaxSchemeImporters.importIntelliJXml(userModifiedLight)
+        assertEquals("#990044", importedUserLight.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#067D17", importedUserLight.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+        assertEquals("#174AD4", importedUserLight.foregroundFor(SyntaxTokenKind.Attribute).toHexRgb())
+
+        // Explicit fallbackParent fills unoverridden tokens
+        val soloXml = """
+            <scheme name="Solo Override">
+              <attributes>
+                <option name="DEFAULT_KEYWORD">
+                  <value><option name="FOREGROUND" value="ff5500" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val withFallback = SyntaxSchemeImporters.importIntelliJXml(
+            xml = soloXml,
+            fallbackParent = SyntaxColorSchemes.GitHubDark,
+        )
+        assertEquals("#0D1117", withFallback.background.toHexRgb())
+        assertEquals("#FF5500", withFallback.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#A5D6FF", withFallback.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+        assertEquals("#D2A8FF", withFallback.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
     }
 
     @Test
@@ -188,6 +270,29 @@ class SyntaxSchemeImportersTest {
         val tooDeep = "<a>".repeat(140) + "</a>".repeat(140)
         assertFailsWith<SyntaxSchemeParseException> {
             SyntaxSchemeImporters.importIntelliJXml(tooDeep)
+        }
+
+        // DOCTYPE comments containing quotes/apostrophes must not confuse quote tracking,
+        // while <!DOCTYPEfoo> without delimiter whitespace and <!ENTITY inside DOCTYPE must fail.
+        val doctypeCommentWithQuotes = """
+            <!DOCTYPE scheme [ <!-- author's note with "quotes" --> ]>
+            <scheme name="Safe Doctype" parent_scheme="Darcula"/>
+        """.trimIndent()
+        assertEquals("#CC7832", SyntaxSchemeImporters.importIntelliJXml(doctypeCommentWithQuotes).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+
+        assertFailsWith<SyntaxSchemeParseException> {
+            SyntaxSchemeImporters.importIntelliJXml(
+                """<!DOCTYPE scheme [ <!-- " --><!ENTITY xxe "bad"><!-- " --> ]><scheme name="Masked"/>""",
+            )
+        }
+        assertFailsWith<SyntaxSchemeParseException> {
+            SyntaxSchemeImporters.importIntelliJXml("""<!DOCTYPEfoo><scheme name="Bad"/>""")
+        }
+        for (badEntity in listOf("&#+65;", "&#-65;", "&#x+41;", "&#x;")) {
+            val ex = assertFailsWith<SyntaxSchemeParseException> {
+                SyntaxSchemeImporters.importIntelliJXml("""<scheme name="$badEntity"/>""")
+            }
+            assertFalse(ex.message.orEmpty().contains("&##"), "Double '#' in error message: ${ex.message}")
         }
     }
 
@@ -432,7 +537,92 @@ class SyntaxSchemeImportersTest {
         assertEquals(bundledGhLight.diffInserted, importedGhLight.diffInserted)
         assertEquals(bundledGhLight.diffDeleted, importedGhLight.diffDeleted)
         assertEquals(bundledGhLight.diffChanged, importedGhLight.diffChanged)
+        assertEquals(bundledGhLight.functionDeclaration, importedGhLight.functionDeclaration)
         assertEquals(bundledGhLight.styles, importedGhLight.styles)
+    }
+
+    @Test
+    fun vsCodeTextMateCascadesFontStyleAndHonorsExactFunctionDeclaration() {
+        val theme = """
+            {
+              "name": "Cascade Check",
+              "type": "dark",
+              "colors": {
+                "editor.background": "#101214",
+                "editor.foreground": "#E0E4EA"
+              },
+              "tokenColors": [
+                {
+                  "scope": "comment",
+                  "settings": { "foreground": "#7A8490", "fontStyle": "bold" }
+                },
+                {
+                  "scope": "comment.line",
+                  "settings": { "fontStyle": "italic" }
+                },
+                {
+                  "scope": "keyword",
+                  "settings": { "foreground": "#FF7B72", "fontStyle": "bold italic" }
+                },
+                {
+                  "scope": "keyword.control",
+                  "settings": { "fontStyle": "" }
+                },
+                {
+                  "scope": "entity.name.function",
+                  "settings": { "foreground": "#D2A8FF" }
+                }
+              ],
+              "semanticTokenColors": {
+                "function.declaration": { "foreground": "#79C0FF", "bold": true }
+              }
+            }
+        """.trimIndent()
+
+        val imported = SyntaxSchemeImporters.importVsCodeJson(theme)
+        // comment.line fontStyle-only rule inherits #7A8490 from comment and replaces bold with italic
+        val comment = imported.styleFor(SyntaxTokenKind.Comment)
+        assertEquals("#7A8490", comment.foreground?.toHexRgb())
+        assertTrue(comment.italic)
+        assertFalse(comment.bold)
+
+        // keyword.control with "fontStyle": "" inherits #FF7B72 and clears bold/italic
+        val kw = imported.styleFor(SyntaxTokenKind.Keyword)
+        assertEquals("#FF7B72", kw.foreground?.toHexRgb())
+        assertFalse(kw.bold)
+        assertFalse(kw.italic)
+
+        // Generic entity.name.function must not shadow semanticTokenColors["function.declaration"]
+        assertEquals("#D2A8FF", imported.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
+        val fnDecl = imported.functionDeclaration
+        assertNotNull(fnDecl)
+        assertEquals("#79C0FF", fnDecl.foreground?.toHexRgb())
+        assertTrue(fnDecl.bold)
+    }
+
+    @Test
+    fun importAutoPassesIncludeResolverThrough() {
+        val base = """
+            {
+              "type": "dark",
+              "colors": { "editor.background": "#111111", "editor.foreground": "#EEEEEE" },
+              "tokenColors": [{ "scope": "keyword", "settings": { "foreground": "#CC7832" } }]
+            }
+        """.trimIndent()
+        val child = """
+            {
+              "name": "Auto Included",
+              "include": "base.json",
+              "tokenColors": [{ "scope": "string", "settings": { "foreground": "#6AAB73" } }]
+            }
+        """.trimIndent()
+        val imported = SyntaxSchemeImporters.importAuto(
+            content = child,
+            fileName = "child.jsonc",
+            includeResolver = { if (it == "base.json") base else null },
+        )
+        assertEquals("#CC7832", imported.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        assertEquals("#6AAB73", imported.foregroundFor(SyntaxTokenKind.String).toHexRgb())
     }
 
     @Test

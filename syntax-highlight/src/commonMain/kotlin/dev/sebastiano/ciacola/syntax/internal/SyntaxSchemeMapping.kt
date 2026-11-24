@@ -18,6 +18,7 @@ internal data class IjSchemeData(
     val parentScheme: String?,
     val colors: Map<String, String>,
     val attributes: Map<String, IjAttributeEntry>,
+    val originalScheme: String? = null,
 )
 
 internal object IjEmbeddedBaseSchemes {
@@ -172,7 +173,10 @@ internal object IjEmbeddedBaseSchemes {
         scheme.styles[SyntaxTokenKind.Type]?.let { attrs["TYPE_PARAMETER_NAME_ATTRIBUTES"] = it.toIjAttr() }
         scheme.styles[SyntaxTokenKind.Property]?.let { attrs["DEFAULT_INSTANCE_FIELD"] = it.toIjAttr() }
         scheme.styles[SyntaxTokenKind.Annotation]?.let { attrs["ANNOTATION_NAME_ATTRIBUTES"] = it.toIjAttr() }
-        scheme.styles[SyntaxTokenKind.Attribute]?.let { attrs["HTML_ATTRIBUTE_NAME"] = it.toIjAttr() }
+        scheme.styles[SyntaxTokenKind.Attribute]?.let {
+            val attrKey = if (scheme.appearance.isLight) "DEFAULT_ATTRIBUTE" else "HTML_ATTRIBUTE_NAME"
+            attrs[attrKey] = it.toIjAttr()
+        }
         scheme.styles[SyntaxTokenKind.Tag]?.let { attrs["XML_TAG_NAME"] = it.toIjAttr() }
         scheme.styles[SyntaxTokenKind.Operator]?.let { attrs["DEFAULT_OPERATION_SIGN"] = it.toIjAttr() }
         scheme.styles[SyntaxTokenKind.Preprocessor]?.let { attrs["PREPROCESSOR_DIRECTIVE"] = it.toIjAttr() }
@@ -241,6 +245,12 @@ internal object IntelliJSchemeMapper {
         val name = el.attributes["name"]?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw SyntaxSchemeParseException("IntelliJ <scheme> element is missing a non-empty 'name' attribute")
         val parentScheme = el.attributes["parent_scheme"]?.trim()?.takeIf { it.isNotEmpty() }
+        val originalScheme = el.firstChildOrNull("metaInfo")
+            ?.childrenNamed("property")
+            ?.firstOrNull { it.attributes["name"] == "originalScheme" }
+            ?.text
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
 
         val colors = LinkedHashMap<String, String>()
         el.firstChildOrNull("colors")?.childrenNamed("option")?.forEach { opt ->
@@ -276,6 +286,7 @@ internal object IntelliJSchemeMapper {
             parentScheme = parentScheme,
             colors = colors,
             attributes = attributes,
+            originalScheme = originalScheme,
         )
     }
 
@@ -312,22 +323,31 @@ internal object IntelliJSchemeMapper {
             )?.foreground
             ?: fg
 
-        val keywordStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD")) ?: plainStyle
-        val stringStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_STRING")) ?: plainStyle
+        val keywordStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"))
+            ?: fallbackParent?.styles?.get(SyntaxTokenKind.Keyword)
+            ?: plainStyle
+        val stringStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_STRING"))
+            ?: fallbackParent?.styles?.get(SyntaxTokenKind.String)
+            ?: plainStyle
         val commentStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT", "DEFAULT_DOC_COMMENT"),
-        ) ?: plainStyle
-        val numberStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_NUMBER")) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Comment)
+            ?: plainStyle
+        val numberStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_NUMBER"))
+            ?: fallbackParent?.styles?.get(SyntaxTokenKind.Number)
+            ?: plainStyle
         val constantStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("DEFAULT_CONSTANT", "DEFAULT_STATIC_FIELD"),
-        ) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Constant)
+            ?: plainStyle
         val fnDeclStyle = pickStyle(schemes, primaryName, bg, listOf("DEFAULT_FUNCTION_DECLARATION"))
+            ?: fallbackParent?.functionDeclaration
         val functionStyle = pickStyle(
             schemes,
             primaryName,
@@ -338,7 +358,8 @@ internal object IntelliJSchemeMapper {
                 "DEFAULT_STATIC_METHOD",
                 "DEFAULT_FUNCTION_CALL",
             ),
-        ) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Function)
+            ?: plainStyle
         val typeStyle = pickStyle(
             schemes,
             primaryName,
@@ -349,52 +370,65 @@ internal object IntelliJSchemeMapper {
             schemes,
             primaryName,
             bg,
-            listOf("TYPE_PARAMETER_NAME_ATTRIBUTES", "DEFAULT_CLASS_NAME", "TEXT"),
-        ) ?: plainStyle
+            listOf("TYPE_PARAMETER_NAME_ATTRIBUTES", "DEFAULT_CLASS_NAME"),
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Type)
+            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"))
+            ?: plainStyle
         val propertyStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("DEFAULT_INSTANCE_FIELD", "DEFAULT_STATIC_FIELD", "KOTLIN_NAMED_ARGUMENT"),
-        ) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Property)
+            ?: plainStyle
         val annotationStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("ANNOTATION_NAME_ATTRIBUTES", "DEFAULT_METADATA"),
-        ) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Annotation)
+            ?: plainStyle
         val attributeStyle = pickStyle(
             schemes,
             primaryName,
             bg,
             listOf("HTML_ATTRIBUTE_NAME", "XML_ATTRIBUTE_NAME", "DEFAULT_ATTRIBUTE"),
             minContrast = 2.5,
-        ) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Attribute)
+            ?: plainStyle
         val tagStyle = pickStyle(
             schemes,
             primaryName,
             bg,
-            listOf("XML_TAG_NAME", "HTML_TAG_NAME", "DEFAULT_TAG", "DEFAULT_KEYWORD"),
+            listOf("XML_TAG_NAME", "HTML_TAG_NAME", "DEFAULT_TAG"),
             fgOnly = true,
-        ) ?: keywordStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Tag)
+            ?: pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"), fgOnly = true)
+            ?: keywordStyle
         val operatorStyle = pickStyle(
             schemes,
             primaryName,
             bg,
-            listOf("DEFAULT_OPERATION_SIGN", "TEXT"),
-        ) ?: plainStyle
+            listOf("DEFAULT_OPERATION_SIGN"),
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Operator)
+            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"))
+            ?: plainStyle
         val preprocessorStyle = pickStyle(
             schemes,
             primaryName,
             bg,
-            listOf("OC.DIRECTIVE", "PREPROCESSOR_DIRECTIVE", "DEFAULT_METADATA", "DEFAULT_KEYWORD"),
-        ) ?: keywordStyle
+            listOf("OC.DIRECTIVE", "PREPROCESSOR_DIRECTIVE", "DEFAULT_METADATA"),
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Preprocessor)
+            ?: pickStyle(schemes, primaryName, bg, listOf("DEFAULT_KEYWORD"))
+            ?: keywordStyle
         val punctuationStyle = pickStyle(
             schemes,
             primaryName,
             bg,
-            listOf("DEFAULT_BRACES", "DEFAULT_COMMA", "DEFAULT_PARENTHS", "TEXT"),
-        ) ?: plainStyle
+            listOf("DEFAULT_BRACES", "DEFAULT_COMMA", "DEFAULT_PARENTHS"),
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Punctuation)
+            ?: pickStyle(schemes, primaryName, bg, listOf("TEXT"))
+            ?: plainStyle
         val invalidStyle = pickStyle(
             schemes,
             primaryName,
@@ -411,7 +445,8 @@ internal object IntelliJSchemeMapper {
             bg,
             listOf("ERRORS_ATTRIBUTES"),
             requireFg = false,
-        ) ?: plainStyle
+        ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Invalid)
+            ?: plainStyle
 
         val styles = linkedMapOf(
             SyntaxTokenKind.Plain to plainStyle,
@@ -466,7 +501,7 @@ internal object IntelliJSchemeMapper {
         val key = schemeName to attrName
         if (!visited.add(key)) return null
 
-        var curName: String? = schemeName
+        var curName: String? = lookupSchemeKey(schemeName, schemes) ?: schemeName
         val chainSeen = HashSet<String>()
         while (curName != null && chainSeen.add(curName)) {
             val scheme = schemes[curName] ?: break
@@ -480,7 +515,7 @@ internal object IntelliJSchemeMapper {
                     if (resolved != null) return resolved
                 }
             }
-            curName = scheme.parentScheme
+            curName = effectiveParentKey(scheme, schemes)
         }
         return null
     }
@@ -490,7 +525,7 @@ internal object IntelliJSchemeMapper {
         schemeName: String,
         colorName: String,
     ): SyntaxColor? {
-        var curName: String? = schemeName
+        var curName: String? = lookupSchemeKey(schemeName, schemes) ?: schemeName
         val seen = HashSet<String>()
         while (curName != null && seen.add(curName)) {
             val scheme = schemes[curName] ?: break
@@ -499,7 +534,37 @@ internal object IntelliJSchemeMapper {
                 val parsed = SyntaxColor.parseIntelliJHexOrNull(raw)
                 if (parsed != null) return parsed
             }
-            curName = scheme.parentScheme
+            curName = effectiveParentKey(scheme, schemes)
+        }
+        return null
+    }
+
+    fun resolveEffectiveParentKey(scheme: IjSchemeData, schemes: Map<String, IjSchemeData>): String? =
+        effectiveParentKey(scheme, schemes)
+
+    private fun effectiveParentKey(scheme: IjSchemeData, schemes: Map<String, IjSchemeData>): String? {
+        val orig = scheme.originalScheme
+        if (orig != null &&
+            (scheme.name.startsWith("_@user_") || scheme.parentScheme == null ||
+                scheme.parentScheme == "Default" || scheme.parentScheme == "Darcula")
+        ) {
+            val origKey = lookupSchemeKey(orig, schemes)
+            if (origKey != null && origKey != scheme.name) {
+                return origKey
+            }
+        }
+        val parent = scheme.parentScheme ?: return null
+        return lookupSchemeKey(parent, schemes)
+    }
+
+    private fun lookupSchemeKey(rawName: String, schemes: Map<String, IjSchemeData>): String? {
+        if (rawName in schemes) return rawName
+        val stripped = rawName.removePrefix("_@user_")
+        if (stripped != rawName && stripped in schemes) return stripped
+        for (key in schemes.keys) {
+            if (key.equals(rawName, ignoreCase = true) || key.equals(stripped, ignoreCase = true)) {
+                return key
+            }
         }
         return null
     }
@@ -519,7 +584,10 @@ internal object IntelliJSchemeMapper {
             val fg = opts["FOREGROUND"]?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             if (requireFg && fg == null) continue
             if (diffFrom != null && fg == diffFrom) continue
-            if (minContrast != null && fg != null && fg.contrastRatio(canvasBg) < minContrast) continue
+            if (minContrast != null && fg != null) {
+                val effectiveFg = if (fg.alpha < 0xFF) fg.compositeOver(canvasBg) else fg
+                if (effectiveFg.contrastRatio(canvasBg) < minContrast) continue
+            }
 
             val rawBg = if (fgOnly || attrName == "TEXT") {
                 null
@@ -669,6 +737,16 @@ internal object VsCodeThemeMapper {
         fallbackName: String?,
         includeResolver: ((String) -> String?)?,
     ): SyntaxColorScheme {
+        val root = MiniJson.parse(json, allowComments = true, allowTrailingCommas = true) as? JsonObject
+            ?: throw SyntaxSchemeParseException("Expected VS Code theme top-level JSON object")
+        return importParsed(root, fallbackName, includeResolver)
+    }
+
+    fun importParsed(
+        root: JsonObject,
+        fallbackName: String?,
+        includeResolver: ((String) -> String?)?,
+    ): SyntaxColorScheme {
         val merged = MergedVsCodeTheme(
             name = null,
             type = null,
@@ -676,8 +754,8 @@ internal object VsCodeThemeMapper {
             tokenColors = ArrayList(),
             semanticTokenColors = LinkedHashMap(),
         )
-        val result = mergeTheme(
-            json = json,
+        val result = mergeThemeObject(
+            root = root,
             acc = merged,
             includeResolver = includeResolver,
             visitedIncludes = HashSet(),
@@ -725,8 +803,11 @@ internal object VsCodeThemeMapper {
             styles[kind] = style
         }
 
-        val fnDeclStyle = matchTextMate(listOf("entity.name.function.declaration"), result.tokenColors)
-            ?: matchSemantic(listOf("function.declaration"), result.semanticTokenColors)
+        val fnDeclStyle = matchTextMate(
+            listOf("entity.name.function.declaration"),
+            result.tokenColors,
+            exactOnly = true,
+        ) ?: matchSemantic(listOf("function.declaration"), result.semanticTokenColors)
 
         return SyntaxColorScheme(
             id = slugify(displayName),
@@ -759,6 +840,19 @@ internal object VsCodeThemeMapper {
         }
         val root = MiniJson.parse(json, allowComments = true, allowTrailingCommas = true) as? JsonObject
             ?: throw SyntaxSchemeParseException("Expected VS Code theme top-level JSON object")
+        return mergeThemeObject(root, acc, includeResolver, visitedIncludes, depth)
+    }
+
+    private fun mergeThemeObject(
+        root: JsonObject,
+        acc: MergedVsCodeTheme,
+        includeResolver: ((String) -> String?)?,
+        visitedIncludes: MutableSet<String>,
+        depth: Int,
+    ): MergedVsCodeTheme {
+        if (depth > 32) {
+            throw SyntaxSchemeParseException("Maximum VS Code theme include depth exceeded")
+        }
 
         var current = acc
         val includePath = (root.entries["include"] as? JsonString)?.value?.takeIf { it.isNotBlank() }
@@ -788,11 +882,22 @@ internal object VsCodeThemeMapper {
         return current.copy(name = themeName, type = themeType)
     }
 
-    private fun matchTextMate(candidates: List<String>, tokenColors: List<JsonObject>): SyntaxTokenStyle? {
+    private data class TextMateMatch(
+        val depth: Int,
+        val index: Int,
+        val fg: SyntaxColor?,
+        val bg: SyntaxColor?,
+        val hasFontStyle: Boolean,
+        val fontStyle: String,
+    )
+
+    private fun matchTextMate(
+        candidates: List<String>,
+        tokenColors: List<JsonObject>,
+        exactOnly: Boolean = false,
+    ): SyntaxTokenStyle? {
         for (target in candidates) {
-            var bestDepth = -1
-            var bestIndex = -1
-            var bestSettings: JsonObject? = null
+            val matches = ArrayList<TextMateMatch>()
             tokenColors.forEachIndexed { idx, rule ->
                 val rawScope = rule.entries["scope"] ?: return@forEachIndexed
                 val scopes = when (rawScope) {
@@ -807,44 +912,65 @@ internal object VsCodeThemeMapper {
                 val bg = (settings.entries["background"] as? JsonString)?.value?.let {
                     SyntaxColor.parseCssHexOrNull(it)
                 }
-                val fontStyle = (settings.entries["fontStyle"] as? JsonString)?.value
-                if (fg == null && bg == null && fontStyle.isNullOrBlank()) return@forEachIndexed
+                val fontStyleValue = settings.entries["fontStyle"] as? JsonString
+                val hasFontStyle = fontStyleValue != null
+                if (fg == null && bg == null && !hasFontStyle) return@forEachIndexed
 
+                var maxMatchedDepth = -1
                 for (scope in scopes) {
                     if (scope.isEmpty() || scope.contains(' ')) continue
-                    if (target == scope || target.startsWith("$scope.")) {
+                    val matched = if (exactOnly) target == scope else (target == scope || target.startsWith("$scope."))
+                    if (matched) {
                         val depth = scope.count { it == '.' } + 1
-                        if (depth > bestDepth || (depth == bestDepth && idx > bestIndex)) {
-                            bestDepth = depth
-                            bestIndex = idx
-                            bestSettings = settings
+                        if (depth > maxMatchedDepth) {
+                            maxMatchedDepth = depth
                         }
                     }
                 }
+                if (maxMatchedDepth >= 0) {
+                    matches += TextMateMatch(
+                        depth = maxMatchedDepth,
+                        index = idx,
+                        fg = fg,
+                        bg = bg,
+                        hasFontStyle = hasFontStyle,
+                        fontStyle = fontStyleValue?.value ?: "",
+                    )
+                }
             }
-            val matched = bestSettings
-            if (matched != null) {
-                val fg = (matched.entries["foreground"] as? JsonString)?.value?.let {
-                    SyntaxColor.parseCssHexOrNull(it)
-                }
-                val bg = (matched.entries["background"] as? JsonString)?.value?.let {
-                    SyntaxColor.parseCssHexOrNull(it)
-                }
-                if (fg != null || bg != null) {
-                    val fontTokens = ((matched.entries["fontStyle"] as? JsonString)?.value ?: "")
+            if (matches.isEmpty()) continue
+            matches.sortWith(compareBy<TextMateMatch>({ it.depth }, { it.index }))
+
+            var fg: SyntaxColor? = null
+            var bg: SyntaxColor? = null
+            var bold = false
+            var italic = false
+            var underline = false
+            var strikethrough = false
+            for (m in matches) {
+                if (m.fg != null) fg = m.fg
+                if (m.bg != null) bg = m.bg
+                if (m.hasFontStyle) {
+                    val fontTokens = m.fontStyle
                         .lowercase()
                         .split(' ', '\t')
                         .filter { it.isNotEmpty() }
                         .toSet()
-                    return SyntaxTokenStyle(
-                        foreground = fg,
-                        background = bg,
-                        bold = "bold" in fontTokens,
-                        italic = "italic" in fontTokens,
-                        underline = "underline" in fontTokens,
-                        strikethrough = "strikethrough" in fontTokens,
-                    )
+                    bold = "bold" in fontTokens
+                    italic = "italic" in fontTokens
+                    underline = "underline" in fontTokens
+                    strikethrough = "strikethrough" in fontTokens
                 }
+            }
+            if (fg != null || bg != null || bold || italic || underline || strikethrough) {
+                return SyntaxTokenStyle(
+                    foreground = fg,
+                    background = bg,
+                    bold = bold,
+                    italic = italic,
+                    underline = underline,
+                    strikethrough = strikethrough,
+                )
             }
         }
         return null

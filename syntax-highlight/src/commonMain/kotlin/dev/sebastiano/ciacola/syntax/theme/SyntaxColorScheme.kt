@@ -102,6 +102,10 @@ public data class SyntaxColorScheme(
         public fun fromCompactJson(json: String): SyntaxColorScheme {
             val root = MiniJson.parse(json, allowComments = false, allowTrailingCommas = false) as? JsonObject
                 ?: throw SyntaxSchemeParseException("Expected top-level JSON object")
+            return fromCompactJsonObject(root)
+        }
+
+        internal fun fromCompactJsonObject(root: JsonObject): SyntaxColorScheme {
 
             val format = root.requireString("format")
             if (format != FORMAT_ID) {
