@@ -499,9 +499,7 @@ class DiffSyntaxLexerTest {
 
     @Test
     fun handlesSvnSpaceAnnotationsUnquotedGitSpacesAndFlaglessDiffHeaders() {
-        val svnDiff = "Index: src/Main.kt\n" +
-            "===================================================================\n" +
-            "--- src/Main.kt (revision 42)\n" +
+        val svnDiff = "--- src/Main.kt (revision 42)\n" +
             "+++ src/Main.kt (working copy)\n" +
             "@@ -1 +1 @@\n" +
             "-val x = 1\n" +
@@ -509,6 +507,24 @@ class DiffSyntaxLexerTest {
         val svnTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, svnDiff, "svn-annotations")
         assertTrue(svnTokens.any { it.slice(svnDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
         assertTrue(svnTokens.any { it.slice(svnDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val isoDiff = "--- src/Main.kt 2026-01-01 12:00:00.000000000 +0000\n" +
+            "+++ src/Main.kt 2026-01-01 12:05:00.000000000 +0000\n" +
+            "@@ -1 +1 @@\n" +
+            "-val iso = 1\n" +
+            "+val iso = 2\n"
+        val isoTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, isoDiff, "iso-space-ts")
+        assertTrue(isoTokens.any { it.slice(isoDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(isoTokens.any { it.slice(isoDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val ctimeDiff = "--- src/Main.kt Thu Jan  1 00:00:00 1970\n" +
+            "+++ src/Main.kt Thu Jan  1 00:01:00 1970\n" +
+            "@@ -1 +1 @@\n" +
+            "-val ct = 3\n" +
+            "+val ct = 4\n"
+        val ctimeTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, ctimeDiff, "ctime-space-ts")
+        assertTrue(ctimeTokens.any { it.slice(ctimeDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(ctimeTokens.any { it.slice(ctimeDiff) == "4" && it.kind == SyntaxTokenKind.Number })
 
         val ccDiff = "diff --cc dir with spaces/Main.kt\n" +
             "index 111,222..333\n" +
@@ -570,6 +586,133 @@ class DiffSyntaxLexerTest {
         val newAddTokens = tokens.filter { it.startIndex >= newAddStart && it.endIndex <= newAddEnd }
         assertTrue(newAddTokens.any { it.slice(ctxDiff) == "new" && it.kind == SyntaxTokenKind.String })
         assertTrue(newAddTokens.any { it.slice(ctxDiff) == "\"\"\"" && it.kind == SyntaxTokenKind.String })
+    }
+
+    @Test
+    fun preventsDefaultModeSectionLeakageHandlesLongDashSeparatorsAndContextToUnifiedReset() {
+        val logAndSignature = "diff --git a/Main.kt b/Main.kt\n" +
+            "--- a/Main.kt\n" +
+            "+++ b/Main.kt\n" +
+            "@@ -1 +1 @@\n" +
+            "-val a = 1\n" +
+            "+val a = 2\n" +
+            "-- \n" +
+            "2.45.0\n" +
+            "----------\n" +
+            "commit 1234567890abcdef\n" +
+            "\n" +
+            "    val indentedProse = 99\n" +
+            "+   bulletedCommitNote\n" +
+            "-   removedCommitNote\n"
+        val logTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, logAndSignature, "log-p-no-leak")
+
+        // `-- ` format-patch signature must NOT be sub-highlighted or attached to the Kotlin hunk
+        val sigStart = logAndSignature.indexOf("\n-- \n") + 1
+        val sigTokens = logTokens.filter { it.startIndex >= sigStart && it.endIndex <= sigStart + 3 }
+        assertEquals("-", sigTokens[0].slice(logAndSignature))
+        assertEquals(SyntaxTokenKind.Punctuation, sigTokens[0].kind)
+        assertEquals("- ", sigTokens[1].slice(logAndSignature))
+        assertEquals(SyntaxTokenKind.Keyword, sigTokens[1].kind)
+
+        // `----------` horizontal rule is a single Punctuation token
+        assertTrue(logTokens.any { it.slice(logAndSignature) == "----------" && it.kind == SyntaxTokenKind.Punctuation })
+
+        // Indented commit message and `+`/`-` prose lines outside a hunk stay pure Diff (no Kotlin sub-highlighting)
+        val proseStart = logAndSignature.indexOf("    val indentedProse = 99")
+        val proseEnd = proseStart + "    val indentedProse = 99".length
+        val proseTokens = logTokens.filter { it.startIndex >= proseStart && it.endIndex <= proseEnd }
+        assertEquals(2, proseTokens.size)
+        assertEquals(SyntaxTokenKind.Whitespace, proseTokens[0].kind)
+        assertEquals(SyntaxTokenKind.Plain, proseTokens[1].kind)
+        assertEquals("   val indentedProse = 99", proseTokens[1].slice(logAndSignature))
+
+        val bulletStart = logAndSignature.indexOf("+   bulletedCommitNote")
+        val bulletEnd = bulletStart + "+   bulletedCommitNote".length
+        val bulletTokens = logTokens.filter { it.startIndex >= bulletStart && it.endIndex <= bulletEnd }
+        assertEquals(2, bulletTokens.size)
+        assertEquals(SyntaxTokenKind.Punctuation, bulletTokens[0].kind)
+        assertEquals(SyntaxTokenKind.String, bulletTokens[1].kind)
+
+        // Context hunk for .kt followed immediately by unified --- unknown.xyz resets language
+        val ctxThenUnified = "*** a/Ctx.kt\t2026-11-23\n" +
+            "--- b/Ctx.kt\t2026-11-23\n" +
+            "***************\n" +
+            "*** 1,1 ****\n" +
+            "- val ktOld = 1\n" +
+            "--- c/unknown.unknownext\n" +
+            "+++ c/unknown.unknownext\n" +
+            "@@ -1 +1 @@\n" +
+            "-val stayPlain = 1\n" +
+            "+val stayString = 2\n"
+        val resetTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, ctxThenUnified, "ctx-to-unified-reset")
+        assertTrue(resetTokens.any { it.slice(ctxThenUnified) == "c/unknown.unknownext" && it.kind == SyntaxTokenKind.Keyword })
+        val unkAddStart = ctxThenUnified.indexOf("+val stayString = 2")
+        val unkAddEnd = unkAddStart + "+val stayString = 2".length
+        val unkAddTokens = resetTokens.filter { it.startIndex >= unkAddStart && it.endIndex <= unkAddEnd }
+        assertEquals(2, unkAddTokens.size)
+        assertEquals(SyntaxTokenKind.Punctuation, unkAddTokens[0].kind)
+        assertEquals(SyntaxTokenKind.String, unkAddTokens[1].kind)
+    }
+
+    @Test
+    fun handlesCopyModeHeadersOctopusCombinedHunksSurrogateOffsetsAndMarkdownDiff() {
+        val richDiff = "diff --git a/src/A.kt b/src/B.kt\n" +
+            "old mode 100644\n" +
+            "new mode 100755\n" +
+            "copy from src/A.kt\n" +
+            "copy to src/B.kt\n" +
+            "diff --git a/New.kt b/New.kt\n" +
+            "new file mode 100644\n" +
+            "--- /dev/null\n" +
+            "+++ b/New.kt\n" +
+            "@@ -0,0 +1,1 @@\n" +
+            "+val rocket = \"🚀\" + 42\n" +
+            "diff --git a/Gone.kt b/Gone.kt\n" +
+            "deleted file mode 100644\n" +
+            "--- a/Gone.kt\n" +
+            "+++ /dev/null\n" +
+            "@@ -1,1 +0,0 @@\n" +
+            "-val gone = 99\n" +
+            "diff --combined Octo.kt\n" +
+            "@@@@ -1,1 -1,1 -1,1 +1,1 @@@@\n" +
+            "---val octoOld = 1\n" +
+            "+++val octoNew = 7\n"
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, richDiff, "copy-mode-octopus-surrogate")
+
+        for (header in listOf("old mode 100644", "new mode 100755", "copy from src/A.kt", "copy to src/B.kt", "new file mode 100644", "deleted file mode 100644")) {
+            assertTrue(tokens.any { it.slice(richDiff) == header && it.kind == SyntaxTokenKind.Keyword }, "Missing header token: $header")
+        }
+
+        // Exact UTF-16 offset after surrogate-pair emoji `🚀`
+        val numOffset = richDiff.indexOf("42")
+        val numToken = tokens.first { it.startIndex == numOffset }
+        assertEquals(SyntaxTokenKind.Number, numToken.kind)
+        assertEquals("42", numToken.slice(richDiff))
+        assertEquals(numOffset + 2, numToken.endIndex)
+
+        // Octopus @@@@ combined hunk sub-highlighted as Kotlin
+        val octoStart = richDiff.indexOf("+++val octoNew = 7")
+        val octoEnd = octoStart + "+++val octoNew = 7".length
+        val octoTokens = tokens.filter { it.startIndex >= octoStart && it.endIndex <= octoEnd }
+        assertEquals("+++", octoTokens[0].slice(richDiff))
+        assertEquals(SyntaxTokenKind.Punctuation, octoTokens[0].kind)
+        assertTrue(octoTokens.any { it.slice(richDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(octoTokens.any { it.slice(richDiff) == "7" && it.kind == SyntaxTokenKind.Number })
+
+        // Markdown diff: lossless in isolation; 1-level non-recursive when Markdown lexer is registered
+        val mdDiff = "diff --git a/README.md b/README.md\n" +
+            "--- a/README.md\n" +
+            "+++ b/README.md\n" +
+            "@@ -1,4 +1,4 @@\n" +
+            " # Title\n" +
+            " ```kotlin\n" +
+            "-val old = 1\n" +
+            "+val new = 2\n" +
+            " ```\n"
+        val mdTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, mdDiff, "diff-of-markdown")
+        if (SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Markdown) != null) {
+            assertTrue(mdTokens.none { it.slice(mdDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+        }
     }
 
     @Test

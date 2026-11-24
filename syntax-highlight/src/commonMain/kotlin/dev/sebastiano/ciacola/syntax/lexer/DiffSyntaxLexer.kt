@@ -208,6 +208,7 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.UNIFIED_FROM_FILE,
                 DiffTokens.NH_UNIFIED_FROM_FILE,
                 DiffTokens.BP_UNIFIED_FROM,
+                DiffTokens.CX_TO_FILE,
                 -> {
                     hunk.flushIfActive(out)
                     state.onFromFile(parsePrefixedPath(source, start, end, 3))
@@ -218,7 +219,6 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.UNIFIED_TO_FILE,
                 DiffTokens.NH_UNIFIED_TO_FILE,
                 DiffTokens.BP_UNIFIED_TO,
-                DiffTokens.CX_TO_FILE,
                 -> {
                     hunk.flushIfActive(out)
                     state.onToFile(parsePrefixedPath(source, start, end, 3))
@@ -353,18 +353,48 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 }
 
                 DiffTokens.UNIFIED_ADD_PREFIX,
-                DiffTokens.UH_ADD_PREFIX,
                 DiffTokens.NORMAL_ADD_PREFIX,
+                DiffTokens.UNIFIED_DEL_PREFIX,
+                DiffTokens.NORMAL_DEL_PREFIX,
+                DiffTokens.CONTEXT_CHG_PREFIX,
+                DiffTokens.DEFAULT_SPACE_PREFIX,
+                -> {
+                    // Outside an active hunk header: flush any completed hunk and emit pure Diff
+                    // tokens so commit messages, diffstats, and `-- ` signatures never sub-highlight.
+                    hunk.flushIfActive(out)
+                    val lineKind = classifyLinePrefix(type, source, start, end, ContextSide.NEW)
+                    val markerKind = if (lineKind == LineRole.CONTEXT) {
+                        SyntaxTokenKind.Whitespace
+                    } else {
+                        SyntaxTokenKind.Punctuation
+                    }
+                    out += SyntaxToken(markerKind, start, end)
+                    if (i + 1 < count && rawTypes[i + 1] == DiffTokens.BODY_TEXT) {
+                        val bodyStart = rawStarts[i + 1]
+                        val bodyEnd = rawEnds[i + 1]
+                        val bodyKind = when (lineKind) {
+                            LineRole.ADDED -> SyntaxTokenKind.String
+                            LineRole.DELETED -> SyntaxTokenKind.Keyword
+                            LineRole.CHANGED_OLD, LineRole.CHANGED_NEW -> SyntaxTokenKind.Type
+                            LineRole.CONTEXT -> SyntaxTokenKind.Plain
+                        }
+                        out += SyntaxToken(bodyKind, bodyStart, bodyEnd)
+                        i++
+                    }
+                    if (i + 1 < count && rawTypes[i + 1] == DiffTokens.BODY_NEWLINE) {
+                        out += SyntaxToken(SyntaxTokenKind.Whitespace, rawStarts[i + 1], rawEnds[i + 1])
+                        i++
+                    }
+                    i++
+                }
+
+                DiffTokens.UH_ADD_PREFIX,
                 DiffTokens.NH_ADD_PREFIX,
                 DiffTokens.CX_ADD_PREFIX,
-                DiffTokens.UNIFIED_DEL_PREFIX,
                 DiffTokens.UH_DEL_PREFIX,
-                DiffTokens.NORMAL_DEL_PREFIX,
                 DiffTokens.NH_DEL_PREFIX,
                 DiffTokens.CX_DEL_PREFIX,
-                DiffTokens.CONTEXT_CHG_PREFIX,
                 DiffTokens.CX_CHG_PREFIX,
-                DiffTokens.DEFAULT_SPACE_PREFIX,
                 DiffTokens.UH_CTX_PREFIX,
                 DiffTokens.CX_CTX_PREFIX,
                 DiffTokens.CH_PREFIX,
@@ -667,8 +697,6 @@ private class HunkAccumulator {
     private val entries = ArrayList<HunkEntry>()
     private val oldBuffer = StringBuilder()
     private val newBuffer = StringBuilder()
-    private val oldMappings = ArrayList<LineProjectionMapping>()
-    private val newMappings = ArrayList<LineProjectionMapping>()
     private var hasOldMappedLines = false
     private var hasNewMappedLines = false
 
@@ -724,7 +752,6 @@ private class HunkAccumulator {
                         bufBodyEnd = bufEnd,
                         fallbackKind = fallbackKind,
                     )
-                    newMappings += mapping
                     entries += HunkEntry.Body(mapping)
                     hasNewMappedLines = true
                 }
@@ -746,7 +773,6 @@ private class HunkAccumulator {
                         bufBodyEnd = bufEnd,
                         fallbackKind = fallbackKind,
                     )
-                    oldMappings += mapping
                     entries += HunkEntry.Body(mapping)
                     hasOldMappedLines = true
                 }
@@ -775,7 +801,6 @@ private class HunkAccumulator {
                             bufBodyEnd = oldBufEnd,
                             fallbackKind = fallbackKind,
                         )
-                        oldMappings += mapping
                         entries += HunkEntry.Body(mapping)
                         hasOldMappedLines = true
                     } else {
@@ -787,7 +812,6 @@ private class HunkAccumulator {
                             bufBodyEnd = newBufEnd,
                             fallbackKind = fallbackKind,
                         )
-                        newMappings += mapping
                         entries += HunkEntry.Body(mapping)
                         hasNewMappedLines = true
                     }
@@ -889,8 +913,6 @@ private class HunkAccumulator {
         entries.clear()
         oldBuffer.setLength(0)
         newBuffer.setLength(0)
-        oldMappings.clear()
-        newMappings.clear()
         hasOldMappedLines = false
         hasNewMappedLines = false
     }

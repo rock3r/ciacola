@@ -9,7 +9,7 @@ internal object DiffOracleFixtures {
             "index 1234567..abcdef0 100644\n" +
             "--- a/docs/notes.txt\n" +
             "+++ b/docs/notes.txt\n" +
-            "@@ -1,4 +1,5 @@ section header\n" +
+            "@@ -1,2 +1,2 @@ section header\n" +
             " unchanged line\n" +
             "-removed line\n" +
             "+added line\n" +
@@ -49,7 +49,7 @@ internal object DiffOracleFixtures {
             OracleTokenExpectation("+++", 96, 99, SyntaxTokenKind.Punctuation, SyntaxTokenKind.String, note = "STRICT: to-file prefix"),
             OracleTokenExpectation("b/docs/notes.txt", 100, 116, SyntaxTokenKind.String, SyntaxTokenKind.String),
             OracleTokenExpectation("@@", 117, 119, SyntaxTokenKind.Punctuation, SyntaxTokenKind.Number, note = "STRICT: unified hunk open delimiter"),
-            OracleTokenExpectation("-1,4 +1,5", 120, 129, SyntaxTokenKind.Number, SyntaxTokenKind.Number, note = "STRICT: unified hunk range"),
+            OracleTokenExpectation("-1,2 +1,2", 120, 129, SyntaxTokenKind.Number, SyntaxTokenKind.Number, note = "STRICT: unified hunk range"),
             OracleTokenExpectation("@@", 130, 132, SyntaxTokenKind.Punctuation, SyntaxTokenKind.Number, note = "STRICT: unified hunk close delimiter"),
             OracleTokenExpectation("section header", 133, 147, SyntaxTokenKind.Plain, SyntaxTokenKind.Plain),
             OracleTokenExpectation("unchanged line", 149, 163, SyntaxTokenKind.Plain, SyntaxTokenKind.Plain),

@@ -85,19 +85,19 @@ CONTEXT_SEPARATOR
     ;
 
 CONTEXT_FILE_HEADER
-    : '***' [ \t]+ ~[\r\n]+
+    : '***' [ \t]+ ~[ \t\r\n] ~[\r\n]*
     ;
 
 UNIFIED_FROM_FILE
-    : '---' [ \t]+ ~[\r\n]+
+    : '---' [ \t]+ ~[ \t\r\n] ~[\r\n]*
     ;
 
 UNIFIED_TO_FILE
-    : '+++' [ \t]+ ~[\r\n]+
+    : '+++' [ \t]+ ~[ \t\r\n] ~[\r\n]*
     ;
 
 SEPARATOR_TRIPLE_DASH
-    : '---' [ \t]*
+    : '---' '-'* [ \t]*
     ;
 
 HUNK_HEADER_UNIFIED

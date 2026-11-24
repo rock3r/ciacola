@@ -16,7 +16,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
     private var combinedOldRemaining: IntArray = IntArray(4)
     private var combinedOldCount: Int = 0
     private var combinedNewRemaining: Int = 0
-    private var activeHunkKind: Int = HUNK_NONE
     private var atHunkLineStart: Boolean = false
 
     override fun reset() {
@@ -30,7 +29,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         combinedPrefixWidth = 2
         combinedOldCount = 0
         combinedNewRemaining = 0
-        activeHunkKind = HUNK_NONE
         atHunkLineStart = false
     }
 
@@ -79,7 +77,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
 
         unifiedOldRemaining = oldCount
         unifiedNewRemaining = newCount
-        activeHunkKind = HUNK_UNIFIED
         if (unifiedOldRemaining > 0 || unifiedNewRemaining > 0) {
             mode(unifiedHunkMode)
         } else {
@@ -144,7 +141,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         combinedOldCount = parentIdx.coerceAtMost(width)
-        activeHunkKind = HUNK_COMBINED
         if (!isCombinedExhausted()) {
             mode(combinedHunkMode)
         } else {
@@ -177,7 +173,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
             unifiedNewRemaining--
         }
         if (unifiedOldRemaining <= 0 && unifiedNewRemaining <= 0) {
-            activeHunkKind = HUNK_NONE
             atHunkLineStart = false
             mode(defaultMode)
         }
@@ -193,7 +188,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
             }
         }
         if (isCombinedExhausted()) {
-            activeHunkKind = HUNK_NONE
             atHunkLineStart = false
             mode(defaultMode)
         }
@@ -247,11 +241,9 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         }
         atHunkLineStart = true
         if (_mode == unifiedHunkMode && unifiedOldRemaining <= 0 && unifiedNewRemaining <= 0) {
-            activeHunkKind = HUNK_NONE
             atHunkLineStart = false
             mode(defaultMode)
         } else if (_mode == combinedHunkMode && isCombinedExhausted()) {
-            activeHunkKind = HUNK_NONE
             atHunkLineStart = false
             mode(defaultMode)
         }
@@ -279,9 +271,6 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private companion object {
-        private const val HUNK_NONE = 0
-        private const val HUNK_UNIFIED = 1
-        private const val HUNK_COMBINED = 2
         private const val MAX_COUNT_SATURATION = 1_000_000_000
     }
 }
