@@ -2,9 +2,8 @@ package dev.sebastiano.ciacola.decks
 
 import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.review.SlideReviewComment
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -29,6 +28,7 @@ internal object DeckReviewCli {
     const val EXIT_OK = 0
     const val EXIT_TIMEOUT = 3
     const val EXIT_NOT_FOUND = 4
+    const val EXIT_UNREADABLE = 5
 
     const val COMMENTS_FILE_NAME = "review-comments.json"
     const val TAKEN_FILE_NAME = "review-agent-taken.json"
@@ -46,26 +46,50 @@ internal object DeckReviewCli {
     @Serializable
     internal data class TakenState(val takenIds: List<String> = emptyList())
 
-    /** Reads the deck's queued comments, tolerating a missing file or a half-written one. */
+    /**
+     * Reads the deck's queued comments.
+     *
+     * No file at all is an empty queue: an agent may legitimately start waiting before the author
+     * has written anything. A file that exists and will not parse is an error, not an empty queue
+     * — collapsing the two turns a corrupt file into a wait that never returns, an export that
+     * prints `[]`, and a resolve that blames the agent for an id the file still contains.
+     */
     fun readComments(commentsFile: Path): List<SlideReviewComment> {
-        if (!Files.isRegularFile(commentsFile)) return emptyList()
-        val text = runCatching { Files.readString(commentsFile) }.getOrNull() ?: return emptyList()
+        val text = DeckReviewQueueFile.readTextOrNull(commentsFile) ?: return emptyList()
         if (text.isBlank()) return emptyList()
-        return runCatching { lenientJson.decodeFromString<List<SlideReviewComment>>(text) }
-            .getOrDefault(emptyList())
+        return try {
+            lenientJson.decodeFromString<List<SlideReviewComment>>(text)
+        } catch (e: SerializationException) {
+            throw DeckReviewQueueFile.Unreadable(commentsFile, e)
+        }
     }
 
-    fun readTaken(takenFile: Path): Set<String> {
-        if (!Files.isRegularFile(takenFile)) return emptySet()
-        val text = runCatching { Files.readString(takenFile) }.getOrNull() ?: return emptySet()
+    /**
+     * Reads this agent's claims.
+     *
+     * Unlike the queue, an unparsable sidecar is recoverable: it is the agent's own bookkeeping,
+     * and forgetting it replays a comment rather than losing one. It is still reported, because
+     * silently replaying every comment ever taken looks like the deck gone mad.
+     */
+    fun readTaken(takenFile: Path, warn: (String) -> Unit = {}): Set<String> {
+        val text = runCatching { DeckReviewQueueFile.readTextOrNull(takenFile) }
+            .getOrElse {
+                warn("Could not read ${takenFile.toAbsolutePath()}, treating it as empty: ${it.message}")
+                null
+            } ?: return emptySet()
         if (text.isBlank()) return emptySet()
         return runCatching { lenientJson.decodeFromString<TakenState>(text).takenIds.toSet() }
-            .getOrDefault(emptySet())
+            .getOrElse {
+                warn("Ignoring unreadable claims in ${takenFile.toAbsolutePath()}: ${it.message}")
+                emptySet()
+            }
     }
 
     fun writeTaken(takenFile: Path, ids: Set<String>) {
-        takenFile.parent?.let { Files.createDirectories(it) }
-        Files.writeString(takenFile, prettyJson.encodeToString(TakenState(ids.toList().sorted())) + "\n")
+        DeckReviewQueueFile.writeAtomically(
+            takenFile,
+            prettyJson.encodeToString(TakenState(ids.toList().sorted())) + "\n",
+        )
     }
 
     /**
@@ -84,10 +108,17 @@ internal object DeckReviewCli {
         comments: List<SlideReviewComment>,
         taken: Set<String>,
     ): List<SlideReviewComment> =
-        comments.filter {
-            (it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed) &&
-                it.id !in taken
-        }
+        comments.filter { isPendingStatus(it.status) && it.id !in taken }
+
+    /**
+     * Flattens a value onto one line.
+     *
+     * [formatComments] joins with newlines and the output is parsed a line at a time, so a note
+     * written across two lines would otherwise arrive as two comments, the second of them
+     * nonsense.
+     */
+    private fun singleLine(value: String): String =
+        value.replace(Regex("\\R+"), " ").trim()
 
     /** One line per comment, enough for an agent to act without opening the file. */
     fun formatComment(comment: SlideReviewComment): String {
@@ -100,8 +131,8 @@ internal object DeckReviewCli {
             append(comment.id)
             append(" | slide=").append(slide)
             if (node != null) append(" node=").append(node)
-            if (target != null) append(" | target=").append(target.take(80))
-            append(" | note=").append(comment.note)
+            if (target != null) append(" | target=").append(singleLine(target.take(80)))
+            append(" | note=").append(singleLine(comment.note))
             comment.screenshotPath?.takeIf { it.isNotBlank() }?.let { append(" | capture=").append(it) }
         }
     }
@@ -129,17 +160,30 @@ internal object DeckReviewCli {
         nowMillis: () -> Long = System::currentTimeMillis,
         sleep: (Long) -> Unit = { Thread.sleep(it) },
     ): Int {
+        val dir = commentsFile.toAbsolutePath().parent
         val deadline = nowMillis() + timeoutMillis
         while (true) {
-            val taken = readTaken(takenFile)
-            val pending = pendingComments(readComments(commentsFile), taken)
-            if (pending.isNotEmpty()) {
-                out(formatComments(pending))
-                writeTaken(takenFile, taken + pending.map { it.id })
+            // Reading the claims, choosing what is pending and recording the claim is one
+            // transaction: two waiters that interleave here both hand the author's note to their
+            // own conversation, and the author gets two agents editing the same slide.
+            val claimed = DeckReviewQueueFile.withLock(dir) {
+                val taken = readTaken(takenFile, warn = out)
+                val pending = pendingComments(readComments(commentsFile), taken)
+                if (pending.isEmpty()) {
+                    null
+                } else {
+                    writeTaken(takenFile, taken + pending.map { it.id })
+                    pending
+                }
+            }
+            if (claimed != null) {
+                out(formatComments(claimed))
                 return EXIT_OK
             }
-            if (nowMillis() >= deadline) return EXIT_TIMEOUT
-            sleep(pollMillis)
+            val remaining = deadline - nowMillis()
+            if (remaining <= 0) return EXIT_TIMEOUT
+            // Never sleep past the deadline: --timeout=100ms must not block for a whole poll.
+            sleep(minOf(pollMillis, remaining))
         }
     }
 
@@ -155,50 +199,56 @@ internal object DeckReviewCli {
         commentId: String,
         resolution: String,
         status: ReviewCommentStatus = ReviewCommentStatus.Applied,
+        takenFile: Path? = null,
         out: (String) -> Unit = ::println,
     ): Int {
-        val comments = readComments(commentsFile)
-        if (comments.none { it.id == commentId }) {
+        val dir = commentsFile.toAbsolutePath().parent
+        // Read and replace under the lock. Outside it, a comment the author queues between the
+        // read and the write is erased by this stale copy, and nothing anywhere reports it.
+        val found = DeckReviewQueueFile.withLock(dir) {
+            val comments = readComments(commentsFile)
+            if (comments.none { it.id == commentId }) {
+                false
+            } else {
+                val updated = comments.map { comment ->
+                    if (comment.id != commentId) {
+                        comment
+                    } else {
+                        comment.copy(
+                            status = status,
+                            resolution = resolution,
+                            // The old failure is no longer the comment's state; leaving it behind
+                            // would keep showing the author a stale error next to a resolved pin.
+                            deliveryError = if (status == ReviewCommentStatus.Applied) {
+                                null
+                            } else {
+                                comment.deliveryError
+                            },
+                        )
+                    }
+                }
+                DeckReviewQueueFile.writeAtomically(commentsFile, encodeComments(updated) + "\n")
+                // Handing a comment back to the queue has to hand back the claim with it.
+                // Otherwise the comment reads as waiting in the UI for ever while every future
+                // wait skips it as already taken: stranded in plain sight.
+                if (takenFile != null && isPendingStatus(status)) {
+                    val taken = readTaken(takenFile, warn = out)
+                    if (commentId in taken) writeTaken(takenFile, taken - commentId)
+                }
+                true
+            }
+        }
+        if (!found) {
             out("No review comment with id '$commentId' in ${commentsFile.toAbsolutePath()}")
             return EXIT_NOT_FOUND
         }
-        val updated = comments.map { comment ->
-            if (comment.id != commentId) {
-                comment
-            } else {
-                comment.copy(
-                    status = status,
-                    resolution = resolution,
-                    // The old failure is no longer the comment's state; leaving it behind would
-                    // keep showing the author a stale error next to a resolved pin.
-                    deliveryError = if (status == ReviewCommentStatus.Applied) null else comment.deliveryError,
-                )
-            }
-        }
-        writeCommentsAtomically(commentsFile, updated)
         out("$commentId -> ${status.name.lowercase()}${if (resolution.isBlank()) "" else ": $resolution"}")
         return EXIT_OK
     }
 
-    /**
-     * Replaces the queue via a temporary file and an atomic move.
-     *
-     * The deck re-reads this file every 250 ms while the review UI is open, so a plain truncating
-     * write would eventually be caught mid-flight.
-     */
-    private fun writeCommentsAtomically(commentsFile: Path, comments: List<SlideReviewComment>) {
-        val dir = commentsFile.toAbsolutePath().parent
-        Files.createDirectories(dir)
-        val tmp = Files.createTempFile(dir, "review-comments", ".json.tmp")
-        try {
-            Files.writeString(tmp, prettyJson.encodeToString(comments) + "\n")
-            runCatching { Files.move(tmp, commentsFile, StandardCopyOption.ATOMIC_MOVE) }
-                .recoverCatching { Files.move(tmp, commentsFile, StandardCopyOption.REPLACE_EXISTING) }
-                .getOrThrow()
-        } finally {
-            runCatching { Files.deleteIfExists(tmp) }
-        }
-    }
+    /** Statuses [pendingComments] hands to an agent, and so the ones a claim must not outlive. */
+    fun isPendingStatus(status: ReviewCommentStatus): Boolean =
+        status == ReviewCommentStatus.Queued || status == ReviewCommentStatus.Failed
 
     /** Prints the queued comments without blocking and without recording them taken. */
     fun runExport(
@@ -208,13 +258,14 @@ internal object DeckReviewCli {
         jsonOutput: Boolean,
         out: (String) -> Unit = ::println,
     ): Int {
-        val comments = readComments(commentsFile)
-        val selected = if (includeTaken) {
-            comments.filter {
-                it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+        val dir = commentsFile.toAbsolutePath().parent
+        val selected = DeckReviewQueueFile.withLock(dir) {
+            val comments = readComments(commentsFile)
+            if (includeTaken) {
+                comments.filter { isPendingStatus(it.status) }
+            } else {
+                pendingComments(comments, readTaken(takenFile, warn = out))
             }
-        } else {
-            pendingComments(comments, readTaken(takenFile))
         }
         out(if (jsonOutput) encodeComments(selected) else formatComments(selected))
         return EXIT_OK

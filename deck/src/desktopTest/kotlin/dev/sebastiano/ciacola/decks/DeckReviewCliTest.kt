@@ -7,6 +7,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
@@ -90,17 +91,118 @@ class DeckReviewCliTest {
     }
 
     @Test
-    fun aMissingOrUnreadableQueueReadsAsEmptyRatherThanThrowing() {
+    fun aQueueThatDoesNotExistYetIsSimplyEmpty() {
         val dir = Files.createTempDirectory("review-cli")
         val missing = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        // An agent may start waiting before the author has written anything.
         assertTrue(DeckReviewCli.readComments(missing).isEmpty())
 
         Files.writeString(missing, "")
         assertTrue(DeckReviewCli.readComments(missing).isEmpty())
+    }
 
-        // The deck rewrites this file wholesale, so a read can land mid-write.
-        Files.writeString(missing, "[{\"id\": \"half")
-        assertTrue(DeckReviewCli.readComments(missing).isEmpty())
+    @Test
+    fun aCorruptQueueIsReportedRatherThanPassedOffAsEmpty() {
+        val dir = Files.createTempDirectory("review-cli")
+        val file = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        Files.writeString(file, "[{\"id\": \"half")
+
+        // Reading it as "no comments" turns a corrupt file into a wait that never returns, an
+        // export that prints [], and a resolve that blames the agent for an id the file holds.
+        val failure = assertFailsWith<DeckReviewQueueFile.Unreadable> { DeckReviewCli.readComments(file) }
+        assertTrue(failure.message.orEmpty().contains(file.toAbsolutePath().toString()), failure.message)
+    }
+
+    @Test
+    fun requeueingAlsoHandsBackTheClaimSoTheCommentIsNotStrandedForEver() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        var now = 0L
+
+        assertEquals(
+            DeckReviewCli.EXIT_OK,
+            DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, {}, { now }, { now += it }),
+        )
+        assertEquals(setOf("rc-1"), DeckReviewCli.readTaken(takenFile))
+
+        // An agent that cannot act on a note puts it back. Keeping the claim would leave the
+        // comment waiting in the UI while every future wait skips it as already taken.
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-1",
+            resolution = "needs a decision from the author",
+            status = ReviewCommentStatus.Queued,
+            takenFile = takenFile,
+            out = {},
+        )
+        assertTrue(DeckReviewCli.readTaken(takenFile).isEmpty())
+
+        val second = mutableListOf<String>()
+        assertEquals(
+            DeckReviewCli.EXIT_OK,
+            DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, second::add, { now }, { now += it }),
+        )
+        assertTrue(second.single().contains("rc-1"))
+    }
+
+    @Test
+    fun resolvingDoesNotEraseACommentQueuedWhileItWasWorking() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+
+        // The author queues rc-2 while the agent is resolving rc-1. Both are whole-file writers,
+        // so without the shared lock the agent's stale copy replaces rc-2 and nothing says so.
+        val queuedMeanwhile = Thread {
+            DeckReviewQueueFile.withLock(dir) {
+                val now = DeckReviewCli.readComments(commentsFile)
+                DeckReviewQueueFile.writeAtomically(
+                    commentsFile,
+                    DeckReviewCli.encodeComments(now + comment("rc-2")),
+                )
+            }
+        }
+        queuedMeanwhile.start()
+        queuedMeanwhile.join()
+
+        DeckReviewCli.runResolve(commentsFile, "rc-1", "done", out = {})
+
+        val after = DeckReviewCli.readComments(commentsFile)
+        assertEquals(listOf("rc-1", "rc-2"), after.map { it.id })
+        assertEquals(ReviewCommentStatus.Applied, after.single { it.id == "rc-1" }.status)
+    }
+
+    @Test
+    fun aNoteWrittenAcrossLinesStaysOneComment() {
+        val formatted = DeckReviewCli.formatComment(
+            comment("rc-1").copy(note = "remove the bar\nand tighten the frame"),
+        )
+        assertEquals(1, formatted.lines().size, formatted)
+        assertTrue(formatted.contains("remove the bar and tighten the frame"), formatted)
+    }
+
+    @Test
+    fun waitingDoesNotSleepPastItsOwnDeadline() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir)
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        var now = 0L
+        val slept = mutableListOf<Long>()
+
+        DeckReviewCli.runWait(commentsFile, takenFile, 100L, 1_000L, {}, { now }, { slept.add(it); now += it })
+
+        // --timeout=100ms must not block for a whole poll interval.
+        assertTrue(slept.all { it <= 100L }, "slept for $slept")
+        assertEquals(100L, slept.sum())
+    }
+
+    @Test
+    fun aDeckPathPicksTheSameQueueTheAppWritesTo() {
+        // The usage text allows --deck=<id|path>; storyboardDirForDeck sanitizes whatever it gets
+        // into one directory name, so a path would otherwise select a queue nothing writes to.
+        assertEquals("as-ide-talk", reviewDeckIdFor("/Talks/as-ide-talk/as-ide-talk.deck.json"))
+        assertEquals("as-ide-talk", reviewDeckIdFor("as-ide-talk.deck.json"))
+        assertEquals("as-ide-talk", reviewDeckIdFor("as-ide-talk"))
     }
 
     @Test

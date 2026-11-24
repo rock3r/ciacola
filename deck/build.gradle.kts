@@ -232,7 +232,9 @@ val requestedStoryboardDirProp = ciacolaArgProp("ciacola.storyboardDir")
 tasks.register<JavaExec>("reviewWait") {
     description =
         "Blocks until the author queues a review comment, prints it, and records it taken " +
-            "(exit 3 on timeout; use -Pciacola.deck=<id> -Pciacola.timeout=30m)."
+            "(use -Pciacola.deck=<id> -Pciacola.timeout=30m). Gradle reports every failure as " +
+            "exit 1, so a timeout is told apart by its message, not its code; call DeckAgentCli " +
+            "directly for the numeric codes."
     group = "verification"
     javaLauncher.set(jbr25)
     mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")

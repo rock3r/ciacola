@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -156,7 +157,12 @@ internal fun BoxScope.ReviewActivityNoticeBar(
             contentDescription = null,
             modifier = Modifier.size(14.dp).padding(top = 2.dp),
         )
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        // Weighted, so a long delivery error cannot consume the row's width before the two
+        // buttons are measured and leave them clipped to nothing.
+        Column(
+            modifier = Modifier.weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             Text(
                 text = notice.title,
                 style = JewelTheme.typography.medium,
@@ -191,19 +197,28 @@ internal fun BoxScope.ReviewActivityNoticeBar(
 }
 
 /**
- * Whether [bin] names something executable: an absolute or relative path that is executable, or a
- * bare name found on [path].
+ * Whether [bin] names something executable: a path that is executable, or a bare name on [path].
+ *
+ * A relative command resolves against [baseDir], not the process's working directory, because
+ * that is what the push itself does — it sets `ProcessBuilder.directory(workspaceRoot)`. Checking
+ * the two against different roots hides Send for a `./tools/agentapi` that would have run, or
+ * offers it for one that would not.
  */
 internal fun isExecutableAvailable(
     bin: String,
     path: String?,
+    baseDir: java.nio.file.Path? = null,
     isExecutable: (java.nio.file.Path) -> Boolean = {
         java.nio.file.Files.isExecutable(it) && !java.nio.file.Files.isDirectory(it)
     },
 ): Boolean {
     val trimmed = bin.trim()
     if (trimmed.isEmpty()) return false
-    if (trimmed.contains('/')) return isExecutable(java.nio.file.Path.of(trimmed))
+    if (trimmed.contains('/')) {
+        val candidate = java.nio.file.Path.of(trimmed)
+        val resolved = if (candidate.isAbsolute || baseDir == null) candidate else baseDir.resolve(candidate)
+        return isExecutable(resolved.normalize())
+    }
     return path.orEmpty()
         .split(java.io.File.pathSeparatorChar)
         .filter { it.isNotBlank() }

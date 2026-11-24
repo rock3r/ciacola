@@ -63,6 +63,9 @@ class SlideReviewWindow(
         internal set
 
     fun openForAgentConfiguration() {
+        // The usual reason for opening this panel is to go and install or configure the thing
+        // that is missing, so take the chance to ask the filesystem again.
+        store.refreshPushAvailability()
         highlightAgentConfigBanner = true
         visible = true
     }

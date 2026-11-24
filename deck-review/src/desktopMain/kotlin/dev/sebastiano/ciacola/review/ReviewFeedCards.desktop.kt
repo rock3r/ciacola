@@ -288,6 +288,7 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
             }
 
             if (store.comments.isNotEmpty()) {
+                val pushAvailable = store.agentPushAvailable()
                 val queuedItems = store.comments.filter {
                     it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
                 }
@@ -296,9 +297,20 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Tooltip(tooltip = { Text("Dispatch all queued and failed comments to target agent") }) {
+                    Tooltip(
+                        tooltip = {
+                            Text(
+                                if (pushAvailable) {
+                                    "Dispatch all queued and failed comments to target agent"
+                                } else {
+                                    "No push command is installed — an agent on :deck:reviewWait " +
+                                        "collects these from the queue"
+                                },
+                            )
+                        },
+                    ) {
                         DefaultButton(
-                            enabled = queuedCount > 0 && effectiveConvId.isNotBlank(),
+                            enabled = queuedCount > 0 && effectiveConvId.isNotBlank() && pushAvailable,
                             onClick = {
                                 if (typedConvId.isNotEmpty() && typedConvId != store.config.conversationId) {
                                     store.saveConfig(store.config.copy(conversationId = typedConvId))

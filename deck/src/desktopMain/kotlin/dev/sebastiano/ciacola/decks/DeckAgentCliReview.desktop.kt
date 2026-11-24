@@ -35,6 +35,22 @@ internal fun parseReviewTimeout(raw: String): Long {
 }
 
 /**
+ * The deck id behind a `--deck` argument, which the usage text allows to be an id or a path.
+ *
+ * `storyboardDirForDeck` sanitizes whatever it is given into a single directory name, so handing
+ * it `/Talks/as-ide-talk.deck.json` yields a directory no running deck ever writes to: the agent
+ * then waits on an empty queue for ever and nobody is told why. The app names that deck's
+ * directory after the file's stem, so the stem is what the agent must ask for too.
+ */
+internal fun reviewDeckIdFor(deckArg: String): String {
+    val trimmed = deckArg.trim()
+    val looksLikeAPath = trimmed.endsWith(".deck.json") || trimmed.contains('/') || trimmed.contains('\\')
+    if (!looksLikeAPath) return trimmed
+    return Path.of(trimmed).fileName?.toString()?.removeSuffix(".deck.json")?.takeIf { it.isNotEmpty() }
+        ?: error("Cannot work out a deck id from --deck='$deckArg'")
+}
+
+/**
  * `.storyboard/decks/<deckId>/` for the deck whose review queue the agent is reading.
  *
  * [storyboardDirArg] is the `.storyboard` root, not the directory holding `*.deck.json` files —
@@ -44,16 +60,32 @@ internal fun reviewDirFor(storyboardDirArg: String?, deckId: String): Path {
     val root = storyboardDirArg?.takeIf { it.isNotEmpty() }
         ?.let { Path.of(it).toAbsolutePath().normalize() }
         ?: resolveDefaultStoryboardDir()
-    return storyboardDirForDeck(root, deckId)
+    return storyboardDirForDeck(root, reviewDeckIdFor(deckId))
 }
+
+/**
+ * Turns an unreadable queue into the dedicated exit code and one sentence naming the file.
+ *
+ * Lives here rather than in `DeckAgentCli` only because that file is within a few lines of the
+ * repository's god-file limit.
+ */
+private fun guardQueue(block: () -> Int): Int =
+    try {
+        block()
+    } catch (e: DeckReviewQueueFile.Unreadable) {
+        System.err.println(e.message)
+        DeckReviewCli.EXIT_UNREADABLE
+    }
 
 internal fun runReviewWaitMode(storyboardDirArg: String?, deckId: String, timeoutMillis: Long): Int {
     val dir = reviewDirFor(storyboardDirArg, deckId)
-    return DeckReviewCli.runWait(
-        commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
-        takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME),
-        timeoutMillis = timeoutMillis,
-    )
+    return guardQueue {
+        DeckReviewCli.runWait(
+            commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
+            takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME),
+            timeoutMillis = timeoutMillis,
+        )
+    }
 }
 
 internal fun runReviewResolveMode(
@@ -64,12 +96,15 @@ internal fun runReviewResolveMode(
     status: ReviewCommentStatus,
 ): Int {
     val dir = reviewDirFor(storyboardDirArg, deckId)
-    return DeckReviewCli.runResolve(
-        commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
-        commentId = commentId,
-        resolution = resolution,
-        status = status,
-    )
+    return guardQueue {
+        DeckReviewCli.runResolve(
+            commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
+            commentId = commentId,
+            resolution = resolution,
+            status = status,
+            takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME),
+        )
+    }
 }
 
 internal fun runReviewExportMode(
@@ -79,10 +114,12 @@ internal fun runReviewExportMode(
     jsonOutput: Boolean,
 ): Int {
     val dir = reviewDirFor(storyboardDirArg, deckId)
-    return DeckReviewCli.runExport(
-        commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
-        takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME),
-        includeTaken = includeTaken,
-        jsonOutput = jsonOutput,
-    )
+    return guardQueue {
+        DeckReviewCli.runExport(
+            commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME),
+            takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME),
+            includeTaken = includeTaken,
+            jsonOutput = jsonOutput,
+        )
+    }
 }

@@ -323,7 +323,11 @@ internal fun AnchoredCommentComposerPopup(
                     outline = if (validationError != null && noteState.text.isBlank()) Outline.Error else Outline.None,
                     placeholder = {
                         Text(
-                            text = "Describe what to change (⌘↵ sends)…",
+                            text = if (pushAvailable) {
+                                "Describe what to change (⌘↵ sends)…"
+                            } else {
+                                "Describe what to change (⌘↵ queues)…"
+                            },
                             style = JewelTheme.typography.regular,
                         )
                     },

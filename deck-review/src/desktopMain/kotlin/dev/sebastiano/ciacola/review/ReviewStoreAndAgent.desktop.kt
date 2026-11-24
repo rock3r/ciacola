@@ -86,33 +86,51 @@ class ReviewCommentStore(
      */
     val deliveringIds = SnapshotStateList<String>()
 
+    /** Whether a push command exists; see [agentPushAvailable]. */
+    private var pushBinAvailable: Boolean by mutableStateOf(false)
+
     /** What the last review action did, for [ReviewActivityNoticeBar]. */
     var activityNotice: ReviewActivityNotice? by mutableStateOf(null)
         private set
 
     private var noticeSeq: Long = 0L
 
+    private val noticeLock = Any()
+
     private fun postNotice(
         kind: ReviewNoticeKind,
         text: Pair<String, String>,
         autoDismissMillis: Long?,
     ) {
-        noticeSeq += 1
-        activityNotice = ReviewActivityNotice(
-            id = noticeSeq,
-            kind = kind,
-            title = text.first,
-            detail = text.second,
-            autoDismissMillis = autoDismissMillis,
-        )
+        // Notices are posted from Dispatchers.IO as well as the UI thread. Allocating the id and
+        // publishing it have to be one step, or two notices share an id and the auto-dismiss
+        // timer for the first one takes the second one down with it.
+        synchronized(noticeLock) {
+            noticeSeq += 1
+            activityNotice = ReviewActivityNotice(
+                id = noticeSeq,
+                kind = kind,
+                title = text.first,
+                detail = text.second,
+                autoDismissMillis = autoDismissMillis,
+            )
+        }
     }
 
+    /** Clears the notice only while it is still the one [noticeId] named. */
     fun dismissNotice(noticeId: Long) {
-        if (activityNotice?.id == noticeId) activityNotice = null
+        synchronized(noticeLock) {
+            if (activityNotice?.id == noticeId) activityNotice = null
+        }
     }
 
-    private fun displayNumbersOf(items: List<SlideReviewComment>): List<Int> =
-        items.map { reviewDisplayNumber(comments, it.id) }.sorted()
+    private fun displayNumbersOf(items: List<SlideReviewComment>): List<Int> {
+        // One immutable snapshot: this runs on Dispatchers.IO, and walking the live
+        // SnapshotStateList while the author queues or a reload swaps it can throw mid-dispatch,
+        // after the comment has already been persisted as Applying.
+        val snapshot = comments.toList()
+        return items.map { reviewDisplayNumber(snapshot, it.id) }.sorted()
+    }
 
     private var lastObservedModifiedMillis: Long = -1L
     private var lastObservedFileSize: Long = -1L
@@ -121,6 +139,7 @@ class ReviewCommentStore(
 
     init {
         config = readConfigInternal()
+        refreshPushAvailability()
         reloadFromDisk()
     }
 
@@ -199,23 +218,29 @@ class ReviewCommentStore(
         return "agentapi"
     }
 
-    private var pushBinChecked: String? = null
-    private var pushBinAvailable: Boolean = false
-
     /**
      * Whether there is a command on this machine to push a comment to at all.
      *
      * Without one, Send can only ever end where Queue already put the comment, so offering it is
      * a dead end dressed up as an action. The queue is the real path: an agent on
      * `:deck:reviewWait` collects from it.
+     *
+     * The answer is snapshot state so that [refreshPushAvailability] reaches the open UI, and it
+     * is only ever *read* here: this is called from composition, and resolving lazily would mean
+     * writing state while composing, which costs a wasted frame on every store and invites the
+     * loop where the write invalidates its own reader.
      */
-    fun agentPushAvailable(): Boolean {
-        val bin = effectiveAgentApiBin()
-        if (bin != pushBinChecked) {
-            pushBinChecked = bin
-            pushBinAvailable = isExecutableAvailable(bin, envProvider("PATH"))
-        }
-        return pushBinAvailable
+    fun agentPushAvailable(): Boolean = pushBinAvailable
+
+    private fun resolvePushAvailability(bin: String): Boolean =
+        isExecutableAvailable(bin = bin, path = envProvider("PATH"), baseDir = workspaceRoot)
+
+    /**
+     * Re-checks the push command, for the moments where the answer plausibly just changed: the
+     * review panel opening, and a launch that failed.
+     */
+    fun refreshPushAvailability() {
+        pushBinAvailable = resolvePushAvailability(effectiveAgentApiBin())
     }
 
     @Synchronized
@@ -307,7 +332,8 @@ class ReviewCommentStore(
                 kind = ReviewNoticeKind.Queued,
                 text = queuedNotice(
                     numbers = displayNumbersOf(listOf(snapshot)),
-                    agentConfigured = effectiveConversationId().isNotBlank(),
+                    // Not "is a conversation set": whether a Send button exists to be pressed.
+                    agentConfigured = effectiveConversationId().isNotBlank() && agentPushAvailable(),
                 ),
                 autoDismissMillis = QUEUED_NOTICE_MILLIS,
             )
@@ -435,7 +461,13 @@ class ReviewCommentStore(
 
         val bin = effectiveAgentApiBin()
         val message = formatAgentMessage(items)
-        deliveringIds.addAll(items.map { it.id }.filterNot { it in deliveringIds })
+        // Retry Send stays live while a comment is Applying, so a second push can start on top of
+        // the first. They share one entry here, and the first to finish would otherwise report the
+        // comment delivered while the other is still running.
+        val alreadyInFlight = items.filter { it.id in deliveringIds }.map { it.id }.toSet()
+        val mine = items.filterNot { it.id in alreadyInFlight }
+        if (mine.isEmpty()) return@withContext items
+        deliveringIds.addAll(mine.map { it.id })
         postNotice(
             kind = ReviewNoticeKind.Sending,
             text = sendingNotice(numbers),
@@ -464,7 +496,7 @@ class ReviewCommentStore(
             }
         }
 
-        deliveringIds.removeAll(items.map { it.id }.toSet())
+        deliveringIds.removeAll(mine.map { it.id }.toSet())
 
         if (result.isFailure) {
             val cause = result.exceptionOrNull()
@@ -473,7 +505,11 @@ class ReviewCommentStore(
             // listening to push to, and the comment is perfectly well served by staying queued for
             // an agent that polls (`:deck:reviewWait`). Reporting it in red trains the author to
             // ignore the one signal that should mean something went wrong.
-            val noAgentInstalled = isAgentBinaryMissing(cause)
+            // Ask the filesystem rather than the exception text: ProcessBuilder says "Cannot run
+            // program" for a command that is present but not executable, or whose interpreter is
+            // missing, and reporting those as "nothing installed" hides a fault the author can fix.
+            refreshPushAvailability()
+            val noAgentInstalled = isAgentBinaryMissing(cause) && !pushBinAvailable
             postNotice(
                 kind = if (noAgentInstalled) ReviewNoticeKind.NothingToPushTo else ReviewNoticeKind.Failed,
                 text = if (noAgentInstalled) {

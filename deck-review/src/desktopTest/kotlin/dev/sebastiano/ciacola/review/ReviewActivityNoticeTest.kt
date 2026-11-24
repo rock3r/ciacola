@@ -56,21 +56,43 @@ class PushAvailabilityTest {
 
     @Test
     fun aBareNameIsLookedUpOnPath() {
-        assertTrue(isExecutableAvailable("agentapi", "/usr/local/bin:/usr/bin", isExecutable))
-        assertTrue(!isExecutableAvailable("agentapi", "/usr/local/bin:/sbin", isExecutable))
+        assertTrue(isExecutableAvailable("agentapi", "/usr/local/bin:/usr/bin", isExecutable = isExecutable))
+        assertTrue(!isExecutableAvailable("agentapi", "/usr/local/bin:/sbin", isExecutable = isExecutable))
     }
 
     @Test
     fun anExplicitPathIsCheckedDirectlyAndNotSearched() {
-        assertTrue(isExecutableAvailable("/tmp/fake-agentapi.sh", null, isExecutable))
-        assertTrue(!isExecutableAvailable("/tmp/missing.sh", "/usr/bin", isExecutable))
+        assertTrue(isExecutableAvailable("/tmp/fake-agentapi.sh", null, isExecutable = isExecutable))
+        assertTrue(!isExecutableAvailable("/tmp/missing.sh", "/usr/bin", isExecutable = isExecutable))
     }
 
     @Test
     fun nothingConfiguredIsNotSomethingToPushTo() {
-        assertTrue(!isExecutableAvailable("", "/usr/bin", isExecutable))
-        assertTrue(!isExecutableAvailable("  ", "/usr/bin", isExecutable))
-        assertTrue(!isExecutableAvailable("agentapi", null, isExecutable))
-        assertTrue(!isExecutableAvailable("agentapi", "", isExecutable))
+        assertTrue(!isExecutableAvailable("", "/usr/bin", isExecutable = isExecutable))
+        assertTrue(!isExecutableAvailable("  ", "/usr/bin", isExecutable = isExecutable))
+        assertTrue(!isExecutableAvailable("agentapi", null, isExecutable = isExecutable))
+        assertTrue(!isExecutableAvailable("agentapi", "", isExecutable = isExecutable))
+    }
+}
+
+class RelativePushCommandTest {
+
+    @Test
+    fun aRelativeCommandResolvesAgainstTheDirectoryThePushActuallyRunsIn() {
+        val workspace = java.nio.file.Path.of("/repo")
+        val present = setOf("/repo/tools/agentapi")
+        val isExecutable: (java.nio.file.Path) -> Boolean = { it.toString() in present }
+
+        // The push sets ProcessBuilder.directory(workspaceRoot), so the check must use it too:
+        // against the process's own directory this command looks absent and Send disappears.
+        assertTrue(isExecutableAvailable("./tools/agentapi", null, workspace, isExecutable))
+        assertTrue(!isExecutableAvailable("./tools/agentapi", null, java.nio.file.Path.of("/elsewhere"), isExecutable))
+    }
+
+    @Test
+    fun anAbsoluteCommandIgnoresTheWorkspaceRoot() {
+        val present = setOf("/usr/local/bin/agentapi")
+        val isExecutable: (java.nio.file.Path) -> Boolean = { it.toString() in present }
+        assertTrue(isExecutableAvailable("/usr/local/bin/agentapi", null, java.nio.file.Path.of("/repo"), isExecutable))
     }
 }
