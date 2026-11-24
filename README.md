@@ -1,176 +1,100 @@
 ![Ciacola mascot presenting the project name on stage](artwork/ciacola-banner.jpg)
 
-**Ciacola** is an experimental foundation for one Compose Desktop conference talk. Its name comes
-from Venetian *ciàcola* — a chat or conversation — and is pronounced roughly “CHAH-koh-lah”.
+**Ciacola** is an experimental, document-driven Compose Desktop presentation app and authoring studio built on [Storyboard](https://github.com/bnorm/storyboard). Its name comes from Venetian *ciàcola* — a chat or conversation — and is pronounced roughly “CHAH-koh-lah”.
 
-The deck uses [Storyboard](https://github.com/bnorm/storyboard) for scenes, state, navigation,
-transitions, shared elements, and fixed-resolution rendering. The `deck` module adds the visual
-language and a small set of provisional scenes. It is a spike, not a presentation framework and
-not the talk's narrative.
+Decks live in human-readable [`.deck.json`](docs/DECK-SCHEMA.md) files paired with optional live `@Composable` and SkSL shader specimens, so you can edit slides directly in the visual Studio or in JSON without recompiling, while keeping hardware-accelerated animations, Keynote-style transitions, and crisp code morphs.
 
-## What is here
+---
 
-The desktop app presents five scenes with fourteen base states (beats). Together they exercise:
+## Quick start
 
-- deterministic forward and backward navigation;
-- a shared-bounds, Magic-Move-style transition;
-- animation that keeps running without advancing the scene;
-- an animated mesh made from indexed Compose `Vertices`;
-- MagicText transitions for prose;
-- MagicText transitions for syntax-highlighted Kotlin;
-- a Keynote effects lab (builds, staggers, line draws, code morphs, and a magnifier loupe); and
-- a single 1920×1080 design system for type, colour, and spacing.
-
-Around the stage it adds an Easel overview grid, a deck catalog switcher (`DeckCatalog`, shipping
-`Foundation Deck` by default), a Jewel Presenter window with speaker
-notes and display routing, a Ctrl-click slide review flow, selectable-text PDF and 60 fps MP4 video
-export, and a unified Studio workspace combining an After Effects-style Timeline Studio (`Motion`),
-Direct Stage Element & Inline Text Editor (`Element`), Live Design System & WCAG Contrast Editor
-(`Theme`), and Live Slide & Full-Deck Linter (`Lint`). See
-[`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) for how each piece works.
-
-All visible copy is marked provisional on purpose.
-
-## Run it
-
-The build uses a JetBrains Runtime 25 toolchain for the desktop application. Gradle downloads it
-automatically when necessary:
+Launch the desktop app from the repository root (Gradle automatically provisions JetBrains Runtime 25):
 
 ```shell
 ./gradlew :deck:run
 ```
 
-The first launch opens a 16:9 1280×720 Story window; window sizes and the current slide are then
-remembered in `.storyboard/` at the repository root.
+The app opens **Ciacola Foundation** (`foundation`) by default and remembers window geometry, open panels, and slide position in `.storyboard/`. Four canonical decks are included out of the box:
 
-### Shortcuts
+- `foundation` — 5-slide sandbox exercising core typography, shaders, code morphs, and transitions
+- `shaders-quickie-2025` — 45 slides with live interactive SkSL teaching shaders
+- `jewel-talk-2024` — 73 slides with live JetBrains Jewel UI & Swing Bridge specimens
+- `not-just-plain-text-2024` — 141 slides exploring typography morphs, text effects, and Markdown
 
-| Key | Action |
-|---|---|
-| `→` `↓` `PgDn` `Space` `Enter` | Next beat (presentation clickers send `PgDn`/`PgUp`) |
-| `←` `↑` `PgUp` `Backspace` | Previous beat |
-| `B` / `W` | Toggle blackout / whiteout curtain in Show Mode (`Esc`, `B`/`W`, click, or advancing clears it) |
-| `⌘G` | Jump to slide (`1..N`) |
-| `⌘⌥1`..`⌘⌥9` | Switch active catalog deck (`Foundation Deck` by default) |
-| `Esc` | Clear active popup/curtain, exit selection context / sub-comp / docked Studio, or toggle the Overview grid |
-| `⌥⌘P` | Toggle fullscreen (**Easel ▸ Fullscreen**) |
-| `F2` | Show the Presenter window (`T` start/pause timer, `R` reset, `⌘-` / `⌘=` zoom speaker notes) |
-| `F3` or hold `Ctrl` | Inspect mode for slide review; `Ctrl+Click` / `Ctrl+Drag` captures a comment |
-| `F4` | Show the Review window |
-| `F5` | Toggle the Studio (`Motion \| Element \| Theme \| Lint`) docked in the Story window |
-| `F6` | Open the Studio in a detached window |
-| `F7` | Focus the `Theme` Design System tab in Studio (or toggle the Theme sidecar window) |
-| `F8` | Focus the `Lint` tab in Studio (or toggle the Deck Linter sidecar window) |
-| `⌘Z` / `⇧⌘Z` | Context-aware Undo / Redo for the active Studio editor (`Motion`, `Element`, or `Theme`) |
+Pass `-Pciacola.deck=<id>` (for example `./gradlew :deck:run -Pciacola.deck=shaders-quickie-2025`), use the App Bar switcher (`Open .deck.json…` for external files), or press `⌘⌥1`..`⌘⌥4` to switch decks.
 
-When Authoring mode is active on the `Element` tab, clicking elements uses container-first selection
-(double-click enters a container or opens an inline text editor on a text leaf; `Enter` / `⌘Enter`
-saves, `Esc` pops selection context or cancels), press-dragging moves elements with 6 px
-viewport-scaled alignment guides, and `Arrow` (`1 dp`) / `Shift+Arrow` (`10 dp`) nudges the
-selected element. Switch registered catalog decks at any time from the leftmost `Deck: <title> ▾`
-Studio dropdown, the macOS **Deck** menu (`⌘⌥1`..`⌘⌥9`), or `-Dciacola.deck=<id>` on launch.
-
-The **Theme** menu switches between `Stage Dark` and `Keynote Light` live, opens the Design System
-Editor (`F7`), and configures **Motion** (`System`, `Reduced Motion`, `Full Motion`, or
-`Pause Ambient Loops`, also via `CIACOLA_REDUCE_MOTION`). The **Linter** menu (`F8`) runs live and
-offscreen full-deck diagnostic sweeps across both presets. **Export ▸ PDF…** writes one
-high-resolution page per beat with an invisible selectable Unicode text layer, and
-**Export ▸ Video (MP4)…** renders deterministic 60 fps offscreen video via `ffmpeg` (cancellable at
-any time with `Esc`).
-
-### Hot reload
-
-Run the deck with Compose Hot Reload and apply code edits without restarting:
+For live Kotlin specimen editing without restarting the app:
 
 ```shell
 ./gradlew :deck:hotRunDesktopAsync   # launches in the background
-./gradlew :deck:reload               # applies the current source edits
+./gradlew :deck:reload               # applies current source changes
 ```
 
-The current slide and build step survive a reload.
+---
 
-## Project layout
+## Highlights
 
-| Path | Purpose |
+- **Present like Keynote:** Clean audience Show Mode, companion **Presenter View** (`F2`) with speaker notes, timer, Quick Jump, display routing, **Blackout / Whiteout** stage curtains (`B` / `W`), and an **Overview** grid (`Esc`, filterable via `⌘K` / `Ctrl+K`).
+- **Visual Studio authoring:** Centered **`Edit` | `Review` | `Present`** modes with direct stage drag/snap/nudge, inline text editing, **`Design | Animate`** inspector tabs, after-effects-style **Timeline** (`F5` / `F6`), live **Deck Theme** editor (`F7`), full-deck **Issues** linter (`F8`), and unified Undo/Redo (`⌘Z` / `⇧⌘Z`) synced atomically to `.deck.json`.
+- **Single-canvas text & code motion:** Paragraph-measured **`MagicText v2`** behind the application-level `DeckTextRenderer` boundary (emoji/grapheme-safe morphs and builds, zero per-token composables) alongside animated code morphs powered by **`:syntax-highlight`** (pure-KMP ANTLR4 lexers across 32 languages with zero extra runtime dependencies).
+- **Shaders & Keynote effects:** 3-tier build effects (Layer, multi-contour SVG Path trimming, SkSL Content shaders), 9 slide transitions including cross-slide Magic Move, interactive SkSL specimens, and reduced-motion / paused-loop modes.
+- **Export & CLI workflows:** Interactive and headless export to **selectable-text PDF** and **60 fps H.264 MP4 video** (via `ffmpeg`), headless deck linting/still rendering, and a zero-dependency Python 3 Apple Keynote (`.kpf`) converter (`tools/kpf_to_deck_json.py`).
+
+---
+
+## Documentation
+
+| Guide | Audience & Contents |
 |---|---|
-| [`deck/`](deck/) | Desktop application root (`Main.kt`, `DeckCatalog.kt`, `FoundationDeck.kt`, `HotReloadStoryboard.kt`, `studio/`) and integration / Spectre tests |
-| [`deck-core/`](deck-core/) | Shared theme (`DeckTheme`, `SlidePalette`, `DeckDesign`, `DesignSystemOverrides`), `StageElementContracts`, `StageInteraction`, `ReducedMotion`, speaker notes, review/timeline contracts, and Jewel theme helpers |
-| [`deck-effects/`](deck-effects/) | Slide authoring DSL (`authoring/ciacolaDeck`), Keynote effects kit, `DeckSkslShader`, `ElementConnector`, `AnimatedMeshBackdrop`, `DeckTextRenderer`, `DeckWarpCodeCard`, and Skia path trimming |
-| [`deck-presenter/`](deck-presenter/) | Jewel Presenter View window, talk timer, display routing, and live stage curtains/quick jump |
-| [`deck-review/`](deck-review/) | Ctrl+Click slide review overlay, capture store, anchored popups, and `agentapi` dispatch |
-| [`deck-timeline/`](deck-timeline/) | After Effects Timeline Studio, offscreen indexer, `scrubStepPolicy`, inspector, and `AgentBakeDispatcher` integration |
-| [`deck-inspector/`](deck-inspector/) | Full-height unified Studio inspector: live design system editor, container-first direct element drag/snap editor, shader uniform sliders, and deck linter |
-| [`storyboard-text/`](storyboard-text/) | Upstream MagicText with Unicode tokenization, private root-active segment walk, single-draw exit snap, and stopword match pruning (`stableSegment` lives in `storyboard-easel/`) |
-| [`storyboard-warp/`](storyboard-warp/) | Upstream code-diff parser (`Kotlin`, `Json`, `Xml`, plus `Agsl`) with blank-line-safe `DiffLists` |
-| [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md) | Architecture, source notes, attribution, retained TODOs, and verification record |
-| [`docs/MAGIC-TEXT-V2-SEAM.md`](docs/MAGIC-TEXT-V2-SEAM.md) | Design boundary and fixtures for a future paragraph-layout renderer |
+| [User Guide](docs/USER-GUIDE.md) | Presenting, Studio controls, keyboard shortcuts, review workflow, PDF/MP4 export, CLI tasks, and Keynote `.kpf` import |
+| [Deck Schema Reference](docs/DECK-SCHEMA.md) | Authoritative `<deckId>.deck.json` v1 schema, builds, transitions, curves, and specimen payloads |
+| [Architecture & Foundation Notes](docs/DECK-FOUNDATION.md) | Module DAG, `DeckDocumentStore` & atomic sync, isolated `RenderSession`s, source attribution, and verification record |
+| [MagicText v2 Seam](docs/MAGIC-TEXT-V2-SEAM.md) | `DeckTextRenderer` contract, `MagicTextDiff`, and Two-Condition Admission character-safety design |
 
-The other modules are the original Storyboard checkout and examples.
+---
 
-## MagicText work
+## Repository structure
 
-The existing renderer remains in use. This branch tightens a few parts of its behaviour:
+| Module / Path | Role |
+|---|---|
+| [`syntax-highlight/`](syntax-highlight/) | Standalone zero-extra-dependency KMP ANTLR4 lexers (`commonMain`: JVM, JS, WasmJs) covering 32 languages, including 1-level sub-highlighting for Diff and Markdown |
+| [`deck/`](deck/) | Desktop application root (`Main.kt`, `DeckCatalog`, `AllDocumentDecks`), 4 tracked `.deck.json` talks + live `@Composable`/SkSL specimens, headless CLI (`lintDeck`, `renderSlides`, `exportVideo`), and Spectre E2E tests |
+| [`deck-core/`](deck-core/) | `.deck.json` schema & validation, `CanonicalJson`, `DeckDocumentStore`, atomic file sync, analytical `SegmentPlanner`, `DeckClock`, `DeckTheme`, `DeckFontResolver` |
+| [`deck-effects/`](deck-effects/) | `MagicText v2` behind `DeckTextRenderer`, 3-tier build effects & transitions, SkSL shaders, animated mesh backdrop, `WarpCodeAdapter`, Skia path trimming |
+| [`deck-presenter/`](deck-presenter/) | Jewel Presenter View window, speaker notes, timer, display routing, Quick Jump, and stage curtains |
+| [`deck-review/`](deck-review/) | `Ctrl+Click` slide review overlay, comment store, and `agentapi` dispatch |
+| [`deck-timeline/`](deck-timeline/) | Docked/detached Timeline Studio, analytical track planner cache, stagger and phase sculpting |
+| [`deck-inspector/`](deck-inspector/) | Unified Studio inspector (`Design | Animate`), direct stage overlay, Deck Theme sheet, and Deck Linter |
+| [`storyboard-text/`](storyboard-text/), [`storyboard-warp/`](storyboard-warp/), [`storyboard-easel/`](storyboard-easel/), [`storyboard/`](storyboard/), [`storyboard-layout/`](storyboard-layout/) | Upstream Storyboard core modules with `MagicTextDiff`, 32-language `:syntax-highlight` integration, and deterministic PDF/video export hooks |
+| [`tools/`](tools/) | Apple Keynote `.kpf` -> `.deck.json` Python 3 converter (`kpf_to_deck_json.py`) |
 
-- Unicode tokenization no longer splits surrogate pairs, common emoji sequences, or combining
-  marks from their base word;
-- unchanged whitespace keeps stable correspondence keys;
-- settled transition state is recorded as a Compose side effect;
-- returning to an interrupted target reuses its shared-bounds plan; and
-- repeated tokens, line breaks, style changes, large inputs, annotations, and representative
-  difficult scripts are covered by tests.
+The [`examples/`](examples/) modules are retained from upstream Storyboard.
 
-The deck sees text rendering through one application-level `DeckTextRenderer` binding. That is the
-replacement point for future work; scenes do not choose between engines.
+---
 
-MagicText v2 is not implemented here. Neither are text shaping, glyph extraction, Canvas text
-rendering, or the unfinished gradual-entrance renderer. The intended boundary is documented in
-[`MAGIC-TEXT-V2-SEAM.md`](docs/MAGIC-TEXT-V2-SEAM.md).
-
-## Checks
-
-Run the architecture/DAG static gate and focused suites with:
+## Verification (for contributors)
 
 ```shell
-./gradlew ciacolaStaticCheck :storyboard-text:jvmTest :storyboard-easel:jvmTest :deck-core:desktopTest :deck-inspector:desktopTest :deck:desktopTest
-```
-
-Real-window end-to-end tests drive the app with Spectre's synthetic AWT input. They run as a
-background accessory app (`apple.awt.UIElement=true`, no auto focus), so they never steal focus
-from what you are doing:
-
-```shell
-./gradlew :deck:spectreTest
-```
-
-The full non-browser gate is:
-
-```shell
+# Full non-browser verification gate (module DAG static check, canonical JSON check, JVM/desktop/Wasm compile & unit tests)
 ./gradlew check --no-parallel -Pkotlin.daemon.jvmargs=-Xmx4g -x wasmJsBrowserTest
+
+# Real-window end-to-end Spectre suite (runs headless-friendly as an accessory app on macOS)
+./gradlew :deck:spectreTest
+
+# KMP syntax-highlighter browser tests (requires ChromeHeadless)
+./gradlew :syntax-highlight:wasmJsBrowserTest
 ```
 
-The browser tests inherited from Storyboard expect ChromeHeadless. They are excluded above so the
-gate also works in environments without Chrome; JVM tests, Wasm compilation, and API checks still
-run.
+See [Architecture & Foundation Notes](docs/DECK-FOUNDATION.md#verification-record) for module-level gates.
+
+---
 
 ## Upstream and licence
 
-Ciacola is a fork of Brian Norman's
-[Storyboard](https://github.com/bnorm/storyboard), based on revision
-`499cda890a7591c8fc56044726531f6f38a82e35`. This repository retains Storyboard's Git history and is
-distributed under the same [Apache License 2.0](LICENSE.txt). See [NOTICE](NOTICE) for attribution.
+Ciacola is derived from Brian Norman's [Storyboard](https://github.com/bnorm/storyboard) (revision `499cda890a7591c8fc56044726531f6f38a82e35`), retains its Git history, and is distributed under the [Apache License 2.0](LICENSE.txt). See [NOTICE](NOTICE) for attribution.
 
 ### Open-source licences and bundled fonts
 
-All third-party libraries, TextMate grammars, build tooling, and bundled open-source fonts (SIL Open
-Font License 1.1 in `deck/src/desktopMain/resources/fonts/` and
-`examples/shared/src/commonMain/composeResources/font/`) are documented with their copyright
-notices, Reserved Font Names, upstream URLs, and full verbatim licence texts in
-[`OPEN_SOURCE_LICENSES.md`](OPEN_SOURCE_LICENSES.md).
+All third-party libraries, adapted grammars (`KotlinLexer.g4`, `XMLLexer.g4`), Unicode Character Database identifier tables, build tooling, and bundled open-source fonts (SIL Open Font License 1.1 in `deck/src/desktopMain/resources/fonts/` and `examples/shared/src/commonMain/composeResources/font/`) are documented with their copyright notices, Reserved Font Names, upstream URLs, and full verbatim licence texts in [`OPEN_SOURCE_LICENSES.md`](OPEN_SOURCE_LICENSES.md).
 
-The vertex-mesh technique was studied in
-[Sina Samaki's ChromaDecks](https://github.com/sinasamaki/ChromaDecks), and the shared-text approach
-was compared with
-[Brian Norman's Magic Move deck](https://github.com/bnorm/deck.bnorm.dev/tree/dcnyc25/dcnyc25/story).
-Neither reference repository exposed a licence file at the revisions studied, so no source or assets
-were copied from them. Exact revisions and source locations are recorded in
-[`DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md).
+The vertex-mesh technique was studied in [Sinasamaki's ChromaDecks](https://github.com/sinasamaki/ChromaDecks), and the shared-text approach was compared with [Brian Norman's Magic Move deck](https://github.com/bnorm/deck.bnorm.dev/tree/dcnyc25/dcnyc25/story). Neither reference repository exposed a licence file at the revisions studied, so no source or assets were copied from them. Exact revisions and source locations are recorded in [`docs/DECK-FOUNDATION.md`](docs/DECK-FOUNDATION.md).
