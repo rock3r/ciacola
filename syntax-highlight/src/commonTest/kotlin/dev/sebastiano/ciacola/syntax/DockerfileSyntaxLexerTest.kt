@@ -191,15 +191,22 @@ class DockerfileSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Property, nestedVarTokens.first { it.slice(nestedVarCode) == "OUTER" }.kind)
         assertEquals(SyntaxTokenKind.Property, nestedVarTokens.first { it.slice(nestedVarCode) == "INNER" }.kind)
 
-        val multiArgCode = "ARG DEBIAN_FRONTEND TARGETARCH TARGETOS\n"
+        val multiArgCode = "ARG DEBIAN_FRONTEND TARGETARCH TARGETOS\nARG FOO=bar BAZ QUX=1 LAST\nARG A=\"hello world\" B C=2 D\n"
         val multiArgTokens = assertValidSnippetHasNoInvalidTokens(
             DockerfileSyntaxLexer,
             multiArgCode,
             "dockerfile-multi-arg",
         )
-        for (argName in listOf("DEBIAN_FRONTEND", "TARGETARCH", "TARGETOS")) {
-            assertEquals(SyntaxTokenKind.Property, multiArgTokens.first { it.slice(multiArgCode) == argName }.kind)
+        for (argName in listOf("DEBIAN_FRONTEND", "TARGETARCH", "TARGETOS", "FOO", "BAZ", "QUX", "LAST", "A", "B", "C", "D")) {
+            assertEquals(
+                SyntaxTokenKind.Property,
+                multiArgTokens.first { it.slice(multiArgCode) == argName }.kind,
+                "Expected ARG name '$argName' to be Property",
+            )
         }
+        assertEquals(SyntaxTokenKind.Plain, multiArgTokens.first { it.slice(multiArgCode) == "bar" }.kind)
+        assertEquals(SyntaxTokenKind.Number, multiArgTokens.first { it.slice(multiArgCode) == "1" }.kind)
+        assertEquals(SyntaxTokenKind.Number, multiArgTokens.first { it.slice(multiArgCode) == "2" }.kind)
 
         val legacyEnvCode = "ENV JAVA_OPTS -Xmx512m -Dfoo=bar\n"
         val legacyEnvTokens = assertValidSnippetHasNoInvalidTokens(

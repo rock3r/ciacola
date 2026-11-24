@@ -267,6 +267,9 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         if (tok.type == DfTokens.BACKSLASH_LINE_CONT || tok.type == DfTokens.BACKTICK_LINE_CONT) {
             continuationPending = true
             commentLineInContinuation = false
+            if (paramExpNeedsIdentStack.isEmpty()) {
+                afterArgEq = false
+            }
             result += tok
             i++
             continue
@@ -316,6 +319,9 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         }
 
         if (tok.isHidden) {
+            if (tok.type == DfTokens.WS && paramExpNeedsIdentStack.isEmpty()) {
+                afterArgEq = false
+            }
             result += tok
             i++
             continue
@@ -432,13 +438,15 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         if (tok.type == DfTokens.WORD) {
             if (!inLegacyEnvValue && isNextNonHiddenText(raw, source, i + 1, "=")) {
                 tok.kind = SyntaxTokenKind.Property
-                expectLegacyKey = false
+                if (currentInstruction != "ARG") {
+                    expectLegacyKey = false
+                }
                 afterArgEq = false
                 result += tok
                 i++
                 continue
             }
-            if (expectLegacyKey && inKeyValueInstruction) {
+            if (!afterArgEq && expectLegacyKey && inKeyValueInstruction) {
                 tok.kind = SyntaxTokenKind.Property
                 if (currentInstruction == "ENV") {
                     expectLegacyKey = false
