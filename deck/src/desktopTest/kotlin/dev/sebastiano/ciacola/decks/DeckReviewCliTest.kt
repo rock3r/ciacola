@@ -78,7 +78,7 @@ class DeckReviewCliTest {
         var now = 0L
         assertEquals(
             DeckReviewCli.EXIT_OK,
-            DeckReviewCli.runWait(commentsFile, takenFile, 5_000L, 1_000L, first::add, { now }, { now += it }),
+            DeckReviewCli.runWait(commentsFile, takenFile, 5_000L, 1_000L, first::add, { false }, { now }, { now += it }),
         )
         assertTrue(first.single().contains("delete this"))
 
@@ -86,7 +86,7 @@ class DeckReviewCliTest {
         now = 0L
         assertEquals(
             DeckReviewCli.EXIT_TIMEOUT,
-            DeckReviewCli.runWait(commentsFile, takenFile, 5_000L, 1_000L, second::add, { now }, { now += it }),
+            DeckReviewCli.runWait(commentsFile, takenFile, 5_000L, 1_000L, second::add, { false }, { now }, { now += it }),
         )
         assertTrue(second.isEmpty())
     }
@@ -95,10 +95,8 @@ class DeckReviewCliTest {
     fun aQueueThatDoesNotExistYetIsSimplyEmpty() {
         val dir = Files.createTempDirectory("review-cli")
         val missing = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
-        // An agent may start waiting before the author has written anything.
-        assertTrue(DeckReviewCli.readComments(missing).isEmpty())
-
-        Files.writeString(missing, "")
+        // An agent may start waiting before the author has written anything. A file that exists
+        // but holds nothing is a different matter: see aTruncatedQueueIsNotMistakenForAnEmptyOne.
         assertTrue(DeckReviewCli.readComments(missing).isEmpty())
     }
 
@@ -123,7 +121,7 @@ class DeckReviewCliTest {
 
         assertEquals(
             DeckReviewCli.EXIT_OK,
-            DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, {}, { now }, { now += it }),
+            DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, {}, { false }, { now }, { now += it }),
         )
         assertEquals(setOf("rc-1"), DeckReviewCli.readTaken(takenFile))
 
@@ -142,7 +140,7 @@ class DeckReviewCliTest {
         val second = mutableListOf<String>()
         assertEquals(
             DeckReviewCli.EXIT_OK,
-            DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, second::add, { now }, { now += it }),
+            DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, second::add, { false }, { now }, { now += it }),
         )
         assertTrue(second.single().contains("rc-1"))
     }
@@ -176,6 +174,32 @@ class DeckReviewCliTest {
             assertEquals(setOf("rc-1", "rc-2"), after.map { it.id }.toSet(), "lost a comment on run $it")
             assertEquals(ReviewCommentStatus.Applied, after.single { c -> c.id == "rc-1" }.status)
         }
+    }
+
+    @Test
+    fun aBatchTheConsumerNeverReceivedIsNotLeftClaimed() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        var now = 0L
+
+        // PrintStream records a broken pipe instead of throwing, so without checking, a batch
+        // that went nowhere still counts as delivered and is skipped for ever after.
+        val exit = DeckReviewCli.runWait(
+            commentsFile, takenFile, 1_000L, 10L, {}, { true }, { now }, { now += it },
+        )
+
+        assertEquals(DeckReviewCli.EXIT_IO, exit)
+        assertTrue(DeckReviewCli.readTaken(takenFile).isEmpty(), "a batch nobody got must stay unclaimed")
+    }
+
+    @Test
+    fun aTruncatedQueueIsNotMistakenForAnEmptyOne() {
+        val dir = Files.createTempDirectory("review-cli")
+        val file = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        Files.writeString(file, "")
+        // An empty queue is "[]". Zero bytes is a write that did not finish.
+        assertFailsWith<ReviewQueueFile.Unreadable> { DeckReviewCli.readComments(file) }
     }
 
     @Test
@@ -217,7 +241,7 @@ class DeckReviewCliTest {
         var now = 0L
         val slept = mutableListOf<Long>()
 
-        DeckReviewCli.runWait(commentsFile, takenFile, 100L, 1_000L, {}, { now }, { slept.add(it); now += it })
+        DeckReviewCli.runWait(commentsFile, takenFile, 100L, 1_000L, {}, { false }, { now }, { slept.add(it); now += it })
 
         // --timeout=100ms must not block for a whole poll interval.
         assertTrue(slept.all { it <= 100L }, "slept for $slept")
@@ -299,7 +323,7 @@ class DeckReviewCliTest {
         assertEquals(
             DeckReviewCli.EXIT_OK,
             DeckReviewCli.runWait(
-                commentsFile, takenFile, 5_000L, 1_000L, first::add, { now }, { now += it },
+                commentsFile, takenFile, 5_000L, 1_000L, first::add, { false }, { now }, { now += it },
             ),
         )
         assertTrue(first.single().contains("rc-1"))
@@ -310,7 +334,7 @@ class DeckReviewCliTest {
         assertEquals(
             DeckReviewCli.EXIT_TIMEOUT,
             DeckReviewCli.runWait(
-                commentsFile, takenFile, 5_000L, 1_000L, second::add, { now }, { now += it },
+                commentsFile, takenFile, 5_000L, 1_000L, second::add, { false }, { now }, { now += it },
             ),
         )
         assertTrue(second.isEmpty())
@@ -322,7 +346,7 @@ class DeckReviewCliTest {
         assertEquals(
             DeckReviewCli.EXIT_OK,
             DeckReviewCli.runWait(
-                commentsFile, takenFile, 5_000L, 1_000L, third::add, { now }, { now += it },
+                commentsFile, takenFile, 5_000L, 1_000L, third::add, { false }, { now }, { now += it },
             ),
         )
         assertTrue(third.single().contains("rc-2"))
@@ -448,7 +472,7 @@ class DeckReviewCliTest {
         val printed = mutableListOf<String>()
         assertEquals(
             DeckReviewCli.EXIT_TIMEOUT,
-            DeckReviewCli.runWait(commentsFile, takenFile, 3_000L, 1_000L, printed::add, { now }, { now += it }),
+            DeckReviewCli.runWait(commentsFile, takenFile, 3_000L, 1_000L, printed::add, { false }, { now }, { now += it }),
         )
         assertTrue(printed.isEmpty())
     }

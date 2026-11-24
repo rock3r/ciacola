@@ -30,6 +30,7 @@ internal object DeckReviewCli {
     const val EXIT_TIMEOUT = 3
     const val EXIT_NOT_FOUND = 4
     const val EXIT_UNREADABLE = 5
+    const val EXIT_IO = 6
 
     const val COMMENTS_FILE_NAME = "review-comments.json"
     const val TAKEN_FILE_NAME = "review-agent-taken.json"
@@ -57,7 +58,9 @@ internal object DeckReviewCli {
      */
     fun readComments(commentsFile: Path): List<SlideReviewComment> {
         val text = ReviewQueueFile.readTextOrNull(commentsFile) ?: return emptyList()
-        if (text.isBlank()) return emptyList()
+        // A zero-byte file is a truncated write, not an empty queue: an empty queue is "[]".
+        // Reading it as "no comments" is how a half-finished write becomes a silent data loss.
+        if (text.isBlank()) throw ReviewQueueFile.Unreadable(commentsFile, null)
         return try {
             lenientJson.decodeFromString<List<SlideReviewComment>>(text)
         } catch (e: SerializationException) {
@@ -158,6 +161,9 @@ internal object DeckReviewCli {
         timeoutMillis: Long,
         pollMillis: Long = 1_000L,
         out: (String) -> Unit = ::println,
+        // PrintStream swallows a broken pipe and only records it, so a batch can look delivered
+        // when the consumer has gone. Asked separately, after the write.
+        outputFailed: () -> Boolean = { System.out.checkError() },
         nowMillis: () -> Long = System::currentTimeMillis,
         sleep: (Long) -> Unit = { Thread.sleep(it) },
     ): Int {
@@ -168,24 +174,39 @@ internal object DeckReviewCli {
             // Reading the claims, choosing what is pending and recording the claim is one
             // transaction: two waiters that interleave here both hand the author's note to their
             // own conversation, and the author gets two agents editing the same slide.
-            // The lock can itself be held for a while, so re-check the clock before claiming
-            // anything: a waiter past its deadline must not take work it is about to abandon.
             if (first || nowMillis() < deadline) {
                 val claimed = ReviewQueueFile.withLock(dir) {
-                    val taken = readTaken(takenFile)
-                    val pending = pendingComments(readComments(commentsFile), taken)
-                    if (pending.isEmpty()) {
+                    // Re-check inside the lock: acquiring it can itself take a while, and a
+                    // waiter past its deadline must not take work it is about to abandon.
+                    if (!first && nowMillis() >= deadline) {
                         null
                     } else {
-                        // Hand the batch over before recording the claim. Killed in between, the
-                        // comments are offered again — noisy but recoverable. The other order
-                        // loses them silently, which is the failure this whole loop exists to end.
-                        out(formatComments(pending))
-                        writeTaken(takenFile, taken + pending.map { it.id })
-                        pending
+                        val taken = readTaken(takenFile)
+                        val pending = pendingComments(readComments(commentsFile), taken)
+                        if (pending.isEmpty()) {
+                            null
+                        } else {
+                            writeTaken(takenFile, taken + pending.map { it.id })
+                            pending
+                        }
                     }
                 }
-                if (claimed != null) return EXIT_OK
+                if (claimed != null) {
+                    // Printing happens outside the lock, deliberately. stdout is a pipe this
+                    // process does not control; writing to one nobody is draining blocks, and the
+                    // deck takes this same lock on its UI thread to queue or delete a comment. A
+                    // slow consumer would freeze the author's running deck.
+                    out(formatComments(claimed))
+                    if (outputFailed()) {
+                        // The consumer never got the batch, so the claim is a lie. Hand it back,
+                        // or these comments are skipped by every later wait and nobody is told.
+                        ReviewQueueFile.withLock(dir) {
+                            writeTaken(takenFile, readTaken(takenFile) - claimed.map { it.id }.toSet())
+                        }
+                        return EXIT_IO
+                    }
+                    return EXIT_OK
+                }
             }
             first = false
             val remaining = deadline - nowMillis()

@@ -298,6 +298,7 @@ class ReviewCommentStore(
     @Synchronized
     private fun persistCommentsInternal(updated: List<SlideReviewComment>) {
         val believed = comments.toList()
+        var committed = updated
         runCatching {
             Files.createDirectories(storyboardDir)
             ReviewQueueFile.withLock(storyboardDir) {
@@ -308,12 +309,17 @@ class ReviewCommentStore(
                 }.getOrNull() ?: updated
                 val merged = mergeOntoDisk(onDisk = onDisk, believed = believed, updated = updated)
                 ReviewQueueFile.writeAtomically(commentsFile, json.encodeToString(merged) + "\n")
+                committed = merged
             }
             lastObservedModifiedMillis = commentsFile.getLastModifiedTime().toMillis()
             lastObservedFileSize = commentsFile.fileSize()
         }
+        // Publish what was committed, not what was asked for. The merge may have kept another
+        // writer's verdict, and the file's mtime is now recorded as seen, so a poll will not
+        // come back for it: believing `updated` here would leave the UI showing a comment as
+        // queued that disk says is applied, and the next write would push that stale state back.
         comments.clear()
-        comments.addAll(updated)
+        comments.addAll(committed)
     }
 
     suspend fun submitComment(
@@ -550,7 +556,9 @@ class ReviewCommentStore(
                 autoDismissMillis = STICKY_NOTICE_MILLIS,
             )
             markDeliveryFailure(
-                items = items,
+                // Only what this dispatch reserved: another dispatch may own the rest, and
+                // marking its comments failed would offer them to a waiter mid-flight.
+                items = mine,
                 fallbackStatus = if (noAgentInstalled) ReviewCommentStatus.Queued else ReviewCommentStatus.Failed,
                 reason = if (noAgentInstalled) "" else err.take(300),
             )
