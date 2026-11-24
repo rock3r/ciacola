@@ -822,4 +822,97 @@ class MarkdownSyntaxLexerTest {
             maxMillisPerInput = 300L,
         )
     }
+
+    @Test
+    fun handlesListMarkerTabAndMultiSpaceFencesBlockquoteHtmlTerminationAndSetextParity() {
+        // N2: List-marker fences with tab and 5 spaces stay in sync with backtick index
+        val tabListFence = "-${'\t'}```kotlin\nval x = 1\n```\nAfter `inline`.\n"
+        val tabTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, tabListFence, "md-tab-list-fence")
+        assertTrue(tabTokens.any { it.slice(tabListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tabTokens.any { it.slice(tabListFence) == "After" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tabTokens.any { it.slice(tabListFence) == "`inline`" && it.kind == SyntaxTokenKind.String })
+
+        val fiveSpaceListFence = "-     ```kotlin\nval x = 1\n```\nAfter `inline`.\n"
+        val fiveSpaceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, fiveSpaceListFence, "md-5space-list-fence")
+        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListFence) == "After" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListFence) == "`inline`" && it.kind == SyntaxTokenKind.String })
+
+        // N3: Line-start <!-- and Type 4 <!DOCTYPE inside blockquote terminate when blockquote exits
+        val bqType2Comment = "> <!-- note\n\nOutside `code`\n"
+        val bqType2Tokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, bqType2Comment, "md-bq-type2-exit")
+        assertTrue(bqType2Tokens.any { it.slice(bqType2Comment).contains("note") && it.kind == SyntaxTokenKind.Comment })
+        assertTrue(bqType2Tokens.any { it.slice(bqType2Comment) == "Outside" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(bqType2Tokens.any { it.slice(bqType2Comment) == "`code`" && it.kind == SyntaxTokenKind.String })
+
+        val bqType4Doctype = "> <!DOCTYPE html\n> body\n\nOutside `code`\n"
+        val bqType4Tokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, bqType4Doctype, "md-bq-type4-exit")
+        assertTrue(bqType4Tokens.any { it.slice(bqType4Doctype) == "Outside" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(bqType4Tokens.any { it.slice(bqType4Doctype) == "`code`" && it.kind == SyntaxTokenKind.String })
+
+        // N5: 1-2 char Setext underlines (--), no internal-space Setext (= =), and Type 7 paragraph sync
+        val shortSetext = "`a\n--\nb`\n"
+        val shortSetextTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, shortSetext, "md-short-setext-backtick")
+        assertTrue(shortSetextTokens.any { it.slice(shortSetext) == "`a" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(shortSetextTokens.any { it.slice(shortSetext) == "--" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(shortSetextTokens.any { it.slice(shortSetext) == "b`" && it.kind == SyntaxTokenKind.Plain })
+
+        val equalsAfterBlankThenType7 = "\n===\n<custom>\n`x`\n"
+        val equalsTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, equalsAfterBlankThenType7, "md-equals-type7-sync")
+        assertTrue(equalsTokens.any { it.slice(equalsAfterBlankThenType7) == "`x`" && it.kind == SyntaxTokenKind.String })
+
+        val spacedEquals = "a\n= =\n"
+        val spacedEqualsTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, spacedEquals, "md-spaced-equals")
+        assertTrue(spacedEqualsTokens.any { it.slice(spacedEquals) == "a" && it.kind == SyntaxTokenKind.Plain })
+    }
+
+    @Test
+    fun enforcesBlockBoundariesForEmphasisStrikethroughAndLinks() {
+        val crossComment = "*a\n<!-- c -->\nb*\n"
+        val commentTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, crossComment, "md-cross-comment")
+        assertFalse(commentTokens.any { it.kind == SyntaxTokenKind.Property })
+
+        val crossRawHtml = "*a\n<?x?>\nb*\n"
+        val rawHtmlTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, crossRawHtml, "md-cross-raw-html")
+        assertFalse(rawHtmlTokens.any { it.kind == SyntaxTokenKind.Property })
+
+        val crossAtx = "*a\n# H\nb*\n"
+        val atxTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, crossAtx, "md-cross-atx")
+        assertFalse(atxTokens.any { it.kind == SyntaxTokenKind.Property })
+
+        val crossList = "*a\n- item b*\n"
+        val listTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, crossList, "md-cross-list")
+        assertFalse(listTokens.any { it.kind == SyntaxTokenKind.Property })
+
+        val crossLinkAtx = "[a\n# H\nb](https://example.com)\n"
+        val linkAtxTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, crossLinkAtx, "md-cross-link-atx")
+        assertFalse(linkAtxTokens.any { it.kind == SyntaxTokenKind.Tag })
+
+        val multiLinePara = "*foo\nbar* and [link\ntext](https://example.com)\n"
+        val paraTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, multiLinePara, "md-multiline-para")
+        assertTrue(paraTokens.any { it.slice(multiLinePara) == "foo" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(paraTokens.any { it.slice(multiLinePara) == "bar" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(paraTokens.any { it.slice(multiLinePara) == "link" && it.kind == SyntaxTokenKind.Tag })
+        assertTrue(paraTokens.any { it.slice(multiLinePara) == "text" && it.kind == SyntaxTokenKind.Tag })
+    }
+
+    @Test
+    fun linearPerformanceOnRepeatedWwwUnderscoreDomains() {
+        val repeatedWww = "www._".repeat(10_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("repeated-www-underscore" to repeatedWww),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnRepeatedHttpsUnderscoreDomains() {
+        val repeatedHttps = "https://a_".repeat(5_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("repeated-https-underscore" to repeatedHttps),
+            maxMillisPerInput = 300L,
+        )
+    }
 }

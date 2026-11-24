@@ -208,6 +208,7 @@ private fun processMarkdownTokens(
     val out = ArrayList<SyntaxToken>(raw.size + 16)
     var currentFenceLang: SyntaxLanguage? = null
     var pendingBqFenceDepth = 0
+    var activeParaBqDepth = -1
     val bqFenceAcc = BqFenceAccumulator()
     var i = 0
 
@@ -216,6 +217,7 @@ private fun processMarkdownTokens(
     val paraBuffer = ArrayList<RawMdToken>()
 
     fun flushParagraph(followedBySetext: Boolean = false) {
+        activeParaBqDepth = -1
         if (paraBuffer.isEmpty()) return
         emitParagraphTokens(source, paraBuffer, followedBySetext, out)
         paraBuffer.clear()
@@ -282,6 +284,73 @@ private fun processMarkdownTokens(
                     continue
                 }
                 // Otherwise fall through to process this non-fence line normally.
+            }
+        }
+
+        if (pendingBqFenceDepth == 0 && (i == 0 || raw[i - 1].type == MdTokens.NEWLINE)) {
+            var lineEnd = i
+            while (lineEnd < raw.size && raw[lineEnd].type != MdTokens.NEWLINE) {
+                lineEnd++
+            }
+            val endExcl = if (lineEnd < raw.size) lineEnd + 1 else lineEnd
+            var hasSpecialBlock = false
+            var hasAtx = false
+            var hasHtmlBlock = false
+            for (k in i until lineEnd) {
+                when (raw[k].type) {
+                    MdTokens.BOM,
+                    MdTokens.FRONTMATTER_DELIM,
+                    MdTokens.FRONTMATTER_YAML_BODY,
+                    MdTokens.FRONTMATTER_TOML_BODY,
+                    MdTokens.FENCE_OPEN,
+                    MdTokens.FENCE_INFO_WS,
+                    MdTokens.FENCE_LANG,
+                    MdTokens.FENCE_INFO_REST,
+                    MdTokens.FENCE_BODY,
+                    MdTokens.FENCE_BODY_LINE,
+                    MdTokens.FENCE_CLOSE,
+                    MdTokens.INDENTED_CODE_LINE,
+                    MdTokens.THEMATIC_BREAK,
+                    MdTokens.SETEXT_UNDERLINE,
+                    -> {
+                        hasSpecialBlock = true
+                        break
+                    }
+                    MdTokens.ATX_HEADING_OPEN -> hasAtx = true
+                    MdTokens.HTML_BLOCK_TEXT,
+                    MdTokens.HTML_BLOCK_TAG_OPEN,
+                    MdTokens.HTML_BLOCK_COMMENT,
+                    -> hasHtmlBlock = true
+                }
+            }
+            if (!hasSpecialBlock) {
+                var bqDepth = 0
+                var firstContent = i
+                while (firstContent < lineEnd &&
+                    (raw[firstContent].type == MdTokens.WS || raw[firstContent].type == MdTokens.BLOCKQUOTE_MARKER)
+                ) {
+                    if (raw[firstContent].type == MdTokens.BLOCKQUOTE_MARKER) bqDepth++
+                    firstContent++
+                }
+                val isBlank = firstContent >= lineEnd
+                val startsList = !isBlank && raw[firstContent].type == MdTokens.LIST_MARKER
+                if (isBlank || hasAtx || startsList || hasHtmlBlock ||
+                    (activeParaBqDepth >= 0 && bqDepth != activeParaBqDepth)
+                ) {
+                    flushParagraph()
+                }
+                for (k in i until endExcl) {
+                    paraBuffer += raw[k]
+                }
+                if (isBlank || hasAtx || hasHtmlBlock ||
+                    (lineEnd < raw.size && isBlankLineAhead(raw, endExcl))
+                ) {
+                    flushParagraph()
+                } else {
+                    activeParaBqDepth = bqDepth
+                }
+                i = endExcl
+                continue
             }
         }
 
@@ -611,11 +680,14 @@ private fun emitParagraphTokens(
                 resolvedKinds[k] = SyntaxTokenKind.Constant
                 excludedFromDelim[k] = true
             }
-            MdTokens.HTML_COMMENT -> {
+            MdTokens.HTML_COMMENT,
+            MdTokens.HTML_BLOCK_COMMENT,
+            -> {
                 resolvedKinds[k] = SyntaxTokenKind.Comment
                 excludedFromDelim[k] = true
             }
             MdTokens.HTML_TAG_OPEN,
+            MdTokens.HTML_BLOCK_TAG_OPEN,
             MdTokens.HTML_TAG_SLASH,
             MdTokens.HTML_TAG_CLOSE,
             -> {
@@ -1538,13 +1610,29 @@ private fun resolveGfmExtendedAutolinks(
         val segEnd = raw[runEndTok - 1].end
         var tokCursor = runStartTok
         var pos = segStart
+        var wwwScanBarrier = -1
+        var httpScanBarrier = -1
         var emailScanBarrier = -1
 
         while (pos < segEnd) {
             var matchEnd = -1
             val urlAllowedBefore = pos == segStart || isGfmUrlBoundaryBefore(source[pos - 1])
             if (urlAllowedBefore) {
-                matchEnd = matchGfmUrlEnd(source, pos, segEnd)
+                val isWww = source.regionMatches(pos, "www.", 0, 4, ignoreCase = false)
+                val isHttp = !isWww && (startsWithIgnoreCase(source, pos, segEnd, "https://") ||
+                    startsWithIgnoreCase(source, pos, segEnd, "http://"))
+                val canTryUrl = (isWww && pos >= wwwScanBarrier) || (isHttp && pos >= httpScanBarrier)
+                if (canTryUrl) {
+                    val (urlEnd, failStop) = matchGfmUrlEnd(source, pos, segEnd)
+                    if (urlEnd > pos) {
+                        matchEnd = urlEnd
+                    } else if (failStop > pos) {
+                        wwwScanBarrier = maxOf(wwwScanBarrier, failStop)
+                        if (isHttp) {
+                            httpScanBarrier = maxOf(httpScanBarrier, failStop)
+                        }
+                    }
+                }
             }
             if (matchEnd < 0 && pos >= emailScanBarrier && isGfmEmailLocalChar(source[pos])) {
                 val validBefore = pos == segStart || !isGfmEmailLocalChar(source[pos - 1])
@@ -1599,14 +1687,14 @@ private fun isGfmDomainChar(ch: Char): Boolean =
 private fun isGfmAsciiAlnum(ch: Char): Boolean =
     ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9'
 
-private fun matchGfmUrlEnd(source: String, start: Int, segEnd: Int): Int {
+private fun matchGfmUrlEnd(source: String, start: Int, segEnd: Int): Pair<Int, Int> {
     val domStart = when {
         startsWithIgnoreCase(source, start, segEnd, "https://") -> start + 8
         startsWithIgnoreCase(source, start, segEnd, "http://") -> start + 7
         source.regionMatches(start, "www.", 0, 4, ignoreCase = false) -> start + 4
-        else -> return -1
+        else -> return -1 to -1
     }
-    if (domStart >= segEnd) return -1
+    if (domStart >= segEnd) return -1 to segEnd
 
     var p = domStart
     var dotCount = 0
@@ -1643,7 +1731,7 @@ private fun matchGfmUrlEnd(source: String, start: Int, segEnd: Int): Int {
     }
 
     if (domEnd <= domStart || dotCount < 1 || curSegLen == 0 || prevSegUnder || curSegUnder) {
-        return -1
+        return -1 to p
     }
 
     var end = domEnd
@@ -1670,7 +1758,7 @@ private fun matchGfmUrlEnd(source: String, start: Int, segEnd: Int): Int {
         }
     }
 
-    return if (end >= domEnd) end else -1
+    return if (end >= domEnd) end to -1 else -1 to p
 }
 
 private fun matchGfmEmailEnd(source: String, start: Int, segEnd: Int): Pair<Int, Int> {

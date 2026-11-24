@@ -29,8 +29,10 @@ tokens {
     TILDE_RUN,
     LBRACK,
     HTML_COMMENT,
+    HTML_BLOCK_COMMENT,
     AUTOLINK,
     HTML_TAG_OPEN,
+    HTML_BLOCK_TAG_OPEN,
     HTML_NAME,
     HTML_ATTR_NAME,
     HTML_ATTR_VALUE,
@@ -63,8 +65,10 @@ tokens {
     override fun tildeRunTokenType(): Int = Tokens.TILDE_RUN
     override fun lbrackTokenType(): Int = Tokens.LBRACK
     override fun htmlCommentTokenType(): Int = Tokens.HTML_COMMENT
+    override fun htmlBlockCommentTokenType(): Int = Tokens.HTML_BLOCK_COMMENT
     override fun autolinkTokenType(): Int = Tokens.AUTOLINK
     override fun htmlTagOpenTokenType(): Int = Tokens.HTML_TAG_OPEN
+    override fun htmlBlockTagOpenTokenType(): Int = Tokens.HTML_BLOCK_TAG_OPEN
     override fun htmlNameTokenType(): Int = Tokens.HTML_NAME
     override fun htmlAttrNameTokenType(): Int = Tokens.HTML_ATTR_NAME
     override fun htmlAttrValueTokenType(): Int = Tokens.HTML_ATTR_VALUE

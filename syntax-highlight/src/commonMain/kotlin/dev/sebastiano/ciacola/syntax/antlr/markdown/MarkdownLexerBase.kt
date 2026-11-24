@@ -34,6 +34,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private var blockquoteDepth: Int = 0
     private var justSawBlockquoteMarker: Boolean = false
     private var leadingIndent: Int = 0
+    private var lineStreamCol: Int = 0
     private var afterListMarker: Boolean = false
     private var canMatchTaskCheckbox: Boolean = false
     private var currentLineHasListMarker: Boolean = false
@@ -100,6 +101,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         blockquoteDepth = 0
         justSawBlockquoteMarker = false
         leadingIndent = 0
+        lineStreamCol = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
         currentLineHasListMarker = false
@@ -159,8 +161,10 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected abstract fun tildeRunTokenType(): Int
     protected abstract fun lbrackTokenType(): Int
     protected abstract fun htmlCommentTokenType(): Int
+    protected abstract fun htmlBlockCommentTokenType(): Int
     protected abstract fun autolinkTokenType(): Int
     protected abstract fun htmlTagOpenTokenType(): Int
+    protected abstract fun htmlBlockTagOpenTokenType(): Int
     protected abstract fun htmlNameTokenType(): Int
     protected abstract fun htmlAttrNameTokenType(): Int
     protected abstract fun htmlAttrValueTokenType(): Int
@@ -247,6 +251,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         blockquoteDepth = 0
         justSawBlockquoteMarker = false
         leadingIndent = 0
+        lineStreamCol = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
         currentLineHasListMarker = false
@@ -259,7 +264,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected fun onLineStartWs() {
         val start = _tokenStartCharIndex
         val end = _input.index()
-        var streamCol = if (justSawBlockquoteMarker) 1 else leadingIndent
+        var streamCol = if (justSawBlockquoteMarker) 1 else lineStreamCol
         var col = 0
         var first = justSawBlockquoteMarker
         for (cp in start until end) {
@@ -278,6 +283,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 }
             }
         }
+        lineStreamCol = streamCol
         justSawBlockquoteMarker = false
 
         if (afterListMarker) {
@@ -319,6 +325,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         blockquoteDepth++
         justSawBlockquoteMarker = true
         leadingIndent = 0
+        lineStreamCol++
         afterListMarker = false
         canMatchTaskCheckbox = false
         currentLineHasListMarker = false
@@ -571,6 +578,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         currentLineAllowsNextIndentedCode = false
         currentLineHasOnlyBqAndWs = false
         currentLineHasListMarker = true
+        lineStreamCol += (_input.index() - _tokenStartCharIndex)
         afterListMarker = true
         canMatchTaskCheckbox = false
         type = listMarkerTokenType()
@@ -1085,8 +1093,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         var prevLineAllowsIndent = true
 
         while (i < size) {
-            // 1. Parse blockquote prefix ('>' markers with <= 3 spaces before each and optional 1 space/tab)
+            // 1. Parse blockquote prefix ('>' markers with <= 3 spaces before each and optional 1 space)
             var bqDepth = 0
+            var consumedSpaceAfterLastBq = false
             var pos = i
             while (pos < size) {
                 var spaces = 0
@@ -1100,6 +1109,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     p++
                     if (p < size && codePointAtIndex(p) == ' '.code) {
                         p++
+                        consumedSpaceAfterLastBq = true
+                    } else {
+                        consumedSpaceAfterLastBq = false
                     }
                     pos = p
                 } else {
@@ -1109,8 +1121,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
 
             // 2. Count leading indentation after blockquote prefix
             var col = 0
-            var streamCol = if (bqDepth > 0) 1 else 0
-            var firstAfterBq = bqDepth > 0
+            var streamCol = if (consumedSpaceAfterLastBq) 2 else if (bqDepth > 0) 1 else 0
+            var firstAfterBq = bqDepth > 0 && !consumedSpaceAfterLastBq
             while (pos < size) {
                 val ch = codePointAtIndex(pos)
                 if (ch == ' '.code) {
@@ -1156,13 +1168,20 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 continue
             }
 
-            // 5. Block-level starters at indent <= 3 (including chained list markers)
+            // 5. Block-level starters at indent <= 3 (or after a list marker, matching DEFAULT_MODE)
             var tbFailDash = -1
             var tbFailStar = -1
             var tbFailUnder = -1
             var sawListMarker = false
-            while (col <= 3 && pos < size) {
+            val canSetextBeforeList = prevLineWasPara && !prevLineWasBlank && bqDepth == prevBqDepth
+            while ((col <= 3 || sawListMarker) && pos < size) {
                 val fch = codePointAtIndex(pos)
+                if (!sawListMarker && canSetextBeforeList &&
+                    (fch == '-'.code || fch == '='.code) &&
+                    isContiguousSameCharThenWsToEol(pos, size, fch)
+                ) {
+                    break
+                }
                 if (fch == '-'.code || fch == '*'.code || fch == '_'.code) {
                     val failAt = when (fch) {
                         '-'.code -> tbFailDash
@@ -1205,15 +1224,19 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 if (markerEnd < 0) break
                 sawListMarker = true
                 paraId++
+                streamCol += (markerEnd - pos)
                 pos = markerEnd
                 var postCol = 0
                 while (pos < size) {
                     val wch = codePointAtIndex(pos)
                     if (wch == ' '.code) {
                         postCol++
+                        streamCol++
                         pos++
                     } else if (wch == '\t'.code) {
-                        postCol += 4 - (postCol % 4)
+                        val step = 4 - (streamCol % 4)
+                        postCol += step
+                        streamCol += step
                         pos++
                     } else {
                         break
@@ -1236,7 +1259,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             }
 
             val firstCh = codePointAtIndex(pos)
-            if (col <= 3) {
+            if (col <= 3 || sawListMarker) {
                 // Fenced code block opener (``` or ~~~)
                 if (firstCh == '`'.code || firstCh == '~'.code) {
                     val fenceCount = countSameChar(pos, size, firstCh)
@@ -1268,9 +1291,11 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     }
                 }
 
-                // Thematic break (---, ***, ___) or Setext underline (===, ---)
-                if ((firstCh == '-'.code || firstCh == '*'.code || firstCh == '_'.code) &&
-                    isThematicOrSetextLine(pos, size, firstCh)
+                // Setext underline (=+ or -+ with optional trailing ws only, directly under a paragraph in same container)
+                val canSetext = !sawListMarker && canSetextBeforeList
+                if (canSetext &&
+                    (firstCh == '-'.code || firstCh == '='.code) &&
+                    isContiguousSameCharThenWsToEol(pos, size, firstCh)
                 ) {
                     paraId++
                     i = advancePastLine(pos, size)
@@ -1281,7 +1306,11 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     prevLineAllowsIndent = true
                     continue
                 }
-                if (firstCh == '='.code && isSetextEqualsLine(pos, size)) {
+
+                // Thematic break (---, ***, ___)
+                if ((firstCh == '-'.code || firstCh == '*'.code || firstCh == '_'.code) &&
+                    isThematicOrSetextLine(pos, size, firstCh)
+                ) {
                     paraId++
                     i = advancePastLine(pos, size)
                     paraId++
@@ -1296,18 +1325,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 if (firstCh == '<'.code) {
                     if (matchesLiteralCaseSensitive(pos, "<!--", size)) {
                         paraId++
-                        var cIdx = pos + 4
-                        var closedAt = -1
-                        while (cIdx + 2 < size) {
-                            if (codePointAtIndex(cIdx) == '-'.code &&
-                                codePointAtIndex(cIdx + 1) == '-'.code &&
-                                codePointAtIndex(cIdx + 2) == '>'.code
-                            ) {
-                                closedAt = cIdx + 3
-                                break
-                            }
-                            cIdx++
-                        }
+                        val (closedAt, stopPos) = findType2HtmlCommentEnd(pos + 4, size, bqDepth)
                         if (closedAt > 0) {
                             i = indexBackticksOnLine(closedAt, size, paraId, paraIds, byLen)
                             paraId++
@@ -1316,7 +1334,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                             prevLineWasPara = false
                             prevLineAllowsIndent = isOnlyWsBeforeEolOrEofAt(closedAt, size)
                         } else {
-                            i = size
+                            i = stopPos
                             paraId++
                             prevBqDepth = bqDepth
                             prevLineWasBlank = false
@@ -1325,7 +1343,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                         }
                         continue
                     }
-                    val allowType7 = !(prevLineWasPara && !prevLineWasBlank && bqDepth == prevBqDepth)
+                    val allowType7 = !canSetextBeforeList
                     val htmlEnd = skipHtmlBlockForBacktickIndex(pos, size, bqDepth, allowType7)
                     if (htmlEnd > pos) {
                         paraId++
@@ -1341,10 +1359,11 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             }
 
             // 6. Index backtick runs across the rest of this line
+            val isRefDef = !sawListMarker && firstCh == '['.code && isLinkRefDefStart(pos)
             i = indexBackticksOnLine(pos, size, paraId, paraIds, byLen)
             prevBqDepth = bqDepth
             prevLineWasBlank = false
-            prevLineWasPara = !sawListMarker
+            prevLineWasPara = !sawListMarker && !isRefDef
             prevLineAllowsIndent = false
         }
 
@@ -1495,51 +1514,76 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         return if (count >= 3) -1 else size
     }
 
-    private fun isSetextEqualsLine(start: Int, size: Int): Boolean {
+    private fun isContiguousSameCharThenWsToEol(start: Int, size: Int, ch: Int): Boolean {
         var idx = start
-        while (idx < size) {
-            val ch = codePointAtIndex(idx)
-            when (ch) {
-                '='.code, ' '.code, '\t'.code -> idx++
-                '\r'.code, '\n'.code -> return true
-                else -> return false
-            }
+        if (idx >= size || codePointAtIndex(idx) != ch) return false
+        while (idx < size && codePointAtIndex(idx) == ch) {
+            idx++
         }
-        return true
+        return isOnlyWsBeforeEolOrEofAt(idx, size)
     }
 
     // -------------------------------------------------------------------------
     // HTML comments, HTML blocks (CommonMark §4.6 types 1-7), autolinks, and inline tags
     // -------------------------------------------------------------------------
 
+    private fun findType2HtmlCommentEnd(scanStart: Int, size: Int, bqDepth: Int): Pair<Int, Int> {
+        var idx = scanStart
+        var firstLine = true
+        while (idx < size) {
+            if (!firstLine && bqDepth > 0) {
+                if (!hasBlockquotePrefixAhead(idx, bqDepth)) {
+                    return -1 to idx
+                }
+                idx = skipBlockquotePrefix(idx, bqDepth, size)
+            }
+            firstLine = false
+            while (idx < size) {
+                val ch = codePointAtIndex(idx)
+                if (ch == '\r'.code || ch == '\n'.code) {
+                    idx = skipNewlineAt(idx, size)
+                    break
+                }
+                if (ch == '-'.code &&
+                    idx + 2 < size &&
+                    codePointAtIndex(idx + 1) == '-'.code &&
+                    codePointAtIndex(idx + 2) == '>'.code
+                ) {
+                    return (idx + 3) to -1
+                }
+                idx++
+            }
+        }
+        return -1 to size
+    }
+
     protected fun handleLineStartHtmlComment() {
         val size = _input.size()
-        var idx = _input.index()
-        var foundClose = -1
-        while (idx + 2 < size) {
-            if (codePointAtIndex(idx) == '-'.code &&
-                codePointAtIndex(idx + 1) == '-'.code &&
-                codePointAtIndex(idx + 2) == '>'.code
-            ) {
-                foundClose = idx + 3
-                break
-            }
-            idx++
-        }
-        if (foundClose > 0) {
-            _input.seek(foundClose)
+        val (closedAt, stopPos) = findType2HtmlCommentEnd(_input.index(), size, blockquoteDepth)
+        if (closedAt > 0) {
+            _input.seek(closedAt)
             onNonParagraphLineStart()
             currentLineAllowsNextIndentedCode = true
-            type = htmlCommentTokenType()
+            type = htmlBlockCommentTokenType()
             mode(inlineModeId())
             return
         }
-        // Unclosed Type 2 HTML comment block runs to EOF per CommonMark §4.6.
-        _input.seek(size)
+        // Unclosed Type 2 HTML comment block runs to blockquote exit or EOF per CommonMark §4.6.
+        _input.seek(stopPos)
         onNonParagraphLineStart()
         currentLineAllowsNextIndentedCode = true
-        type = htmlCommentTokenType()
-        mode(inlineModeId())
+        type = htmlBlockCommentTokenType()
+        if (stopPos < size) {
+            prevLineWasParagraph = false
+            prevLineBlockquoteDepth = 0
+            prevLineWasIndentedCode = false
+            prevLineAllowsIndentedCode = true
+            afterBlankLine = false
+            resetLineState()
+            mode(defaultModeId())
+        } else {
+            mode(inlineModeId())
+        }
     }
 
     protected fun consumeInlineHtmlComment() {
@@ -1550,12 +1594,27 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         } else {
             textTokenType()
         }
+        val size = _input.size()
+        val firstAfterOpen = _input.index()
+        // CommonMark §6.8 allows abrupt HTML comments '<!-->' and '<!--->'
+        if (firstAfterOpen < size && codePointAtIndex(firstAfterOpen) == '>'.code) {
+            _input.seek(firstAfterOpen + 1)
+            type = htmlCommentTokenType()
+            return
+        }
+        if (firstAfterOpen + 1 < size &&
+            codePointAtIndex(firstAfterOpen) == '-'.code &&
+            codePointAtIndex(firstAfterOpen + 1) == '>'.code
+        ) {
+            _input.seek(firstAfterOpen + 2)
+            type = htmlCommentTokenType()
+            return
+        }
         if (start < htmlCommentFailEnd) {
             type = fallbackType
             return
         }
-        val size = _input.size()
-        var idx = _input.index()
+        var idx = firstAfterOpen
         while (idx < size) {
             val ch = codePointAtIndex(idx)
             if (ch == '-'.code &&
@@ -1623,7 +1682,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             hbrBqConsumed = blockquoteDepth
             if (hasValidHtmlTagClose(start)) {
                 htmlExpectingTagName = true
-                type = htmlTagOpenTokenType()
+                type = htmlBlockTagOpenTokenType()
                 mode(htmlBlockRawModeId())
                 pushMode(htmlTagModeId())
             } else {
@@ -1726,7 +1785,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         hbBqConsumed = blockquoteDepth
         if (hasValidHtmlTagClose(ltStart)) {
             htmlExpectingTagName = true
-            type = htmlTagOpenTokenType()
+            type = htmlBlockTagOpenTokenType()
             mode(htmlBlockModeId())
             pushMode(htmlTagModeId())
         } else {
@@ -1754,7 +1813,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         val start = _tokenStartCharIndex
         if (hasValidHtmlTagClose(start)) {
             htmlExpectingTagName = true
-            type = htmlTagOpenTokenType()
+            type = htmlBlockTagOpenTokenType()
             pushMode(htmlTagModeId())
         } else {
             type = htmlBlockTextTokenType()
@@ -1817,7 +1876,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             htmlBlockClosed = true
             if (hasValidHtmlTagClose(start)) {
                 htmlExpectingTagName = true
-                type = htmlTagOpenTokenType()
+                type = htmlBlockTagOpenTokenType()
                 pushMode(htmlTagModeId())
                 return
             }
@@ -2318,6 +2377,21 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         return -1
     }
 
+    private fun skipBlockquotePrefix(lineStart: Int, requiredDepth: Int, size: Int): Int {
+        var idx = lineStart
+        for (d in 0 until requiredDepth) {
+            var spaces = 0
+            while (idx < size && spaces < 4 && codePointAtIndex(idx) == ' '.code) {
+                spaces++
+                idx++
+            }
+            if (spaces > 3 || idx >= size || codePointAtIndex(idx) != '>'.code) return idx
+            idx++
+            if (idx < size && codePointAtIndex(idx) == ' '.code) idx++
+        }
+        return idx
+    }
+
     private fun skipRawHtmlLinesForBacktickIndex(
         scanStart: Int,
         size: Int,
@@ -2328,8 +2402,11 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         var idx = scanStart
         var firstLine = true
         while (idx < size) {
-            if (!firstLine && bqDepth > 0 && !hasBlockquotePrefixAhead(idx, bqDepth)) {
-                return idx
+            if (!firstLine && bqDepth > 0) {
+                if (!hasBlockquotePrefixAhead(idx, bqDepth)) {
+                    return idx
+                }
+                idx = skipBlockquotePrefix(idx, bqDepth, size)
             }
             firstLine = false
             while (idx < size) {
