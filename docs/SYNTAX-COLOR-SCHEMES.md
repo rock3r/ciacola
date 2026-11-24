@@ -181,7 +181,7 @@ Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importIntelli
 Both `scripts/update-syntax-schemes.py` and `SyntaxSchemeImporters.importVsCodeJson` support standard VS Code themes:
 
 1. **JSONC support (Kotlin importer):**
-   - `SyntaxSchemeImporters.importVsCodeJson` uses a pure-Kotlin O(N) JSONC parser supporting `//` line comments, `/* */` block comments, trailing commas, and full JSON string escapes (including `\uXXXX`), with a 128-level nesting depth limit. (The Python updater script strips JSONC comments and trailing commas using `json.loads`.)
+   - `SyntaxSchemeImporters.importVsCodeJson` uses a pure-Kotlin O(N) JSONC parser supporting `//` line comments, `/* */` block comments, trailing commas, and full JSON string escapes (including `\uXXXX`), with a 128-level nesting depth limit. (The Python updater script strips JSONC comments and trailing commas via `strip_jsonc()` and parses the resulting JSON with Python's `json.loads`.)
 2. **`include` chaining (Kotlin importer):**
    - `SyntaxSchemeImporters.importVsCodeJson` (and `importAuto` when supplied an `includeResolver`) resolves parent themes recursively with cycle detection (up to depth 32); child `colors` and `semanticTokenColors` override parent entries, and child `tokenColors` append after parent rules. (Standalone single-file themes in `scripts/update-syntax-schemes.py` do not resolve `include`.)
 3. **Appearance detection:**

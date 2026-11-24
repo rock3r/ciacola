@@ -423,6 +423,14 @@ def _has_high_contrast_in_chain(schemes: dict[str, IjScheme], scheme_name: str, 
     return False
 
 
+def _parse_uint32_or_zero(raw: str | None) -> int:
+    if raw and raw.isascii() and raw.isdigit():
+        val = int(raw)
+        if 0 <= val <= 0x7FFFFFFF:
+            return val
+    return 0
+
+
 def _pick_ij_style(
     schemes: dict[str, IjScheme],
     scheme_name: str,
@@ -450,10 +458,8 @@ def _pick_ij_style(
         bg_color = None if (fg_only or attr_name == "TEXT") else normalize_ij_hex(opts.get("BACKGROUND"))
         if bg_color == bg:
             bg_color = None
-        font_raw = opts.get("FONT_TYPE")
-        font_type = int(font_raw) if font_raw and font_raw.isascii() and font_raw.isdigit() else 0
-        effect_raw = opts.get("EFFECT_TYPE")
-        effect_type = int(effect_raw) if effect_raw and effect_raw.isascii() and effect_raw.isdigit() else 0
+        font_type = _parse_uint32_or_zero(opts.get("FONT_TYPE"))
+        effect_type = _parse_uint32_or_zero(opts.get("EFFECT_TYPE"))
         effect_color = normalize_ij_hex(opts.get("EFFECT_COLOR"))
         has_effect = effect_color is not None
         return StyleEntry(
