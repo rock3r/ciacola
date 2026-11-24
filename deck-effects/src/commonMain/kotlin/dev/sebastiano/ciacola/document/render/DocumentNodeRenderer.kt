@@ -548,6 +548,7 @@ internal fun DocumentNodeItem(
                     colorResolver = ctx.colorResolver,
                     reducedMotion = ctx.reducedMotion,
                     modifier = nodeModifier,
+                    fontResolverHandle = ctx.fontResolverHandle,
                 )
             }
             NodeKind.Shape -> {

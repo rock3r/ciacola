@@ -336,6 +336,34 @@ class AllFourDocumentDecksValidationTest {
         assertNotNull(meshDecl.param("driftScale"))
     }
 
+    @Test
+    fun `ported sample decks declare theme code schemes and use live syntax-highlighted code nodes`() {
+        val portedRegs = listOf(
+            AllDocumentDecks.shadersQuickie2025,
+            AllDocumentDecks.jewelTalk2024,
+            AllDocumentDecks.notJustPlainText2024,
+        )
+        for (reg in portedRegs) {
+            val doc = decodeOrFail(reg)
+            assertEquals("intellij-islands-dark", doc.themes["dark"]?.codeScheme, "${reg.id} dark codeScheme")
+            assertEquals("intellij-light", doc.themes["light"]?.codeScheme, "${reg.id} light codeScheme")
+        }
+
+        val shadersDoc = decodeOrFail(AllDocumentDecks.shadersQuickie2025)
+        val shadersCodeNodes = flattenNodes(shadersDoc.slides.flatMap { it.nodes }).filter { it.code != null }
+        assertTrue(shadersCodeNodes.size >= 31, "Expected >= 31 live code nodes in shaders-quickie-2025, got ${shadersCodeNodes.size}")
+        assertEquals(setOf("agsl", "kotlin"), shadersCodeNodes.mapNotNull { it.code?.language }.toSet())
+        val shadersWarpMorphs = shadersCodeNodes.count { node ->
+            node.builds.any { it is dev.sebastiano.ciacola.document.Build.Change && "code" in it.set }
+        }
+        assertTrue(shadersWarpMorphs >= 4, "Expected >= 4 live Warp code morph builds in shaders-quickie-2025, got $shadersWarpMorphs")
+
+        val njptDoc = decodeOrFail(AllDocumentDecks.notJustPlainText2024)
+        val njptCodeNodes = flattenNodes(njptDoc.slides.flatMap { it.nodes }).filter { it.code != null }
+        assertTrue(njptCodeNodes.size >= 23, "Expected >= 23 live code nodes in not-just-plain-text-2024, got ${njptCodeNodes.size}")
+        assertEquals(setOf("css", "html", "markdown"), njptCodeNodes.mapNotNull { it.code?.language }.toSet())
+    }
+
     private fun decodeOrFail(reg: DocumentDeckRegistration): DeckDocument {
         val rawText = loadResourceText(reg.resourcePath)
         val result = DeckDocumentCodec.decode(

@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
 import dev.sebastiano.ciacola.document.ConnectorPayload
 import dev.sebastiano.ciacola.document.DeckDocument
@@ -93,6 +94,16 @@ expect fun rememberDocumentFontResolverHandle(
     document: DeckDocument,
     fontsDir: String?,
 ): Any?
+
+/**
+ * Resolves [familyName] against [fontResolverHandle] onto [style], clamping weights to loaded
+ * faces when available.
+ */
+expect fun resolveDocumentFontStyle(
+    fontResolverHandle: Any?,
+    familyName: String?,
+    style: TextStyle,
+): TextStyle
 
 /** Applies a full [LayerState] (including blur, colorMatrix, Wipe/Iris clip). */
 expect fun Modifier.applyDocumentLayerState(state: LayerState): Modifier

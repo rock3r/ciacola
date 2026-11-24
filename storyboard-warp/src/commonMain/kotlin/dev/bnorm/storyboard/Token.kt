@@ -94,6 +94,22 @@ internal fun List<Token>.splitIntoLexicalTokens(): List<Token> = buildList(size 
                     while (i < text.length && text[i].isWhitespace()) i++
                     i
                 }
+                text[offset].isHighSurrogate() && offset + 1 < text.length && text[offset + 1].isLowSurrogate() -> {
+                    var i = offset + 2
+                    while (i < text.length) {
+                        val c = text[i]
+                        when {
+                            c == '\uFE0F' || c == '\uFE0E' || c == '\u20E3' -> i++
+                            c == '\u200D' && i + 1 < text.length -> {
+                                i++
+                                i += if (text[i].isHighSurrogate() && i + 1 < text.length && text[i + 1].isLowSurrogate()) 2 else 1
+                            }
+                            c == '\uD83C' && i + 1 < text.length && text[i + 1] in '\uDFFB'..'\uDFFF' -> i += 2
+                            else -> break
+                        }
+                    }
+                    i
+                }
                 else -> offset + 1
             }
             if (offset == 0 && end == text.length) {

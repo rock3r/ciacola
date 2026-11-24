@@ -316,4 +316,25 @@ class SyntaxParserTest {
             assertEquals(sample.after.split('\n').size, diffs[1].rows.size)
         }
     }
+
+    @Test
+    fun lexicalTokenSplittingPreservesSurrogatePairsAndEmojiClusters() {
+        val code = "Use `animateFloatAsState()` 🙂 👍🏽 👨‍👩‍👧‍👦"
+        val tokens = assertLosslessAndWellFormed(code, Markdown)
+        val contents = tokens.map { it.content }
+        assertTrue("🙂" in contents, "Expected intact surrogate-pair emoji token in $contents")
+        assertTrue("👍🏽" in contents, "Expected intact skin-tone emoji token in $contents")
+        assertTrue("👨‍👩‍👧‍👦" in contents, "Expected intact ZWJ emoji cluster token in $contents")
+        for (tok in tokens) {
+            val s = tok.content
+            for (i in s.indices) {
+                if (s[i].isHighSurrogate()) {
+                    assertTrue(i + 1 < s.length && s[i + 1].isLowSurrogate(), "Dangling high surrogate in token: $tok")
+                }
+                if (s[i].isLowSurrogate()) {
+                    assertTrue(i > 0 && s[i - 1].isHighSurrogate(), "Dangling low surrogate in token: $tok")
+                }
+            }
+        }
+    }
 }

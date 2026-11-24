@@ -232,6 +232,7 @@ internal fun RenderStaticOverlaySubtree(
             colorResolver = ctx.colorResolver,
             reducedMotion = ctx.reducedMotion,
             modifier = effectiveMod,
+            fontResolverHandle = ctx.fontResolverHandle,
         )
         NodeKind.Specimen -> {
             val payload = node.specimen!!

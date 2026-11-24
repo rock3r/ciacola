@@ -746,6 +746,7 @@ internal fun DocumentTravellingOverlayNode(
                 colorResolver = ctx.colorResolver,
                 reducedMotion = ctx.reducedMotion,
                 modifier = overlayTransformMod,
+                fontResolverHandle = ctx.fontResolverHandle,
             )
         }
         NodeKind.Stack -> {

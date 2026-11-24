@@ -595,3 +595,20 @@ private fun parseConnectorStyle(raw: String?): ConnectorStyle = when (raw?.lower
     "treeedge" -> ConnectorStyle.TreeEdge
     else -> ConnectorStyle.Arrow
 }
+
+actual fun resolveDocumentFontStyle(
+    fontResolverHandle: Any?,
+    familyName: String?,
+    style: TextStyle,
+): TextStyle {
+    val fontResolver = fontResolverHandle as? DeckFontResolver ?: return style
+    return if (!familyName.isNullOrBlank()) {
+        fontResolver.resolveTextStyle(
+            familyName = familyName,
+            style = style,
+            disableOptionalLigatures = false,
+        )
+    } else {
+        fontResolver.clampStyleWeights(style)
+    }
+}
