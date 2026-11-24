@@ -1,11 +1,11 @@
 package dev.sebastiano.ciacola.decks
 
+import dev.sebastiano.ciacola.review.ReviewClaims
 import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.review.ReviewQueueFile
 import dev.sebastiano.ciacola.review.SlideReviewComment
 import java.nio.file.Path
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
@@ -33,7 +33,7 @@ internal object DeckReviewCli {
     const val EXIT_IO = 6
 
     const val COMMENTS_FILE_NAME = "review-comments.json"
-    const val TAKEN_FILE_NAME = "review-agent-taken.json"
+    const val TAKEN_FILE_NAME = ReviewClaims.FILE_NAME
 
     private val lenientJson = Json {
         ignoreUnknownKeys = true
@@ -44,9 +44,6 @@ internal object DeckReviewCli {
         prettyPrint = true
         encodeDefaults = true
     }
-
-    @Serializable
-    internal data class TakenState(val takenIds: List<String> = emptyList())
 
     /**
      * Reads the deck's queued comments.
@@ -69,32 +66,15 @@ internal object DeckReviewCli {
     }
 
     /**
-     * Reads this agent's claims.
+     * This agent's claims, in the format [ReviewClaims] defines.
      *
-     * Unlike the queue, an unparsable sidecar is recoverable: it is the agent's own bookkeeping,
-     * and forgetting it replays a comment rather than losing one. It is still reported, because
-     * silently replaying every comment ever taken looks like the deck gone mad.
+     * The deck reads the same file, so the format cannot live here: both halves dispatch, and a
+     * claim only prevents double delivery if both of them understand it.
      */
-    fun readTaken(takenFile: Path, warn: (String) -> Unit = System.err::println): Set<String> {
-        val text = runCatching { ReviewQueueFile.readTextOrNull(takenFile) }
-            .getOrElse {
-                warn("Could not read ${takenFile.toAbsolutePath()}, treating it as empty: ${it.message}")
-                null
-            } ?: return emptySet()
-        if (text.isBlank()) return emptySet()
-        return runCatching { lenientJson.decodeFromString<TakenState>(text).takenIds.toSet() }
-            .getOrElse {
-                warn("Ignoring unreadable claims in ${takenFile.toAbsolutePath()}: ${it.message}")
-                emptySet()
-            }
-    }
+    fun readTaken(takenFile: Path, warn: (String) -> Unit = System.err::println): Set<String> =
+        ReviewClaims.read(takenFile, warn)
 
-    fun writeTaken(takenFile: Path, ids: Set<String>) {
-        ReviewQueueFile.writeAtomically(
-            takenFile,
-            prettyJson.encodeToString(TakenState(ids.toList().sorted())) + "\n",
-        )
-    }
+    fun writeTaken(takenFile: Path, ids: Set<String>) = ReviewClaims.write(takenFile, ids)
 
     /**
      * Comments the author is still waiting on that this agent has not taken yet, in file order.

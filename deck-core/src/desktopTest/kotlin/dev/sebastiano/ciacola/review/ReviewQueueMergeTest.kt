@@ -66,3 +66,30 @@ class ReviewQueueMergeTest {
         assertEquals(listOf("A", "B"), merged.map { it.id })
     }
 }
+
+class ReviewQueueLockTest {
+
+    @Test
+    fun aTransactionCanNestWithoutDeadlockingOrThrowing() {
+        val dir = java.nio.file.Files.createTempDirectory("review-lock")
+        // A FileLock belongs to the process, so a second one on the same file throws even on the
+        // thread already holding it. Nesting has to be allowed: the deck's persist runs inside
+        // selections that take the lock themselves.
+        val reached = ReviewQueueFile.withLock(dir) {
+            ReviewQueueFile.withLock(dir) { "inner ran" }
+        }
+        assertEquals("inner ran", reached)
+    }
+
+    @Test
+    fun claimsSurviveARoundTripAndAnUnreadableFileReadsAsEmpty() {
+        val dir = java.nio.file.Files.createTempDirectory("review-claims")
+        val file = dir.resolve(ReviewClaims.FILE_NAME)
+        ReviewClaims.write(file, setOf("rc-2", "rc-1"))
+        assertEquals(setOf("rc-1", "rc-2"), ReviewClaims.read(file) {})
+
+        java.nio.file.Files.writeString(file, "{ not json")
+        // Losing a claim costs a repeat, not a comment, so this one recovers rather than throws.
+        assertEquals(emptySet(), ReviewClaims.read(file) {})
+    }
+}

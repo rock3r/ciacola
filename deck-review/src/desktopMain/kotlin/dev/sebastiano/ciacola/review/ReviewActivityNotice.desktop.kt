@@ -91,6 +91,11 @@ internal fun sendingNotice(numbers: List<Int>): Pair<String, String> =
     "Sending ${formatCommentNumbers(numbers)} to the agent…" to
         "Pushing to the configured conversation."
 
+internal fun alreadyWithAnAgentNotice(numbers: List<Int>): Pair<String, String> =
+    "${formatCommentNumbers(numbers)} is already with an agent" to
+        "An agent collected it from the queue and has not reported back yet. Pushing it again " +
+        "would put two of them on the same slide."
+
 internal fun deliveredNotice(numbers: List<Int>): Pair<String, String> =
     "The agent has ${formatCommentNumbers(numbers)}" to
         "The pin turns green once the agent reports it applied."

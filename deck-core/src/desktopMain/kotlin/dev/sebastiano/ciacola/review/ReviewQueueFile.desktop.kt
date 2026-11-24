@@ -59,8 +59,15 @@ object ReviewQueueFile {
         val lockFile = dir.resolve(LOCK_FILE_NAME)
         val key = lockFile.toAbsolutePath().normalize().toString()
         val inProcess = inProcessLocks.computeIfAbsent(key) { ReentrantLock() }
+        // Already inside a transaction on this file: run the block and do not ask for a second
+        // FileLock. A FileLock belongs to the process, so asking twice throws
+        // OverlappingFileLockException even on the thread that already holds it — nesting would
+        // fail at the inner call rather than waiting, which is the opposite of what a reentrant
+        // lock should do.
+        val alreadyHeld = inProcess.isHeldByCurrentThread
         inProcess.lock()
         try {
+            if (alreadyHeld) return block()
             FileChannel.open(
                 lockFile,
                 StandardOpenOption.CREATE,

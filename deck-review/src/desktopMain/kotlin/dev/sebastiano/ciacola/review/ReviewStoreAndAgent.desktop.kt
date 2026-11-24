@@ -70,6 +70,7 @@ class ReviewCommentStore(
     }
 
     val commentsFile: Path = storyboardDir.resolve("review-comments.json")
+    val claimsFile: Path = storyboardDir.resolve(ReviewClaims.FILE_NAME)
     val configFile: Path = storyboardDir.resolve("review-config.json")
     val capturesDir: Path = storyboardDir.resolve("review-captures")
 
@@ -372,12 +373,30 @@ class ReviewCommentStore(
         return dispatchItemsToAgent(listOf(snapshot)).single()
     }
 
+    /**
+     * Pushes everything still waiting, except what an agent has already taken.
+     *
+     * Status alone is not enough to decide. A comment collected by `:deck:reviewWait` stays
+     * `Queued` until the agent resolves it, so selecting on status would hand a note somebody is
+     * already acting on to a second agent, and two of them would edit the same slide.
+     */
     suspend fun flushQueued(): Int {
+        val claimed = ReviewQueueFile.withLock(storyboardDir) { ReviewClaims.read(claimsFile) {} }
         val queued = synchronized(this) {
-            val pending = comments.filter {
+            val waiting = comments.filter {
                 it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
             }
-            if (pending.isEmpty()) return 0
+            val pending = waiting.filterNot { it.id in claimed }
+            if (pending.isEmpty()) {
+                if (waiting.isNotEmpty()) {
+                    postNotice(
+                        kind = ReviewNoticeKind.Delivered,
+                        text = alreadyWithAnAgentNotice(displayNumbersOf(waiting)),
+                        autoDismissMillis = QUEUED_NOTICE_MILLIS,
+                    )
+                }
+                return 0
+            }
             val pendingIds = pending.map { it.id }.toSet()
             val updated = comments.map { c ->
                 if (c.id in pendingIds) c.copy(status = ReviewCommentStatus.Applying, deliveryError = null) else c
@@ -462,6 +481,17 @@ class ReviewCommentStore(
     }
 
     suspend fun retryComment(commentId: String) {
+        val claimed = ReviewQueueFile.withLock(storyboardDir) { ReviewClaims.read(claimsFile) {} }
+        if (commentId in claimed) {
+            // An agent is already on it; pushing would be the same double delivery flushQueued
+            // avoids, just one comment at a time.
+            postNotice(
+                kind = ReviewNoticeKind.Delivered,
+                text = alreadyWithAnAgentNotice(displayNumbersOf(comments.filter { it.id == commentId })),
+                autoDismissMillis = QUEUED_NOTICE_MILLIS,
+            )
+            return
+        }
         val item = synchronized(this) {
             val target = comments.firstOrNull { it.id == commentId } ?: return
             val retrying = target.copy(status = ReviewCommentStatus.Applying, deliveryError = null)
