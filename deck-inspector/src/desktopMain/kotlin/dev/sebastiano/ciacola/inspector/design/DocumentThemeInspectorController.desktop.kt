@@ -283,6 +283,8 @@ class DocumentThemeInspectorController(
         includePath: String,
     ): String? {
         if (includePath.isBlank()) return null
+        if (includePath.startsWith('/') || includePath.startsWith('\\')) return null
+        if (includePath.length >= 2 && includePath[0].isLetter() && includePath[1] == ':') return null
         val rel = runCatching { Path.of(includePath) }.getOrNull() ?: return null
         if (rel.isAbsolute) return null
         val resolved = normalizedBaseDir.resolve(rel).normalize()

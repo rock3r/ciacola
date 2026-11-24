@@ -810,6 +810,7 @@ internal object VsCodeThemeMapper {
             root = root,
             acc = merged,
             includeResolver = includeResolver,
+            currentBaseDir = "",
             visitedIncludes = HashSet(),
             depth = 0,
         )
@@ -884,6 +885,7 @@ internal object VsCodeThemeMapper {
         json: String,
         acc: MergedVsCodeTheme,
         includeResolver: ((String) -> String?)?,
+        currentBaseDir: String,
         visitedIncludes: MutableSet<String>,
         depth: Int,
     ): MergedVsCodeTheme {
@@ -892,13 +894,14 @@ internal object VsCodeThemeMapper {
         }
         val root = MiniJson.parse(json, allowComments = true, allowTrailingCommas = true) as? JsonObject
             ?: throw SyntaxSchemeParseException("Expected VS Code theme top-level JSON object")
-        return mergeThemeObject(root, acc, includeResolver, visitedIncludes, depth)
+        return mergeThemeObject(root, acc, includeResolver, currentBaseDir, visitedIncludes, depth)
     }
 
     private fun mergeThemeObject(
         root: JsonObject,
         acc: MergedVsCodeTheme,
         includeResolver: ((String) -> String?)?,
+        currentBaseDir: String,
         visitedIncludes: MutableSet<String>,
         depth: Int,
     ): MergedVsCodeTheme {
@@ -907,11 +910,20 @@ internal object VsCodeThemeMapper {
         }
 
         var current = acc
-        val includePath = (root.entries["include"] as? JsonString)?.value?.takeIf { it.isNotBlank() }
-        if (includePath != null && includeResolver != null && visitedIncludes.add(includePath)) {
-            val includedJson = includeResolver(includePath)
-                ?: throw SyntaxSchemeParseException("Could not resolve included VS Code theme '$includePath'")
-            current = mergeTheme(includedJson, current, includeResolver, visitedIncludes, depth + 1)
+        val rawInclude = (root.entries["include"] as? JsonString)?.value?.trim()?.takeIf { it.isNotEmpty() }
+        if (rawInclude != null && includeResolver != null) {
+            val resolvedPath = resolveRelativeIncludePath(currentBaseDir, rawInclude)
+            if (resolvedPath.isEmpty()) {
+                throw SyntaxSchemeParseException("Could not resolve included VS Code theme '$rawInclude'")
+            }
+            if (visitedIncludes.add(resolvedPath)) {
+                val includedJson = (
+                    includeResolver(resolvedPath)
+                        ?: if (currentBaseDir.isEmpty() && resolvedPath != rawInclude) includeResolver(rawInclude) else null
+                    ) ?: throw SyntaxSchemeParseException("Could not resolve included VS Code theme '$resolvedPath'")
+                val nextBaseDir = parentIncludeDir(resolvedPath)
+                current = mergeTheme(includedJson, current, includeResolver, nextBaseDir, visitedIncludes, depth + 1)
+            }
         }
 
         val themeName = (root.entries["name"] as? JsonString)?.value?.takeIf { it.isNotBlank() } ?: current.name
@@ -932,6 +944,41 @@ internal object VsCodeThemeMapper {
         }
 
         return current.copy(name = themeName, type = themeType)
+    }
+
+    private fun isAbsoluteIncludePath(raw: String): Boolean {
+        if (raw.startsWith('/') || raw.startsWith('\\')) return true
+        if (raw.length >= 2 && raw[0].isLetter() && raw[1] == ':') return true
+        return false
+    }
+
+    private fun resolveRelativeIncludePath(currentBaseDir: String, rawInclude: String): String {
+        val trimmed = rawInclude.trim()
+        if (trimmed.isEmpty()) return ""
+        if (isAbsoluteIncludePath(trimmed)) return trimmed
+        val normalizedRaw = trimmed.replace('\\', '/')
+        val combined = if (currentBaseDir.isEmpty()) normalizedRaw else "$currentBaseDir/$normalizedRaw"
+        val segments = ArrayList<String>()
+        for (part in combined.split('/')) {
+            when (part) {
+                "", "." -> Unit
+                ".." -> {
+                    if (segments.isNotEmpty() && segments.last() != "..") {
+                        segments.removeAt(segments.lastIndex)
+                    } else {
+                        segments.add("..")
+                    }
+                }
+                else -> segments.add(part)
+            }
+        }
+        return segments.joinToString("/")
+    }
+
+    private fun parentIncludeDir(normalizedPath: String): String {
+        if (normalizedPath.isEmpty() || isAbsoluteIncludePath(normalizedPath)) return ""
+        val slash = normalizedPath.lastIndexOf('/')
+        return if (slash <= 0) "" else normalizedPath.substring(0, slash)
     }
 
     private data class TextMateMatch(

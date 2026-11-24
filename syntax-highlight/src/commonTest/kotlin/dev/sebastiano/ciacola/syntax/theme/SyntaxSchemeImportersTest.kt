@@ -426,6 +426,91 @@ class SyntaxSchemeImportersTest {
             includeResolver = { if (it == "b.json") cycleB else cycleA },
         )
         assertEquals("#FF0000", cyclic.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+
+        // Nested subdirectory includes resolve relative to the including file, not the root file
+        val rootDecoyColors = """{"colors":{"editor.background":"#990000","editor.foreground":"#FFFFFF"}}"""
+        val nestedColors = """{"colors":{"editor.background":"#102030","editor.foreground":"#E0E8F0"},"tokenColors":[{"scope":"comment","settings":{"foreground":"#607080"}}]}"""
+        val sharedTokens = """{"tokenColors":[{"scope":"constant.numeric","settings":{"foreground":"#44DDAA"}}]}"""
+        val subBase = """{"include":"./colors.json","tokenColors":[{"scope":"keyword","settings":{"foreground":"#FFAA33"}}]}"""
+        val subMid = """{"include":"../shared/tokens.json","tokenColors":[{"scope":"string","settings":{"foreground":"#88EE66"}}]}"""
+        val nestedRoot = """{"name":"Nested Theme","type":"dark","include":"base/base.json"}"""
+        val requestedPaths = mutableListOf<String>()
+        val nested = SyntaxSchemeImporters.importVsCodeJson(
+            json = nestedRoot,
+            includeResolver = { path ->
+                requestedPaths += path
+                when (path) {
+                    "base/base.json" -> subBase
+                    "base/colors.json" -> nestedColors
+                    "colors.json", "./colors.json" -> rootDecoyColors
+                    else -> null
+                }
+            },
+        )
+        assertEquals(listOf("base/base.json", "base/colors.json"), requestedPaths)
+        assertEquals("#102030", nested.background.toHexRgb())
+        assertEquals("#607080", nested.foregroundFor(SyntaxTokenKind.Comment).toHexRgb())
+        assertEquals("#FFAA33", nested.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+
+        // Parent-relative include across sibling subdirectories (`base/sub/mid.json` -> `../shared/tokens.json` -> `base/shared/tokens.json`)
+        val siblingRoot = """{"name":"Sibling Theme","type":"dark","include":"base/sub/mid.json"}"""
+        val siblingRequests = mutableListOf<String>()
+        val sibling = SyntaxSchemeImporters.importVsCodeJson(
+            json = siblingRoot,
+            includeResolver = { path ->
+                siblingRequests += path
+                when (path) {
+                    "base/sub/mid.json" -> subMid
+                    "base/shared/tokens.json" -> sharedTokens
+                    else -> null
+                }
+            },
+        )
+        assertEquals(listOf("base/sub/mid.json", "base/shared/tokens.json"), siblingRequests)
+        assertEquals("#44DDAA", sibling.foregroundFor(SyntaxTokenKind.Number).toHexRgb())
+        assertEquals("#88EE66", sibling.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+
+        // Missing nested `./colors.json` must fail instead of falling back to root `colors.json`
+        assertFailsWith<SyntaxSchemeParseException> {
+            SyntaxSchemeImporters.importVsCodeJson(
+                json = nestedRoot,
+                includeResolver = { path ->
+                    when (path) {
+                        "base/base.json" -> subBase
+                        "colors.json", "./colors.json" -> rootDecoyColors
+                        else -> null
+                    }
+                },
+            )
+        }
+
+        // Nested escape (`base/base.json` -> `../../escape.json`) resolves to `../escape.json` so resolvers can reject it
+        val escapeRequests = mutableListOf<String>()
+        assertFailsWith<SyntaxSchemeParseException> {
+            SyntaxSchemeImporters.importVsCodeJson(
+                json = """{"name":"Escape","include":"base/base.json"}""",
+                includeResolver = { path ->
+                    escapeRequests += path
+                    when (path) {
+                        "base/base.json" -> """{"include":"../../escape.json"}"""
+                        else -> null
+                    }
+                },
+            )
+        }
+        assertEquals(listOf("base/base.json", "../escape.json"), escapeRequests)
+
+        // Normalized cycle across subdirectory (`base/a.json` -> `../base/a.json`) stops cleanly
+        val subCycleRequests = mutableListOf<String>()
+        val subCyclic = SyntaxSchemeImporters.importVsCodeJson(
+            json = """{"name":"SubCycle","include":"base/a.json"}""",
+            includeResolver = { path ->
+                subCycleRequests += path
+                """{"include":"../base/a.json","colors":{"editor.background":"#222222","editor.foreground":"#EEEEEE"}}"""
+            },
+        )
+        assertEquals(listOf("base/a.json"), subCycleRequests)
+        assertEquals("#222222", subCyclic.background.toHexRgb())
     }
 
     @Test

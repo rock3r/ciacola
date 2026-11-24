@@ -145,6 +145,50 @@ class CodeSchemeInspectorTest {
             assertEquals("#BB9AF7", importedScheme.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
             assertEquals("#9ECE6A", importedScheme.foregroundFor(SyntaxTokenKind.String).toHexRgb())
 
+            // 1b. Nested subdirectory includes resolve relative to the including file, not the root directory,
+            // while still enforcing the original themesDir confinement boundary.
+            val baseSubDir = themesDir.resolve("base").also { Files.createDirectory(it) }
+            val sharedSubDir = themesDir.resolve("shared").also { Files.createDirectory(it) }
+            // Decoy colors.json beside root theme must NOT be picked up by base/base.json's "./colors.json"
+            Files.writeString(
+                themesDir.resolve("colors.json"),
+                """{"colors":{"editor.background":"#990000","editor.foreground":"#FFFFFF"}}""",
+            )
+            Files.writeString(
+                baseSubDir.resolve("colors.json"),
+                """{"include":"../shared/tokens.json","colors":{"editor.background":"#112233","editor.foreground":"#DCE6F0"}}""",
+            )
+            Files.writeString(
+                sharedSubDir.resolve("tokens.json"),
+                """{"tokenColors":[{"scope":"comment","settings":{"foreground":"#667788"}}]}""",
+            )
+            Files.writeString(
+                baseSubDir.resolve("base.json"),
+                """{"include":"./colors.json","tokenColors":[{"scope":"keyword","settings":{"foreground":"#FF9944"}}]}""",
+            )
+            val nestedThemeFile = themesDir.resolve("nested-theme.json").apply {
+                Files.writeString(this, """{"name":"Nested Disk Theme","type":"dark","include":"base/base.json"}""")
+            }
+            assertTrue(controller.importCodeSchemeFromFile(nestedThemeFile))
+            val nestedDiskScheme = controller.activeCodeScheme()
+            assertEquals("#112233", nestedDiskScheme.background.toHexRgb())
+            assertEquals("#FF9944", nestedDiskScheme.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            assertEquals("#667788", nestedDiskScheme.foregroundFor(SyntaxTokenKind.Comment).toHexRgb())
+
+            // Nested escape out of themesDir (`base/escape.json` -> `../../secret.json`) must still be rejected
+            Files.writeString(
+                baseSubDir.resolve("escape.json"),
+                """{"include":"../../secret.json"}""",
+            )
+            val nestedEscapeFile = themesDir.resolve("nested-escape.json").apply {
+                Files.writeString(this, """{"name":"Nested Escape","include":"base/escape.json"}""")
+            }
+            val revBeforeNestedEscape = store.revision
+            assertFalse(controller.importCodeSchemeFromFile(nestedEscapeFile))
+            assertEquals(revBeforeNestedEscape, store.revision)
+            val nestedEscapeStatus = assertNotNull(controller.lastCodeSchemeStatus)
+            assertFalse(nestedEscapeStatus.contains(tempDir.toString()), "Status must not leak path: $nestedEscapeStatus")
+
             // 2. Path-traversal include "../secret.json" rejected without leaking temp path
             val revBefore = store.revision
             val traversalFile = themesDir.resolve("traversal.json").apply {
