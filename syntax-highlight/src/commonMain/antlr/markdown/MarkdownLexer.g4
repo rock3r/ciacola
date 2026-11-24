@@ -26,7 +26,7 @@ tokens {
     INLINE_CODE,
     STAR_RUN,
     UNDERSCORE_RUN,
-    TILDE_TILDE,
+    TILDE_RUN,
     LBRACK,
     HTML_COMMENT,
     AUTOLINK,
@@ -34,6 +34,7 @@ tokens {
     HTML_NAME,
     HTML_ATTR_NAME,
     HTML_ATTR_VALUE,
+    HTML_BLOCK_TEXT,
     BLOCKQUOTE_MARKER,
     TEXT
 }
@@ -59,7 +60,7 @@ tokens {
     override fun inlineCodeTokenType(): Int = Tokens.INLINE_CODE
     override fun starRunTokenType(): Int = Tokens.STAR_RUN
     override fun underscoreRunTokenType(): Int = Tokens.UNDERSCORE_RUN
-    override fun tildeTildeTokenType(): Int = Tokens.TILDE_TILDE
+    override fun tildeRunTokenType(): Int = Tokens.TILDE_RUN
     override fun lbrackTokenType(): Int = Tokens.LBRACK
     override fun htmlCommentTokenType(): Int = Tokens.HTML_COMMENT
     override fun autolinkTokenType(): Int = Tokens.AUTOLINK
@@ -67,6 +68,7 @@ tokens {
     override fun htmlNameTokenType(): Int = Tokens.HTML_NAME
     override fun htmlAttrNameTokenType(): Int = Tokens.HTML_ATTR_NAME
     override fun htmlAttrValueTokenType(): Int = Tokens.HTML_ATTR_VALUE
+    override fun htmlBlockTextTokenType(): Int = Tokens.HTML_BLOCK_TEXT
     override fun blockquoteMarkerTokenType(): Int = Tokens.BLOCKQUOTE_MARKER
 
     override fun defaultModeId(): Int = DEFAULT_MODE
@@ -81,6 +83,8 @@ tokens {
     override fun bqFenceInfoModeId(): Int = Modes.BQ_FENCE_INFO_MODE
     override fun bqFenceBodyModeId(): Int = Modes.BQ_FENCE_BODY_MODE
     override fun htmlTagModeId(): Int = Modes.HTML_TAG_MODE
+    override fun htmlBlockModeId(): Int = Modes.HTML_BLOCK_MODE
+    override fun htmlBlockRawModeId(): Int = Modes.HTML_BLOCK_RAW_MODE
 }
 
 // =========================================================================
@@ -144,7 +148,7 @@ LINE_LBRACK
     ;
 
 LINE_HTML_COMMENT
-    : '<!--' { consumeHtmlComment(); onNonParagraphLineStart(); } -> mode(INLINE_MODE)
+    : '<!--' { handleLineStartHtmlComment(); }
     ;
 
 LINE_LT
@@ -224,8 +228,8 @@ INLINE_UNDERSCORE
     : '_'+ -> type(UNDERSCORE_RUN)
     ;
 
-INLINE_TILDE_TILDE
-    : '~~' -> type(TILDE_TILDE)
+INLINE_TILDE
+    : '~'+ -> type(TILDE_RUN)
     ;
 
 BANG_LBRACK
@@ -265,7 +269,7 @@ HARD_BREAK_ESCAPE
     ;
 
 INLINE_HTML_COMMENT
-    : '<!--' { consumeHtmlComment(); }
+    : '<!--' { consumeInlineHtmlComment(); }
     ;
 
 INLINE_LT
@@ -368,7 +372,7 @@ FC_CLOSE
     ;
 
 FC_NEWLINE
-    : ( '\r'? '\n' | '\r' ) { onDefaultNewline(); } -> type(NEWLINE), mode(DEFAULT_MODE)
+    : ( '\r'? '\n' | '\r' ) { onFenceCloseNewline(); } -> type(NEWLINE), mode(DEFAULT_MODE)
     ;
 
 FC_FALLBACK
@@ -461,4 +465,70 @@ HTML_TAG_UNQUOTED
 
 HTML_TAG_ERROR
     : .
+    ;
+
+// =========================================================================
+// HTML_BLOCK_MODE: CommonMark HTML blocks (types 2-tail, 6, 7)
+// =========================================================================
+mode HTML_BLOCK_MODE;
+
+HB_WS
+    : [ \t]+ -> type(WS)
+    ;
+
+HB_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onHtmlBlockNewline(); } -> type(NEWLINE)
+    ;
+
+HB_BQ
+    : '>' { handleHtmlBlockGt(); }
+    ;
+
+HB_COMMENT
+    : '<!--' { consumeInlineHtmlComment(); }
+    ;
+
+HB_LT
+    : '<' { handleHtmlBlockLt(); }
+    ;
+
+HB_ENTITY
+    : '&' ( [A-Za-z][A-Za-z0-9]* | '#' ( [0-9]+ | [xX][0-9A-Fa-f]+ ) ) ';' { onHtmlBlockNonWs(); } -> type(ENTITY_REF)
+    ;
+
+HB_TEXT
+    : ~[ \t\r\n<&>]+ { onHtmlBlockNonWs(); } -> type(HTML_BLOCK_TEXT)
+    ;
+
+HB_FALLBACK
+    : . { onHtmlBlockNonWs(); } -> type(HTML_BLOCK_TEXT)
+    ;
+
+// =========================================================================
+// HTML_BLOCK_RAW_MODE: CommonMark HTML blocks (types 1, 3, 4, 5)
+// =========================================================================
+mode HTML_BLOCK_RAW_MODE;
+
+HBR_WS
+    : [ \t]+ -> type(WS)
+    ;
+
+HBR_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onHtmlBlockRawNewline(); } -> type(NEWLINE)
+    ;
+
+HBR_BQ
+    : '>' { handleHtmlBlockRawGt(); }
+    ;
+
+HBR_LT
+    : '<' { handleHtmlBlockRawLt(); }
+    ;
+
+HBR_TEXT
+    : ~[ \t\r\n<>]+ { onHtmlBlockRawText(); } -> type(HTML_BLOCK_TEXT)
+    ;
+
+HBR_FALLBACK
+    : . { onHtmlBlockRawFallback(); } -> type(HTML_BLOCK_TEXT)
     ;

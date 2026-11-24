@@ -237,7 +237,8 @@ class MarkdownSyntaxLexerTest {
         // 3. CommonMark rule: backtick fence info string cannot contain backticks; tilde fence CAN
         val infoStringRule = """
             ```foo`bar
-            val notFence = 1
+            # Heading After
+            **bold**
 
             ~~~kotlin `backtick` ok
             val isFence = 2
@@ -245,7 +246,14 @@ class MarkdownSyntaxLexerTest {
         """.trimIndent() + "\n"
         val infoTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, infoStringRule, "md-info-backtick-rule")
         assertFalse(
-            infoTokens.any { it.slice(infoStringRule).contains("notFence") && it.kind == SyntaxTokenKind.Keyword },
+            infoTokens.any { it.slice(infoStringRule).contains("foo`") && it.kind == SyntaxTokenKind.String },
+            "Backtick run with backtick in info string and mismatched closing count must not open a fence or inline span",
+        )
+        assertTrue(
+            infoTokens.any { it.slice(infoStringRule) == "Heading" && it.kind == SyntaxTokenKind.Keyword } &&
+                infoTokens.any { it.slice(infoStringRule) == "After" && it.kind == SyntaxTokenKind.Keyword } &&
+                infoTokens.any { it.slice(infoStringRule) == "bold" && it.kind == SyntaxTokenKind.Constant },
+            "Lines after rejected backtick fence opener must remain normal Markdown",
         )
         assertTrue(
             infoTokens.any { it.slice(infoStringRule) == "val" && it.kind == SyntaxTokenKind.Keyword },
@@ -378,6 +386,57 @@ class MarkdownSyntaxLexerTest {
         )
         assertTrue(overIndentedTokens.any { it.slice(overIndentedTabCloseBq) == "val" && it.kind == SyntaxTokenKind.Keyword })
         assertTrue(overIndentedTokens.any { it.slice(overIndentedTabCloseBq) == "`ok`" && it.kind == SyntaxTokenKind.String })
+
+        // 2-level nested blockquote fence + UTF-16 surrogate pair offset check
+        val nestedBqSurrogate = "> > ```kotlin\n> > val rocket = \"🚀\"\n> > val n = 42\n> > ```\n"
+        val bqSurrogateTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, nestedBqSurrogate, "md-bq2-surrogate")
+        val rocketTok = bqSurrogateTokens.firstOrNull { it.slice(nestedBqSurrogate) == "🚀" }
+        assertTrue(rocketTok != null && rocketTok.kind == SyntaxTokenKind.String)
+        assertEquals(nestedBqSurrogate.indexOf("🚀"), rocketTok.startIndex)
+        assertEquals(nestedBqSurrogate.indexOf("🚀") + "🚀".length, rocketTok.endIndex)
+        val numTok = bqSurrogateTokens.firstOrNull { it.slice(nestedBqSurrogate) == "42" }
+        assertTrue(numTok != null && numTok.kind == SyntaxTokenKind.Number)
+        assertEquals(nestedBqSurrogate.indexOf("42"), numTok.startIndex)
+        assertEquals(nestedBqSurrogate.indexOf("42") + 2, numTok.endIndex)
+
+        // List-marker fenced block followed by inline code
+        val listFence = "- ```kotlin\nval x = 1\n  ```\nAfter `inline`.\n"
+        val listFenceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, listFence, "md-list-fence")
+        assertTrue(listFenceTokens.any { it.slice(listFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(listFenceTokens.any { it.slice(listFence) == "`inline`" && it.kind == SyntaxTokenKind.String })
+
+        // Diff fenced block enforces 1-level-only non-recursion (Diff markers highlighted, Kotlin inside Diff NOT highlighted)
+        val diffFence = """
+            ```diff
+            --- a/Main.kt
+            +++ b/Main.kt
+            @@ -1,1 +1,1 @@
+            -val oldVal = 1
+            +val newVal = 2
+            ```
+        """.trimIndent() + "\n"
+        val diffTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, diffFence, "md-diff-fence-no-recurse")
+        if (SyntaxHighlighter.lexerOrNull(SyntaxLanguage.Diff) != null) {
+            assertTrue(diffTokens.any { it.slice(diffFence).startsWith("@@") && it.kind == SyntaxTokenKind.Type })
+        }
+        assertFalse(
+            diffTokens.any { it.slice(diffFence) == "val" && it.kind == SyntaxTokenKind.Keyword },
+            "Diff inside Markdown must NOT recurse into Kotlin highlighting",
+        )
+
+        // Indented code after heading, thematic break, fence close, and blank blockquote line
+        val afterHeading = "# Heading\n    codeAfterHeading\n"
+        assertTrue(assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, afterHeading, "md-ic-heading")
+            .any { it.slice(afterHeading) == "codeAfterHeading" && it.kind == SyntaxTokenKind.String })
+        val afterRule = "---\n    codeAfterRule\n"
+        assertTrue(assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, afterRule, "md-ic-rule")
+            .any { it.slice(afterRule) == "codeAfterRule" && it.kind == SyntaxTokenKind.String })
+        val afterFence = "```plain\nx\n```\n    codeAfterFence\n"
+        assertTrue(assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, afterFence, "md-ic-fence")
+            .any { it.slice(afterFence) == "codeAfterFence" && it.kind == SyntaxTokenKind.String })
+        val afterBlankBq = "> text\n>\n>     codeAfterBlankBq\n"
+        assertTrue(assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, afterBlankBq, "md-ic-bq")
+            .any { it.slice(afterBlankBq) == "codeAfterBlankBq" && it.kind == SyntaxTokenKind.String })
     }
 
     @Test
@@ -633,6 +692,111 @@ class MarkdownSyntaxLexerTest {
                 "unclosed-html-tags" to unclosedHtmlTags,
                 "unclosed-html-comments" to unclosedHtmlComments,
             ),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun handlesGfmExtendedAutolinksTildesEmphasisOpenersAndHtmlBlocks() {
+        // 1. GFM extended autolinks + intraword '_' inside URLs
+        val autolinks = "See www.example.com/a_b, http://example.com, (https://sub.example.org/p_(ok)), and user.name+tag@example.com.\n"
+        val autoTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, autolinks, "md-gfm-autolinks")
+        assertTrue(autoTokens.any { it.slice(autolinks) == "www.example.com/a_b" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(autoTokens.any { it.slice(autolinks) == "http://example.com" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(autoTokens.any { it.slice(autolinks) == "https://sub.example.org/p_(ok)" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(autoTokens.any { it.slice(autolinks) == "user.name+tag@example.com" && it.kind == SyntaxTokenKind.Attribute })
+        assertFalse(autoTokens.any { it.slice(autolinks) == "a" && it.kind == SyntaxTokenKind.Property })
+
+        // 2. GFM single-tilde ~x~, double-tilde ~~x~~, non-matching ~~~x~~~, and CommonMark openersBottom closer length
+        val tildeAndOpeners = "~one~ ~~two~~ ~~~three~~~ and a*b c** d **e f****\n"
+        val empTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, tildeAndOpeners, "md-tildes-and-openers")
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "one" && it.kind == SyntaxTokenKind.Comment })
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "two" && it.kind == SyntaxTokenKind.Comment })
+        assertFalse(empTokens.any { it.slice(tildeAndOpeners) == "three" && it.kind == SyntaxTokenKind.Comment })
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "b" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "c" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "d" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "e" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(empTokens.any { it.slice(tildeAndOpeners) == "f" && it.kind == SyntaxTokenKind.Constant })
+
+        // 3. Unclosed inline <!-- must NOT swallow following heading
+        val unclosedInlineComment = "type <!-- here\n# Next Heading\n"
+        val commentTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, unclosedInlineComment, "md-unclosed-inline-comment")
+        assertTrue(commentTokens.any { it.slice(unclosedInlineComment) == "Next" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(commentTokens.any { it.slice(unclosedInlineComment) == "Heading" && it.kind == SyntaxTokenKind.Keyword })
+
+        // 4. CommonMark HTML blocks types 1-7 suppress Markdown emphasis/links/code inside them
+        val htmlBlocks = """
+            <pre>
+            *not1* [n1](x) `c1`
+            </pre>
+
+            <script>
+            const s = "*not2*";
+
+            [n2](x)
+            </script>
+
+            <!-- line comment
+            *not3* -->
+
+            <?xml *not4* ?>
+            <!DOCTYPE *not5*>
+            <![CDATA[*not6*]]>
+
+            <div>
+            *not7* [n7](x) `c7`
+            </div>
+
+            <custom-widget>
+            *not8* [n8](x)
+            </custom-widget>
+
+            *afterHtml*
+        """.trimIndent() + "\n"
+        val htmlTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, htmlBlocks, "md-html-blocks-1-7")
+        for (idx in 1..8) {
+            assertFalse(
+                htmlTokens.any { it.slice(htmlBlocks).contains("not$idx") && it.kind == SyntaxTokenKind.Property },
+                "HTML block content not$idx must not lex as Markdown emphasis",
+            )
+        }
+        assertFalse(htmlTokens.any { it.slice(htmlBlocks) == "n7" && it.kind == SyntaxTokenKind.Tag })
+        assertFalse(htmlTokens.any { it.slice(htmlBlocks) == "`c7`" && it.kind == SyntaxTokenKind.String })
+        assertTrue(htmlTokens.any { it.slice(htmlBlocks) == "afterHtml" && it.kind == SyntaxTokenKind.Property })
+
+        // Type 7 cannot interrupt a paragraph
+        val type7Paragraph = "Paragraph line\n<custom-inline>\n*isEmphasis*\n"
+        val type7ParaTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, type7Paragraph, "md-type7-para-interrupt")
+        assertTrue(type7ParaTokens.any { it.slice(type7Paragraph) == "isEmphasis" && it.kind == SyntaxTokenKind.Property })
+    }
+
+    @Test
+    fun linearPerformanceOnNestedDashLists() {
+        val nestedDashLists = "- ".repeat(8_000) + "`x`"
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("nested-dash-lists" to nestedDashLists),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnNestedStarLists() {
+        val nestedStarLists = "* ".repeat(8_000) + "x"
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("nested-star-lists" to nestedStarLists),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnUnclosedInlineHtmlComments() {
+        val unclosedInlineComments = "text <!-- ".repeat(5_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("unclosed-inline-comments" to unclosedInlineComments),
             maxMillisPerInput = 300L,
         )
     }

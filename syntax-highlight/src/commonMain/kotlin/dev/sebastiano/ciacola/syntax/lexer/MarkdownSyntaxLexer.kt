@@ -565,7 +565,7 @@ private fun emitParagraphTokens(
             }
         }
 
-        if (!isBlank && raw[firstContent].type == MdTokens.HTML_COMMENT) {
+        if (!isBlank && (raw[firstContent].type == MdTokens.HTML_COMMENT || raw[firstContent].type == MdTokens.HTML_BLOCK_TEXT)) {
             isNonPara = true
         }
 
@@ -587,6 +587,10 @@ private fun emitParagraphTokens(
         when (tok.type) {
             MdTokens.WS, MdTokens.NEWLINE -> {
                 resolvedKinds[k] = SyntaxTokenKind.Whitespace
+                excludedFromDelim[k] = true
+            }
+            MdTokens.HTML_BLOCK_TEXT -> {
+                resolvedKinds[k] = SyntaxTokenKind.Plain
                 excludedFromDelim[k] = true
             }
             MdTokens.ATX_HEADING_OPEN,
@@ -855,6 +859,15 @@ private fun emitParagraphTokens(
         idx++
     }
 
+    // 5.5 Strictly O(N) GFM extended autolinks (www., http://, https://, bare email)
+    val autolinkPartialSpans = resolveGfmExtendedAutolinks(
+        source = source,
+        raw = raw,
+        linkTextMask = linkTextMask,
+        resolvedKinds = resolvedKinds,
+        excludedFromDelim = excludedFromDelim,
+    )
+
     // 6. Strictly O(N) emphasis & strikethrough delimiter resolution using CommonMark openersBottom
     resolveEmphasisDelimiters(source, raw, resolvedKinds, excludedFromDelim, customSplitTokens)
 
@@ -893,7 +906,22 @@ private fun emitParagraphTokens(
                     else -> SyntaxTokenKind.Plain
                 }
                 val kind = resolvedKinds[k] ?: defaultTextKind
-                out += SyntaxToken(kind, tok.start, tok.end)
+                val partialSpans = autolinkPartialSpans[k]
+                if (partialSpans == null) {
+                    out += SyntaxToken(kind, tok.start, tok.end)
+                } else {
+                    var cursor = tok.start
+                    for ((aStart, aEnd) in partialSpans) {
+                        if (cursor < aStart) {
+                            out += SyntaxToken(kind, cursor, aStart)
+                        }
+                        out += SyntaxToken(SyntaxTokenKind.Attribute, aStart, aEnd)
+                        cursor = aEnd
+                    }
+                    if (cursor < tok.end) {
+                        out += SyntaxToken(kind, cursor, tok.end)
+                    }
+                }
             }
         }
     }
@@ -1253,8 +1281,8 @@ private fun resolveEmphasisDelimiters(
 ) {
     val n = raw.size
     val stack = ArrayList<DelimEntry>()
-    // openersBottom[kindSlot]: 0..5 for '*', 6..11 for '_', 12..13 for '~'
-    val openersBottom = IntArray(14) { -1 }
+    // openersBottom[kindSlot]: 0..5 for '*', 6..11 for '_', 12..15 for '~' (single vs double)
+    val openersBottom = IntArray(16) { -1 }
 
     // Track per-delimiter-token matched mask (left-consumed / right-consumed)
     val matchedLeft = IntArray(n)
@@ -1269,10 +1297,12 @@ private fun resolveEmphasisDelimiters(
         val delimChar = when (tok.type) {
             MdTokens.STAR_RUN -> '*'
             MdTokens.UNDERSCORE_RUN -> '_'
-            MdTokens.TILDE_TILDE -> '~'
+            MdTokens.TILDE_RUN -> '~'
             else -> continue
         }
         val len = tok.end - tok.start
+        // Per GFM §6.5, only 1 or 2 tildes can open or close strikethrough.
+        if (delimChar == '~' && len > 2) continue
         val (canOpen, canClose) = computeFlanking(source, tok.start, tok.end, delimChar)
         if (!canOpen && !canClose) continue
 
@@ -1280,9 +1310,9 @@ private fun resolveEmphasisDelimiters(
             var remainingClose = len
             while (remainingClose > 0) {
                 val bottomSlot = when (delimChar) {
-                    '*' -> (if (canOpen) 3 else 0) + (remainingClose % 3)
-                    '_' -> 6 + (if (canOpen) 3 else 0) + (remainingClose % 3)
-                    else -> 12 + (if (canOpen) 1 else 0)
+                    '*' -> (if (canOpen) 3 else 0) + (len % 3)
+                    '_' -> 6 + (if (canOpen) 3 else 0) + (len % 3)
+                    else -> 12 + (if (len == 2) 2 else 0) + (if (canOpen) 1 else 0)
                 }
                 val bottom = openersBottom[bottomSlot]
                 var openerStackIdx = stack.size - 1
@@ -1290,11 +1320,14 @@ private fun resolveEmphasisDelimiters(
                 while (openerStackIdx > bottom) {
                     val opener = stack[openerStackIdx]
                     if (opener.canOpen && opener.char == delimChar && opener.len > 0) {
-                        val ruleOfThreeBlocked = delimChar != '~' &&
+                        val blocked = if (delimChar == '~') {
+                            opener.origLen != len
+                        } else {
                             ((opener.canOpen && opener.canClose) || (canOpen && canClose)) &&
-                            (opener.origLen + len) % 3 == 0 &&
-                            !(opener.origLen % 3 == 0 && len % 3 == 0)
-                        if (!ruleOfThreeBlocked) {
+                                (opener.origLen + len) % 3 == 0 &&
+                                !(opener.origLen % 3 == 0 && len % 3 == 0)
+                        }
+                        if (!blocked) {
                             found = true
                             break
                         }
@@ -1308,7 +1341,7 @@ private fun resolveEmphasisDelimiters(
 
                 val opener = stack[openerStackIdx]
                 val useCount = when {
-                    delimChar == '~' -> 2
+                    delimChar == '~' -> len
                     opener.len >= 2 && remainingClose >= 2 -> 2
                     else -> 1
                 }
@@ -1466,6 +1499,232 @@ private fun isMdPunctuationCp(cp: Int): Boolean {
         }
     }
     return false
+}
+
+private fun resolveGfmExtendedAutolinks(
+    source: String,
+    raw: List<RawMdToken>,
+    linkTextMask: IntArray,
+    resolvedKinds: Array<SyntaxTokenKind?>,
+    excludedFromDelim: BooleanArray,
+): Map<Int, List<Pair<Int, Int>>> {
+    val n = raw.size
+    if (n == 0) return emptyMap()
+    val partialSpans = HashMap<Int, ArrayList<Pair<Int, Int>>>()
+    var linkDepth = 0
+    var t = 0
+    while (t < n) {
+        linkDepth += linkTextMask[t]
+        if (excludedFromDelim[t] || linkDepth > 0 || resolvedKinds[t] != null) {
+            t++
+            continue
+        }
+        val runStartTok = t
+        var runEndTok = t + 1
+        while (runEndTok < n) {
+            val nextLinkDepth = linkDepth + linkTextMask[runEndTok]
+            if (nextLinkDepth > 0 ||
+                excludedFromDelim[runEndTok] ||
+                resolvedKinds[runEndTok] != null ||
+                raw[runEndTok].start != raw[runEndTok - 1].end
+            ) {
+                break
+            }
+            linkDepth = nextLinkDepth
+            runEndTok++
+        }
+
+        val segStart = raw[runStartTok].start
+        val segEnd = raw[runEndTok - 1].end
+        var tokCursor = runStartTok
+        var pos = segStart
+        var emailScanBarrier = -1
+
+        while (pos < segEnd) {
+            var matchEnd = -1
+            val urlAllowedBefore = pos == segStart || isGfmUrlBoundaryBefore(source[pos - 1])
+            if (urlAllowedBefore) {
+                matchEnd = matchGfmUrlEnd(source, pos, segEnd)
+            }
+            if (matchEnd < 0 && pos >= emailScanBarrier && isGfmEmailLocalChar(source[pos])) {
+                val validBefore = pos == segStart || !isGfmEmailLocalChar(source[pos - 1])
+                if (validBefore) {
+                    val (emailEnd, localEnd) = matchGfmEmailEnd(source, pos, segEnd)
+                    if (emailEnd > pos) {
+                        matchEnd = emailEnd
+                    } else {
+                        emailScanBarrier = localEnd + 1
+                    }
+                }
+            }
+            if (matchEnd > pos) {
+                while (tokCursor < runEndTok && raw[tokCursor].end <= pos) {
+                    tokCursor++
+                }
+                var k = tokCursor
+                while (k < runEndTok && raw[k].start < matchEnd) {
+                    val tok = raw[k]
+                    if (tok.start >= pos && tok.end <= matchEnd) {
+                        resolvedKinds[k] = SyntaxTokenKind.Attribute
+                        excludedFromDelim[k] = true
+                    } else {
+                        val s = maxOf(tok.start, pos)
+                        val e = minOf(tok.end, matchEnd)
+                        if (e > s) {
+                            partialSpans.getOrPut(k) { ArrayList(2) }.add(s to e)
+                        }
+                    }
+                    k++
+                }
+                tokCursor = if (k > tokCursor) k - 1 else tokCursor
+                pos = matchEnd
+            } else {
+                pos++
+            }
+        }
+        t = runEndTok
+    }
+    return partialSpans
+}
+
+private fun isGfmUrlBoundaryBefore(ch: Char): Boolean =
+    ch == '*' || ch == '_' || ch == '~' || ch == '('
+
+private fun isGfmEmailLocalChar(ch: Char): Boolean =
+    ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' || ch == '.' || ch == '+' || ch == '_' || ch == '-'
+
+private fun isGfmDomainChar(ch: Char): Boolean =
+    ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' || ch == '_' || ch == '-'
+
+private fun isGfmAsciiAlnum(ch: Char): Boolean =
+    ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9'
+
+private fun matchGfmUrlEnd(source: String, start: Int, segEnd: Int): Int {
+    val domStart = when {
+        startsWithIgnoreCase(source, start, segEnd, "https://") -> start + 8
+        startsWithIgnoreCase(source, start, segEnd, "http://") -> start + 7
+        source.regionMatches(start, "www.", 0, 4, ignoreCase = false) -> start + 4
+        else -> return -1
+    }
+    if (domStart >= segEnd) return -1
+
+    var p = domStart
+    var dotCount = 0
+    var prevSegUnder = false
+    var curSegUnder = false
+    var curSegLen = 0
+    var domEnd = -1
+
+    while (p < segEnd) {
+        val ch = source[p]
+        if (ch == '.') {
+            if (curSegLen == 0) break
+            // Peek ahead: if next char starts a valid segment, advance dot; else domain ends before '.'
+            if (p + 1 >= segEnd || !isGfmDomainChar(source[p + 1])) {
+                domEnd = p
+                break
+            }
+            dotCount++
+            prevSegUnder = curSegUnder
+            curSegUnder = false
+            curSegLen = 0
+            p++
+        } else if (isGfmDomainChar(ch)) {
+            if (ch == '_') curSegUnder = true
+            curSegLen++
+            p++
+            domEnd = p
+        } else {
+            if (curSegLen > 0) {
+                domEnd = p
+            }
+            break
+        }
+    }
+
+    if (domEnd <= domStart || dotCount < 1 || curSegLen == 0 || prevSegUnder || curSegUnder) {
+        return -1
+    }
+
+    var end = domEnd
+    var openParens = 0
+    var closeParens = 0
+    while (end < segEnd) {
+        val ch = source[end]
+        if (ch == '<') break
+        if (ch == '(') openParens++ else if (ch == ')') closeParens++
+        end++
+    }
+
+    while (end > domEnd) {
+        val last = source[end - 1]
+        if (last == '?' || last == '!' || last == '.' || last == ',' || last == ':' ||
+            last == '*' || last == '_' || last == '~' || last == '\'' || last == '"'
+        ) {
+            end--
+        } else if (last == ')' && closeParens > openParens) {
+            end--
+            closeParens--
+        } else {
+            break
+        }
+    }
+
+    return if (end >= domEnd) end else -1
+}
+
+private fun matchGfmEmailEnd(source: String, start: Int, segEnd: Int): Pair<Int, Int> {
+    var localEnd = start
+    while (localEnd < segEnd && isGfmEmailLocalChar(source[localEnd])) {
+        localEnd++
+    }
+    if (localEnd == start || localEnd >= segEnd || source[localEnd] != '@') {
+        return -1 to localEnd
+    }
+    var p = localEnd + 1
+    if (p >= segEnd || !isGfmDomainChar(source[p])) {
+        return -1 to localEnd
+    }
+    var dotCount = 0
+    var curSegLen = 0
+    var curLastChar = '\u0000'
+    var domEnd = -1
+    while (p < segEnd) {
+        val ch = source[p]
+        if (ch == '.') {
+            if (curSegLen == 0) break
+            if (p + 1 >= segEnd || !isGfmDomainChar(source[p + 1])) {
+                domEnd = p
+                break
+            }
+            dotCount++
+            curSegLen = 0
+            p++
+        } else if (isGfmDomainChar(ch)) {
+            curSegLen++
+            curLastChar = ch
+            p++
+            domEnd = p
+        } else {
+            if (curSegLen > 0) domEnd = p
+            break
+        }
+    }
+    if (domEnd < 0 || dotCount < 1 || curSegLen == 0 || curLastChar == '-' || curLastChar == '_') {
+        return -1 to localEnd
+    }
+    if (domEnd < segEnd) {
+        val after = source[domEnd]
+        if (isGfmAsciiAlnum(after) || after == '@' || after == '/') {
+            return -1 to localEnd
+        }
+    }
+    return domEnd to localEnd
+}
+
+private fun startsWithIgnoreCase(source: String, start: Int, segEnd: Int, literal: String): Boolean {
+    if (start + literal.length > segEnd) return false
+    return source.regionMatches(start, literal, 0, literal.length, ignoreCase = true)
 }
 
 private fun coalesceAdjacentTokens(tokens: List<SyntaxToken>): List<SyntaxToken> {
