@@ -97,6 +97,8 @@ class ReviewCommentStore(
 
     private val noticeLock = Any()
 
+    private val deliveryLock = Any()
+
     private fun postNotice(
         kind: ReviewNoticeKind,
         text: Pair<String, String>,
@@ -280,11 +282,33 @@ class ReviewCommentStore(
         return true
     }
 
+    /**
+     * Commits [updated] to disk, merged against whatever is there now.
+     *
+     * The deck is not the only writer: an agent's `--review-resolve` edits the same file. Writing
+     * this list wholesale would erase a verdict that landed since the last 250 ms poll, exactly as
+     * the agent writing wholesale would erase a comment queued since its own read. So the write is
+     * a transaction under the shared lock, and it carries a *delta* rather than a whole file:
+     * what this store added or changed since it last agreed with disk, and what it deleted.
+     *
+     * Everything on disk that this store never knew about is left alone, which is what makes the
+     * two writers safe together — and why a plain union would be wrong, since it would resurrect
+     * every comment the author had just deleted.
+     */
     @Synchronized
     private fun persistCommentsInternal(updated: List<SlideReviewComment>) {
+        val believed = comments.toList()
         runCatching {
             Files.createDirectories(storyboardDir)
-            writeAtomically(commentsFile, json.encodeToString(updated) + "\n")
+            ReviewQueueFile.withLock(storyboardDir) {
+                val onDisk = runCatching {
+                    ReviewQueueFile.readTextOrNull(commentsFile)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { json.decodeFromString<List<SlideReviewComment>>(it) }
+                }.getOrNull() ?: updated
+                val merged = mergeOntoDisk(onDisk = onDisk, believed = believed, updated = updated)
+                ReviewQueueFile.writeAtomically(commentsFile, json.encodeToString(merged) + "\n")
+            }
             lastObservedModifiedMillis = commentsFile.getLastModifiedTime().toMillis()
             lastObservedFileSize = commentsFile.fileSize()
         }
@@ -460,14 +484,17 @@ class ReviewCommentStore(
         }
 
         val bin = effectiveAgentApiBin()
-        val message = formatAgentMessage(items)
         // Retry Send stays live while a comment is Applying, so a second push can start on top of
-        // the first. They share one entry here, and the first to finish would otherwise report the
-        // comment delivered while the other is still running.
-        val alreadyInFlight = items.filter { it.id in deliveringIds }.map { it.id }.toSet()
-        val mine = items.filterNot { it.id in alreadyInFlight }
+        // the first. Reserving has to be one step, or two dispatches both see the id unreserved;
+        // and the message has to be built from what this dispatch actually owns, not from what it
+        // was asked for, or the push describes comments another one is already sending.
+        val mine = synchronized(deliveryLock) {
+            val free = items.filterNot { it.id in deliveringIds }
+            deliveringIds.addAll(free.map { it.id })
+            free
+        }
         if (mine.isEmpty()) return@withContext items
-        deliveringIds.addAll(mine.map { it.id })
+        val message = formatAgentMessage(mine)
         postNotice(
             kind = ReviewNoticeKind.Sending,
             text = sendingNotice(numbers),
@@ -496,7 +523,7 @@ class ReviewCommentStore(
             }
         }
 
-        deliveringIds.removeAll(mine.map { it.id }.toSet())
+        synchronized(deliveryLock) { deliveringIds.removeAll(mine.map { it.id }.toSet()) }
 
         if (result.isFailure) {
             val cause = result.exceptionOrNull()
@@ -508,8 +535,11 @@ class ReviewCommentStore(
             // Ask the filesystem rather than the exception text: ProcessBuilder says "Cannot run
             // program" for a command that is present but not executable, or whose interpreter is
             // missing, and reporting those as "nothing installed" hides a fault the author can fix.
+            // Absent is the only case that means "nothing to push to"; present-but-unrunnable
+            // keeps its diagnostic, because that one the author can act on.
             refreshPushAvailability()
-            val noAgentInstalled = isAgentBinaryMissing(cause) && !pushBinAvailable
+            val noAgentInstalled = isAgentBinaryMissing(cause) &&
+                !commandExistsAnywhere(effectiveAgentApiBin(), envProvider("PATH"), workspaceRoot)
             postNotice(
                 kind = if (noAgentInstalled) ReviewNoticeKind.NothingToPushTo else ReviewNoticeKind.Failed,
                 text = if (noAgentInstalled) {

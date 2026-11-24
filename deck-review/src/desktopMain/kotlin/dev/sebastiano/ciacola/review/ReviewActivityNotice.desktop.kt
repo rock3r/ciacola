@@ -224,3 +224,16 @@ internal fun isExecutableAvailable(
         .filter { it.isNotBlank() }
         .any { isExecutable(java.nio.file.Path.of(it, trimmed)) }
 }
+
+/**
+ * Whether [bin] names a file that exists at all, executable or not.
+ *
+ * Separate from [isExecutableAvailable] on purpose: a command that is there but has lost its
+ * execute bit fails to launch exactly like a missing one, and the author needs to be told which
+ * of the two it was.
+ */
+internal fun commandExistsAnywhere(
+    bin: String,
+    path: String?,
+    baseDir: java.nio.file.Path? = null,
+): Boolean = isExecutableAvailable(bin, path, baseDir) { java.nio.file.Files.exists(it) }

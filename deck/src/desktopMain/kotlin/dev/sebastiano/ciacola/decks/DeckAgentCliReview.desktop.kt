@@ -1,7 +1,10 @@
 package dev.sebastiano.ciacola.decks
 
 import dev.bnorm.storyboard.easel.resolveDefaultStoryboardDir
+import dev.sebastiano.ciacola.DeckEntry
+import dev.sebastiano.ciacola.forExternalFile
 import dev.sebastiano.ciacola.review.ReviewCommentStatus
+import dev.sebastiano.ciacola.review.ReviewQueueFile
 import dev.sebastiano.ciacola.studio.storyboardDirForDeck
 import java.nio.file.Path
 
@@ -46,7 +49,15 @@ internal fun reviewDeckIdFor(deckArg: String): String {
     val trimmed = deckArg.trim()
     val looksLikeAPath = trimmed.endsWith(".deck.json") || trimmed.contains('/') || trimmed.contains('\\')
     if (!looksLikeAPath) return trimmed
-    return Path.of(trimmed).fileName?.toString()?.removeSuffix(".deck.json")?.takeIf { it.isNotEmpty() }
+    val file = Path.of(trimmed).toAbsolutePath().normalize()
+    // The id the app writes its queue under is the one declared inside the file, which need not
+    // match the file's name: DeckEntry.forExternalFile reads conference-keynote.deck.json as
+    // "conf-2026". The stem is only the fallback for a file we cannot read.
+    val fromFile = runCatching { DeckEntry.forExternalFile(file).id }
+        .getOrNull()
+        ?.takeIf { it.isNotEmpty() }
+    return fromFile
+        ?: file.fileName?.toString()?.removeSuffix(".deck.json")?.takeIf { it.isNotEmpty() }
         ?: error("Cannot work out a deck id from --deck='$deckArg'")
 }
 
@@ -72,7 +83,7 @@ internal fun reviewDirFor(storyboardDirArg: String?, deckId: String): Path {
 private fun guardQueue(block: () -> Int): Int =
     try {
         block()
-    } catch (e: DeckReviewQueueFile.Unreadable) {
+    } catch (e: ReviewQueueFile.Unreadable) {
         System.err.println(e.message)
         DeckReviewCli.EXIT_UNREADABLE
     }

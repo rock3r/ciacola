@@ -57,15 +57,31 @@ class SlideReviewWindow(
         internal set
 
     override val name: String = "Review"
+
+    /**
+     * Re-checks the push command whenever the panel is shown, however it was shown.
+     *
+     * [openForAgentConfiguration] is only one of the ways in; F4 and the menu set [visible]
+     * directly, and someone who has just gone off to install the agent will come back through one
+     * of those.
+     */
+    private fun onBecameVisible() {
+        store.refreshPushAvailability()
+    }
     override val minimumSize: DpSize get() = DpSize(420.dp, 480.dp)
-    override var visible: Boolean by mutableStateOf(false)
+    private var visibleState: Boolean by mutableStateOf(false)
+
+    override var visible: Boolean
+        get() = visibleState
+        set(value) {
+            val wasVisible = visibleState
+            visibleState = value
+            if (value && !wasVisible) onBecameVisible()
+        }
     var highlightAgentConfigBanner: Boolean by mutableStateOf(false)
         internal set
 
     fun openForAgentConfiguration() {
-        // The usual reason for opening this panel is to go and install or configure the thing
-        // that is missing, so take the chance to ask the filesystem again.
-        store.refreshPushAvailability()
         highlightAgentConfigBanner = true
         visible = true
     }

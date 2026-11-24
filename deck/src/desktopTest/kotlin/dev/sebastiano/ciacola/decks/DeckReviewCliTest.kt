@@ -1,6 +1,7 @@
 package dev.sebastiano.ciacola.decks
 
 import dev.sebastiano.ciacola.review.ReviewCommentStatus
+import dev.sebastiano.ciacola.review.ReviewQueueFile
 import dev.sebastiano.ciacola.review.ReviewTargetHit
 import dev.sebastiano.ciacola.review.SlideReviewComment
 import java.nio.file.Files
@@ -109,7 +110,7 @@ class DeckReviewCliTest {
 
         // Reading it as "no comments" turns a corrupt file into a wait that never returns, an
         // export that prints [], and a resolve that blames the agent for an id the file holds.
-        val failure = assertFailsWith<DeckReviewQueueFile.Unreadable> { DeckReviewCli.readComments(file) }
+        val failure = assertFailsWith<ReviewQueueFile.Unreadable> { DeckReviewCli.readComments(file) }
         assertTrue(failure.message.orEmpty().contains(file.toAbsolutePath().toString()), failure.message)
     }
 
@@ -148,28 +149,55 @@ class DeckReviewCliTest {
 
     @Test
     fun resolvingDoesNotEraseACommentQueuedWhileItWasWorking() {
+        // The previous version of this test joined the writer before resolving, so it proved
+        // nothing about interleaving. Here the writer runs *while* the resolve is in its
+        // transaction: it blocks on the lock until the resolve commits, and both survive.
+        repeat(25) {
+            val dir = Files.createTempDirectory("review-cli-race")
+            val commentsFile = writeComments(dir, comment("rc-1"))
+            val bothRunning = java.util.concurrent.CyclicBarrier(2)
+
+            val queuesMeanwhile = Thread {
+                bothRunning.await()
+                ReviewQueueFile.withLock(dir) {
+                    val now = DeckReviewCli.readComments(commentsFile)
+                    ReviewQueueFile.writeAtomically(
+                        commentsFile,
+                        DeckReviewCli.encodeComments(now + comment("rc-2")),
+                    )
+                }
+            }
+            queuesMeanwhile.start()
+            bothRunning.await()
+            DeckReviewCli.runResolve(commentsFile, "rc-1", "done", out = {})
+            queuesMeanwhile.join()
+
+            val after = DeckReviewCli.readComments(commentsFile)
+            assertEquals(setOf("rc-1", "rc-2"), after.map { it.id }.toSet(), "lost a comment on run $it")
+            assertEquals(ReviewCommentStatus.Applied, after.single { c -> c.id == "rc-1" }.status)
+        }
+    }
+
+    @Test
+    fun aQueueHandedBackBeforeItsStatusIsNeverQueuedAndClaimedAtOnce() {
         val dir = Files.createTempDirectory("review-cli")
         val commentsFile = writeComments(dir, comment("rc-1"))
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        DeckReviewCli.writeTaken(takenFile, setOf("rc-1"))
 
-        // The author queues rc-2 while the agent is resolving rc-1. Both are whole-file writers,
-        // so without the shared lock the agent's stale copy replaces rc-2 and nothing says so.
-        val queuedMeanwhile = Thread {
-            DeckReviewQueueFile.withLock(dir) {
-                val now = DeckReviewCli.readComments(commentsFile)
-                DeckReviewQueueFile.writeAtomically(
-                    commentsFile,
-                    DeckReviewCli.encodeComments(now + comment("rc-2")),
-                )
-            }
-        }
-        queuedMeanwhile.start()
-        queuedMeanwhile.join()
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-1",
+            resolution = "putting it back",
+            status = ReviewCommentStatus.Queued,
+            takenFile = takenFile,
+            out = {},
+        )
 
-        DeckReviewCli.runResolve(commentsFile, "rc-1", "done", out = {})
-
-        val after = DeckReviewCli.readComments(commentsFile)
-        assertEquals(listOf("rc-1", "rc-2"), after.map { it.id })
-        assertEquals(ReviewCommentStatus.Applied, after.single { it.id == "rc-1" }.status)
+        // Whatever happens, the pair must never settle on queued-and-claimed: that is stranded.
+        val stillClaimed = "rc-1" in DeckReviewCli.readTaken(takenFile)
+        val isQueued = DeckReviewCli.readComments(commentsFile).single().status == ReviewCommentStatus.Queued
+        assertFalse(stillClaimed && isQueued)
     }
 
     @Test
