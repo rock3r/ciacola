@@ -856,11 +856,21 @@ internal object VsCodeThemeMapper {
             styles[kind] = style
         }
 
-        val fnDeclStyle = matchTextMate(
+        val tmFnDecl = matchTextMate(
             listOf("entity.name.function.declaration"),
             result.tokenColors,
             exactOnly = true,
-        ) ?: matchSemantic(listOf("function.declaration"), result.semanticTokenColors)
+        )
+        val semFnDecl = matchSemantic(listOf("function.declaration"), result.semanticTokenColors)
+        val fnBaseStyle = styles[SyntaxTokenKind.Function]
+        val fnDeclStyle = (tmFnDecl ?: semFnDecl)?.let { matched ->
+            if (matched.foreground == null) {
+                val inheritedFg = semFnDecl?.foreground ?: fnBaseStyle?.foreground
+                if (inheritedFg != null) matched.copy(foreground = inheritedFg) else matched
+            } else {
+                matched
+            }
+        }
 
         return SyntaxColorScheme(
             id = slugify(displayName),
@@ -1057,16 +1067,14 @@ internal object VsCodeThemeMapper {
                     strikethrough = "strikethrough" in fontTokens
                 }
             }
-            if (fg != null || bg != null || bold || italic || underline || strikethrough) {
-                return SyntaxTokenStyle(
-                    foreground = fg,
-                    background = bg,
-                    bold = bold,
-                    italic = italic,
-                    underline = underline,
-                    strikethrough = strikethrough,
-                )
-            }
+            return SyntaxTokenStyle(
+                foreground = fg,
+                background = bg,
+                bold = bold,
+                italic = italic,
+                underline = underline,
+                strikethrough = strikethrough,
+            )
         }
         return null
     }
@@ -1085,14 +1093,23 @@ internal object VsCodeThemeMapper {
                 is JsonObject -> {
                     val fg = (raw.entries["foreground"] as? JsonString)?.value?.let {
                         SyntaxColor.parseCssHexOrNull(it)
-                    } ?: continue
-                    val fontTokens = splitWhitespaceTokens((raw.entries["fontStyle"] as? JsonString)?.value ?: "")
-                    val bold = (raw.entries["bold"] as? JsonBoolean)?.value == true || "bold" in fontTokens
-                    val italic = (raw.entries["italic"] as? JsonBoolean)?.value == true || "italic" in fontTokens
-                    val underline =
-                        (raw.entries["underline"] as? JsonBoolean)?.value == true || "underline" in fontTokens
-                    val strikethrough =
-                        (raw.entries["strikethrough"] as? JsonBoolean)?.value == true || "strikethrough" in fontTokens
+                    }
+                    val fontStyleRaw = (raw.entries["fontStyle"] as? JsonString)?.value
+                    val boldProp = (raw.entries["bold"] as? JsonBoolean)?.value
+                    val italicProp = (raw.entries["italic"] as? JsonBoolean)?.value
+                    val underlineProp = (raw.entries["underline"] as? JsonBoolean)?.value
+                    val strikethroughProp = (raw.entries["strikethrough"] as? JsonBoolean)?.value
+                    val hasStyleProp = fontStyleRaw != null ||
+                        boldProp != null ||
+                        italicProp != null ||
+                        underlineProp != null ||
+                        strikethroughProp != null
+                    if (fg == null && !hasStyleProp) continue
+                    val fontTokens = splitWhitespaceTokens(fontStyleRaw ?: "")
+                    val bold = boldProp ?: ("bold" in fontTokens)
+                    val italic = italicProp ?: ("italic" in fontTokens)
+                    val underline = underlineProp ?: ("underline" in fontTokens)
+                    val strikethrough = strikethroughProp ?: ("strikethrough" in fontTokens)
                     return SyntaxTokenStyle(
                         foreground = fg,
                         bold = bold,

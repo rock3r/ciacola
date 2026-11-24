@@ -46,10 +46,19 @@ public data class SyntaxColorScheme(
         styles[kind]?.foreground ?: styles[SyntaxTokenKind.Plain]?.foreground ?: foreground
 
     /**
-     * Returns [functionDeclaration] when specified, or falls back to [styleFor] for [SyntaxTokenKind.Function].
+     * Returns [functionDeclaration] when specified (inheriting [SyntaxTokenKind.Function]'s
+     * foreground if [functionDeclaration] omits one), or falls back to [styleFor] for
+     * [SyntaxTokenKind.Function].
      */
-    public fun effectiveFunctionDeclarationStyle(): SyntaxTokenStyle =
-        functionDeclaration ?: styleFor(SyntaxTokenKind.Function)
+    public fun effectiveFunctionDeclarationStyle(): SyntaxTokenStyle {
+        val fnBase = styleFor(SyntaxTokenKind.Function)
+        val decl = functionDeclaration ?: return fnBase
+        return if (decl.foreground == null && fnBase.foreground != null) {
+            decl.copy(foreground = fnBase.foreground)
+        } else {
+            decl
+        }
+    }
 
     /**
      * Serializes this scheme into the Ciacola Syntax Color Scheme v1 JSON format.

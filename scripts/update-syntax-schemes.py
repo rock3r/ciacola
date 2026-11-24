@@ -719,15 +719,14 @@ def _match_textmate_scopes(
                 italic = "italic" in fs_tokens
                 underline = "underline" in fs_tokens
                 strikethrough = "strikethrough" in fs_tokens
-        if eff_fg is not None or eff_bg is not None or bold or italic or underline or strikethrough:
-            return StyleEntry(
-                fg=eff_fg,
-                bg=eff_bg,
-                bold=bold,
-                italic=italic,
-                underline=underline,
-                strikethrough=strikethrough,
-            )
+        return StyleEntry(
+            fg=eff_fg,
+            bg=eff_bg,
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            strikethrough=strikethrough,
+        )
     return None
 
 
@@ -741,19 +740,26 @@ def _match_semantic_tokens(candidates: list[str], semantic_colors: dict[str, Any
         elif isinstance(val, dict):
             fg = normalize_css_hex(val.get("foreground"))
             raw_fs = val.get("fontStyle")
-            fs = raw_fs.lower().split() if isinstance(raw_fs, str) else []
-            bold = (val.get("bold") is True) or ("bold" in fs)
-            italic = (val.get("italic") is True) or ("italic" in fs)
-            underline = (val.get("underline") is True) or ("underline" in fs)
-            strikethrough = (val.get("strikethrough") is True) or ("strikethrough" in fs)
-            if fg is not None:
-                return StyleEntry(
-                    fg=fg,
-                    bold=bold,
-                    italic=italic,
-                    underline=underline,
-                    strikethrough=strikethrough,
-                )
+            has_fs = isinstance(raw_fs, str)
+            bold_prop = val.get("bold") if isinstance(val.get("bold"), bool) else None
+            italic_prop = val.get("italic") if isinstance(val.get("italic"), bool) else None
+            underline_prop = val.get("underline") if isinstance(val.get("underline"), bool) else None
+            strikethrough_prop = val.get("strikethrough") if isinstance(val.get("strikethrough"), bool) else None
+            has_style = has_fs or any(p is not None for p in (bold_prop, italic_prop, underline_prop, strikethrough_prop))
+            if fg is None and not has_style:
+                continue
+            fs = set(raw_fs.lower().split()) if has_fs else set()
+            bold = bold_prop if bold_prop is not None else ("bold" in fs)
+            italic = italic_prop if italic_prop is not None else ("italic" in fs)
+            underline = underline_prop if underline_prop is not None else ("underline" in fs)
+            strikethrough = strikethrough_prop if strikethrough_prop is not None else ("strikethrough" in fs)
+            return StyleEntry(
+                fg=fg,
+                bold=bold,
+                italic=italic,
+                underline=underline,
+                strikethrough=strikethrough,
+            )
     return None
 
 
@@ -839,6 +845,7 @@ def convert_vscode_theme(
         "plain": plain_style.to_json(),
         "whitespace": StyleEntry(fg=ws_fg).to_json(),
     }
+    fn_base_entry: StyleEntry | None = None
     for kind_name in TOKEN_ORDER[2:]:
         tm_cands, sem_cands, tm_fallback = scope_map[kind_name]
         matched = (
@@ -847,13 +854,30 @@ def convert_vscode_theme(
             or _match_textmate_scopes(tm_fallback, token_colors)
             or plain_style
         )
+        if kind_name == "function":
+            fn_base_entry = matched
         tokens[kind_name] = matched.to_json()
 
-    fn_decl_style = _match_textmate_scopes(
+    tm_fn_decl = _match_textmate_scopes(
         ["entity.name.function.declaration"],
         token_colors,
         exact_only=True,
-    ) or _match_semantic_tokens(["function.declaration"], semantic_colors)
+    )
+    sem_fn_decl = _match_semantic_tokens(["function.declaration"], semantic_colors)
+    fn_decl_style = tm_fn_decl or sem_fn_decl
+    if fn_decl_style is not None and fn_decl_style.fg is None:
+        inherited_fg = (sem_fn_decl.fg if sem_fn_decl is not None else None) or (
+            fn_base_entry.fg if fn_base_entry is not None else None
+        )
+        if inherited_fg is not None:
+            fn_decl_style = StyleEntry(
+                fg=inherited_fg,
+                bg=fn_decl_style.bg,
+                bold=fn_decl_style.bold,
+                italic=fn_decl_style.italic,
+                underline=fn_decl_style.underline,
+                strikethrough=fn_decl_style.strikethrough,
+            )
     if fn_decl_style is not None:
         tokens["functionDeclaration"] = fn_decl_style.to_json()
 

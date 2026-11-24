@@ -719,6 +719,110 @@ class SyntaxSchemeImportersTest {
         assertNotNull(fnDecl)
         assertEquals("#79C0FF", fnDecl.foreground?.toHexRgb())
         assertTrue(fnDecl.bold)
+
+        // Font-only TextMate reset (`comment` italic -> `comment.line` fontStyle "") without foreground must NOT
+        // fall through to `comment.block` and restore italic, AND semantic styles without foreground must be preserved.
+        val fontOnlyTheme = """
+            {
+              "name": "Font Only & Semantic Reset",
+              "type": "dark",
+              "colors": {
+                "editor.background": "#121417",
+                "editor.foreground": "#E2E6EC"
+              },
+              "tokenColors": [
+                {
+                  "scope": "comment",
+                  "settings": { "fontStyle": "italic" }
+                },
+                {
+                  "scope": "comment.line",
+                  "settings": { "fontStyle": "" }
+                }
+              ],
+              "semanticTokenColors": {
+                "function": { "bold": true },
+                "type": { "fontStyle": "bold italic", "italic": false },
+                "property": {},
+                "variable.readonly": { "fontStyle": "underline" }
+              }
+            }
+        """.trimIndent()
+        val fontOnly = SyntaxSchemeImporters.importVsCodeJson(fontOnlyTheme)
+        val resetComment = fontOnly.styleFor(SyntaxTokenKind.Comment)
+        assertFalse(resetComment.italic, "comment.line fontStyle reset must clear inherited comment italic")
+        assertEquals("#E2E6EC", fontOnly.foregroundFor(SyntaxTokenKind.Comment).toHexRgb())
+
+        val boldFn = fontOnly.styleFor(SyntaxTokenKind.Function)
+        assertTrue(boldFn.bold, "semantic function style without foreground must keep bold")
+        assertEquals("#E2E6EC", fontOnly.foregroundFor(SyntaxTokenKind.Function).toHexRgb())
+
+        val typeStyle = fontOnly.styleFor(SyntaxTokenKind.Type)
+        assertTrue(typeStyle.bold)
+        assertFalse(typeStyle.italic, "explicit semantic boolean italic=false must override fontStyle")
+
+        val constStyle = fontOnly.styleFor(SyntaxTokenKind.Constant)
+        assertTrue(constStyle.underline)
+        assertEquals("#E2E6EC", fontOnly.foregroundFor(SyntaxTokenKind.Constant).toHexRgb())
+
+        val propStyle = fontOnly.styleFor(SyntaxTokenKind.Property)
+        assertEquals("#E2E6EC", fontOnly.foregroundFor(SyntaxTokenKind.Property).toHexRgb())
+        assertFalse(propStyle.bold || propStyle.italic || propStyle.underline || propStyle.strikethrough)
+
+        // Foreground-less function.declaration inherits Function foreground instead of falling back to plain foreground
+        val fnDeclInheritTheme = """
+            {
+              "name": "Fn Decl Inherit",
+              "type": "dark",
+              "colors": {
+                "editor.background": "#121417",
+                "editor.foreground": "#E2E6EC"
+              },
+              "semanticTokenColors": {
+                "function": "#79C0FF",
+                "function.declaration": { "bold": true }
+              }
+            }
+        """.trimIndent()
+        val fnDeclInherited = SyntaxSchemeImporters.importVsCodeJson(fnDeclInheritTheme)
+        val inheritedDecl = fnDeclInherited.effectiveFunctionDeclarationStyle()
+        assertEquals("#79C0FF", inheritedDecl.foreground?.toHexRgb())
+        assertTrue(inheritedDecl.bold)
+
+        // Exact TextMate entity.name.function.declaration with fontStyle "" inherits semantic/Function foreground
+        val fnDeclTmResetTheme = """
+            {
+              "name": "Fn Decl TM Reset",
+              "type": "dark",
+              "colors": {
+                "editor.background": "#121417",
+                "editor.foreground": "#E2E6EC"
+              },
+              "tokenColors": [
+                {
+                  "scope": "entity.name.function",
+                  "settings": { "foreground": "#D2A8FF", "fontStyle": "italic" }
+                },
+                {
+                  "scope": "entity.name.function.declaration",
+                  "settings": { "fontStyle": "" }
+                }
+              ],
+              "semanticTokenColors": {
+                "function.declaration": { "foreground": "#56A8F5" }
+              }
+            }
+        """.trimIndent()
+        val fnDeclTmReset = SyntaxSchemeImporters.importVsCodeJson(fnDeclTmResetTheme)
+        val tmResetDecl = fnDeclTmReset.effectiveFunctionDeclarationStyle()
+        assertEquals("#56A8F5", tmResetDecl.foreground?.toHexRgb())
+        assertFalse(tmResetDecl.italic)
+
+        // Direct SyntaxColorScheme.effectiveFunctionDeclarationStyle() also inherits Function foreground when omitted
+        val manualScheme = fnDeclInherited.copy(functionDeclaration = SyntaxTokenStyle(underline = true))
+        val manualDecl = manualScheme.effectiveFunctionDeclarationStyle()
+        assertEquals("#79C0FF", manualDecl.foreground?.toHexRgb())
+        assertTrue(manualDecl.underline)
     }
 
     @Test
