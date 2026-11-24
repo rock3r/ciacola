@@ -1,5 +1,6 @@
 package dev.sebastiano.ciacola.inspector.design
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,13 @@ import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
+/** Status feedback for code scheme selection/import operations in [DocumentThemeInspectorController]. */
+@Immutable
+data class CodeSchemeStatus(
+    val message: String,
+    val isError: Boolean,
+)
+
 /**
  * Document-backed Theme & Palette Inspector controller bound directly to [DeckDocumentStore].
  *
@@ -55,8 +63,11 @@ class DocumentThemeInspectorController(
     var lastCopyStatus: String? by mutableStateOf(null)
         private set
 
-    var lastCodeSchemeStatus: String? by mutableStateOf(null)
+    var codeSchemeStatus: CodeSchemeStatus? by mutableStateOf(null)
         private set
+
+    val lastCodeSchemeStatus: String?
+        get() = codeSchemeStatus?.message
 
     /** Optional unified workspace Undo/Redo & cross-controller gesture handoff hooks. */
     var onUndoRequest: (() -> Unit)? = null
@@ -75,7 +86,7 @@ class DocumentThemeInspectorController(
         } else {
             if (!cancelGesture()) store.undo()
         }
-        lastCodeSchemeStatus = null
+        codeSchemeStatus = null
     }
 
     fun performRedo() {
@@ -85,7 +96,7 @@ class DocumentThemeInspectorController(
         } else {
             store.redo()
         }
-        lastCodeSchemeStatus = null
+        codeSchemeStatus = null
     }
 
     fun currentThemeSpec(): DeckThemeSpec =
@@ -98,7 +109,7 @@ class DocumentThemeInspectorController(
 
     fun selectTheme(themeName: String) {
         activeThemeName = themeName
-        lastCodeSchemeStatus = null
+        codeSchemeStatus = null
     }
 
     fun setDefaultTheme(themeName: String): Boolean =
@@ -139,7 +150,7 @@ class DocumentThemeInspectorController(
     fun setThemePreset(preset: String): Boolean {
         val ok = mutateActiveTheme("Change theme preset") { it.copy(preset = preset) }
         if (ok) {
-            lastCodeSchemeStatus = null
+            codeSchemeStatus = null
         }
         return ok
     }
@@ -175,7 +186,7 @@ class DocumentThemeInspectorController(
 
     fun selectBundledCodeScheme(schemeId: String): Boolean {
         val scheme = SyntaxColorSchemes.findById(schemeId) ?: run {
-            lastCodeSchemeStatus = "Unknown code scheme '$schemeId'."
+            codeSchemeStatus = CodeSchemeStatus("Unknown code scheme '$schemeId'.", isError = true)
             return false
         }
         val ok = mutateActiveTheme("Select code scheme '${scheme.name}'") { theme ->
@@ -187,7 +198,7 @@ class DocumentThemeInspectorController(
             )
         }
         if (ok) {
-            lastCodeSchemeStatus = null
+            codeSchemeStatus = null
         }
         return ok
     }
@@ -200,21 +211,24 @@ class DocumentThemeInspectorController(
         val imported = try {
             SyntaxSchemeImporters.importAuto(content, fileName, includeResolver = includeResolver)
         } catch (e: SyntaxSchemeParseException) {
-            lastCodeSchemeStatus = e.message ?: "Failed to parse code scheme."
+            codeSchemeStatus = CodeSchemeStatus(e.message ?: "Failed to parse code scheme.", isError = true)
             return false
         } catch (e: Exception) {
-            lastCodeSchemeStatus = "Failed to import code scheme: ${e.message ?: "unknown error"}"
+            codeSchemeStatus = CodeSchemeStatus(
+                "Failed to import code scheme: ${e.message ?: "unknown error"}",
+                isError = true,
+            )
             return false
         }
         val ok = mutateActiveTheme("Import code scheme '${imported.name}'") { theme ->
             theme.copy(
-                codeScheme = imported.id,
+                codeScheme = null,
                 customCodeScheme = imported.toCodeSchemeSpec(),
                 colors = stripStaleCodeColorOverrides(theme.colors),
             )
         }
         if (ok) {
-            lastCodeSchemeStatus = "Imported '${imported.name}'"
+            codeSchemeStatus = CodeSchemeStatus("Imported '${imported.name}'", isError = false)
         }
         return ok
     }
@@ -222,7 +236,7 @@ class DocumentThemeInspectorController(
     fun importCodeSchemeFromFile(path: Path): Boolean {
         val displayName = path.fileName?.toString()?.takeIf { it.isNotBlank() } ?: "selected file"
         val content = readBoundedUtf8SchemeFile(path, displayName).getOrElse { err ->
-            lastCodeSchemeStatus = err.message ?: "Failed to read $displayName."
+            codeSchemeStatus = CodeSchemeStatus(err.message ?: "Failed to read $displayName.", isError = true)
             return false
         }
         val normalizedBaseDir = path.toAbsolutePath().normalize().parent
@@ -247,7 +261,7 @@ class DocumentThemeInspectorController(
 
     fun resetCodeScheme(): Boolean {
         if (!isCodeSchemeModified()) {
-            lastCodeSchemeStatus = null
+            codeSchemeStatus = null
             return false
         }
         val ok = mutateActiveTheme("Reset code scheme to preset default") { theme ->
@@ -258,7 +272,7 @@ class DocumentThemeInspectorController(
             )
         }
         if (ok) {
-            lastCodeSchemeStatus = null
+            codeSchemeStatus = null
         }
         return ok
     }

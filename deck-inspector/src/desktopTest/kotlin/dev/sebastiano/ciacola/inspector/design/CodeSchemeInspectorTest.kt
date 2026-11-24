@@ -39,6 +39,7 @@ import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image as SkiaImage
 import org.jetbrains.skia.ImageInfo
+import org.junit.Assume.assumeTrue
 
 @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
 class CodeSchemeInspectorTest {
@@ -156,18 +157,7 @@ class CodeSchemeInspectorTest {
             val traversalStatus = assertNotNull(controller.lastCodeSchemeStatus)
             assertFalse(traversalStatus.contains(tempDir.toString()), "Status must not leak path: $traversalStatus")
 
-            // 3. Symlink escape inside themesDir pointing outside rejected
-            val linkPath = themesDir.resolve("link-escape.json")
-            val createdSymlink = runCatching { Files.createSymbolicLink(linkPath, outsideSecret) }.isSuccess
-            if (createdSymlink) {
-                val symlinkIncludeFile = themesDir.resolve("via-symlink.json").apply {
-                    Files.writeString(this, """{"name":"Via Symlink","include":"./link-escape.json"}""")
-                }
-                assertFalse(controller.importCodeSchemeFromFile(symlinkIncludeFile))
-                assertEquals(revBefore, store.revision)
-            }
-
-            // 4. Directory and missing-file safe errors (no full path disclosure)
+            // 3. Directory and missing-file safe errors (no full path disclosure)
             assertFalse(controller.importCodeSchemeFromFile(themesDir))
             val dirStatus = assertNotNull(controller.lastCodeSchemeStatus)
             assertTrue(dirStatus.contains("not a regular file"), dirStatus)
@@ -179,7 +169,7 @@ class CodeSchemeInspectorTest {
             assertTrue(missingStatus.contains("file not found"), missingStatus)
             assertFalse(missingStatus.contains(tempDir.toString()), missingStatus)
 
-            // 5. Invalid UTF-8 bytes rejected cleanly
+            // 4. Invalid UTF-8 bytes rejected cleanly
             val badUtf8 = themesDir.resolve("bad-utf8.json")
             Files.write(badUtf8, byteArrayOf(0x7B, 0xFF.toByte(), 0xFE.toByte(), 0x7D))
             assertFalse(controller.importCodeSchemeFromFile(badUtf8))
@@ -187,13 +177,43 @@ class CodeSchemeInspectorTest {
             assertTrue(utf8Status.contains("invalid UTF-8"), utf8Status)
             assertFalse(utf8Status.contains(tempDir.toString()), utf8Status)
 
-            // 6. Oversized > 4 MB file rejected cleanly
+            // 5. Oversized > 4 MB file rejected cleanly
             val hugeFile = themesDir.resolve("huge.json")
             Files.write(hugeFile, ByteArray(4 * 1024 * 1024 + 8) { ' '.code.toByte() })
             assertFalse(controller.importCodeSchemeFromFile(hugeFile))
             val hugeStatus = assertNotNull(controller.lastCodeSchemeStatus)
             assertTrue(hugeStatus.contains("exceeds 4 MB limit"), hugeStatus)
             assertFalse(hugeStatus.contains(tempDir.toString()), hugeStatus)
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun fileImportRejectsSymlinkEscapingBaseDirectory() {
+        val store = DeckDocumentStore(testDoc(), initialLoad = DeckLoadState.Loaded)
+        val controller = DocumentThemeInspectorController(store)
+        val tempDir = Files.createTempDirectory("ciacola-scheme-symlink")
+        try {
+            val themesDir = tempDir.resolve("themes").also { Files.createDirectory(it) }
+            val outsideSecret = tempDir.resolve("secret.json").apply {
+                Files.writeString(
+                    this,
+                    """{"name":"Secret","type":"dark","colors":{"editor.background":"#111111","editor.foreground":"#EEEEEE"}}""",
+                )
+            }
+            val linkPath = themesDir.resolve("link-escape.json")
+            val createdSymlink = runCatching { Files.createSymbolicLink(linkPath, outsideSecret) }.isSuccess
+            assumeTrue("Symbolic links are not supported in this environment", createdSymlink)
+
+            val revBefore = store.revision
+            val symlinkIncludeFile = themesDir.resolve("via-symlink.json").apply {
+                Files.writeString(this, """{"name":"Via Symlink","include":"./link-escape.json"}""")
+            }
+            assertFalse(controller.importCodeSchemeFromFile(symlinkIncludeFile))
+            assertEquals(revBefore, store.revision)
+            val status = assertNotNull(controller.lastCodeSchemeStatus)
+            assertFalse(status.contains(tempDir.toString()), "Status must not leak path: $status")
         } finally {
             tempDir.toFile().deleteRecursively()
         }
@@ -274,7 +294,7 @@ class CodeSchemeInspectorTest {
         controller.performRedo()
         assertNull(controller.lastCodeSchemeStatus)
 
-        // Verify DocumentThemeResolver bidirectional code.function <-> code.functionCall alias sync
+        // Verify DocumentThemeResolver bidirectional code.function <-> code.functionCall alias sync & precedence
         val specFn = DeckThemeSpec(preset = "stageDark", colors = mapOf("code.function" to "#11AAFF"))
         val mapFn = DocumentThemeResolver.resolveThemeColorMap(specFn)
         assertEquals(Color(0xFF11AAFF), mapFn["code.function"])
@@ -284,6 +304,17 @@ class CodeSchemeInspectorTest {
         val mapFnCall = DocumentThemeResolver.resolveThemeColorMap(specFnCall)
         assertEquals(Color(0xFFFFAA11), mapFnCall["code.functionCall"])
         assertEquals(Color(0xFFFFAA11), mapFnCall["code.function"])
+
+        for (ordered in listOf(
+            linkedMapOf("code.function" to "#111111", "code.functionCall" to "#222222", "code.background" to "#333333", "codeBackground" to "#444444"),
+            linkedMapOf("code.functionCall" to "#222222", "code.function" to "#111111", "codeBackground" to "#444444", "code.background" to "#333333"),
+        )) {
+            val resolvedMap = DocumentThemeResolver.resolveThemeColorMap(DeckThemeSpec(preset = "stageDark", colors = ordered))
+            assertEquals(Color(0xFF222222), resolvedMap["code.functionCall"])
+            assertEquals(Color(0xFF222222), resolvedMap["code.function"])
+            assertEquals(Color(0xFF444444), resolvedMap["codeBackground"])
+            assertEquals(Color(0xFF444444), resolvedMap["code.background"])
+        }
     }
 
     @Test
@@ -353,11 +384,22 @@ class CodeSchemeInspectorTest {
 
             assertTrue(controller.importCodeSchemeFromFile(iclsFile))
             assertEquals("Imported 'My Studio Dark'", controller.lastCodeSchemeStatus)
+            assertFalse(controller.codeSchemeStatus!!.isError)
+            assertNull(store.document.themes["dark"]?.codeScheme)
             val customSpec = assertNotNull(store.document.themes["dark"]?.customCodeScheme)
             assertEquals("My Studio Dark", customSpec.name)
             assertEquals("#1B1E24", customSpec.background)
             assertTrue(controller.activeCodeScheme().styleFor(SyntaxTokenKind.Keyword).bold)
             assertFalse("codeBackground" in store.document.themes["dark"]!!.colors)
+
+            // Re-importing the exact same scheme still updates status cleanly
+            controller.performUndo()
+            assertNull(controller.lastCodeSchemeStatus)
+            controller.performRedo()
+            assertNull(controller.lastCodeSchemeStatus)
+            assertTrue(controller.importCodeSchemeFromFile(iclsFile))
+            assertEquals("Imported 'My Studio Dark'", controller.lastCodeSchemeStatus)
+            assertFalse(controller.codeSchemeStatus!!.isError)
 
             val vsCodeJson = """
                 {
@@ -385,6 +427,8 @@ class CodeSchemeInspectorTest {
 
             assertTrue(controller.importCodeSchemeFromFile(vsCodeFile))
             assertEquals("Imported 'Nord Breeze'", controller.lastCodeSchemeStatus)
+            assertFalse(controller.codeSchemeStatus!!.isError)
+            assertNull(store.document.themes["dark"]?.codeScheme)
             assertEquals("#2E3440", store.document.themes["dark"]?.customCodeScheme?.background)
             assertTrue(controller.activeCodeScheme().styleFor(SyntaxTokenKind.Comment).italic)
 
@@ -394,6 +438,7 @@ class CodeSchemeInspectorTest {
             Files.writeString(badFile, "<not-a-scheme>")
             assertFalse(controller.importCodeSchemeFromFile(badFile))
             assertEquals(revBefore, store.revision)
+            assertTrue(controller.codeSchemeStatus!!.isError)
             val errorStatus = assertNotNull(controller.lastCodeSchemeStatus)
             assertFalse(errorStatus.startsWith("Imported "))
         } finally {
@@ -467,8 +512,11 @@ class CodeSchemeInspectorTest {
     fun renderThemeSheetDarkAndLightScreenshotsWhenRequested() {
         val rawDir = System.getProperty("ciacola.screenshots.dir")
             ?: System.getenv("CIACOLA_SCREENSHOTS_DIR")
-            ?: return
-        val outDir = File(rawDir)
+        assumeTrue(
+            "Set -Dciacola.screenshots.dir or CIACOLA_SCREENSHOTS_DIR to render theme sheet screenshots",
+            rawDir != null,
+        )
+        val outDir = File(rawDir!!)
         outDir.mkdirs()
 
         val darkDoc = testDoc(

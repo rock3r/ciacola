@@ -31,6 +31,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -412,13 +415,14 @@ private fun CodeSchemeEditorSection(
             }
         }
 
-        controller.lastCodeSchemeStatus?.let { status ->
-            val isSuccess = status.startsWith("Imported ")
+        controller.codeSchemeStatus?.let { status ->
             Text(
-                text = status,
+                text = status.message,
                 style = inspectorCaptionStyle(),
-                color = if (isSuccess) colors.text.info else colors.text.error,
-                modifier = Modifier.testTag("ciacola-doc-theme-code-scheme-status"),
+                color = if (status.isError) colors.text.error else colors.text.info,
+                modifier = Modifier
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+                    .testTag("ciacola-doc-theme-code-scheme-status"),
             )
         }
 

@@ -121,7 +121,7 @@ fun resolveDeckTheme(
         number = resolver.resolveToken("code.number") ?: c.code.number,
         type = resolver.resolveToken("code.type") ?: c.code.type,
         functionDeclaration = resolver.resolveToken("code.functionDeclaration") ?: c.code.functionDeclaration,
-        functionCall = resolver.resolveToken("code.functionCall") ?: resolver.resolveToken("code.function") ?: c.code.functionCall,
+        functionCall = resolver.resolveToken("code.functionCall") ?: c.code.functionCall,
         property = resolver.resolveToken("code.property") ?: c.code.property,
         annotation = resolver.resolveToken("code.annotation") ?: c.code.annotation,
         punctuation = resolver.resolveToken("code.punctuation") ?: c.code.punctuation,
@@ -206,6 +206,8 @@ data class DocumentColorResolver(
             "code.background" -> themeSpec?.colors?.get("codeBackground")
             "codeForeground" -> themeSpec?.colors?.get("code.foreground")
             "code.foreground" -> themeSpec?.colors?.get("codeForeground")
+            "code.functionCall" -> themeSpec?.colors?.get("code.function")
+            "code.function" -> themeSpec?.colors?.get("code.functionCall")
             else -> null
         }
         if (themeRaw != null) {

@@ -72,6 +72,29 @@ class CodeSchemeResolutionAndWarpStyleTest {
         assertEquals(Color(0xFF101010), resolvedOverridden.colors.code.background)
         assertEquals(Color(0xFFFF7B72), resolvedOverridden.colors.code.keyword)
 
+        // code.function alias updates functionCall, and primary keys win deterministically over aliases
+        val fnAliasDoc = baseDoc.copy(
+            themes = mapOf(
+                "dark" to DeckThemeSpec(
+                    preset = "stageDark",
+                    colors = mapOf("code.function" to "#FF0000"),
+                ),
+            ),
+        )
+        assertEquals(Color(0xFFFF0000), resolveDeckTheme(fnAliasDoc, "dark").colors.code.functionCall)
+
+        for (colors in listOf(
+            linkedMapOf("code.function" to "#111111", "code.functionCall" to "#222222", "code.background" to "#333333", "codeBackground" to "#444444"),
+            linkedMapOf("code.functionCall" to "#222222", "code.function" to "#111111", "codeBackground" to "#444444", "code.background" to "#333333"),
+        )) {
+            val precedenceDoc = baseDoc.copy(
+                themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark", colors = colors)),
+            )
+            val resolved = resolveDeckTheme(precedenceDoc, "dark")
+            assertEquals(Color(0xFF222222), resolved.colors.code.functionCall)
+            assertEquals(Color(0xFF444444), resolved.colors.code.background)
+        }
+
         // Custom imported scheme overrides bundled codeScheme id
         val custom = SyntaxColorScheme(
             id = "custom-solar",

@@ -156,6 +156,18 @@ object DocumentThemeResolver {
                 }
             }
         }
+        // Deterministic primary-key precedence independent of map iteration order:
+        // codeBackground > code.background, codeForeground > code.foreground, code.functionCall > code.function.
+        for ((primary, alias) in listOf(
+            "codeBackground" to "code.background",
+            "codeForeground" to "code.foreground",
+            "code.functionCall" to "code.function",
+        )) {
+            val primaryRaw = themeSpec.colors[primary] ?: continue
+            val parsed = parseHexColorOrNull(primaryRaw) ?: out[primaryRaw] ?: continue
+            out[primary] = parsed
+            out[alias] = parsed
+        }
         return out
     }
 
