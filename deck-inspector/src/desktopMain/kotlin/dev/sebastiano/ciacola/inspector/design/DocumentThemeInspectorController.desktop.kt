@@ -16,7 +16,12 @@ import dev.sebastiano.ciacola.document.TextStyleOverride
 import dev.sebastiano.ciacola.document.ThemeMotionDefaults
 import dev.sebastiano.ciacola.document.TransitionSpec
 import dev.sebastiano.ciacola.document.TransitionType
+import dev.sebastiano.ciacola.document.toCodeSchemeSpec
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeImporters
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeParseException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -41,6 +46,9 @@ class DocumentThemeInspectorController(
     var selectedPaletteName: String? by mutableStateOf(store.document.palettes.keys.firstOrNull())
 
     var lastCopyStatus: String? by mutableStateOf(null)
+        private set
+
+    var lastCodeSchemeStatus: String? by mutableStateOf(null)
         private set
 
     /** Optional unified workspace Undo/Redo & cross-controller gesture handoff hooks. */
@@ -137,6 +145,107 @@ class DocumentThemeInspectorController(
             val nextColors = LinkedHashMap(theme.colors).apply { remove(tokenKey) }
             theme.copy(colors = nextColors)
         }
+
+    // ── Code Highlighting Schemes ────────────────────────────────────────────────────────────────
+
+    fun activeCodeScheme(): SyntaxColorScheme =
+        DocumentThemeResolver.resolveCodeScheme(currentThemeSpec())
+
+    fun isCodeSchemeModified(): Boolean {
+        val spec = currentThemeSpec()
+        return spec.codeScheme != null || spec.customCodeScheme != null
+    }
+
+    fun selectBundledCodeScheme(schemeId: String): Boolean {
+        val scheme = SyntaxColorSchemes.findById(schemeId) ?: run {
+            lastCodeSchemeStatus = "Unknown code scheme '$schemeId'."
+            return false
+        }
+        val ok = mutateActiveTheme("Select code scheme '${scheme.name}'") { theme ->
+            theme.copy(
+                codeScheme = scheme.id,
+                customCodeScheme = null,
+                colors = stripStaleCodeColorOverrides(theme.colors),
+            )
+        }
+        if (ok) {
+            lastCodeSchemeStatus = null
+        }
+        return ok
+    }
+
+    fun importCodeSchemeFromText(content: String, fileName: String? = null): Boolean {
+        val imported = try {
+            SyntaxSchemeImporters.importAuto(content, fileName)
+        } catch (e: SyntaxSchemeParseException) {
+            lastCodeSchemeStatus = e.message ?: "Failed to parse code scheme."
+            return false
+        } catch (e: Exception) {
+            lastCodeSchemeStatus = "Failed to import code scheme: ${e.message ?: "unknown error"}"
+            return false
+        }
+        val ok = mutateActiveTheme("Import code scheme '${imported.name}'") { theme ->
+            theme.copy(
+                codeScheme = imported.id,
+                customCodeScheme = imported.toCodeSchemeSpec(),
+                colors = stripStaleCodeColorOverrides(theme.colors),
+            )
+        }
+        if (ok) {
+            lastCodeSchemeStatus = "Imported '${imported.name}'"
+        }
+        return ok
+    }
+
+    fun importCodeSchemeFromFile(path: Path): Boolean {
+        val size = runCatching { Files.size(path) }.getOrElse { err ->
+            lastCodeSchemeStatus = "Failed to read ${path.fileName}: ${err.message ?: "I/O error"}"
+            return false
+        }
+        if (size > MAX_CODE_SCHEME_IMPORT_BYTES) {
+            lastCodeSchemeStatus = "File '${path.fileName}' is too large ($size bytes; max 4 MB)."
+            return false
+        }
+        val content = runCatching { Files.readString(path, StandardCharsets.UTF_8) }.getOrElse { err ->
+            lastCodeSchemeStatus = "Failed to read ${path.fileName}: ${err.message ?: "I/O error"}"
+            return false
+        }
+        return importCodeSchemeFromText(content, fileName = path.fileName?.toString())
+    }
+
+    fun resetCodeScheme(): Boolean {
+        if (!isCodeSchemeModified()) {
+            lastCodeSchemeStatus = null
+            return false
+        }
+        val ok = mutateActiveTheme("Reset code scheme to preset default") { theme ->
+            theme.copy(
+                codeScheme = null,
+                customCodeScheme = null,
+            )
+        }
+        if (ok) {
+            lastCodeSchemeStatus = null
+        }
+        return ok
+    }
+
+    private fun stripStaleCodeColorOverrides(colors: Map<String, String>): Map<String, String> {
+        if (CODE_OVERRIDE_KEYS.none { it in colors }) return colors
+        return LinkedHashMap(colors).apply {
+            for (k in CODE_OVERRIDE_KEYS) remove(k)
+        }
+    }
+
+    private companion object {
+        const val MAX_CODE_SCHEME_IMPORT_BYTES: Long = 4L * 1024L * 1024L
+        val CODE_OVERRIDE_KEYS: Set<String> = setOf(
+            "codeBackground",
+            "codeForeground",
+            "code.background",
+            "code.foreground",
+        )
+    }
 
     // ── Typography Roles ─────────────────────────────────────────────────────────────────────────
 

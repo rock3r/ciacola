@@ -22,11 +22,16 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.text.highlight.CodeStyle
 import dev.sebastiano.ciacola.inspector.LocalEffectiveBackgroundColor
+import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
+import dev.sebastiano.ciacola.syntax.theme.SyntaxTokenStyle
 import kotlin.math.pow
 import ciacola.deck.generated.resources.Inter_Black
 import ciacola.deck.generated.resources.Inter_Bold
@@ -66,38 +71,121 @@ data class DeckCodePalette(
     val annotation: Color,
     val punctuation: Color,
     val invalid: Color,
+    val constant: Color = keyword,
+    val attribute: Color = annotation,
+    val tag: Color = keyword,
+    val operator: Color = punctuation,
+    val preprocessor: Color = annotation,
+    val scheme: SyntaxColorScheme? = null,
 ) {
     fun toCodeStyle(): CodeStyle = CodeStyle.build(SpanStyle(color = foreground)) {
-        keyword = simple + SpanStyle(color = this@DeckCodePalette.keyword, fontWeight = FontWeight.SemiBold)
-        string = simple + SpanStyle(color = this@DeckCodePalette.string)
-        comment = simple + SpanStyle(color = this@DeckCodePalette.comment, fontStyle = FontStyle.Italic)
-        number = simple + SpanStyle(color = this@DeckCodePalette.number)
-        typeParameters = simple + SpanStyle(color = this@DeckCodePalette.type)
-        functionDeclaration = simple + SpanStyle(color = this@DeckCodePalette.functionDeclaration, fontWeight = FontWeight.Bold)
-        staticFunctionCall = simple + SpanStyle(color = this@DeckCodePalette.functionCall)
-        extensionFunctionCall = simple + SpanStyle(color = this@DeckCodePalette.functionCall)
-        property = simple + SpanStyle(color = this@DeckCodePalette.property)
-        staticProperty = simple + SpanStyle(color = this@DeckCodePalette.property)
-        annotation = simple + SpanStyle(color = this@DeckCodePalette.annotation)
-        punctuation = simple + SpanStyle(color = this@DeckCodePalette.punctuation)
-        namedArgument = simple + SpanStyle(color = this@DeckCodePalette.property)
-        label = simple + SpanStyle(color = this@DeckCodePalette.annotation)
+        fun styleFor(kind: SyntaxTokenKind, paletteColor: Color): SpanStyle {
+            val base = scheme?.styleFor(kind) ?: return SpanStyle(color = paletteColor)
+            return base.toSpanStyle(paletteColor)
+        }
+
+        val fnDeclSpan = scheme?.effectiveFunctionDeclarationStyle()
+            ?.toSpanStyle(this@DeckCodePalette.functionDeclaration)
+            ?: SpanStyle(color = this@DeckCodePalette.functionDeclaration)
+
+        keyword = simple + styleFor(SyntaxTokenKind.Keyword, this@DeckCodePalette.keyword)
+        string = simple + styleFor(SyntaxTokenKind.String, this@DeckCodePalette.string)
+        comment = simple + styleFor(SyntaxTokenKind.Comment, this@DeckCodePalette.comment)
+        number = simple + styleFor(SyntaxTokenKind.Number, this@DeckCodePalette.number)
+        typeParameters = simple + styleFor(SyntaxTokenKind.Type, this@DeckCodePalette.type)
+        functionDeclaration = simple + fnDeclSpan
+        staticFunctionCall = simple + styleFor(SyntaxTokenKind.Function, this@DeckCodePalette.functionCall)
+        extensionFunctionCall = simple + styleFor(SyntaxTokenKind.Function, this@DeckCodePalette.functionCall)
+        property = simple + styleFor(SyntaxTokenKind.Property, this@DeckCodePalette.property)
+        staticProperty = simple + styleFor(SyntaxTokenKind.Property, this@DeckCodePalette.property)
+        annotation = simple + styleFor(SyntaxTokenKind.Annotation, this@DeckCodePalette.annotation)
+        punctuation = simple + styleFor(SyntaxTokenKind.Punctuation, this@DeckCodePalette.punctuation)
+        namedArgument = simple + styleFor(SyntaxTokenKind.Property, this@DeckCodePalette.property)
+        label = simple + styleFor(SyntaxTokenKind.Annotation, this@DeckCodePalette.annotation)
+        constant = simple + styleFor(SyntaxTokenKind.Constant, this@DeckCodePalette.constant)
+        attribute = simple + styleFor(SyntaxTokenKind.Attribute, this@DeckCodePalette.attribute)
+        tag = simple + styleFor(SyntaxTokenKind.Tag, this@DeckCodePalette.tag)
+        operator = simple + styleFor(SyntaxTokenKind.Operator, this@DeckCodePalette.operator)
+        preprocessor = simple + styleFor(SyntaxTokenKind.Preprocessor, this@DeckCodePalette.preprocessor)
+        invalid = simple + styleFor(SyntaxTokenKind.Invalid, this@DeckCodePalette.invalid)
     }
 
-    fun colorForWarpScope(scope: String): Color = when {
-        scope.contains("annotation") || scope.contains("attribute") -> annotation
-        scope.contains("storage.type") -> type
-        scope.contains("keyword") || scope.contains("storage") || scope.contains("entity.name.tag") -> keyword
-        scope.contains("string") -> string
-        scope.contains("comment") -> comment
-        scope.contains("constant.numeric") || scope.contains("constants.numeric") || scope.contains("constant") -> number
-        scope.contains("function") -> functionCall
-        scope.contains("entity.name.type") || scope.contains("class") -> type
-        scope.contains("property") || scope.contains("variable.other.property") -> property
-        scope.contains("punctuation") -> punctuation
-        scope.contains("invalid") -> invalid
-        else -> foreground
+    fun styleForWarpScope(scope: String): SpanStyle {
+        fun style(kind: SyntaxTokenKind, color: Color): SpanStyle {
+            val base = scheme?.styleFor(kind) ?: return SpanStyle(color = color)
+            return base.toSpanStyle(color)
+        }
+        return when {
+            scope.contains("meta.annotation.preprocessor") || scope.contains("preprocessor") ->
+                style(SyntaxTokenKind.Preprocessor, preprocessor)
+            scope.contains("annotation") -> style(SyntaxTokenKind.Annotation, annotation)
+            scope.contains("entity.other.attribute-name") || scope.contains("attribute") ->
+                style(SyntaxTokenKind.Attribute, attribute)
+            scope.contains("entity.name.tag") -> style(SyntaxTokenKind.Tag, tag)
+            scope.contains("storage.type") -> style(SyntaxTokenKind.Type, type)
+            scope.contains("keyword") || scope.contains("storage") -> style(SyntaxTokenKind.Keyword, keyword)
+            scope.contains("string") -> style(SyntaxTokenKind.String, string)
+            scope.contains("comment") -> style(SyntaxTokenKind.Comment, comment)
+            scope.contains("constant.numeric") || scope.contains("constants.numeric") ->
+                style(SyntaxTokenKind.Number, number)
+            scope.contains("constant.language") || scope.contains("constant") ->
+                style(SyntaxTokenKind.Constant, constant)
+            scope.contains("function") -> style(SyntaxTokenKind.Function, functionCall)
+            scope.contains("entity.name.type") || scope.contains("class") ->
+                style(SyntaxTokenKind.Type, type)
+            scope.contains("property") || scope.contains("variable.other.property") ->
+                style(SyntaxTokenKind.Property, property)
+            scope.contains("punctuation.operator") -> style(SyntaxTokenKind.Operator, operator)
+            scope.contains("punctuation") -> style(SyntaxTokenKind.Punctuation, punctuation)
+            scope.contains("invalid") -> style(SyntaxTokenKind.Invalid, invalid)
+            else -> SpanStyle(color = foreground)
+        }
     }
+
+    fun colorForWarpScope(scope: String): Color = styleForWarpScope(scope).color
+
+    companion object {
+        /** Builds a [DeckCodePalette] from a [SyntaxColorScheme], preserving colors and font styles. */
+        fun fromScheme(scheme: SyntaxColorScheme): DeckCodePalette = DeckCodePalette(
+            background = Color(scheme.background.argb),
+            foreground = Color(scheme.foreground.argb),
+            keyword = Color(scheme.foregroundFor(SyntaxTokenKind.Keyword).argb),
+            string = Color(scheme.foregroundFor(SyntaxTokenKind.String).argb),
+            comment = Color(scheme.foregroundFor(SyntaxTokenKind.Comment).argb),
+            number = Color(scheme.foregroundFor(SyntaxTokenKind.Number).argb),
+            type = Color(scheme.foregroundFor(SyntaxTokenKind.Type).argb),
+            functionDeclaration = Color(
+                (scheme.effectiveFunctionDeclarationStyle().foreground ?: scheme.foregroundFor(SyntaxTokenKind.Function)).argb,
+            ),
+            functionCall = Color(scheme.foregroundFor(SyntaxTokenKind.Function).argb),
+            property = Color(scheme.foregroundFor(SyntaxTokenKind.Property).argb),
+            annotation = Color(scheme.foregroundFor(SyntaxTokenKind.Annotation).argb),
+            punctuation = Color(scheme.foregroundFor(SyntaxTokenKind.Punctuation).argb),
+            invalid = Color(scheme.foregroundFor(SyntaxTokenKind.Invalid).argb),
+            constant = Color(scheme.foregroundFor(SyntaxTokenKind.Constant).argb),
+            attribute = Color(scheme.foregroundFor(SyntaxTokenKind.Attribute).argb),
+            tag = Color(scheme.foregroundFor(SyntaxTokenKind.Tag).argb),
+            operator = Color(scheme.foregroundFor(SyntaxTokenKind.Operator).argb),
+            preprocessor = Color(scheme.foregroundFor(SyntaxTokenKind.Preprocessor).argb),
+            scheme = scheme,
+        )
+    }
+}
+
+private fun SyntaxTokenStyle.toSpanStyle(overrideColor: Color): SpanStyle {
+    val decoration = when {
+        underline && strikethrough -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+        underline -> TextDecoration.Underline
+        strikethrough -> TextDecoration.LineThrough
+        else -> null
+    }
+    return SpanStyle(
+        color = overrideColor,
+        background = background?.let { Color(it.argb) } ?: Color.Unspecified,
+        fontWeight = if (bold) FontWeight.Bold else null,
+        fontStyle = if (italic) FontStyle.Italic else null,
+        textDecoration = decoration,
+    )
 }
 
 @Immutable
@@ -303,38 +391,11 @@ data class DeckTheme(
 }
 
 object DeckThemes {
-    private val DarkCodeCardPalette = DeckCodePalette(
-        background = Color(0xFF171B24),
-        foreground = Color(0xFFF4F1EA),
-        keyword = Color(0xFFFF6B5E),
-        string = Color(0xFF71D7C5),
-        comment = Color(0xFF838C9E),
-        number = Color(0xFFF5B864),
-        type = Color(0xFFD59BF6),
-        functionDeclaration = Color(0xFFFFD166),
-        functionCall = Color(0xFF8CB4FF),
-        property = Color(0xFFC7B8FA),
-        annotation = Color(0xFFFFD166),
-        punctuation = Color(0xFFA9B0C0),
-        invalid = Color(0xFFFA6675),
-    )
+    private val DarkCodeCardPalette: DeckCodePalette
+        get() = DeckCodePalette.fromScheme(SyntaxColorSchemes.IntelliJIslandsDark)
 
-    // Inspired by Shaders Quickie & Not Just Plain Text: warm light stage + dark plum/charcoal code card & teal callouts.
-    private val KeynoteCodeCardPalette = DeckCodePalette(
-        background = Color(0xFF2E282C),
-        foreground = Color(0xFFEDE8E6),
-        keyword = Color(0xFFE57C58),
-        string = Color(0xFF63D9B6),
-        comment = Color(0xFF9C9398),
-        number = Color(0xFF53D6C8),
-        type = Color(0xFFF2B866),
-        functionDeclaration = Color(0xFFFFCF70),
-        functionCall = Color(0xFF7EC4FA),
-        property = Color(0xFFD9A6F5),
-        annotation = Color(0xFFF2B866),
-        punctuation = Color(0xFFB5ACB0),
-        invalid = Color(0xFFFF6E7A),
-    )
+    private val KeynoteCodeCardPalette: DeckCodePalette
+        get() = DeckCodePalette.fromScheme(SyntaxColorSchemes.IntelliJLight)
 
     val StageDarkColors = DeckColors(
         background = Color(0xFF0B0D12),

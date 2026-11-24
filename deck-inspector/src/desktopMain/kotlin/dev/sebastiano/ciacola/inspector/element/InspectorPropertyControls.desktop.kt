@@ -123,6 +123,7 @@ internal fun ModifiedDot(
     modified: Boolean,
     label: String,
     tag: String,
+    resolvedTestTag: String = "$tag-modified-dot",
     onReset: (() -> Unit)?,
 ) {
     if (!modified) {
@@ -140,7 +141,7 @@ internal fun ModifiedDot(
                     role = Role.Button
                     contentDescription = "Reset $label"
                 }
-                .testTag("$tag-modified-dot"),
+                .testTag(resolvedTestTag),
         )
     }
 }

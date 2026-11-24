@@ -245,6 +245,18 @@ internal fun pickDeckFileForCopyThemes(): Path? {
     return if (dir != null && file != null) Path.of(dir, file) else null
 }
 
+internal fun pickCodeSchemeFile(): Path? {
+    val dialog = FileDialog(null as Frame?, "Import IntelliJ or VS Code color scheme", FileDialog.LOAD)
+    dialog.setFilenameFilter { _, name ->
+        val lower = name.lowercase()
+        lower.endsWith(".icls") || lower.endsWith(".xml") || lower.endsWith(".json")
+    }
+    dialog.isVisible = true
+    val dir = dialog.directory
+    val file = dialog.file
+    return if (dir != null && file != null) Path.of(dir, file) else null
+}
+
 /**
  * Runs before the outgoing deck is flushed for a deck switch or quit: cancels uncommitted drag and
  * inline-text transactions, then commits an open speaker-notes draft into the outgoing store so the

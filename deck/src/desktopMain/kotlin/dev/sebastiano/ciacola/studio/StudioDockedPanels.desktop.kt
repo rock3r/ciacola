@@ -72,6 +72,7 @@ private const val MAX_ISSUES_DOCK_HEIGHT_DP = 560f
 fun StudioThemeSheet(
     workspace: StudioWorkspaceController,
     onPickDeckFileToCopyThemes: (() -> Path?)?,
+    onPickCodeSchemeFile: (() -> Path?)? = null,
     modifier: Modifier = Modifier,
 ) {
     val globalColors = JewelTheme.globalColors
@@ -97,6 +98,7 @@ fun StudioThemeSheet(
             DocumentThemeInspectorUi(
                 controller = workspace.themeController,
                 onPickDeckFileToCopyThemes = onPickDeckFileToCopyThemes,
+                onPickCodeSchemeFile = onPickCodeSchemeFile,
                 modifier = Modifier.fillMaxSize(),
             )
         }

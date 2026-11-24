@@ -37,24 +37,21 @@ fun String.highlight(
             SyntaxTokenKind.Plain,
             SyntaxTokenKind.Whitespace,
             -> null
-            SyntaxTokenKind.Keyword,
-            SyntaxTokenKind.Tag,
-            SyntaxTokenKind.Constant,
-            -> codeStyle.keyword
+            SyntaxTokenKind.Keyword -> codeStyle.keyword
+            SyntaxTokenKind.Tag -> codeStyle.tag
+            SyntaxTokenKind.Constant -> codeStyle.constant
             SyntaxTokenKind.String -> codeStyle.string
             SyntaxTokenKind.Comment -> codeStyle.comment
             SyntaxTokenKind.Number -> codeStyle.number
             SyntaxTokenKind.Function -> codeStyle.staticFunctionCall
             SyntaxTokenKind.Type -> codeStyle.typeParameters
             SyntaxTokenKind.Property -> codeStyle.property
-            SyntaxTokenKind.Annotation,
-            SyntaxTokenKind.Attribute,
-            SyntaxTokenKind.Preprocessor,
-            -> codeStyle.annotation
-            SyntaxTokenKind.Operator,
-            SyntaxTokenKind.Punctuation,
-            -> codeStyle.punctuation
-            SyntaxTokenKind.Invalid -> codeStyle.simple
+            SyntaxTokenKind.Annotation -> codeStyle.annotation
+            SyntaxTokenKind.Attribute -> codeStyle.attribute
+            SyntaxTokenKind.Preprocessor -> codeStyle.preprocessor
+            SyntaxTokenKind.Operator -> codeStyle.operator
+            SyntaxTokenKind.Punctuation -> codeStyle.punctuation
+            SyntaxTokenKind.Invalid -> codeStyle.invalid
         }
         if (spanStyle != null && spanStyle != codeStyle.simple && token.length > 0) {
             addStyle(spanStyle, token.startIndex, token.endIndex)

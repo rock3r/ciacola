@@ -2,6 +2,7 @@ package dev.sebastiano.ciacola.inspector.design
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
@@ -25,12 +27,23 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.MenuScope
 import dev.bnorm.storyboard.easel.EaselWindow
 import dev.sebastiano.ciacola.document.Curve
@@ -43,6 +56,11 @@ import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import dev.sebastiano.ciacola.inspector.element.ColorSwatch
 import dev.sebastiano.ciacola.inspector.element.CompactSliderRow
 import dev.sebastiano.ciacola.inspector.element.ModifiedDot
+import dev.sebastiano.ciacola.syntax.SyntaxHighlighter
+import dev.sebastiano.ciacola.syntax.SyntaxLanguage
+import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
 import dev.sebastiano.ciacola.theme.ReducedMotionMode
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
@@ -57,6 +75,7 @@ import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.TextField
 import org.jetbrains.jewel.ui.component.VerticalScrollbar
+import org.jetbrains.jewel.ui.component.separator
 
 private enum class ThemeInspectorSectionTab(val label: String) {
     Colors("Colors"),
@@ -111,6 +130,7 @@ internal fun themeCurveLabel(curve: Curve?): String = when {
 fun DocumentThemeInspectorUi(
     controller: DocumentThemeInspectorController,
     onPickDeckFileToCopyThemes: (() -> Path?)? = null,
+    onPickCodeSchemeFile: (() -> Path?)? = null,
     modifier: Modifier = Modifier,
     showHeaderUndoRedo: Boolean = false,
 ) {
@@ -220,7 +240,10 @@ fun DocumentThemeInspectorUi(
                     .padding(bottom = 24.dp, end = 8.dp),
             ) {
                 when (activeTab) {
-                    ThemeInspectorSectionTab.Colors -> ThemeColorsEditorSection(controller, themeSpec.colors, resolvedColors)
+                    ThemeInspectorSectionTab.Colors -> {
+                        CodeSchemeEditorSection(controller, onPickCodeSchemeFile)
+                        ThemeColorsEditorSection(controller, themeSpec.colors, resolvedColors)
+                    }
                     ThemeInspectorSectionTab.Typography -> ThemeTypographyEditorSection(controller)
                     ThemeInspectorSectionTab.Motion -> ThemeMotionEditorSection(controller)
                     ThemeInspectorSectionTab.Palettes -> ThemePalettesEditorSection(controller, doc.palettes.keys.toList())
@@ -254,6 +277,172 @@ private fun HexField(value: String, tag: String, onCommit: (String) -> Unit, mod
             .trackAuthoringTextInputFocus()
             .testTag(tag),
     )
+}
+
+private const val CODE_SCHEME_PREVIEW_SNIPPET =
+    "@Composable\nfun greet(name: String = \"hi\") {\n    // preview\n    val n = 42\n}"
+
+private fun highlightCodeSchemePreview(scheme: SyntaxColorScheme): AnnotatedString {
+    val baseColor = Color(scheme.foreground.argb)
+    val tokens = SyntaxHighlighter.lex(CODE_SCHEME_PREVIEW_SNIPPET, SyntaxLanguage.Kotlin)
+    return buildAnnotatedString {
+        withStyle(SpanStyle(color = baseColor)) {
+            append(CODE_SCHEME_PREVIEW_SNIPPET)
+        }
+        for (token in tokens) {
+            if (token.length <= 0) continue
+            if (token.kind == SyntaxTokenKind.Plain || token.kind == SyntaxTokenKind.Whitespace) continue
+            val tokenStyle = scheme.styleFor(token.kind)
+            val decoration = when {
+                tokenStyle.underline && tokenStyle.strikethrough ->
+                    TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                tokenStyle.underline -> TextDecoration.Underline
+                tokenStyle.strikethrough -> TextDecoration.LineThrough
+                else -> null
+            }
+            addStyle(
+                style = SpanStyle(
+                    color = tokenStyle.foreground?.let { Color(it.argb) } ?: baseColor,
+                    background = tokenStyle.background?.let { Color(it.argb) } ?: Color.Unspecified,
+                    fontWeight = if (tokenStyle.bold) FontWeight.Bold else null,
+                    fontStyle = if (tokenStyle.italic) FontStyle.Italic else null,
+                    textDecoration = decoration,
+                ),
+                start = token.startIndex,
+                end = token.endIndex,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CodeSchemeEditorSection(
+    controller: DocumentThemeInspectorController,
+    onPickCodeSchemeFile: (() -> Path?)?,
+) {
+    val colors = JewelTheme.globalColors
+    val themeSpec = controller.currentThemeSpec()
+    val activeScheme = remember(themeSpec) { controller.activeCodeScheme() }
+    val isImported = themeSpec.customCodeScheme != null
+    val selectedLabel = if (isImported) "${activeScheme.name} (Imported)" else activeScheme.name
+    val isModified = controller.isCodeSchemeModified()
+
+    FlatCollapsibleSection(title = "Code highlighting", testTag = "ciacola-doc-theme-code-scheme-section") {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(InspectorTokens.RowHeight),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModifiedDot(
+                modified = isModified,
+                label = "Code scheme",
+                tag = "ciacola-doc-theme-code-scheme-reset",
+                onReset = { controller.resetCodeScheme() },
+                resolvedTestTag = "ciacola-doc-theme-code-scheme-reset",
+            )
+            Text("Scheme", style = inspectorBodyStyle(), color = colors.text.info)
+            Dropdown(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(InspectorTokens.RowHeight)
+                    .testTag("ciacola-doc-theme-code-scheme-selector"),
+                menuContent = {
+                    if (isImported) {
+                        selectableItem(selected = true, onClick = {}) {
+                            Text("${activeScheme.name} (Imported)", style = inspectorBodyStyle())
+                        }
+                        separator()
+                    }
+                    passiveItem {
+                        Text(
+                            text = "IntelliJ",
+                            style = inspectorCaptionStyle(),
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.text.info,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                    for (scheme in SyntaxColorSchemes.intelliJ) {
+                        selectableItem(
+                            selected = !isImported && activeScheme.id == scheme.id,
+                            onClick = { controller.selectBundledCodeScheme(scheme.id) },
+                        ) {
+                            Text(scheme.name, style = inspectorBodyStyle())
+                        }
+                    }
+                    separator()
+                    passiveItem {
+                        Text(
+                            text = "GitHub",
+                            style = inspectorCaptionStyle(),
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.text.info,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                    for (scheme in SyntaxColorSchemes.gitHub) {
+                        selectableItem(
+                            selected = !isImported && activeScheme.id == scheme.id,
+                            onClick = { controller.selectBundledCodeScheme(scheme.id) },
+                        ) {
+                            Text(scheme.name, style = inspectorBodyStyle())
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    text = selectedLabel,
+                    style = inspectorBodyStyle(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (onPickCodeSchemeFile != null) {
+            OutlinedButton(
+                onClick = { onPickCodeSchemeFile()?.let { controller.importCodeSchemeFromFile(it) } },
+                enabled = !controller.store.isReadOnly,
+                modifier = Modifier.testTag("ciacola-doc-theme-code-scheme-import"),
+            ) {
+                Text("Import IJ / VS Code…", style = inspectorBodyStyle())
+            }
+        }
+
+        controller.lastCodeSchemeStatus?.let { status ->
+            val isSuccess = status.startsWith("Imported ")
+            Text(
+                text = status,
+                style = inspectorCaptionStyle(),
+                color = if (isSuccess) colors.text.info else colors.text.error,
+                modifier = Modifier.testTag("ciacola-doc-theme-code-scheme-status"),
+            )
+        }
+
+        val previewShape = RoundedCornerShape(6.dp)
+        val schemeBg = Color(activeScheme.background.argb)
+        val schemeFg = Color(activeScheme.foreground.argb)
+        val previewAnnotated = remember(activeScheme) { highlightCodeSchemePreview(activeScheme) }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(previewShape)
+                .background(schemeBg, previewShape)
+                .border(1.dp, schemeFg.copy(alpha = 0.18f), previewShape)
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .testTag("ciacola-doc-theme-code-scheme-preview"),
+        ) {
+            Text(
+                text = previewAnnotated,
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    color = schemeFg,
+                ),
+            )
+        }
+    }
 }
 
 @Composable
@@ -536,6 +725,7 @@ class DocumentThemeInspectorWindow(
     var isEditorShownProvider: () -> Boolean = { false },
     var onToggleEditor: () -> Unit = {},
     var onPickDeckFileToCopyThemes: (() -> Path?)? = null,
+    var onPickCodeSchemeFile: (() -> Path?)? = null,
 ) : EaselWindow {
     override val name: String = "Theme"
     override val initialSize: DpSize = DpSize(440.dp, 680.dp)
@@ -593,6 +783,7 @@ class DocumentThemeInspectorWindow(
             DocumentThemeInspectorUi(
                 controller = controller,
                 onPickDeckFileToCopyThemes = onPickDeckFileToCopyThemes,
+                onPickCodeSchemeFile = onPickCodeSchemeFile,
             )
         }
     }
@@ -610,6 +801,7 @@ fun rememberDocumentThemeInspectorWindow(
     isEditorShownProvider: () -> Boolean = { false },
     onToggleEditor: () -> Unit = {},
     onPickDeckFileToCopyThemes: (() -> Path?)? = null,
+    onPickCodeSchemeFile: (() -> Path?)? = null,
 ): DocumentThemeInspectorWindow = remember {
     DocumentThemeInspectorWindow(
         controller = controller,
@@ -622,6 +814,7 @@ fun rememberDocumentThemeInspectorWindow(
         isEditorShownProvider = isEditorShownProvider,
         onToggleEditor = onToggleEditor,
         onPickDeckFileToCopyThemes = onPickDeckFileToCopyThemes,
+        onPickCodeSchemeFile = onPickCodeSchemeFile,
     )
 }.also {
     it.controller = controller
@@ -634,6 +827,7 @@ fun rememberDocumentThemeInspectorWindow(
     it.isEditorShownProvider = isEditorShownProvider
     it.onToggleEditor = onToggleEditor
     it.onPickDeckFileToCopyThemes = onPickDeckFileToCopyThemes
+    it.onPickCodeSchemeFile = onPickCodeSchemeFile
 }
 
 /** Which header controls the Theme sheet shows for the deck's theme set. */

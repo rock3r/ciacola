@@ -76,6 +76,9 @@ class FoundationDocumentMigrationTest {
         val doc = loadFoundationDocument()
         val outDir = System.getProperty("ciacola.foundationPreview.dir")?.let(::File)
         outDir?.mkdirs()
+        val screenshotsDir = (System.getProperty("ciacola.screenshots.dir") ?: System.getenv("CIACOLA_SCREENSHOTS_DIR"))
+            ?.let(::File)
+        screenshotsDir?.mkdirs()
 
         assertEquals(listOf(3, 2, 1, 3, 5), doc.slides.map { it.beats.size })
 
@@ -120,6 +123,10 @@ class FoundationDocumentMigrationTest {
                     renderedBeats[sIdx][bIdx] = rgba
                     if (outDir != null) {
                         savePng(rgba, 1920, 1080, File(outDir, "${themeKey}_s${sIdx + 1}_b${bIdx}_doc.png"))
+                    }
+                    if (screenshotsDir != null && sIdx == 3 && bIdx == 2) {
+                        val name = if (themeKey == "dark") "slide4-islands-dark.png" else "slide4-intellij-light.png"
+                        savePng(rgba, 1920, 1080, File(screenshotsDir, name))
                     }
 
                     // Slide 3 (index 2) fills stage with ambient vertex mesh; other slides match theme canvas at corners

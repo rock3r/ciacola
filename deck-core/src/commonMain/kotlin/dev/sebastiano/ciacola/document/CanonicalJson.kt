@@ -44,6 +44,7 @@ object CanonicalJson {
         "manual",
         "colors",
         "typography",
+        "tokens",
     )
 
     private val BUILD_DESCRIPTORS_BY_KIND: Map<String, SerialDescriptor> = mapOf(

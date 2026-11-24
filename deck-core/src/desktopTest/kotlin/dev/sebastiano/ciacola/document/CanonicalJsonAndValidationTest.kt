@@ -913,6 +913,9 @@ class CanonicalJsonAndValidationTest {
             "DeckDocument" to DeckDocument.serializer().descriptor,
             "StageSize" to StageSize.serializer().descriptor,
             "DeckThemeSpec" to DeckThemeSpec.serializer().descriptor,
+            "CodeSchemeSpec" to CodeSchemeSpec.serializer().descriptor,
+            "CodeTokenStyleSpec" to CodeTokenStyleSpec.serializer().descriptor,
+            "CodeSchemeSourceSpec" to CodeSchemeSourceSpec.serializer().descriptor,
             "ThemeMotionDefaults" to ThemeMotionDefaults.serializer().descriptor,
             "TextStyleOverride" to TextStyleOverride.serializer().descriptor,
             "SlidePaletteSpec" to SlidePaletteSpec.serializer().descriptor,
@@ -1178,5 +1181,70 @@ class CanonicalJsonAndValidationTest {
         )
         assertEquals(4.0, JsonMergePatch.resolveNodeAtBeat(allStrokeWidth, 0).shape?.stroke?.width)
         assertNull(JsonMergePatch.resolveNodeAtBeat(allStrokeWidth, 1).shape?.stroke)
+    }
+
+    @Test
+    fun codeSchemeAndCustomCodeSchemeRoundTripAndValidateCleanly() {
+        val githubDark = dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes.GitHubDark
+        val islandsDark = dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes.IntelliJIslandsDark
+        val doc = DeckDocument(
+            id = "code-scheme-roundtrip",
+            title = "Code Scheme Test",
+            defaultTheme = "dark",
+            themes = mapOf(
+                "dark" to DeckThemeSpec(
+                    preset = "stageDark",
+                    codeScheme = "github-dark",
+                ),
+                "imported" to DeckThemeSpec(
+                    preset = "stageDark",
+                    codeScheme = islandsDark.id,
+                    customCodeScheme = islandsDark.toCodeSchemeSpec(),
+                ),
+                "legacy" to DeckThemeSpec(preset = "keynoteLight"),
+            ),
+            slides = listOf(SlideSpec(id = "s1")),
+        )
+
+        val printed = CanonicalJson.print(doc)
+        val decoded = assertIs<DeckDecodeResult.Success>(DeckDocumentCodec.decode(printed))
+        assertTrue(decoded.lintIssues.isEmpty(), "Expected no lint issues, got ${decoded.lintIssues}")
+        assertEquals("github-dark", decoded.document.themes["dark"]?.codeScheme)
+        assertNull(decoded.document.themes["dark"]?.customCodeScheme)
+
+        val roundTrippedCustom = assertNotNull(decoded.document.themes["imported"]?.customCodeScheme)
+        assertEquals(islandsDark, roundTrippedCustom.toSyntaxColorScheme())
+        assertEquals(githubDark, resolveDeckCodeScheme(decoded.document.themes["dark"], isLight = false))
+        assertEquals(
+            dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes.IntelliJLight,
+            resolveDeckCodeScheme(decoded.document.themes["legacy"], isLight = true),
+        )
+
+        // Unknown bundled codeScheme id -> lint error
+        val unknownSchemeDoc = doc.copy(
+            themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark", codeScheme = "non-existent-scheme")),
+        )
+        val unknownIssues = DeckDocumentCodec.validate(unknownSchemeDoc)
+        assertTrue(unknownIssues.any { it.code == "UNKNOWN_CODE_SCHEME" && it.severity == IssueSeverity.LintError })
+
+        // Invalid customCodeScheme -> lint error
+        val badCustomDoc = doc.copy(
+            themes = mapOf(
+                "dark" to DeckThemeSpec(
+                    preset = "stageDark",
+                    customCodeScheme = CodeSchemeSpec(
+                        id = "",
+                        name = "Broken",
+                        appearance = "neon",
+                        background = "not-a-color",
+                        foreground = "#FFFFFF",
+                        tokens = mapOf("keyword" to CodeTokenStyleSpec(fg = "#ZZZ")),
+                    ),
+                ),
+            ),
+        )
+        val customIssues = DeckDocumentCodec.validate(badCustomDoc)
+        assertTrue(customIssues.any { it.code == "INVALID_CUSTOM_CODE_SCHEME" && it.severity == IssueSeverity.LintError })
+        assertNull(badCustomDoc.themes["dark"]?.customCodeScheme?.toSyntaxColorSchemeOrNull())
     }
 }

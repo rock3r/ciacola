@@ -1,6 +1,9 @@
 DeckDocument: format, id, title, stage, themes, defaultTheme, fonts, palettes, loopPeriodsMs, slides
 StageSize: width, height
-DeckThemeSpec: preset, colors, typography, motion
+DeckThemeSpec: preset, codeScheme, customCodeScheme, colors, typography, motion
+CodeSchemeSpec: id, name, appearance, background, foreground, selectionBackground, lineHighlightBackground, lineNumberForeground, diffInserted, diffDeleted, diffChanged, tokens, source
+CodeTokenStyleSpec: fg, bg, bold, italic, underline, strikethrough
+CodeSchemeSourceSpec: family, upstream, license, revision
 ThemeMotionDefaults: durationMs, curve, transition
 TextStyleOverride: font, size, weight, italic, color, lineHeight, tracking, align
 SlidePaletteSpec: canvas, ink, mutedInk, accent, surface, border

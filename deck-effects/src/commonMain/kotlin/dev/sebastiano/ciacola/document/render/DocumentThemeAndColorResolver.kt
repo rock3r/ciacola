@@ -36,11 +36,14 @@ import dev.sebastiano.ciacola.document.SurfaceSpec
 import dev.sebastiano.ciacola.document.ThemeMotionDefaults
 import dev.sebastiano.ciacola.document.TransitionSpec
 import dev.sebastiano.ciacola.document.TransitionType
+import dev.sebastiano.ciacola.document.isLightThemePreset
+import dev.sebastiano.ciacola.document.resolveDeckCodeScheme
 import dev.sebastiano.ciacola.effects.v2.CurveV2
 import dev.sebastiano.ciacola.effects.v2.EffectArgs
 import dev.sebastiano.ciacola.effects.v2.EffectDirection8
 import dev.sebastiano.ciacola.effects.v2.IrisDirection
 import dev.sebastiano.ciacola.effects.v2.SlideTransitionV2
+import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.DeckTheme
 import dev.sebastiano.ciacola.theme.DeckThemes
 import dev.sebastiano.ciacola.theme.SlidePalette
@@ -79,25 +82,56 @@ fun effectiveSlideTransition(
 ): TransitionSpec = slide.transition ?: activeThemeSpec?.motion?.transition ?: TransitionSpec()
 
 /**
- * Resolves the active [DeckTheme] from a [DeckDocument] and [themeName] (preset + color overrides).
+ * Resolves the active [DeckTheme] from a [DeckDocument] and [themeName] (preset + code scheme +
+ * color overrides).
  */
 fun resolveDeckTheme(
     document: DeckDocument,
     themeName: String? = null,
 ): DeckTheme {
     val spec = resolveActiveThemeSpec(document, themeName)
-    val base = when (spec?.preset?.lowercase()) {
-        "keynotelight", "stagelight", "light" -> DeckThemes.keynoteLight()
-        else -> DeckThemes.stageDark()
+    val base = if (isLightThemePreset(spec?.preset)) {
+        DeckThemes.keynoteLight()
+    } else {
+        DeckThemes.stageDark()
     }
-    if (spec == null || spec.colors.isEmpty()) return base
+    if (spec == null) return base
+
+    val effectiveScheme = resolveDeckCodeScheme(spec, isLight = base.isLight)
+    val schemePalette = DeckCodePalette.fromScheme(effectiveScheme)
+    val baseWithScheme = if (schemePalette != base.colors.code) {
+        base.copy(colors = base.colors.copy(code = schemePalette))
+    } else {
+        base
+    }
+    if (spec.colors.isEmpty()) return baseWithScheme
 
     val resolver = DocumentColorResolver(
         themeSpec = spec,
-        baseTheme = base,
+        baseTheme = baseWithScheme,
         slidePaletteSpec = null,
     )
-    val c = base.colors
+    val c = baseWithScheme.colors
+    val overriddenCode = c.code.copy(
+        background = resolver.resolveToken("codeBackground") ?: resolver.resolveToken("code.background") ?: c.code.background,
+        foreground = resolver.resolveToken("codeForeground") ?: resolver.resolveToken("code.foreground") ?: c.code.foreground,
+        keyword = resolver.resolveToken("code.keyword") ?: c.code.keyword,
+        string = resolver.resolveToken("code.string") ?: c.code.string,
+        comment = resolver.resolveToken("code.comment") ?: c.code.comment,
+        number = resolver.resolveToken("code.number") ?: c.code.number,
+        type = resolver.resolveToken("code.type") ?: c.code.type,
+        functionDeclaration = resolver.resolveToken("code.functionDeclaration") ?: c.code.functionDeclaration,
+        functionCall = resolver.resolveToken("code.functionCall") ?: resolver.resolveToken("code.function") ?: c.code.functionCall,
+        property = resolver.resolveToken("code.property") ?: c.code.property,
+        annotation = resolver.resolveToken("code.annotation") ?: c.code.annotation,
+        punctuation = resolver.resolveToken("code.punctuation") ?: c.code.punctuation,
+        invalid = resolver.resolveToken("code.invalid") ?: c.code.invalid,
+        constant = resolver.resolveToken("code.constant") ?: c.code.constant,
+        attribute = resolver.resolveToken("code.attribute") ?: c.code.attribute,
+        tag = resolver.resolveToken("code.tag") ?: c.code.tag,
+        operator = resolver.resolveToken("code.operator") ?: c.code.operator,
+        preprocessor = resolver.resolveToken("code.preprocessor") ?: c.code.preprocessor,
+    )
     val overridden = c.copy(
         background = resolver.resolveToken("canvas") ?: resolver.resolveToken("background") ?: c.background,
         surface = resolver.resolveToken("surface") ?: c.surface,
@@ -112,8 +146,9 @@ fun resolveDeckTheme(
         warning = resolver.resolveToken("warning") ?: c.warning,
         danger = resolver.resolveToken("danger") ?: c.danger,
         onAccent = resolver.resolveToken("onAccent") ?: c.onAccent,
+        code = overriddenCode,
     )
-    return base.copy(colors = overridden)
+    return baseWithScheme.copy(colors = overridden)
 }
 
 /**
@@ -167,6 +202,10 @@ data class DocumentColorResolver(
             "ink" -> themeSpec?.colors?.get("foreground")
             "muted" -> themeSpec?.colors?.get("mutedInk")
             "mutedInk" -> themeSpec?.colors?.get("muted")
+            "codeBackground" -> themeSpec?.colors?.get("code.background")
+            "code.background" -> themeSpec?.colors?.get("codeBackground")
+            "codeForeground" -> themeSpec?.colors?.get("code.foreground")
+            "code.foreground" -> themeSpec?.colors?.get("codeForeground")
             else -> null
         }
         if (themeRaw != null) {
@@ -189,6 +228,24 @@ data class DocumentColorResolver(
             "elevatedSurface" -> c.elevatedSurface
             "border" -> c.border
             "onAccent" -> c.onAccent
+            "codeBackground", "code.background" -> c.code.background
+            "codeForeground", "code.foreground" -> c.code.foreground
+            "code.keyword" -> c.code.keyword
+            "code.string" -> c.code.string
+            "code.comment" -> c.code.comment
+            "code.number" -> c.code.number
+            "code.type" -> c.code.type
+            "code.functionDeclaration" -> c.code.functionDeclaration
+            "code.functionCall", "code.function" -> c.code.functionCall
+            "code.property" -> c.code.property
+            "code.annotation" -> c.code.annotation
+            "code.punctuation" -> c.code.punctuation
+            "code.invalid" -> c.code.invalid
+            "code.constant" -> c.code.constant
+            "code.attribute" -> c.code.attribute
+            "code.tag" -> c.code.tag
+            "code.operator" -> c.code.operator
+            "code.preprocessor" -> c.code.preprocessor
             "transparent" -> Color.Transparent
             "black" -> Color.Black
             "white" -> Color.White

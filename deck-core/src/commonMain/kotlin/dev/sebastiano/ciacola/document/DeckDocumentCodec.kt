@@ -3,6 +3,8 @@ package dev.sebastiano.ciacola.document
 import androidx.compose.runtime.Immutable
 import dev.sebastiano.ciacola.core.fonts.FontValidationSeverity
 import dev.sebastiano.ciacola.core.fonts.validateFontDeclarations
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColor
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -277,8 +279,25 @@ object DeckDocumentCodec {
         }
         val declaredFonts = document.fonts.mapTo(hashSetOf()) { it.family }
 
-        // Validate theme typography font references and motion curves
+        // Validate theme code schemes, typography font references, and motion curves
         for ((themeName, themeSpec) in document.themes) {
+            if (themeSpec.codeScheme != null &&
+                themeSpec.customCodeScheme == null &&
+                SyntaxColorSchemes.findById(themeSpec.codeScheme) == null
+            ) {
+                issues += lintError(
+                    "UNKNOWN_CODE_SCHEME",
+                    "<root>/themes/$themeName/codeScheme",
+                    "Theme '$themeName' references unknown codeScheme '${themeSpec.codeScheme}'.",
+                )
+            }
+            themeSpec.customCodeScheme?.let { custom ->
+                validateCustomCodeScheme(
+                    scheme = custom,
+                    address = "<root>/themes/$themeName/customCodeScheme",
+                    issues = issues,
+                )
+            }
             for ((role, style) in themeSpec.typography) {
                 if (style.font != null && declaredFonts.isNotEmpty() && style.font !in declaredFonts) {
                     issues += lintError(
@@ -821,6 +840,54 @@ object DeckDocumentCodec {
                     )
                 }
             }
+        }
+    }
+
+    private fun validateCustomCodeScheme(
+        scheme: CodeSchemeSpec,
+        address: String,
+        issues: MutableList<DocumentIssue>,
+    ) {
+        if (scheme.id.isBlank()) {
+            issues += lintError("INVALID_CUSTOM_CODE_SCHEME", "$address/id", "Custom code scheme 'id' must not be blank.")
+        }
+        if (scheme.name.isBlank()) {
+            issues += lintError("INVALID_CUSTOM_CODE_SCHEME", "$address/name", "Custom code scheme 'name' must not be blank.")
+        }
+        if (parseSpecAppearanceOrNull(scheme.appearance) == null) {
+            issues += lintError(
+                "INVALID_CUSTOM_CODE_SCHEME",
+                "$address/appearance",
+                "Unknown customCodeScheme appearance '${scheme.appearance}'.",
+            )
+        }
+        fun checkCssColor(value: String?, field: String) {
+            if (value != null && SyntaxColor.parseCssHexOrNull(value) == null) {
+                issues += lintError(
+                    "INVALID_CUSTOM_CODE_SCHEME",
+                    "$address/$field",
+                    "Invalid CSS hex color '$value' in customCodeScheme.$field.",
+                )
+            }
+        }
+        checkCssColor(scheme.background, "background")
+        checkCssColor(scheme.foreground, "foreground")
+        checkCssColor(scheme.selectionBackground, "selectionBackground")
+        checkCssColor(scheme.lineHighlightBackground, "lineHighlightBackground")
+        checkCssColor(scheme.lineNumberForeground, "lineNumberForeground")
+        checkCssColor(scheme.diffInserted, "diffInserted")
+        checkCssColor(scheme.diffDeleted, "diffDeleted")
+        checkCssColor(scheme.diffChanged, "diffChanged")
+        for ((key, style) in scheme.tokens) {
+            if (key != "functionDeclaration" && key !in CODE_SCHEME_TOKEN_KEYS) {
+                issues += lintWarning(
+                    "UNKNOWN_CODE_SCHEME_TOKEN",
+                    "$address/tokens/$key",
+                    "Unknown token key '$key' in customCodeScheme.tokens.",
+                )
+            }
+            checkCssColor(style.fg, "tokens/$key/fg")
+            checkCssColor(style.bg, "tokens/$key/bg")
         }
     }
 

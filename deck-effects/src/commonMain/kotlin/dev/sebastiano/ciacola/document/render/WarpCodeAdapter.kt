@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -411,8 +412,7 @@ fun WarpCodeAdapter(
                                                         with(this@SharedTransitionLayout) {
                                                             Text(
                                                                 text = text,
-                                                                style = fittedStyle,
-                                                                color = colorToken.docColorIn(codePalette),
+                                                                style = fittedStyle.merge(colorToken.docStyleIn(codePalette)),
                                                                 softWrap = false,
                                                                 maxLines = 1,
                                                                 modifier = Modifier
@@ -431,8 +431,7 @@ fun WarpCodeAdapter(
                                                         with(this@DocWarpStateHost) {
                                                             Text(
                                                                 text = text,
-                                                                style = fittedStyle,
-                                                                color = colorToken.docColorIn(codePalette),
+                                                                style = fittedStyle.merge(colorToken.docStyleIn(codePalette)),
                                                                 softWrap = false,
                                                                 maxLines = 1,
                                                                 modifier = Modifier
@@ -496,8 +495,7 @@ private fun StaticWarpCodeRows(
                             val colorToken = state.docResolveColorToken()
                             Text(
                                 text = text,
-                                style = style,
-                                color = colorToken.docColorIn(palette),
+                                style = style.merge(colorToken.docStyleIn(palette)),
                                 softWrap = false,
                                 maxLines = 1,
                                 modifier = Modifier.graphicsLayer { alpha = rowAlpha },
@@ -719,7 +717,7 @@ private fun collectKeyRowMap(diff: DiffContents): Map<String, Int> {
     return map
 }
 
-private fun Token.docColorIn(palette: DeckCodePalette): Color = palette.colorForWarpScope(scope)
+private fun Token.docStyleIn(palette: DeckCodePalette): SpanStyle = palette.styleForWarpScope(scope)
 
 private fun String.isPlainWarpScope(): Boolean = startsWith("source.") || startsWith("text.")
 
