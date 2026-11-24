@@ -414,12 +414,14 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                     hunk.awaitingHeaderNewline = false
 
                     // Emit the leading diff prefix marker
-                    val markerKind = if (lineKind == LineRole.CONTEXT) {
-                        SyntaxTokenKind.Whitespace
+                    if (lineKind == LineRole.CONTEXT) {
+                        hunk.addFixed(SyntaxTokenKind.Whitespace, start, end)
+                    } else if (end - start == 2 && source[start + 1] == '\t') {
+                        hunk.addFixed(SyntaxTokenKind.Punctuation, start, start + 1)
+                        hunk.addFixed(SyntaxTokenKind.Whitespace, start + 1, end)
                     } else {
-                        SyntaxTokenKind.Punctuation
+                        hunk.addFixed(SyntaxTokenKind.Punctuation, start, end)
                     }
-                    hunk.addFixed(markerKind, start, end)
 
                     // Consume optional BODY_TEXT and optional BODY_NEWLINE that immediately follow
                     var bodyStart = -1
@@ -555,6 +557,13 @@ private class DiffSectionState {
     private var toPath: String? = null
     private var sawHunkInSection: Boolean = false
     private var lastHeaderWasContextFrom: Boolean = false
+    private var cachedLanguage: SyntaxLanguage? = null
+    private var languageCached: Boolean = false
+
+    private fun invalidateLanguageCache() {
+        cachedLanguage = null
+        languageCached = false
+    }
 
     fun onHunkStarted() {
         sawHunkInSection = true
@@ -569,6 +578,7 @@ private class DiffSectionState {
         toPath = null
         sawHunkInSection = false
         lastHeaderWasContextFrom = false
+        invalidateLanguageCache()
 
         val trimmed = line.trimEnd()
         val afterDiff = skipWs(trimmed, 4)
@@ -624,6 +634,7 @@ private class DiffSectionState {
         toPath = null
         sawHunkInSection = false
         lastHeaderWasContextFrom = false
+        invalidateLanguageCache()
         val colonIdx = line.indexOf(':')
         indexPath = if (colonIdx >= 0) {
             parseHeaderPathValue(line.substring(colonIdx + 1))
@@ -634,6 +645,7 @@ private class DiffSectionState {
 
     fun onCopyRenameHeader(line: String) {
         lastHeaderWasContextFrom = false
+        invalidateLanguageCache()
         when {
             line.startsWith("rename from") -> fromPath = parseHeaderPathValue(line.substring(11))
             line.startsWith("copy from") -> fromPath = parseHeaderPathValue(line.substring(9))
@@ -652,9 +664,11 @@ private class DiffSectionState {
         fromPath = path
         toPath = null
         lastHeaderWasContextFrom = true
+        invalidateLanguageCache()
     }
 
     fun onFromFile(path: String?) {
+        invalidateLanguageCache()
         if (lastHeaderWasContextFrom && !sawHunkInSection) {
             toPath = path
             lastHeaderWasContextFrom = false
@@ -674,6 +688,7 @@ private class DiffSectionState {
     fun onToFile(path: String?) {
         toPath = path
         lastHeaderWasContextFrom = false
+        invalidateLanguageCache()
     }
 
     fun resolveSubHighlightLanguage(allowNestedSubHighlighting: Boolean): SyntaxLanguage? {
@@ -685,13 +700,21 @@ private class DiffSectionState {
     }
 
     fun resolveTargetLanguage(): SyntaxLanguage? {
+        if (languageCached) return cachedLanguage
+        var resolved: SyntaxLanguage? = null
         val candidates = arrayOf(toPath, fromPath, gitToPath, gitFromPath, indexPath)
         for (raw in candidates) {
             if (raw == null) continue
             val normalized = normalizeDiffPath(raw) ?: continue
-            resolveLanguageForNormalizedPath(normalized)?.let { return it }
+            val lang = resolveLanguageForNormalizedPath(normalized)
+            if (lang != null) {
+                resolved = lang
+                break
+            }
         }
-        return null
+        cachedLanguage = resolved
+        languageCached = true
+        return resolved
     }
 }
 

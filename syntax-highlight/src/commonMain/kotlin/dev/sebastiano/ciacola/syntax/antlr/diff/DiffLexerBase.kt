@@ -126,8 +126,9 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
                         idx++
                     }
                 }
-                combinedOldRemaining[parentIdx] = count
-                if (count > 0) positiveOldRemainingCount++
+                if (parentIdx < width) {
+                    combinedOldRemaining[parentIdx] = count
+                }
                 parentIdx++
             } else if (ch == '+'.code) {
                 idx++
@@ -147,7 +148,11 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
                 break
             }
         }
-        combinedOldCount = parentIdx.coerceAtMost(width)
+        combinedOldCount = minOf(parentIdx, width)
+        positiveOldRemainingCount = 0
+        for (i in 0 until combinedOldCount) {
+            if (combinedOldRemaining[i] > 0) positiveOldRemainingCount++
+        }
         if (!isCombinedExhausted()) {
             mode(combinedHunkMode)
         } else {

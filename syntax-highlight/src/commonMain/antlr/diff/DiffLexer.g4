@@ -320,35 +320,35 @@ CX_DASH_SEP
     ;
 
 CX_CHG_PREFIX
-    : ( '! ' | '!' ) -> pushMode(BODY_TEXT_MODE)
+    : ( '!' [ \t] | '!' ) -> pushMode(BODY_TEXT_MODE)
     ;
 
 CX_ADD_PREFIX
-    : ( '+ ' | '+' ) -> pushMode(BODY_TEXT_MODE)
+    : ( '+' [ \t] | '+' ) -> pushMode(BODY_TEXT_MODE)
     ;
 
 CX_DEL_PREFIX
-    : ( '- ' | '-' ) -> pushMode(BODY_TEXT_MODE)
+    : ( '-' [ \t] | '-' ) -> pushMode(BODY_TEXT_MODE)
     ;
 
 CX_CTX_PREFIX
-    : ( '  ' | ' ' ) -> pushMode(BODY_TEXT_MODE)
+    : ( ' ' [ \t] | ' ' ) -> pushMode(BODY_TEXT_MODE)
     ;
 
 CX_NON_HUNK_BANG
-    : '!' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    : '!' ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 CX_NON_HUNK_PLUS
-    : '+' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    : '+' ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 CX_NON_HUNK_MINUS
-    : '-' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    : '-' ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 CX_NON_HUNK_SPACE
-    : ' ' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    : ' ' ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 CX_NO_NEWLINE

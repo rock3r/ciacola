@@ -851,4 +851,74 @@ class DiffSyntaxLexerTest {
             maxMillisPerInput = 300L,
         )
     }
+
+    @Test
+    fun exitsCombinedModeCleanlyWhenHeaderHasExcessParentRanges() {
+        val diff = "--- a/Main.kt\n" +
+            "+++ b/Main.kt\n" +
+            "@@@ -1,1 -1,1 -1,1 +1,2 @@@\n" +
+            "  val keep = 1\n" +
+            "++val added = 2\n" +
+            "-- \n" +
+            "2.45.0\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, diff, "excess-combined-parents")
+        val sigStart = diff.indexOf("\n-- \n") + 1
+        val sigTokens = tokens.filter { it.startIndex >= sigStart && it.endIndex <= sigStart + 3 }
+        assertEquals(listOf("-", "- "), sigTokens.map { it.slice(diff) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), sigTokens.map { it.kind })
+    }
+
+    @Test
+    fun supportsInitialTabContextDiffLinesWhileKeepingDashDashSignatureOutside() {
+        val diff = "*** a/Main.kt\t2026-11-23\n" +
+            "--- b/Main.kt\t2026-11-23\n" +
+            "***************\n" +
+            "*** 1,3 ****\n" +
+            " \tval ctx = 4\n" +
+            "-\tval old = 1\n" +
+            "!\tval chg = 0\n" +
+            "--- 1,3 ----\n" +
+            " \tval ctx = 4\n" +
+            "+\tval new = 2\n" +
+            "!\tval chg = 3\n" +
+            "-- \n" +
+            "2.45.0\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, diff, "context-initial-tab")
+
+        for (line in listOf(" \tval ctx = 4", "-\tval old = 1", "+\tval new = 2", "!\tval chg = 3")) {
+            val lineStart = diff.indexOf(line)
+            val lineEnd = lineStart + line.length
+            val lineTokens = tokens.filter { it.startIndex >= lineStart && it.endIndex <= lineEnd }
+            assertTrue(lineTokens.any { it.slice(diff) == "val" && it.kind == SyntaxTokenKind.Keyword }, "Missing Kotlin Keyword in '$line'")
+            assertTrue(lineTokens.any { it.kind == SyntaxTokenKind.Number }, "Missing Kotlin Number in '$line'")
+            if (!line.startsWith(" ")) {
+                assertEquals(line.substring(0, 1), lineTokens[0].slice(diff))
+                assertEquals(SyntaxTokenKind.Punctuation, lineTokens[0].kind)
+                assertEquals("\t", lineTokens[1].slice(diff))
+                assertEquals(SyntaxTokenKind.Whitespace, lineTokens[1].kind)
+            }
+        }
+
+        val sigStart = diff.indexOf("\n-- \n") + 1
+        val sigTokens = tokens.filter { it.startIndex >= sigStart && it.endIndex <= sigStart + 3 }
+        assertEquals(listOf("-", "- "), sigTokens.map { it.slice(diff) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), sigTokens.map { it.kind })
+    }
+
+    @Test
+    fun linearPerformanceOnExcessParentsWithSmallWidthAndLongPathManyHunks() {
+        val narrowExcessParents = "@@@ " + "-1,999999 ".repeat(80) + "+1,999999 @@@\n" + " \n".repeat(10_000)
+        val longPath = "x".repeat(50_000)
+        val longPathManyHunks = "--- a/$longPath.kt\n+++ b/$longPath.kt\n" + "@@ -0,0 +0,0 @@\n".repeat(10_000)
+        assertLinearPerformance(
+            lexer = DiffSyntaxLexer,
+            pathologicalInputs = listOf(
+                "width2-80-parents" to narrowExcessParents,
+                "50kb-path-10k-hunks" to longPathManyHunks,
+            ),
+            maxMillisPerInput = 300L,
+        )
+    }
 }
