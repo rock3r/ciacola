@@ -21,6 +21,12 @@ class CodeStyle private constructor(
     val typeParameters: SpanStyle,
     val namedArgument: SpanStyle,
     val label: SpanStyle,
+    val constant: SpanStyle,
+    val attribute: SpanStyle,
+    val tag: SpanStyle,
+    val operator: SpanStyle,
+    val preprocessor: SpanStyle,
+    val invalid: SpanStyle,
 ) {
     companion object {
         fun build(
@@ -44,6 +50,12 @@ class CodeStyle private constructor(
                     typeParameters = base,
                     namedArgument = base,
                     label = base,
+                    constant = base,
+                    attribute = base,
+                    tag = base,
+                    operator = base,
+                    preprocessor = base,
+                    invalid = base,
                 )
             ).apply(builder).build()
         }
@@ -66,6 +78,48 @@ class CodeStyle private constructor(
         var namedArgument: SpanStyle = base.namedArgument
         var label: SpanStyle = base.label
 
+        private var _constant: SpanStyle? = null
+        var constant: SpanStyle
+            get() = _constant ?: keyword
+            set(value) {
+                _constant = value
+            }
+
+        private var _attribute: SpanStyle? = null
+        var attribute: SpanStyle
+            get() = _attribute ?: annotation
+            set(value) {
+                _attribute = value
+            }
+
+        private var _tag: SpanStyle? = null
+        var tag: SpanStyle
+            get() = _tag ?: keyword
+            set(value) {
+                _tag = value
+            }
+
+        private var _operator: SpanStyle? = null
+        var operator: SpanStyle
+            get() = _operator ?: punctuation
+            set(value) {
+                _operator = value
+            }
+
+        private var _preprocessor: SpanStyle? = null
+        var preprocessor: SpanStyle
+            get() = _preprocessor ?: annotation
+            set(value) {
+                _preprocessor = value
+            }
+
+        private var _invalid: SpanStyle? = null
+        var invalid: SpanStyle
+            get() = _invalid ?: simple
+            set(value) {
+                _invalid = value
+            }
+
         fun build(): CodeStyle {
             return CodeStyle(
                 simple = simple,
@@ -83,6 +137,12 @@ class CodeStyle private constructor(
                 typeParameters = typeParameters,
                 namedArgument = namedArgument,
                 label = label,
+                constant = constant,
+                attribute = attribute,
+                tag = tag,
+                operator = operator,
+                preprocessor = preprocessor,
+                invalid = invalid,
             )
         }
     }

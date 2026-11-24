@@ -1,5 +1,13 @@
 package dev.sebastiano.ciacola.syntax
 
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColor
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeAppearance
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeImporters
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeMetadata
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeParseException
+import dev.sebastiano.ciacola.syntax.theme.SyntaxTokenStyle
 import java.io.File
 import java.lang.reflect.Modifier
 import kotlin.test.Test
@@ -16,6 +24,14 @@ class SyntaxHighlightPackagingTest {
             SyntaxLanguage::class.java,
             SyntaxLexer::class.java,
             SyntaxHighlighter::class.java,
+            SyntaxColor::class.java,
+            SyntaxTokenStyle::class.java,
+            SyntaxSchemeAppearance::class.java,
+            SyntaxSchemeMetadata::class.java,
+            SyntaxColorScheme::class.java,
+            SyntaxSchemeParseException::class.java,
+            SyntaxColorSchemes::class.java,
+            SyntaxSchemeImporters::class.java,
         )
 
         assertTrue(publicApiClasses.isNotEmpty(), "Expected public API classes to inspect")
@@ -71,6 +87,7 @@ class SyntaxHighlightPackagingTest {
         val lexerImplDir = File(moduleDir, "src/commonMain/kotlin/dev/sebastiano/ciacola/syntax/lexer")
         val internalDir = File(moduleDir, "src/commonMain/kotlin/dev/sebastiano/ciacola/syntax/internal")
         val generatedAntlrRoot = File(moduleDir, "build/generatedAntlr")
+        val generatedSchemesRoot = File(moduleDir, "build/generatedSchemes")
 
         val modifierWord =
             """(?:public|open|abstract|final|sealed|data|enum|value|annotation|inline|const|expect|actual|suspend|tailrec|operator|infix|external|lateinit|override|companion)"""
@@ -95,6 +112,9 @@ class SyntaxHighlightPackagingTest {
             }
             for (root in activeGeneratedRoots) {
                 root.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { add(it) }
+            }
+            if (generatedSchemesRoot.isDirectory) {
+                generatedSchemesRoot.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { add(it) }
             }
         }
         assertTrue(kotlinFiles.isNotEmpty(), "Expected Kotlin files under internal implementation directories in $moduleDir")
@@ -128,6 +148,18 @@ class SyntaxHighlightPackagingTest {
             noticeText.contains("Permission is hereby granted, free of charge, to any person obtaining"),
             "NOTICE.txt must contain the Unicode License v3 permission notice",
         )
+        assertTrue(noticeText.contains("IntelliJ Platform Color Schemes"), "NOTICE.txt must cite IntelliJ Platform Color Schemes")
+        assertTrue(noticeText.contains("This software includes code from IntelliJ IDEA"), "NOTICE.txt must include JetBrains NOTICE text")
+        assertTrue(noticeText.contains("Copyright (C) JetBrains s.r.o."), "NOTICE.txt must cite JetBrains s.r.o. copyright")
+        assertTrue(noticeText.contains("https://www.jetbrains.com/idea/"), "NOTICE.txt must cite JetBrains IDEA URL")
+        assertTrue(noticeText.contains("GitHub Primer Color Themes"), "NOTICE.txt must cite GitHub Primer Color Themes")
+        assertTrue(noticeText.contains("Copyright (c) 2020 Primer"), "NOTICE.txt must cite Primer MIT copyright")
+        assertTrue(noticeText.contains("Copyright (c) 2021 Pine Wu"), "NOTICE.txt must cite Pine Wu MIT copyright")
+        assertTrue(
+            noticeText.contains("Copyright (c) 2023 Anthony Fu <https://github.com/antfu>"),
+            "NOTICE.txt must cite Anthony Fu MIT copyright",
+        )
+        assertTrue(noticeText.contains("MIT License"), "NOTICE.txt must contain MIT License text")
 
         val expectedUnicodeGrammars = listOf(
             "UnicodeIdent.g4",

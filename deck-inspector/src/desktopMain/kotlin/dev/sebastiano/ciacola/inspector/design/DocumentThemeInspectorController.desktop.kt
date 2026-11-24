@@ -1,5 +1,6 @@
 package dev.sebastiano.ciacola.inspector.design
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,10 +17,29 @@ import dev.sebastiano.ciacola.document.TextStyleOverride
 import dev.sebastiano.ciacola.document.ThemeMotionDefaults
 import dev.sebastiano.ciacola.document.TransitionSpec
 import dev.sebastiano.ciacola.document.TransitionType
+import dev.sebastiano.ciacola.document.isLightThemePreset
+import dev.sebastiano.ciacola.document.toCodeSchemeSpec
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeImporters
+import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeParseException
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.nio.file.AccessDeniedException
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+
+/** Status feedback for code scheme selection/import operations in [DocumentThemeInspectorController]. */
+@Immutable
+data class CodeSchemeStatus(
+    val message: String,
+    val isError: Boolean,
+)
 
 /**
  * Document-backed Theme & Palette Inspector controller bound directly to [DeckDocumentStore].
@@ -43,6 +63,12 @@ class DocumentThemeInspectorController(
     var lastCopyStatus: String? by mutableStateOf(null)
         private set
 
+    var codeSchemeStatus: CodeSchemeStatus? by mutableStateOf(null)
+        private set
+
+    val lastCodeSchemeStatus: String?
+        get() = codeSchemeStatus?.message
+
     /** Optional unified workspace Undo/Redo & cross-controller gesture handoff hooks. */
     var onUndoRequest: (() -> Unit)? = null
     var onRedoRequest: (() -> Unit)? = null
@@ -60,6 +86,7 @@ class DocumentThemeInspectorController(
         } else {
             if (!cancelGesture()) store.undo()
         }
+        codeSchemeStatus = null
     }
 
     fun performRedo() {
@@ -69,6 +96,7 @@ class DocumentThemeInspectorController(
         } else {
             store.redo()
         }
+        codeSchemeStatus = null
     }
 
     fun currentThemeSpec(): DeckThemeSpec =
@@ -81,6 +109,7 @@ class DocumentThemeInspectorController(
 
     fun selectTheme(themeName: String) {
         activeThemeName = themeName
+        codeSchemeStatus = null
     }
 
     fun setDefaultTheme(themeName: String): Boolean =
@@ -118,8 +147,13 @@ class DocumentThemeInspectorController(
 
     // ── Theme Preset & Colors ────────────────────────────────────────────────────────────────────
 
-    fun setThemePreset(preset: String): Boolean =
-        mutateActiveTheme("Change theme preset") { it.copy(preset = preset) }
+    fun setThemePreset(preset: String): Boolean {
+        val ok = mutateActiveTheme("Change theme preset") { it.copy(preset = preset) }
+        if (ok) {
+            codeSchemeStatus = null
+        }
+        return ok
+    }
 
     fun setThemeColor(
         tokenKey: String,
@@ -137,6 +171,182 @@ class DocumentThemeInspectorController(
             val nextColors = LinkedHashMap(theme.colors).apply { remove(tokenKey) }
             theme.copy(colors = nextColors)
         }
+
+    // ── Code Highlighting Schemes ────────────────────────────────────────────────────────────────
+
+    fun activeCodeScheme(): SyntaxColorScheme =
+        DocumentThemeResolver.resolveCodeScheme(currentThemeSpec())
+
+    fun isCodeSchemeModified(): Boolean {
+        val spec = currentThemeSpec()
+        return spec.codeScheme != null ||
+            spec.customCodeScheme != null ||
+            hasCodeColorOverrides(spec.colors)
+    }
+
+    fun selectBundledCodeScheme(schemeId: String): Boolean {
+        val scheme = SyntaxColorSchemes.findById(schemeId) ?: run {
+            codeSchemeStatus = CodeSchemeStatus("Unknown code scheme '$schemeId'.", isError = true)
+            return false
+        }
+        val ok = mutateActiveTheme("Select code scheme '${scheme.name}'") { theme ->
+            val presetDefaultId = SyntaxColorSchemes.defaultFor(isLightThemePreset(theme.preset)).id
+            theme.copy(
+                codeScheme = if (scheme.id == presetDefaultId) null else scheme.id,
+                customCodeScheme = null,
+                colors = stripStaleCodeColorOverrides(theme.colors),
+            )
+        }
+        if (ok) {
+            codeSchemeStatus = null
+        }
+        return ok
+    }
+
+    fun importCodeSchemeFromText(
+        content: String,
+        fileName: String? = null,
+        includeResolver: ((String) -> String?)? = null,
+    ): Boolean {
+        val imported = try {
+            SyntaxSchemeImporters.importAuto(content, fileName, includeResolver = includeResolver)
+        } catch (e: SyntaxSchemeParseException) {
+            codeSchemeStatus = CodeSchemeStatus(e.message ?: "Failed to parse code scheme.", isError = true)
+            return false
+        } catch (e: Exception) {
+            codeSchemeStatus = CodeSchemeStatus(
+                "Failed to import code scheme: ${e.message ?: "unknown error"}",
+                isError = true,
+            )
+            return false
+        }
+        val ok = mutateActiveTheme("Import code scheme '${imported.name}'") { theme ->
+            theme.copy(
+                codeScheme = null,
+                customCodeScheme = imported.toCodeSchemeSpec(),
+                colors = stripStaleCodeColorOverrides(theme.colors),
+            )
+        }
+        if (ok) {
+            codeSchemeStatus = CodeSchemeStatus("Imported '${imported.name}'", isError = false)
+        }
+        return ok
+    }
+
+    fun importCodeSchemeFromFile(path: Path): Boolean {
+        val displayName = path.fileName?.toString()?.takeIf { it.isNotBlank() } ?: "selected file"
+        val content = readBoundedUtf8SchemeFile(path, displayName).getOrElse { err ->
+            codeSchemeStatus = CodeSchemeStatus(err.message ?: "Failed to read $displayName.", isError = true)
+            return false
+        }
+        val normalizedBaseDir = path.toAbsolutePath().normalize().parent
+        val realBaseDir = normalizedBaseDir?.let { runCatching { it.toRealPath() }.getOrNull() ?: it }
+        val includeResolver: ((String) -> String?)? = if (normalizedBaseDir != null && realBaseDir != null) {
+            { includePath ->
+                resolveConfinedInclude(
+                    normalizedBaseDir = normalizedBaseDir,
+                    realBaseDir = realBaseDir,
+                    includePath = includePath,
+                )
+            }
+        } else {
+            null
+        }
+        return importCodeSchemeFromText(
+            content = content,
+            fileName = displayName,
+            includeResolver = includeResolver,
+        )
+    }
+
+    fun resetCodeScheme(): Boolean {
+        if (!isCodeSchemeModified()) {
+            codeSchemeStatus = null
+            return false
+        }
+        val ok = mutateActiveTheme("Reset code scheme to preset default") { theme ->
+            theme.copy(
+                codeScheme = null,
+                customCodeScheme = null,
+                colors = stripStaleCodeColorOverrides(theme.colors),
+            )
+        }
+        if (ok) {
+            codeSchemeStatus = null
+        }
+        return ok
+    }
+
+    private fun resolveConfinedInclude(
+        normalizedBaseDir: Path,
+        realBaseDir: Path,
+        includePath: String,
+    ): String? {
+        if (includePath.isBlank()) return null
+        if (includePath.startsWith('/') || includePath.startsWith('\\')) return null
+        if (includePath.length >= 2 && includePath[0].isLetter() && includePath[1] == ':') return null
+        val rel = runCatching { Path.of(includePath) }.getOrNull() ?: return null
+        if (rel.isAbsolute) return null
+        val resolved = normalizedBaseDir.resolve(rel).normalize()
+        if (!resolved.startsWith(normalizedBaseDir)) return null
+        if (!Files.isRegularFile(resolved)) return null
+        val realResolved = runCatching { resolved.toRealPath() }.getOrNull() ?: return null
+        if (!realResolved.startsWith(realBaseDir)) return null
+        val includeDisplay = resolved.fileName?.toString()?.takeIf { it.isNotBlank() } ?: "included file"
+        return readBoundedUtf8SchemeFile(realResolved, includeDisplay).getOrElse { err ->
+            throw SyntaxSchemeParseException(err.message ?: "Failed to read $includeDisplay")
+        }
+    }
+
+    private fun readBoundedUtf8SchemeFile(path: Path, displayName: String): Result<String> {
+        if (!Files.exists(path)) {
+            return Result.failure(IOException("Failed to read $displayName: file not found."))
+        }
+        if (!Files.isRegularFile(path)) {
+            return Result.failure(IOException("Failed to read $displayName: not a regular file."))
+        }
+        val bytes = try {
+            Files.newInputStream(path).use { input ->
+                input.readNBytes(MAX_CODE_SCHEME_IMPORT_BYTES + 1)
+            }
+        } catch (_: NoSuchFileException) {
+            return Result.failure(IOException("Failed to read $displayName: file not found."))
+        } catch (_: AccessDeniedException) {
+            return Result.failure(IOException("Failed to read $displayName: permission denied."))
+        } catch (_: SecurityException) {
+            return Result.failure(IOException("Failed to read $displayName: permission denied."))
+        } catch (_: IOException) {
+            return Result.failure(IOException("Failed to read $displayName: I/O error."))
+        }
+        if (bytes.size > MAX_CODE_SCHEME_IMPORT_BYTES) {
+            return Result.failure(IOException("Failed to read $displayName: exceeds 4 MB limit."))
+        }
+        return try {
+            val decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            Result.success(decoder.decode(ByteBuffer.wrap(bytes)).toString())
+        } catch (_: CharacterCodingException) {
+            Result.failure(IOException("Failed to read $displayName: invalid UTF-8."))
+        }
+    }
+
+    private fun isCodeColorOverrideKey(key: String): Boolean =
+        key == "codeBackground" || key == "codeForeground" || key.startsWith("code.")
+
+    private fun hasCodeColorOverrides(colors: Map<String, String>): Boolean =
+        colors.keys.any(::isCodeColorOverrideKey)
+
+    private fun stripStaleCodeColorOverrides(colors: Map<String, String>): Map<String, String> {
+        if (!hasCodeColorOverrides(colors)) return colors
+        return LinkedHashMap(colors).apply {
+            keys.removeAll(::isCodeColorOverrideKey)
+        }
+    }
+
+    private companion object {
+        const val MAX_CODE_SCHEME_IMPORT_BYTES: Int = 4 * 1024 * 1024
+    }
 
     // ── Typography Roles ─────────────────────────────────────────────────────────────────────────
 

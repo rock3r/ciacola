@@ -9,7 +9,11 @@ import dev.sebastiano.ciacola.document.SlidePaletteSpec
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.document.TextRangeEdit
 import dev.sebastiano.ciacola.document.TextStyleOverride
+import dev.sebastiano.ciacola.document.isLightThemePreset
+import dev.sebastiano.ciacola.document.resolveDeckCodeScheme
 import dev.sebastiano.ciacola.inspector.design.parseHexColorOrNull
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.DeckColors
 import dev.sebastiano.ciacola.theme.DeckThemes
 import kotlin.math.roundToInt
@@ -92,10 +96,14 @@ object DocumentThemeResolver {
     }
 
     fun baseColorsForPreset(preset: String): DeckColors =
-        if (preset.equals("keynoteLight", ignoreCase = true)) DeckThemes.KeynoteLightColors else DeckThemes.StageDarkColors
+        if (isLightThemePreset(preset)) DeckThemes.KeynoteLightColors else DeckThemes.StageDarkColors
+
+    fun resolveCodeScheme(themeSpec: DeckThemeSpec): SyntaxColorScheme =
+        resolveDeckCodeScheme(themeSpec, isLight = isLightThemePreset(themeSpec.preset))
 
     fun resolveThemeColorMap(themeSpec: DeckThemeSpec): Map<String, Color> {
         val base = baseColorsForPreset(themeSpec.preset)
+        val codePalette = DeckCodePalette.fromScheme(resolveCodeScheme(themeSpec))
         val out = linkedMapOf(
             "background" to base.background,
             "surface" to base.surface,
@@ -112,18 +120,55 @@ object DocumentThemeResolver {
             "chipBackground" to base.chipBackground,
             "onAccent" to base.onAccent,
             "motionPathPreview" to base.motionPathPreview,
-            "code.background" to base.code.background,
-            "code.foreground" to base.code.foreground,
-            "code.keyword" to base.code.keyword,
-            "code.string" to base.code.string,
-            "code.comment" to base.code.comment,
-            "code.number" to base.code.number,
-            "code.type" to base.code.type,
+            "codeBackground" to codePalette.background,
+            "codeForeground" to codePalette.foreground,
+            "code.background" to codePalette.background,
+            "code.foreground" to codePalette.foreground,
+            "code.keyword" to codePalette.keyword,
+            "code.string" to codePalette.string,
+            "code.comment" to codePalette.comment,
+            "code.number" to codePalette.number,
+            "code.type" to codePalette.type,
+            "code.functionDeclaration" to codePalette.functionDeclaration,
+            "code.functionCall" to codePalette.functionCall,
+            "code.function" to codePalette.functionCall,
+            "code.property" to codePalette.property,
+            "code.annotation" to codePalette.annotation,
+            "code.punctuation" to codePalette.punctuation,
+            "code.invalid" to codePalette.invalid,
+            "code.constant" to codePalette.constant,
+            "code.attribute" to codePalette.attribute,
+            "code.tag" to codePalette.tag,
+            "code.operator" to codePalette.operator,
+            "code.preprocessor" to codePalette.preprocessor,
         )
         for ((token, hexOrRef) in themeSpec.colors) {
             val parsed = parseHexColorOrNull(hexOrRef) ?: out[hexOrRef]
             if (parsed != null) {
                 out[token] = parsed
+                when (token) {
+                    "codeBackground" -> out["code.background"] = parsed
+                    "code.background" -> out["codeBackground"] = parsed
+                    "codeForeground" -> out["code.foreground"] = parsed
+                    "code.foreground" -> out["codeForeground"] = parsed
+                    "code.function" -> out["code.functionCall"] = parsed
+                    "code.functionCall" -> out["code.function"] = parsed
+                }
+            }
+        }
+        // Deterministic primary-key precedence independent of map iteration order:
+        // codeBackground > code.background, codeForeground > code.foreground, code.functionCall > code.function.
+        for ((primary, alias) in listOf(
+            "codeBackground" to "code.background",
+            "codeForeground" to "code.foreground",
+            "code.functionCall" to "code.function",
+        )) {
+            val primaryColor = themeSpec.colors[primary]?.let { parseHexColorOrNull(it) ?: out[it] }
+            val aliasColor = themeSpec.colors[alias]?.let { parseHexColorOrNull(it) ?: out[it] }
+            val effective = primaryColor ?: aliasColor
+            if (effective != null) {
+                out[primary] = effective
+                out[alias] = effective
             }
         }
         return out
@@ -162,6 +207,8 @@ object DocumentThemeResolver {
             "canvas" -> themeColors["background"]
             "ink" -> themeColors["foreground"]
             "mutedInk" -> themeColors["muted"]
+            "codeBackground" -> themeColors["code.background"]
+            "codeForeground" -> themeColors["code.foreground"]
             else -> null
         }
     }

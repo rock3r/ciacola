@@ -62,9 +62,49 @@ data class StageSize(
 @Serializable
 data class DeckThemeSpec(
     val preset: String = "stageDark",
+    val codeScheme: String? = null,
+    val customCodeScheme: CodeSchemeSpec? = null,
     val colors: Map<String, String> = emptyMap(),
     val typography: Map<String, TextStyleOverride> = emptyMap(),
     val motion: ThemeMotionDefaults? = null,
+)
+
+@Immutable
+@Serializable
+data class CodeSchemeSpec(
+    val id: String,
+    val name: String,
+    val appearance: String,
+    val background: String,
+    val foreground: String,
+    val selectionBackground: String? = null,
+    val lineHighlightBackground: String? = null,
+    val lineNumberForeground: String? = null,
+    val diffInserted: String? = null,
+    val diffDeleted: String? = null,
+    val diffChanged: String? = null,
+    val tokens: Map<String, CodeTokenStyleSpec> = emptyMap(),
+    val source: CodeSchemeSourceSpec? = null,
+)
+
+@Immutable
+@Serializable
+data class CodeTokenStyleSpec(
+    val fg: String? = null,
+    val bg: String? = null,
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val underline: Boolean = false,
+    val strikethrough: Boolean = false,
+)
+
+@Immutable
+@Serializable
+data class CodeSchemeSourceSpec(
+    val family: String? = null,
+    val upstream: String? = null,
+    val license: String? = null,
+    val revision: String? = null,
 )
 
 @Immutable

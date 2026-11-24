@@ -100,6 +100,7 @@ import dev.sebastiano.ciacola.studio.openRecoveryCopyIntoStore
 import dev.sebastiano.ciacola.studio.persistActiveDeckId
 import dev.sebastiano.ciacola.studio.persistInspectorWidthDp
 import dev.sebastiano.ciacola.studio.persistSelectedThemeForDeck
+import dev.sebastiano.ciacola.studio.pickCodeSchemeFile
 import dev.sebastiano.ciacola.studio.pickDeckFileForCopyThemes
 import dev.sebastiano.ciacola.studio.pickDeckJsonFile
 import dev.sebastiano.ciacola.studio.preOpenDeckSession
@@ -773,6 +774,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         isEditorShownProvider = { studioWorkspace.isDesignEditorVisible },
         onToggleEditor = { studioWorkspace.toggleDesignSystemEditor() },
         onPickDeckFileToCopyThemes = ::pickDeckFileForCopyThemes,
+        onPickCodeSchemeFile = ::pickCodeSchemeFile,
     )
 
     var lintWindowHolder by remember { mutableStateOf<DocumentDeckLintWindow?>(null) }
@@ -1006,6 +1008,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
             StudioThemeSheet(
                 workspace = studioWorkspace,
                 onPickDeckFileToCopyThemes = ::pickDeckFileForCopyThemes,
+                onPickCodeSchemeFile = ::pickCodeSchemeFile,
             )
         },
         issuesDock = if (timelineWindow.dockedInStoryWindow) {

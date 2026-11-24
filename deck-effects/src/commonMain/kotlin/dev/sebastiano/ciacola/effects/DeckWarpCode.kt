@@ -47,6 +47,7 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -407,8 +408,7 @@ fun DeckWarpCodeCard(
                                                 val colorToken = state.resolveWarpColorToken()
                                                 Text(
                                                     text = text,
-                                                    style = fittedStyle,
-                                                    color = colorToken.colorIn(palette),
+                                                    style = fittedStyle.merge(colorToken.styleIn(palette)),
                                                     softWrap = false,
                                                     maxLines = 1,
                                                     modifier = Modifier.graphicsLayer { alpha = lineAlpha },
@@ -472,8 +472,7 @@ fun DeckWarpCodeCard(
                                                         with(this@SharedTransitionLayout) {
                                                             Text(
                                                                 text = text,
-                                                                style = fittedStyle,
-                                                                color = colorToken.colorIn(palette),
+                                                                style = fittedStyle.merge(colorToken.styleIn(palette)),
                                                                 softWrap = false,
                                                                 maxLines = 1,
                                                                 modifier = Modifier
@@ -496,8 +495,7 @@ fun DeckWarpCodeCard(
                                                         with(this@WarpStateHost) {
                                                             Text(
                                                                 text = text,
-                                                                style = fittedStyle,
-                                                                color = colorToken.colorIn(palette),
+                                                                style = fittedStyle.merge(colorToken.styleIn(palette)),
                                                                 softWrap = false,
                                                                 maxLines = 1,
                                                                 modifier = Modifier
@@ -627,8 +625,8 @@ private fun TextStyle.scaleFontSize(scale: Float): TextStyle {
     return copy(fontSize = scaledSize, lineHeight = scaledLineHeight)
 }
 
-private fun Token.colorIn(palette: DeckCodePalette) =
-    palette.colorForWarpScope(scope)
+private fun Token.styleIn(palette: DeckCodePalette): SpanStyle =
+    palette.styleForWarpScope(scope)
 
 private fun WarpTokenState.resolveWarpColorToken(): Token = if (
     this is WarpTokenState.Match &&
