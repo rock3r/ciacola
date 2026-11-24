@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -387,11 +388,17 @@ class ReviewCommentStore(
         }
 
         if (result.isFailure) {
-            val err = result.exceptionOrNull()?.message ?: "Unknown agentapi error"
+            val cause = result.exceptionOrNull()
+            val err = cause?.message ?: "Unknown agentapi error"
+            // Having no agent binary on PATH is not a delivery failure. There is simply nothing
+            // listening to push to, and the comment is perfectly well served by staying queued for
+            // an agent that polls (`:deck:reviewWait`). Reporting it in red trains the author to
+            // ignore the one signal that should mean something went wrong.
+            val noAgentInstalled = isAgentBinaryMissing(cause)
             markDeliveryFailure(
                 items = items,
-                fallbackStatus = ReviewCommentStatus.Failed,
-                reason = err.take(300),
+                fallbackStatus = if (noAgentInstalled) ReviewCommentStatus.Queued else ReviewCommentStatus.Failed,
+                reason = if (noAgentInstalled) "" else err.take(300),
             )
         } else {
             items
@@ -667,3 +674,13 @@ internal fun writeTextToSystemClipboard(text: String) {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
 }
+
+/**
+ * Whether a dispatch failed only because the configured agent command is not installed.
+ *
+ * That is the ordinary state for an author whose agent polls the queue instead of being pushed to,
+ * so it should leave the comment queued rather than marked as a delivery failure.
+ */
+internal fun isAgentBinaryMissing(cause: Throwable?): Boolean =
+    cause is IOException && (cause.message ?: "").contains("Cannot run program")
+
