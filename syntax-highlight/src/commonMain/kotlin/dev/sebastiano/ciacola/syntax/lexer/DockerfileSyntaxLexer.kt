@@ -56,6 +56,8 @@ private const val SYNTHETIC_HEREDOC_OP = -101
 private const val SYNTHETIC_HEREDOC_DELIM = -102
 private const val SYNTHETIC_EXPOSE_SLASH = -103
 private const val SYNTHETIC_EXPOSE_PROTO = -104
+private const val SYNTHETIC_EMBEDDED_COMMENT = -105
+private const val SYNTHETIC_EMBEDDED_WS = -106
 
 private fun emitRawDfToken(
     source: String,
@@ -71,9 +73,11 @@ private fun emitRawDfToken(
         DfTokens.NEWLINE,
         DfTokens.DQ_NEWLINE,
         DfTokens.DQ_AFTER_COMMENT_NEWLINE,
+        DfTokens.DQ_CONT_BLANK_LINE,
         DfTokens.PE_WS,
         DfTokens.PE_BACKSLASH_LINE_CONT,
         DfTokens.PE_BACKTICK_LINE_CONT,
+        DfTokens.PE_CONT_NEWLINE,
         DfTokens.PE_NEWLINE,
         DfTokens.HL_NEWLINE,
         DfTokens.HE_NEWLINE,
@@ -82,16 +86,18 @@ private fun emitRawDfToken(
         DfTokens.COMMENT ->
             out += RawDfToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true)
 
-        DfTokens.DQ_COMMENT -> {
+        DfTokens.DQ_COMMENT,
+        DfTokens.PE_CONT_COMMENT,
+        -> {
             var wsEnd = start
             while (wsEnd < end && (source[wsEnd] == ' ' || source[wsEnd] == '\t')) {
                 wsEnd++
             }
             if (wsEnd > start) {
-                out += RawDfToken(DfTokens.WS, start, wsEnd, SyntaxTokenKind.Whitespace, isHidden = true)
+                out += RawDfToken(SYNTHETIC_EMBEDDED_WS, start, wsEnd, SyntaxTokenKind.Whitespace, isHidden = true)
             }
             if (wsEnd < end) {
-                out += RawDfToken(DfTokens.COMMENT, wsEnd, end, SyntaxTokenKind.Comment, isHidden = true)
+                out += RawDfToken(SYNTHETIC_EMBEDDED_COMMENT, wsEnd, end, SyntaxTokenKind.Comment, isHidden = true)
             }
         }
 
@@ -157,6 +163,10 @@ private fun emitRawDfToken(
         DfTokens.PE_INT,
         -> out += RawDfToken(type, start, end, SyntaxTokenKind.Number, isHidden = false)
 
+        DfTokens.SINGLE_STRING,
+        DfTokens.PE_SINGLE_STRING,
+        -> emitSingleStringToken(source, type, start, end, out)
+
         DfTokens.DQUOTE_OPEN,
         DfTokens.DQ_CLOSE,
         DfTokens.DQ_TEXT,
@@ -165,8 +175,6 @@ private fun emitRawDfToken(
         DfTokens.DQ_BT_LITERAL,
         DfTokens.DQ_HASH,
         DfTokens.PE_DQUOTE_OPEN,
-        DfTokens.SINGLE_STRING,
-        DfTokens.PE_SINGLE_STRING,
         DfTokens.HL_TEXT,
         DfTokens.HE_TEXT,
         DfTokens.HE_BS_LITERAL,
@@ -195,6 +203,80 @@ private fun emitRawDfToken(
         -> out += RawDfToken(type, start, end, SyntaxTokenKind.Plain, isHidden = false)
 
         else -> out += RawDfToken(type, start, end, SyntaxTokenKind.Invalid, isHidden = false)
+    }
+}
+
+private fun emitSingleStringToken(
+    source: String,
+    type: Int,
+    start: Int,
+    end: Int,
+    out: MutableList<RawDfToken>,
+) {
+    var hasNewline = false
+    for (idx in start until end) {
+        val ch = source[idx]
+        if (ch == '\n' || ch == '\r') {
+            hasNewline = true
+            break
+        }
+    }
+    if (!hasNewline) {
+        out += RawDfToken(type, start, end, SyntaxTokenKind.String, isHidden = false)
+        return
+    }
+
+    var chunkStart = start
+    var pos = start
+    var isFirstLine = true
+    while (pos < end) {
+        val lineStart = pos
+        while (pos < end && source[pos] != '\n' && source[pos] != '\r') {
+            pos++
+        }
+        val lineEnd = pos
+        if (pos < end) {
+            if (source[pos] == '\r' && pos + 1 < end && source[pos + 1] == '\n') {
+                pos += 2
+            } else {
+                pos++
+            }
+        }
+        val eolEnd = pos
+
+        if (!isFirstLine) {
+            var firstNonWs = lineStart
+            while (firstNonWs < lineEnd && (source[firstNonWs] == ' ' || source[firstNonWs] == '\t')) {
+                firstNonWs++
+            }
+            if (firstNonWs == lineEnd) {
+                if (chunkStart < lineStart) {
+                    out += RawDfToken(type, chunkStart, lineStart, SyntaxTokenKind.String, isHidden = false)
+                }
+                if (lineStart < eolEnd) {
+                    out += RawDfToken(SYNTHETIC_EMBEDDED_WS, lineStart, eolEnd, SyntaxTokenKind.Whitespace, isHidden = true)
+                }
+                chunkStart = eolEnd
+            } else if (source[firstNonWs] == '#') {
+                if (chunkStart < lineStart) {
+                    out += RawDfToken(type, chunkStart, lineStart, SyntaxTokenKind.String, isHidden = false)
+                }
+                if (firstNonWs > lineStart) {
+                    out += RawDfToken(SYNTHETIC_EMBEDDED_WS, lineStart, firstNonWs, SyntaxTokenKind.Whitespace, isHidden = true)
+                }
+                if (lineEnd > firstNonWs) {
+                    out += RawDfToken(SYNTHETIC_EMBEDDED_COMMENT, firstNonWs, lineEnd, SyntaxTokenKind.Comment, isHidden = true)
+                }
+                if (eolEnd > lineEnd) {
+                    out += RawDfToken(SYNTHETIC_EMBEDDED_WS, lineEnd, eolEnd, SyntaxTokenKind.Whitespace, isHidden = true)
+                }
+                chunkStart = eolEnd
+            }
+        }
+        isFirstLine = false
+    }
+    if (chunkStart < end) {
+        out += RawDfToken(type, chunkStart, end, SyntaxTokenKind.String, isHidden = false)
     }
 }
 
@@ -244,6 +326,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
     var inHealthcheckHeader = false
     var inShellCommand = false
     var inKeyValueInstruction = false
+    var expectKvKey = false
+    var inKvValue = false
     var expectLegacyKey = false
     var inLegacyEnvValue = false
     var afterArgEq = false
@@ -267,6 +351,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         inHealthcheckHeader = false
         inShellCommand = false
         inKeyValueInstruction = false
+        expectKvKey = false
+        inKvValue = false
         expectLegacyKey = false
         inLegacyEnvValue = false
         afterArgEq = false
@@ -299,6 +385,12 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             if (paramExpNeedsIdentStack.isEmpty()) {
                 afterArgEq = false
                 inFlagValue = false
+                if (inKvValue) {
+                    inKvValue = false
+                    if (inKeyValueInstruction && !inLegacyEnvValue) {
+                        expectKvKey = true
+                    }
+                }
             }
             result += tok
             i++
@@ -332,18 +424,25 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         if (tok.type == DfTokens.NEWLINE ||
             tok.type == DfTokens.DQ_NEWLINE ||
             tok.type == DfTokens.DQ_AFTER_COMMENT_NEWLINE ||
+            tok.type == DfTokens.DQ_CONT_BLANK_LINE ||
+            tok.type == DfTokens.PE_CONT_NEWLINE ||
             tok.type == DfTokens.PE_NEWLINE ||
             tok.type == DfTokens.HL_NEWLINE ||
             tok.type == DfTokens.HE_NEWLINE
         ) {
-            if (tok.type == DfTokens.DQ_AFTER_COMMENT_NEWLINE) {
+            if (tok.type == DfTokens.DQ_AFTER_COMMENT_NEWLINE ||
+                tok.type == DfTokens.DQ_CONT_BLANK_LINE ||
+                tok.type == DfTokens.PE_CONT_NEWLINE
+            ) {
                 result += tok
                 i++
                 continue
             }
-            if (tok.type == DfTokens.PE_NEWLINE) {
+            if (tok.type == DfTokens.DQ_NEWLINE || tok.type == DfTokens.PE_NEWLINE) {
                 paramExpNeedsIdentStack.clear()
                 paramExpBraceDepthStack.clear()
+                continuationPending = false
+                commentLineInContinuation = false
                 if (pendingHeredocCount == 0) {
                     resetInstructionState()
                     atLineStartInClassifier = true
@@ -361,12 +460,7 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             }
             continuationPending = false
             atLineStartInClassifier = true
-            val isDefaultModeNewline = tok.type == DfTokens.NEWLINE || tok.type == DfTokens.DQ_NEWLINE
-            if (paramExpNeedsIdentStack.isEmpty() && isDefaultModeNewline && pendingHeredocCount == 0) {
-                resetInstructionState()
-            } else if (tok.type == DfTokens.DQ_NEWLINE && pendingHeredocCount == 0) {
-                paramExpNeedsIdentStack.clear()
-                paramExpBraceDepthStack.clear()
+            if (paramExpNeedsIdentStack.isEmpty() && tok.type == DfTokens.NEWLINE && pendingHeredocCount == 0) {
                 resetInstructionState()
             }
             result += tok
@@ -378,6 +472,12 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             if (tok.type == DfTokens.WS && paramExpNeedsIdentStack.isEmpty()) {
                 afterArgEq = false
                 inFlagValue = false
+                if (inKvValue) {
+                    inKvValue = false
+                    if (inKeyValueInstruction && !inLegacyEnvValue) {
+                        expectKvKey = true
+                    }
+                }
             }
             result += tok
             i++
@@ -391,6 +491,10 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             tok.type == DfTokens.PE_PARAM_EXP_OPEN ||
             tok.type == DfTokens.HE_PARAM_EXP_OPEN
         ) {
+            if (tok.type == DfTokens.PARAM_EXP_OPEN && !inFlagValue) {
+                inFlagPosition = false
+                afterFlagEq = false
+            }
             paramExpNeedsIdentStack.add(true)
             paramExpBraceDepthStack.add(0)
             result += tok
@@ -437,6 +541,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
                 inHealthcheckHeader = upper == "HEALTHCHECK"
                 inShellCommand = upper == "RUN" || upper == "CMD" || upper == "ENTRYPOINT"
                 inKeyValueInstruction = upper == "ARG" || upper == "ENV" || upper == "LABEL"
+                expectKvKey = inKeyValueInstruction
+                inKvValue = false
                 expectLegacyKey = upper == "ENV" || upper == "ARG"
                 inLegacyEnvValue = false
                 afterArgEq = false
@@ -497,6 +603,10 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
                 afterFlagEq = false
                 inFlagValue = true
             }
+            if (inKeyValueInstruction && !inLegacyEnvValue) {
+                expectKvKey = false
+                inKvValue = true
+            }
             if (currentInstruction == "ARG") {
                 afterArgEq = true
             }
@@ -518,9 +628,10 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
 
         // Key=Value instructions (ARG / ENV / LABEL) & BuildKit --mount=type=cache,target=... keys.
         if (tok.type == DfTokens.WORD) {
-            val allowsKeyBeforeEq = (inKeyValueInstruction && !inLegacyEnvValue) || inFlagValue
+            val allowsKeyBeforeEq = (inKeyValueInstruction && expectKvKey && !inLegacyEnvValue) || inFlagValue
             if (allowsKeyBeforeEq && isNextNonHiddenText(raw, source, i + 1, "=")) {
                 tok.kind = SyntaxTokenKind.Property
+                expectKvKey = false
                 if (currentInstruction != "ARG") {
                     expectLegacyKey = false
                 }
@@ -534,6 +645,7 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
                 if (currentInstruction == "ENV") {
                     expectLegacyKey = false
                     inLegacyEnvValue = true
+                    expectKvKey = false
                 } else if (currentInstruction != "ARG") {
                     expectLegacyKey = false
                 }

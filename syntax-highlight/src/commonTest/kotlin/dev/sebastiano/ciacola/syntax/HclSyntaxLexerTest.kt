@@ -138,7 +138,7 @@ class HclSyntaxLexerTest {
                 no
                 %{ endif ~}
               INNER
-              ])}"
+              ]})}"
               plain_heredoc = <<EOF
             line 1 ${'$'}${'$'}escaped
             ${'$'}{var.x}
@@ -165,6 +165,66 @@ class HclSyntaxLexerTest {
         val delimTok = tokens.first { it.startIndex == innerClosePos + 2 }
         assertEquals(SyntaxTokenKind.Keyword, delimTok.kind)
         assertEquals("INNER", delimTok.slice(code))
+
+        // Verify the outer `nested` template closes cleanly before `plain_heredoc` and `locals`.
+        val outerClosePos = code.indexOf("]})}\"")
+        assertEquals(SyntaxTokenKind.Punctuation, tokens.first { it.startIndex == outerClosePos + 2 }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, tokens.first { it.startIndex == outerClosePos + 3 }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.startIndex == outerClosePos + 4 }.kind)
+
+        val plainHeredocTok = tokens.first { it.slice(code) == "plain_heredoc" }
+        assertEquals(SyntaxTokenKind.Property, plainHeredocTok.kind)
+        val eofCloseTok = tokens.last { it.slice(code) == "EOF" }
+        assertEquals(SyntaxTokenKind.Keyword, eofCloseTok.kind)
+        val localsCloseTok = tokens.last { it.slice(code) == "}" }
+        assertEquals(SyntaxTokenKind.Punctuation, localsCloseTok.kind)
+    }
+
+    @Test
+    fun handlesIndentedAndTrailingWhitespaceHeredocClosingMarkers() {
+        val code =
+            "a = <<EOF\n" +
+                "hello\n" +
+                "  \tEOF\t \n" +
+                "b = <<-TAG\n" +
+                "  world\n" +
+                "  TAG   \n" +
+                "c = <<OUTER\n" +
+                "${'$'}{trimspace(<<-INNER\n" +
+                "  inner\n" +
+                "  INNER \t\n" +
+                ")}\n" +
+                "OUTER \n" +
+                "resource \"null_resource\" \"ok\" {}\n"
+        val tokens = assertValidSnippetHasNoInvalidTokens(HclSyntaxLexer, code, "hcl-heredoc-delim-ws")
+
+        // Plain `<<EOF` with leading and trailing spaces/tabs splits whitespace around Keyword `EOF`.
+        val eofLinePos = code.indexOf("  \tEOF\t ")
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first { it.startIndex == eofLinePos }.kind)
+        val eofTok = tokens.first { it.startIndex == eofLinePos + 3 }
+        assertEquals(SyntaxTokenKind.Keyword, eofTok.kind)
+        assertEquals("EOF", eofTok.slice(code))
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first { it.startIndex == eofLinePos + 6 }.kind)
+
+        // Indented `<<-TAG` with trailing spaces also leaves `c` at top-level.
+        val tagLinePos = code.indexOf("  TAG   ")
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first { it.startIndex == tagLinePos }.kind)
+        val tagTok = tokens.first { it.startIndex == tagLinePos + 2 }
+        assertEquals(SyntaxTokenKind.Keyword, tagTok.kind)
+        assertEquals("TAG", tagTok.slice(code))
+        assertEquals(SyntaxTokenKind.Whitespace, tokens.first { it.startIndex == tagLinePos + 5 }.kind)
+
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "b" }.kind)
+        assertEquals(SyntaxTokenKind.Property, tokens.first { it.slice(code) == "c" }.kind)
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            tokens.last { it.slice(code) == "INNER" }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            tokens.last { it.slice(code) == "OUTER" }.kind,
+        )
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "resource" }.kind)
     }
 
     @Test

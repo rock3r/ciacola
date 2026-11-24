@@ -159,7 +159,7 @@ class ProtobufSyntaxLexerTest {
                 count: 42
               >
             };
-            option (top.angle) = < flag: false >;
+            option (top.angle) = < flag: false; count: 7 >;
         """.trimIndent() + "\n"
         val angleTokens = assertValidSnippetHasNoInvalidTokens(ProtobufSyntaxLexer, angleOptionCode, "protobuf-angle-options")
         for (prop in listOf("sub_msg", "name", "enabled", "other_msg", "count", "flag")) {
@@ -169,6 +169,11 @@ class ProtobufSyntaxLexerTest {
                 "Expected textproto field '$prop' inside angle-bracket message to be Property",
             )
         }
+        assertEquals(
+            SyntaxTokenKind.Property,
+            angleTokens.last { it.slice(angleOptionCode) == "count" }.kind,
+            "Expected semicolon-separated textproto field inside <...> to be Property",
+        )
         assertEquals(SyntaxTokenKind.Constant, angleTokens.first { it.slice(angleOptionCode) == "true" }.kind)
         assertEquals(SyntaxTokenKind.Constant, angleTokens.first { it.slice(angleOptionCode) == "false" }.kind)
 
@@ -181,15 +186,25 @@ class ProtobufSyntaxLexerTest {
             message Broken {
               string a = 1 [deprecated = true;
               option (unclosed.opt = "x";
+              option (angle.opt) = < a: 1;
               map<string, int32 broken = 2;
             }
             message After { int32 ok = 1; }
+            message UnclosedAngle { option (x) = < a: 1; }
+            message N { string s = 1; }
         """.trimIndent() + "\n"
         val unclosedScopeTokens = assertValidSnippetHasNoInvalidTokens(ProtobufSyntaxLexer, unclosedScopesCode, "protobuf-unclosed-scopes")
         val afterStart = unclosedScopesCode.indexOf("message After")
         val afterTokens = unclosedScopeTokens.filter { it.startIndex >= afterStart }
         assertEquals(SyntaxTokenKind.Keyword, afterTokens.first { it.slice(unclosedScopesCode) == "message" }.kind)
         assertEquals(SyntaxTokenKind.Type, afterTokens.first { it.slice(unclosedScopesCode) == "After" }.kind)
+
+        val nStart = unclosedScopesCode.indexOf("message N")
+        val nTokens = unclosedScopeTokens.filter { it.startIndex >= nStart }
+        assertEquals(SyntaxTokenKind.Keyword, nTokens.first { it.slice(unclosedScopesCode) == "message" }.kind)
+        assertEquals(SyntaxTokenKind.Type, nTokens.first { it.slice(unclosedScopesCode) == "N" }.kind)
+        assertEquals(SyntaxTokenKind.Type, nTokens.first { it.slice(unclosedScopesCode) == "string" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, nTokens.first { it.slice(unclosedScopesCode) == "s" }.kind)
     }
 
     @Test

@@ -37,6 +37,8 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
     private var commentLineInContinuation: Boolean = false
     private var dqAtLineStart: Boolean = false
     private var dqAfterComment: Boolean = false
+    private var peAtLineStart: Boolean = false
+    private var peAfterComment: Boolean = false
     private var paramExpBraceDepth: Int = 0
     private val paramExpDepthStack = ArrayList<Int>()
     private val pendingHeredocs = ArrayDeque<HeredocSpec>()
@@ -54,6 +56,8 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         commentLineInContinuation = false
         dqAtLineStart = false
         dqAfterComment = false
+        peAtLineStart = false
+        peAfterComment = false
         paramExpBraceDepth = 0
         paramExpDepthStack.clear()
         pendingHeredocs.clear()
@@ -66,9 +70,15 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun isCommentStart(): Boolean = atLineStart
 
+    protected fun isDqAtLineStart(): Boolean = dqAtLineStart
+
     protected fun isDqCommentStart(): Boolean = dqAtLineStart
 
     protected fun isDqAfterComment(): Boolean = dqAfterComment
+
+    protected fun isPeCommentStart(): Boolean = peAtLineStart
+
+    protected fun isPeContinuationLineStart(): Boolean = peAtLineStart || peAfterComment
 
     protected fun isHeredocAllowed(): Boolean = canAcceptHeredoc && atWordBoundary
 
@@ -201,6 +211,11 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         dqAtLineStart = true
     }
 
+    protected fun onDQuoteContinuationBlankLine() {
+        dqAfterComment = false
+        dqAtLineStart = true
+    }
+
     protected fun onDQuoteNonComment() {
         dqAtLineStart = false
         dqAfterComment = false
@@ -215,40 +230,41 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun onDQuoteNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {
-        dqAtLineStart = false
-        dqAfterComment = false
-        if (!_modeStack.isEmpty) {
-            popMode()
-        }
-        if (_mode == DEFAULT_MODE) {
-            directivesActive = false
-            atLineStart = true
-            atWordBoundary = true
-            atInstructionStart = true
-            canAcceptHeredoc = false
-            continuationPending = false
-            commentLineInContinuation = false
-            if (pendingHeredocs.isNotEmpty()) {
-                val nextSpec = pendingHeredocs.removeFirst()
-                heredocStack.add(HeredocFrame(spec = nextSpec))
-                val targetMode = if (nextSpec.isQuoted || isClosingDelimiterAhead(nextSpec)) {
-                    heredocLiteralMode
-                } else {
-                    heredocExpandMode
-                }
-                pushMode(targetMode)
-            }
-        }
+        unwindUnclosedInlineExpansion(heredocLiteralMode, heredocExpandMode)
     }
 
     protected fun consumeSingleString() {
+        var atContLineStart = false
         while (true) {
             val ch = _input.LA(1)
-            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) break
+            if (ch == IntStream.EOF) break
+            if (ch == '\r'.code || ch == '\n'.code) {
+                if (!atContLineStart) break
+                if (ch == '\r'.code && _input.LA(2) == '\n'.code) {
+                    _input.consume()
+                }
+                _input.consume()
+                atContLineStart = true
+                continue
+            }
+            if (atContLineStart && (ch == ' '.code || ch == '\t'.code)) {
+                _input.consume()
+                continue
+            }
             if (ch == '\''.code) {
                 _input.consume()
                 break
             }
+            if (atContLineStart && ch == '#'.code) {
+                while (true) {
+                    val c = _input.LA(1)
+                    if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) break
+                    _input.consume()
+                }
+                atContLineStart = true
+                continue
+            }
+            atContLineStart = false
             if (ch == escapeChar.code) {
                 var offset = 2
                 while (_input.LA(offset) == ' '.code || _input.LA(offset) == '\t'.code) {
@@ -257,16 +273,38 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
                 val eol = _input.LA(offset)
                 if (eol == '\n'.code) {
                     repeat(offset) { _input.consume() }
+                    atContLineStart = true
                     continue
                 }
                 if (eol == '\r'.code) {
                     val hasLf = _input.LA(offset + 1) == '\n'.code
                     repeat(offset + if (hasLf) 1 else 0) { _input.consume() }
+                    atContLineStart = true
                     continue
                 }
             }
             _input.consume()
         }
+    }
+
+    protected fun onPeLineCont() {
+        peAtLineStart = true
+        peAfterComment = false
+    }
+
+    protected fun onPeComment() {
+        peAtLineStart = false
+        peAfterComment = true
+    }
+
+    protected fun onPeContNewline() {
+        peAtLineStart = true
+        peAfterComment = false
+    }
+
+    protected fun onPeNonComment() {
+        peAtLineStart = false
+        peAfterComment = false
     }
 
     protected fun enqueueHeredoc(lexeme: String) {
@@ -296,6 +334,8 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         if (_mode == DEFAULT_MODE) {
             onNonWsToken()
         }
+        peAtLineStart = false
+        peAfterComment = false
         paramExpDepthStack.add(paramExpBraceDepth)
         paramExpBraceDepth = 0
         pushMode(paramExpMode)
@@ -322,6 +362,10 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun onParamExpUnclosedNewline(heredocLiteralMode: Int, heredocExpandMode: Int) {
+        unwindUnclosedInlineExpansion(heredocLiteralMode, heredocExpandMode)
+    }
+
+    private fun unwindUnclosedInlineExpansion(heredocLiteralMode: Int, heredocExpandMode: Int) {
         // Unwind nested PARAM_EXP / DQUOTE modes back to HEREDOC_EXPAND or DEFAULT_MODE.
         while (!_modeStack.isEmpty && _mode != heredocExpandMode && _mode != DEFAULT_MODE) {
             popMode()
@@ -330,6 +374,8 @@ internal abstract class DockerfileLexerBase(input: CharStream) : Lexer(input) {
         paramExpDepthStack.clear()
         dqAtLineStart = false
         dqAfterComment = false
+        peAtLineStart = false
+        peAfterComment = false
         if (_mode == heredocExpandMode) {
             onHeredocNewline(heredocLiteralMode, heredocExpandMode)
         } else {

@@ -328,6 +328,94 @@ class DockerfileSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Plain, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "--no-install-recommends" }.kind)
         assertEquals(SyntaxTokenKind.Plain, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "x" }.kind)
         assertEquals(SyntaxTokenKind.Attribute, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "--from" }.kind)
+
+        val kvValuesWithEqualsCode = """
+            ENV JAVA_OPTS=-Dfile.encoding=UTF-8
+            ENV DB_URL=postgres://h/db?sslmode=disable
+            ENV A=1 B=2
+            RUN ${'$'}{CC} --version
+            ENTRYPOINT ${'$'}{APP} --serve
+            COPY --from=${'$'}{STAGE} --link /src /dst
+        """.trimIndent() + "\n"
+        val kvValTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            kvValuesWithEqualsCode,
+            "dockerfile-kv-eq-and-param-flags",
+        )
+        assertEquals(SyntaxTokenKind.Property, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "JAVA_OPTS" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "-Dfile.encoding" }.kind)
+        assertEquals(SyntaxTokenKind.Property, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "DB_URL" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "postgres://h/db?sslmode" }.kind)
+        assertEquals(SyntaxTokenKind.Property, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "A" }.kind)
+        assertEquals(SyntaxTokenKind.Property, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "B" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "--version" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "--serve" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "--from" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, kvValTokens.first { it.slice(kvValuesWithEqualsCode) == "--link" }.kind)
+    }
+
+    @Test
+    fun handlesNestedUnclosedDQuotesAndBlankOrCommentedContinuationsInStringsAndParamExp() {
+        // P2-1: Unclosed '"' inside '${...}' outside and inside a heredoc unwinds to line/heredoc start.
+        val unclosedDqOutside = "ENV A=${'$'}{B:-\"oops\nFROM alpine\n"
+        val unclosedDqOutsideTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            unclosedDqOutside,
+            "dockerfile-unclosed-dq-in-pe-outside",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, unclosedDqOutsideTokens.first { it.slice(unclosedDqOutside) == "FROM" }.kind)
+
+        val unclosedDqHeredoc = "RUN <<EOF\necho ${'$'}{A:-\"x\nEOF\nFROM alpine\n"
+        val unclosedDqHeredocTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            unclosedDqHeredoc,
+            "dockerfile-unclosed-dq-in-pe-heredoc",
+        )
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            unclosedDqHeredocTokens.last { it.slice(unclosedDqHeredoc) == "EOF" }.kind,
+        )
+        assertEquals(SyntaxTokenKind.Keyword, unclosedDqHeredocTokens.first { it.slice(unclosedDqHeredoc) == "FROM" }.kind)
+
+        // P2-2: Blank/whitespace-only and '#'-comment lines inside '"..."', "'...'", and '${...}' continuations.
+        val dqBlankCont = "RUN echo \"a \\\n\n  \n  # dq note\n  \n b\"\nFROM alpine\n"
+        val dqBlankTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, dqBlankCont, "dockerfile-dq-blank-cont")
+        assertEquals(SyntaxTokenKind.Comment, dqBlankTokens.first { it.slice(dqBlankCont) == "# dq note" }.kind)
+        assertEquals(SyntaxTokenKind.String, dqBlankTokens.first { it.slice(dqBlankCont).contains("b") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, dqBlankTokens.first { it.slice(dqBlankCont) == "FROM" }.kind)
+
+        val sqBlankCommentCont = "RUN echo 'a \\\n  \n  # sq note\n\n b'\nFROM alpine\n"
+        val sqBlankTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, sqBlankCommentCont, "dockerfile-sq-blank-comment-cont")
+        assertEquals(SyntaxTokenKind.Comment, sqBlankTokens.first { it.slice(sqBlankCommentCont) == "# sq note" }.kind)
+        assertEquals(SyntaxTokenKind.String, sqBlankTokens.first { it.slice(sqBlankCommentCont) == " b'" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, sqBlankTokens.first { it.slice(sqBlankCommentCont) == "FROM" }.kind)
+
+        val peBlankCommentCont = "RUN echo ${'$'}{A:-\\\n\n  \n  # pe note\n\n  fallback}\nFROM alpine\n"
+        val peBlankTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, peBlankCommentCont, "dockerfile-pe-blank-comment-cont")
+        assertEquals(SyntaxTokenKind.Comment, peBlankTokens.first { it.slice(peBlankCommentCont) == "# pe note" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, peBlankTokens.first { it.slice(peBlankCommentCont) == "fallback" }.kind)
+        assertEquals(SyntaxTokenKind.Punctuation, peBlankTokens.first { it.slice(peBlankCommentCont) == "}" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, peBlankTokens.first { it.slice(peBlankCommentCont) == "FROM" }.kind)
+
+        // Ensure unclosed quotes/param-exp WITHOUT continuation still recover on newline.
+        val unclosedNoCont = "RUN echo 'unclosed\nFROM scratch\nRUN echo ${'$'}{UNCLOSED\nFROM busybox\n"
+        val unclosedNoContTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, unclosedNoCont, "dockerfile-unclosed-no-cont")
+        assertEquals(2, unclosedNoContTokens.count { it.slice(unclosedNoCont) == "FROM" && it.kind == SyntaxTokenKind.Keyword })
+
+        // P2-3: Embedded comment inside '"..."' must not stick outer continuation state onto closing newline.
+        val nestedContWithDqComment =
+            "RUN a \\\n" +
+                "    && echo \"x \\\n" +
+                "    # c\n" +
+                "    y\"\n" +
+                "FROM alpine\n"
+        val nestedContTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            nestedContWithDqComment,
+            "dockerfile-outer-cont-dq-comment",
+        )
+        assertEquals(SyntaxTokenKind.Comment, nestedContTokens.first { it.slice(nestedContWithDqComment) == "# c" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, nestedContTokens.first { it.slice(nestedContWithDqComment) == "FROM" }.kind)
     }
 
     @Test

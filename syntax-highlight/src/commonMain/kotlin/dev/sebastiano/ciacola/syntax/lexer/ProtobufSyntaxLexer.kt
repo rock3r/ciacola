@@ -223,11 +223,13 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoTokens.RBRACE -> {
-                while (scopeStack.size > 1 && isTemporaryProtoScope(currentScope().kind)) {
+                while (scopeStack.size > 1 &&
+                    (isTemporaryProtoScope(currentScope().kind) ||
+                        (currentScope().kind == ProtoScopeKind.OPTION_AGGREGATE && currentScope().isAngleDelimited))
+                ) {
                     scopeStack.removeAt(scopeStack.lastIndex)
                 }
-                val braceScope = currentScope()
-                if (scopeStack.size > 1 && !(braceScope.kind == ProtoScopeKind.OPTION_AGGREGATE && braceScope.isAngleDelimited)) {
+                if (scopeStack.size > 1) {
                     scopeStack.removeAt(scopeStack.lastIndex)
                 }
                 val parent = currentScope()

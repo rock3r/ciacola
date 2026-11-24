@@ -125,6 +125,10 @@ DQ_AFTER_COMMENT_NEWLINE
     : ( '\r'? '\n' | '\r' ) { isDqAfterComment() }? { onDQuoteAfterCommentNewline(); }
     ;
 
+DQ_CONT_BLANK_LINE
+    : [ \t]* ( '\r'? '\n' | '\r' ) { isDqAtLineStart() }? { onDQuoteContinuationBlankLine(); }
+    ;
+
 DQ_NEWLINE
     : ( '\r'? '\n' | '\r' ) { onDQuoteNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
     ;
@@ -182,69 +186,77 @@ PE_WS
     ;
 
 PE_BACKSLASH_LINE_CONT
-    : '\\' { isEscapeBackslash() }? [ \t]* ( '\r'? '\n' | '\r' )
+    : '\\' { isEscapeBackslash() }? [ \t]* ( '\r'? '\n' | '\r' ) { onPeLineCont(); }
     ;
 
 PE_BACKTICK_LINE_CONT
-    : '`' { isEscapeBacktick() }? [ \t]* ( '\r'? '\n' | '\r' )
+    : '`' { isEscapeBacktick() }? [ \t]* ( '\r'? '\n' | '\r' ) { onPeLineCont(); }
+    ;
+
+PE_CONT_NEWLINE
+    : [ \t]* ( '\r'? '\n' | '\r' ) { isPeContinuationLineStart() }? { onPeContNewline(); }
     ;
 
 PE_NEWLINE
     : ( '\r'? '\n' | '\r' ) { onParamExpUnclosedNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
     ;
 
+PE_CONT_COMMENT
+    : [ \t]* '#' { isPeCommentStart() }? ~[\r\n]* { onPeComment(); }
+    ;
+
 PE_LBRACE
-    : '{' { onParamExpLBrace(); }
+    : '{' { onPeNonComment(); onParamExpLBrace(); }
     ;
 
 PE_RBRACE
-    : '}' { onParamExpRBrace(Tokens.PARAM_EXP_CLOSE); }
+    : '}' { onPeNonComment(); onParamExpRBrace(Tokens.PARAM_EXP_CLOSE); }
     ;
 
 PE_PARAM_EXP_OPEN
-    : '${' { pushParamExp(Modes.PARAM_EXP); }
+    : '${' { onPeNonComment(); pushParamExp(Modes.PARAM_EXP); }
     ;
 
 PE_SIMPLE_VAR
-    : '$' [a-zA-Z_][a-zA-Z0-9_]*
+    : '$' [a-zA-Z_][a-zA-Z0-9_]* { onPeNonComment(); }
     ;
 
 PE_SPECIAL_VAR
-    : '$' [0-9@#?$!*-]
+    : '$' [0-9@#?$!*-] { onPeNonComment(); }
     ;
 
 PE_DQUOTE_OPEN
-    : '"' { pushDQuote(Modes.DQUOTE); }
+    : '"' { onPeNonComment(); pushDQuote(Modes.DQUOTE); }
     ;
 
 PE_SINGLE_STRING
-    : '\'' { consumeSingleString(); }
+    : '\'' { onPeNonComment(); consumeSingleString(); }
     ;
 
 PE_ESC_BS
-    : '\\' { isEscapeBackslash() }? ~[\r\n]?
+    : '\\' { isEscapeBackslash() }? ~[\r\n]? { onPeNonComment(); }
     ;
 
 PE_ESC_BT
-    : '`' { isEscapeBacktick() }? ~[\r\n]?
+    : '`' { isEscapeBacktick() }? ~[\r\n]? { onPeNonComment(); }
     ;
 
 PE_OP
-    : ':-' | ':=' | ':?' | ':+' | '##' | '%%' | '//' | '^^' | ',,'
-    | '-' | '=' | '?' | '+' | '#' | '%' | '/' | ':' | '^' | ',' | '@' | '!' | '~' | '*'
+    : ( ':-' | ':=' | ':?' | ':+' | '##' | '%%' | '//' | '^^' | ',,'
+    | '-' | '=' | '?' | '+' | '#' | '%' | '/' | ':' | '^' | ',' | '@' | '!' | '~' | '*' ) { onPeNonComment(); }
     ;
 
 PE_INT
-    : [0-9]+
+    : [0-9]+ { onPeNonComment(); }
     ;
 
 PE_IDENT
-    : [a-zA-Z_][a-zA-Z0-9_]*
+    : [a-zA-Z_][a-zA-Z0-9_]* { onPeNonComment(); }
     ;
 
 PE_TEXT
-    : ~[ \t\r\n{}'"\\$`\-=?+#%/:^,@!~*0-9a-zA-Z_]+
-    | [\\`$]
+    : ( ~[ \t\r\n{}'"\\$`\-=?+#%/:^,@!~*0-9a-zA-Z_]+
+    | [\\`$] ) { onPeNonComment(); }
     ;
 
 // ---------------- Heredoc Literal Body (Quoted Delimiter) ----------------

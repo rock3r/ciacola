@@ -84,11 +84,18 @@ private fun emitRawHclToken(
             while (indentEnd < end && (source[indentEnd] == ' ' || source[indentEnd] == '\t')) {
                 indentEnd++
             }
+            var delimEnd = end
+            while (delimEnd > indentEnd && (source[delimEnd - 1] == ' ' || source[delimEnd - 1] == '\t')) {
+                delimEnd--
+            }
             if (indentEnd > start) {
                 out += RawHclToken(HclTokens.WS, start, indentEnd, SyntaxTokenKind.Whitespace, isHidden = true)
             }
-            if (indentEnd < end) {
-                out += RawHclToken(type, indentEnd, end, SyntaxTokenKind.Keyword, isHidden = false)
+            if (delimEnd > indentEnd) {
+                out += RawHclToken(type, indentEnd, delimEnd, SyntaxTokenKind.Keyword, isHidden = false)
+            }
+            if (end > delimEnd) {
+                out += RawHclToken(HclTokens.WS, delimEnd, end, SyntaxTokenKind.Whitespace, isHidden = true)
             }
         }
 

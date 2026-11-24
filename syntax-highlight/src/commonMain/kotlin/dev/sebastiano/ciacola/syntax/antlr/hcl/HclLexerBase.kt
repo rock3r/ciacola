@@ -152,14 +152,12 @@ internal abstract class HclLexerBase(input: CharStream) : Lexer(input) {
 
     private fun matchClosingDelimiterLengthFromTokenStart(spec: HeredocSpec): Int {
         var offset = 0
-        if (spec.stripIndent) {
-            while (true) {
-                val ch = charAtOffsetFromTokenStart(offset)
-                if (ch == ' '.code || ch == '\t'.code) {
-                    offset++
-                } else {
-                    break
-                }
+        while (true) {
+            val ch = charAtOffsetFromTokenStart(offset)
+            if (ch == ' '.code || ch == '\t'.code) {
+                offset++
+            } else {
+                break
             }
         }
         val delimCps = spec.delimiterCodePoints
@@ -169,9 +167,18 @@ internal abstract class HclLexerBase(input: CharStream) : Lexer(input) {
                 return 0
             }
         }
-        val after = charAtOffsetFromTokenStart(offset + delimCps.size)
+        var endOffset = offset + delimCps.size
+        while (true) {
+            val ch = charAtOffsetFromTokenStart(endOffset)
+            if (ch == ' '.code || ch == '\t'.code) {
+                endOffset++
+            } else {
+                break
+            }
+        }
+        val after = charAtOffsetFromTokenStart(endOffset)
         return if (after == IntStream.EOF || after == '\r'.code || after == '\n'.code) {
-            offset + delimCps.size
+            endOffset
         } else {
             0
         }
