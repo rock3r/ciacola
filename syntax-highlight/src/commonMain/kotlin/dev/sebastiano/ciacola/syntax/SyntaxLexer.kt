@@ -2,6 +2,7 @@ package dev.sebastiano.ciacola.syntax
 
 import dev.sebastiano.ciacola.syntax.lexer.AgslSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.CSharpSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CppSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CssSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GlslSyntaxLexer
@@ -11,12 +12,16 @@ import dev.sebastiano.ciacola.syntax.lexer.JavaScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JavaSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JsonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.KotlinSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.PhpSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.PythonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.RustSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.ShellSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.SkslSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.SqlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.TomlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.TypeScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.XmlSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.YamlSyntaxLexer
 
 /**
  * Lossless lexical tokenizer for a single [SyntaxLanguage].
@@ -52,6 +57,11 @@ public object SyntaxHighlighter {
         SyntaxLanguage.Glsl to GlslSyntaxLexer,
         SyntaxLanguage.Sksl to SkslSyntaxLexer,
         SyntaxLanguage.Agsl to AgslSyntaxLexer,
+        SyntaxLanguage.Yaml to YamlSyntaxLexer,
+        SyntaxLanguage.Sql to SqlSyntaxLexer,
+        SyntaxLanguage.Shell to ShellSyntaxLexer,
+        SyntaxLanguage.CSharp to CSharpSyntaxLexer,
+        SyntaxLanguage.Php to PhpSyntaxLexer,
     )
 
     /** Languages that currently have a registered [SyntaxLexer]. */

@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class DualOracleSuiteTest {
 
     @Test
-    fun allSeventeenLanguagesHaveDualOracleFixtures() {
+    fun allLanguagesHaveDualOracleFixtures() {
         val allFixtures = buildList {
             add(KotlinOracleFixtures.fixture)
             add(XmlOracleFixtures.fixture)
@@ -28,6 +28,11 @@ class DualOracleSuiteTest {
             addAll(cOracleFixtures)
             addAll(cppOracleFixtures)
             addAll(shaderOracleFixtures)
+            add(YamlOracleFixtures.fixture)
+            addAll(sqlOracleFixtures)
+            addAll(shellOracleFixtures)
+            addAll(CSharpOracleFixtures.all)
+            addAll(PhpOracleFixtures.all)
         }
         val coveredLanguages = allFixtures.map { it.language }.toSet()
         assertEquals(SyntaxLanguage.entries.toSet(), coveredLanguages)
@@ -125,6 +130,31 @@ class DualOracleSuiteTest {
         val fixtures = shaderOracleFixtures.filter { it.language == SyntaxLanguage.Agsl }
         assertTrue(fixtures.isNotEmpty())
         assertAllOracleFixtures(fixtures)
+    }
+
+    @Test
+    fun yamlMatchesDualOracle() {
+        assertMatchesOracleFixture(YamlOracleFixtures.fixture)
+    }
+
+    @Test
+    fun sqlMatchesDualOracle() {
+        assertAllOracleFixtures(sqlOracleFixtures)
+    }
+
+    @Test
+    fun shellMatchesDualOracle() {
+        assertAllOracleFixtures(shellOracleFixtures)
+    }
+
+    @Test
+    fun cSharpMatchesDualOracle() {
+        assertAllOracleFixtures(CSharpOracleFixtures.all)
+    }
+
+    @Test
+    fun phpMatchesDualOracle() {
+        assertAllOracleFixtures(PhpOracleFixtures.all)
     }
 
     @Test

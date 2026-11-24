@@ -22,7 +22,7 @@ class LanguageHighlightTest {
     }
 
     @Test
-    fun highlightsAllSeventeenRegisteredSyntaxLanguages() {
+    fun highlightsAllRegisteredSyntaxLanguages() {
         val kt = "val x: Int = 42"
         val ktAnnotated = kt.highlight(testStyle, SyntaxLanguage.Kotlin)
         assertEquals(kt, ktAnnotated.text)
@@ -67,6 +67,11 @@ class LanguageHighlightTest {
             SyntaxLanguage.Glsl to "uniform vec4 uColor;",
             SyntaxLanguage.Sksl to "half4 main(float2 p) { return half4(1.0); }",
             SyntaxLanguage.Agsl to "uniform float2 iResolution;",
+            SyntaxLanguage.Yaml to "name: \"ciacola\"\nport: 8080",
+            SyntaxLanguage.Sql to "SELECT id FROM users WHERE active = TRUE;",
+            SyntaxLanguage.Shell to "if [[ -n \"${'$'}USER\" ]]; then echo 1; fi",
+            SyntaxLanguage.CSharp to "public record Point(int X, int Y);",
+            SyntaxLanguage.Php to "<?php function greet(string ${'$'}s): int { return 1; }",
         )
         assertEquals(SyntaxLanguage.entries.toSet(), samples.keys)
         for ((language, snippet) in samples) {

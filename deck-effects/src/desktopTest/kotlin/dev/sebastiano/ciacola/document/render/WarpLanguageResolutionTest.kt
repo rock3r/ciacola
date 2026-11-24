@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola.document.render
 import dev.bnorm.storyboard.Agsl
 import dev.bnorm.storyboard.BasicCode
 import dev.bnorm.storyboard.C
+import dev.bnorm.storyboard.CSharp
 import dev.bnorm.storyboard.Cpp
 import dev.bnorm.storyboard.Css
 import dev.bnorm.storyboard.Glsl
@@ -13,12 +14,16 @@ import dev.bnorm.storyboard.JavaScript
 import dev.bnorm.storyboard.Json
 import dev.bnorm.storyboard.Kotlin
 import dev.bnorm.storyboard.Language
+import dev.bnorm.storyboard.Php
 import dev.bnorm.storyboard.Python
 import dev.bnorm.storyboard.Rust
+import dev.bnorm.storyboard.Shell
 import dev.bnorm.storyboard.Sksl
+import dev.bnorm.storyboard.Sql
 import dev.bnorm.storyboard.Toml
 import dev.bnorm.storyboard.TypeScript
 import dev.bnorm.storyboard.Xml
+import dev.bnorm.storyboard.Yaml
 import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.parse
 import dev.sebastiano.ciacola.syntax.SyntaxLanguage
@@ -31,7 +36,7 @@ import kotlin.test.assertTrue
 class WarpLanguageResolutionTest {
 
     @Test
-    fun resolvesAllSeventeenLanguagesAndAliasesAndDefaultsUnknownToKotlin() {
+    fun resolvesAllLanguagesAndAliasesAndDefaultsUnknownToKotlin() {
         val expectedBySyntaxLanguage: Map<SyntaxLanguage, Language> = mapOf(
             SyntaxLanguage.Kotlin to Kotlin,
             SyntaxLanguage.Xml to Xml,
@@ -50,7 +55,13 @@ class WarpLanguageResolutionTest {
             SyntaxLanguage.Glsl to Glsl,
             SyntaxLanguage.Sksl to Sksl,
             SyntaxLanguage.Agsl to Agsl,
+            SyntaxLanguage.Yaml to Yaml,
+            SyntaxLanguage.Sql to Sql,
+            SyntaxLanguage.Shell to Shell,
+            SyntaxLanguage.CSharp to CSharp,
+            SyntaxLanguage.Php to Php,
         )
+        assertEquals(22, expectedBySyntaxLanguage.size)
         assertEquals(SyntaxLanguage.entries.toSet(), expectedBySyntaxLanguage.keys)
 
         for ((syntaxLang, expectedWarpLang) in expectedBySyntaxLanguage) {
@@ -78,7 +89,7 @@ class WarpLanguageResolutionTest {
     }
 
     @Test
-    fun deckCodePaletteMapsEmittedScopesAcrossAllSeventeenWarpLanguages() {
+    fun deckCodePaletteMapsEmittedScopesAcrossAllWarpLanguages() {
         val darkPalette = DeckThemes.StageDarkColors.code
         val lightPalette = DeckThemes.KeynoteLightColors.code
 
@@ -100,8 +111,13 @@ class WarpLanguageResolutionTest {
             "glsl" to "#version 450\nuniform vec4 uColor;\nvoid main() {}",
             "sksl" to "uniform shader child;\nhalf4 main(float2 p) { return child.eval(p); }",
             "agsl" to "uniform float2 iResolution;\nhalf4 main(float2 p) { return half4(0.5); }",
+            "yml" to "server:\n  host: \"127.0.0.1\"\n  port: 8080 # port",
+            "postgresql" to "SELECT u.id, COUNT(*) AS total FROM users u WHERE u.active = TRUE;",
+            "zsh" to "if [[ -n \"${'$'}USER\" ]]; then echo \"hi ${'$'}USER\"; fi",
+            "c#" to "[Serializable] public record User(string Name) { public int Id => 1; }",
+            "phtml" to "<?php #[Route('/api')] function ok(int ${'$'}x): string { return \"v=${'$'}x\"; } ?>",
         )
-        assertEquals(17, snippetsById.size)
+        assertEquals(22, snippetsById.size)
 
         for ((langId, code) in snippetsById) {
             val warpLang = resolveWarpLanguage(langId)

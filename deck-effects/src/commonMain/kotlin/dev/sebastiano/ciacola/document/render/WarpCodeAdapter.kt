@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import dev.bnorm.storyboard.Agsl as WarpAgslLanguage
 import dev.bnorm.storyboard.BasicCode
 import dev.bnorm.storyboard.C as WarpCLanguage
+import dev.bnorm.storyboard.CSharp as WarpCSharpLanguage
 import dev.bnorm.storyboard.Cpp as WarpCppLanguage
 import dev.bnorm.storyboard.Css as WarpCssLanguage
 import dev.bnorm.storyboard.DiffContents
@@ -54,14 +55,18 @@ import dev.bnorm.storyboard.JavaScript as WarpJavaScriptLanguage
 import dev.bnorm.storyboard.Json as WarpJsonLanguage
 import dev.bnorm.storyboard.Kotlin as WarpKotlinLanguage
 import dev.bnorm.storyboard.Language as WarpLanguage
+import dev.bnorm.storyboard.Php as WarpPhpLanguage
 import dev.bnorm.storyboard.Python as WarpPythonLanguage
 import dev.bnorm.storyboard.Rust as WarpRustLanguage
+import dev.bnorm.storyboard.Shell as WarpShellLanguage
 import dev.bnorm.storyboard.Sksl as WarpSkslLanguage
+import dev.bnorm.storyboard.Sql as WarpSqlLanguage
 import dev.bnorm.storyboard.State as WarpTokenState
 import dev.bnorm.storyboard.Token
 import dev.bnorm.storyboard.Toml as WarpTomlLanguage
 import dev.bnorm.storyboard.TypeScript as WarpTypeScriptLanguage
 import dev.bnorm.storyboard.Xml as WarpXmlLanguage
+import dev.bnorm.storyboard.Yaml as WarpYamlLanguage
 import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
 import dev.bnorm.storyboard.easel.LocalStoryboardTransition
@@ -609,6 +614,11 @@ internal fun resolveWarpLanguage(language: String?): WarpLanguage =
         SyntaxLanguage.Glsl -> WarpGlslLanguage
         SyntaxLanguage.Sksl -> WarpSkslLanguage
         SyntaxLanguage.Agsl -> WarpAgslLanguage
+        SyntaxLanguage.Yaml -> WarpYamlLanguage
+        SyntaxLanguage.Sql -> WarpSqlLanguage
+        SyntaxLanguage.Shell -> WarpShellLanguage
+        SyntaxLanguage.CSharp -> WarpCSharpLanguage
+        SyntaxLanguage.Php -> WarpPhpLanguage
     }
 
 private fun defaultCodeSurfaceSpec(theme: DeckTheme, density: Density): SurfaceSpec {
