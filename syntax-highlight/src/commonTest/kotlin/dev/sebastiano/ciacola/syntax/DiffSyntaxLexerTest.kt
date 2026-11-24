@@ -766,4 +766,89 @@ class DiffSyntaxLexerTest {
             maxMillisPerInput = 300L,
         )
     }
+
+    @Test
+    fun contextHunkExitsOnNonHunkLinesAndLongDashSeparatorsWithoutLeakingSubHighlighting() {
+        val diff = "*** a/Main.kt\t2026-11-23\n" +
+            "--- b/Main.kt\t2026-11-23\n" +
+            "***************\n" +
+            "*** 1,1 ****\n" +
+            "  val a = 1\n" +
+            "--- 1,1 ----\n" +
+            "! val a = 2\n" +
+            "-- \n" +
+            "2.45.0\n" +
+            "----------\n" +
+            " val notHunk = 99\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, diff, "context-exit-non-hunk")
+        val sigStart = diff.indexOf("\n-- \n") + 1
+        val sigTokens = tokens.filter { it.startIndex >= sigStart && it.endIndex <= sigStart + 3 }
+        assertEquals(listOf("-", "- "), sigTokens.map { it.slice(diff) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), sigTokens.map { it.kind })
+
+        assertTrue(tokens.any { it.slice(diff) == "----------" && it.kind == SyntaxTokenKind.Punctuation })
+
+        val proseStart = diff.indexOf(" val notHunk = 99")
+        val proseEnd = proseStart + " val notHunk = 99".length
+        val proseTokens = tokens.filter { it.startIndex >= proseStart && it.endIndex <= proseEnd }
+        assertEquals(2, proseTokens.size)
+        assertEquals(SyntaxTokenKind.Whitespace, proseTokens[0].kind)
+        assertEquals(SyntaxTokenKind.Plain, proseTokens[1].kind)
+        assertEquals("val notHunk = 99", proseTokens[1].slice(diff))
+
+        // Repeat with ---------- directly after context hunk before 1-space prose
+        val sepFirstDiff = "*** a/Main.kt\n" +
+            "--- b/Main.kt\n" +
+            "***************\n" +
+            "*** 1,1 ****\n" +
+            "  val a = 1\n" +
+            "----------\n" +
+            " val afterDash = 42\n"
+        val sepTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, sepFirstDiff, "context-dash-sep-exit")
+        assertTrue(sepTokens.any { it.slice(sepFirstDiff) == "----------" && it.kind == SyntaxTokenKind.Punctuation })
+        val afterDashStart = sepFirstDiff.indexOf(" val afterDash = 42")
+        val afterDashTokens = sepTokens.filter { it.startIndex >= afterDashStart && it.endIndex <= afterDashStart + " val afterDash = 42".length }
+        assertEquals(2, afterDashTokens.size)
+        assertEquals(SyntaxTokenKind.Plain, afterDashTokens[1].kind)
+    }
+
+    @Test
+    fun normalHunkTransitionsCleanlyOnLongDashSeparatorsAndContextHeaders() {
+        val diff = "diff a/Old.py b/Old.py\n" +
+            "1c1\n" +
+            "< def old(): return 1\n" +
+            "---\n" +
+            "> def new(): return 2\n" +
+            "----------\n" +
+            "*** src/Next.kt\t2026-11-23\n" +
+            "--- src/Next.kt\t2026-11-23\n" +
+            "***************\n" +
+            "*** 1,1 ****\n" +
+            "! val ktOld = 1\n" +
+            "--- 1,1 ----\n" +
+            "! val ktNew = 2\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, diff, "normal-dash-and-context-next")
+        assertTrue(tokens.any { it.slice(diff) == "----------" && it.kind == SyntaxTokenKind.Punctuation })
+        val nextStart = diff.indexOf("! val ktNew = 2")
+        val nextEnd = nextStart + "! val ktNew = 2".length
+        val nextTokens = tokens.filter { it.startIndex >= nextStart && it.endIndex <= nextEnd }
+        assertTrue(nextTokens.any { it.slice(diff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(nextTokens.any { it.slice(diff) == "2" && it.kind == SyntaxTokenKind.Number })
+    }
+
+    @Test
+    fun linearPerformanceOnHugeCombinedHunkHeaderAndManyParents() {
+        val hugeAtHeader = "@".repeat(50_000) + " -1,999999 +1,999999 " + "@".repeat(50_000) + "\n" + " \n".repeat(10_000)
+        val manyParentsHeader = "@@@" + "@".repeat(120) + " " + "-1,999999 ".repeat(120) + "+1,999999 " + "@".repeat(123) + "\n" + " \n".repeat(10_000)
+        assertLinearPerformance(
+            lexer = DiffSyntaxLexer,
+            pathologicalInputs = listOf(
+                "100k-combined-at-header" to hugeAtHeader,
+                "120-parents-combined-header" to manyParentsHeader,
+            ),
+            maxMillisPerInput = 300L,
+        )
+    }
 }

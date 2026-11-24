@@ -308,11 +308,15 @@ CX_HUNK_DASH
     ;
 
 CX_FROM_FILE
-    : '***' [ \t]+ ~[\r\n]+ -> mode(DEFAULT_MODE)
+    : '***' [ \t]+ ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 CX_TO_FILE
-    : '---' [ \t]+ ~[\r\n]+ -> mode(DEFAULT_MODE)
+    : '---' [ \t]+ ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    ;
+
+CX_DASH_SEP
+    : '---' '-'* [ \t]* -> mode(DEFAULT_MODE)
     ;
 
 CX_CHG_PREFIX
@@ -329,6 +333,22 @@ CX_DEL_PREFIX
 
 CX_CTX_PREFIX
     : ( '  ' | ' ' ) -> pushMode(BODY_TEXT_MODE)
+    ;
+
+CX_NON_HUNK_BANG
+    : '!' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    ;
+
+CX_NON_HUNK_PLUS
+    : '+' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    ;
+
+CX_NON_HUNK_MINUS
+    : '-' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    ;
+
+CX_NON_HUNK_SPACE
+    : ' ' ~[ \r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 CX_NO_NEWLINE
@@ -373,12 +393,16 @@ NH_HUNK_NORMAL
     : [0-9]+ ( ',' [0-9]+ )? [acd] [0-9]+ ( ',' [0-9]+ )? [ \t]*
     ;
 
+NH_CONTEXT_FILE
+    : '***' [ \t]+ ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
+    ;
+
 NH_UNIFIED_FROM_FILE
-    : '---' [ \t]+ ~[\r\n]+ -> mode(DEFAULT_MODE)
+    : '---' [ \t]+ ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 NH_UNIFIED_TO_FILE
-    : '+++' [ \t]+ ~[\r\n]+ -> mode(DEFAULT_MODE)
+    : '+++' [ \t]+ ~[ \t\r\n] ~[\r\n]* -> mode(DEFAULT_MODE)
     ;
 
 NH_DEL_PREFIX
@@ -391,6 +415,10 @@ NH_ADD_PREFIX
 
 NH_SEP
     : '---' [ \t]*
+    ;
+
+NH_DASH_SEP
+    : '----' '-'* [ \t]* -> mode(DEFAULT_MODE)
     ;
 
 NH_NO_NEWLINE

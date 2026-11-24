@@ -13,8 +13,9 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
     private var unifiedOldRemaining: Int = 0
     private var unifiedNewRemaining: Int = 0
     private var combinedPrefixWidth: Int = 2
-    private var combinedOldRemaining: IntArray = IntArray(4)
+    private var combinedOldRemaining: IntArray = IntArray(MAX_COMBINED_PARENTS)
     private var combinedOldCount: Int = 0
+    private var positiveOldRemainingCount: Int = 0
     private var combinedNewRemaining: Int = 0
     private var atHunkLineStart: Boolean = false
 
@@ -28,6 +29,7 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         unifiedNewRemaining = 0
         combinedPrefixWidth = 2
         combinedOldCount = 0
+        positiveOldRemainingCount = 0
         combinedNewRemaining = 0
         atHunkLineStart = false
     }
@@ -96,17 +98,23 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
             atCount++
             idx++
         }
-        val width = (atCount - 1).coerceAtLeast(2)
-        combinedPrefixWidth = width
-        if (combinedOldRemaining.size < width) {
-            combinedOldRemaining = IntArray(width)
+        val width = atCount - 1
+        if (width < 2 || width > MAX_COMBINED_PARENTS) {
+            mode(defaultMode)
+            return
         }
+        combinedPrefixWidth = width
 
         var parentIdx = 0
         while (idx < len) {
             while (idx < len && (peek(idx) == ' '.code || peek(idx) == '\t'.code)) idx++
             val ch = peek(idx)
             if (ch == '-'.code) {
+                if (parentIdx >= MAX_COMBINED_PARENTS) {
+                    resetHunkCounts()
+                    mode(defaultMode)
+                    return
+                }
                 idx++
                 while (idx < len && peek(idx) in '0'.code..'9'.code) idx++
                 var count = 1
@@ -118,9 +126,8 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
                         idx++
                     }
                 }
-                if (parentIdx < width) {
-                    combinedOldRemaining[parentIdx] = count
-                }
+                combinedOldRemaining[parentIdx] = count
+                if (count > 0) positiveOldRemainingCount++
                 parentIdx++
             } else if (ch == '+'.code) {
                 idx++
@@ -181,10 +188,10 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
     protected fun onCombinedNewline(defaultMode: Int) {
         if (!atHunkLineStart) {
             atHunkLineStart = true
-        } else if (combinedNewRemaining > 0 && allCombinedOldRemainingPositive()) {
+        } else if (combinedNewRemaining > 0 && positiveOldRemainingCount == combinedOldCount) {
             combinedNewRemaining--
             for (i in 0 until combinedOldCount) {
-                combinedOldRemaining[i]--
+                decrementCombinedOld(i)
             }
         }
         if (isCombinedExhausted()) {
@@ -213,21 +220,20 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
             if (ch != ' '.code) allSpaces = false
             if (ch == '-'.code) {
                 hasMinus = true
-                if (i < combinedOldCount && combinedOldRemaining[i] > 0) {
-                    combinedOldRemaining[i]--
+                if (i < combinedOldCount) {
+                    decrementCombinedOld(i)
                 }
             } else if (ch == ' '.code) {
-                if (i < combinedOldCount && combinedOldRemaining[i] > 0) {
-                    combinedOldRemaining[i]--
+                if (i < combinedOldCount) {
+                    decrementCombinedOld(i)
                 }
             }
         }
         if (allSpaces && consumed < targetWidth) {
             // Stripped trailing space(s) on a blank combined context line
-            for (i in consumed until targetWidth) {
-                if (i < combinedOldCount && combinedOldRemaining[i] > 0) {
-                    combinedOldRemaining[i]--
-                }
+            val limit = minOf(targetWidth, combinedOldCount)
+            for (i in consumed until limit) {
+                decrementCombinedOld(i)
             }
         }
         if (!hasMinus && combinedNewRemaining > 0) {
@@ -249,20 +255,19 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         }
     }
 
-    private fun allCombinedOldRemainingPositive(): Boolean {
-        for (i in 0 until combinedOldCount) {
-            if (combinedOldRemaining[i] <= 0) return false
+    private fun decrementCombinedOld(index: Int) {
+        val prev = combinedOldRemaining[index]
+        if (prev > 0) {
+            val next = prev - 1
+            combinedOldRemaining[index] = next
+            if (next == 0) {
+                positiveOldRemainingCount--
+            }
         }
-        return true
     }
 
-    private fun isCombinedExhausted(): Boolean {
-        if (combinedNewRemaining > 0) return false
-        for (i in 0 until combinedOldCount) {
-            if (combinedOldRemaining[i] > 0) return false
-        }
-        return true
-    }
+    private fun isCombinedExhausted(): Boolean =
+        combinedNewRemaining <= 0 && positiveOldRemainingCount == 0
 
     private fun saturateAddDigit(current: Int, digit: Int): Int {
         if (current >= MAX_COUNT_SATURATION) return MAX_COUNT_SATURATION
@@ -271,6 +276,7 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private companion object {
+        private const val MAX_COMBINED_PARENTS = 64
         private const val MAX_COUNT_SATURATION = 1_000_000_000
     }
 }

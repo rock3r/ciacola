@@ -197,6 +197,7 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
 
                 DiffTokens.CONTEXT_FILE_HEADER,
                 DiffTokens.CX_FROM_FILE,
+                DiffTokens.NH_CONTEXT_FILE,
                 DiffTokens.BP_CONTEXT_FILE,
                 -> {
                     hunk.flushIfActive(out)
@@ -226,7 +227,10 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                     i++
                 }
 
-                DiffTokens.SEPARATOR_TRIPLE_DASH -> {
+                DiffTokens.SEPARATOR_TRIPLE_DASH,
+                DiffTokens.CX_DASH_SEP,
+                DiffTokens.NH_DASH_SEP,
+                -> {
                     hunk.flushIfActive(out)
                     emitTrimmedPunctuation(source, start, end, out)
                     i++
@@ -470,6 +474,25 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.BODY_NEWLINE -> {
                     hunk.flushIfActive(out)
                     out += SyntaxToken(SyntaxTokenKind.Whitespace, start, end)
+                    i++
+                }
+
+                DiffTokens.CX_NON_HUNK_BANG,
+                DiffTokens.CX_NON_HUNK_PLUS,
+                DiffTokens.CX_NON_HUNK_MINUS,
+                DiffTokens.CX_NON_HUNK_SPACE,
+                -> {
+                    hunk.flushIfActive(out)
+                    val (markerKind, bodyKind) = when (type) {
+                        DiffTokens.CX_NON_HUNK_BANG -> SyntaxTokenKind.Punctuation to SyntaxTokenKind.Type
+                        DiffTokens.CX_NON_HUNK_PLUS -> SyntaxTokenKind.Punctuation to SyntaxTokenKind.String
+                        DiffTokens.CX_NON_HUNK_MINUS -> SyntaxTokenKind.Punctuation to SyntaxTokenKind.Keyword
+                        else -> SyntaxTokenKind.Whitespace to SyntaxTokenKind.Plain
+                    }
+                    out += SyntaxToken(markerKind, start, start + 1)
+                    if (end > start + 1) {
+                        out += SyntaxToken(bodyKind, start + 1, end)
+                    }
                     i++
                 }
 
