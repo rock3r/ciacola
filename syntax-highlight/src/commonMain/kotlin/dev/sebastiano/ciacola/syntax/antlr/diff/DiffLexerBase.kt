@@ -217,32 +217,45 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
                 break
             }
         }
-        // Update combined hunk counters based on the prefix characters just consumed.
+        // First pass: check whether this is a deletion line (any '-').
         var hasMinus = false
-        var allSpaces = true
         for (i in 0 until consumed) {
-            val ch = _input.LA(-(consumed - i))
-            if (ch != ' '.code) allSpaces = false
-            if (ch == '-'.code) {
+            if (_input.LA(-(consumed - i)) == '-'.code) {
                 hasMinus = true
-                if (i < combinedOldCount) {
-                    decrementCombinedOld(i)
-                }
-            } else if (ch == ' '.code) {
-                if (i < combinedOldCount) {
+                break
+            }
+        }
+        // Second pass: update parent/result counters per Git combined-diff semantics:
+        // - Deletion line (hasMinus): only '-' columns were present in that parent; space columns
+        //   indicate absence from that parent (do not decrement), and the line is absent from result.
+        // - Non-deletion line (!hasMinus): present in result (decrement new); space columns were
+        //   present in that parent (decrement parent), while '+' columns were absent. Stripped
+        //   trailing spaces at EOL/EOF (e.g. blank " \n" or "+\n") represent space columns.
+        val limit = minOf(consumed, combinedOldCount)
+        if (hasMinus) {
+            for (i in 0 until limit) {
+                if (_input.LA(-(consumed - i)) == '-'.code) {
                     decrementCombinedOld(i)
                 }
             }
-        }
-        if (allSpaces && consumed < targetWidth) {
-            // Stripped trailing space(s) on a blank combined context line
-            val limit = minOf(targetWidth, combinedOldCount)
-            for (i in consumed until limit) {
-                decrementCombinedOld(i)
+        } else {
+            for (i in 0 until limit) {
+                if (_input.LA(-(consumed - i)) == ' '.code) {
+                    decrementCombinedOld(i)
+                }
             }
-        }
-        if (!hasMinus && combinedNewRemaining > 0) {
-            combinedNewRemaining--
+            if (consumed < targetWidth) {
+                val next = _input.LA(1)
+                if (next == '\r'.code || next == '\n'.code || next == IntStream.EOF) {
+                    val fullLimit = minOf(targetWidth, combinedOldCount)
+                    for (i in consumed until fullLimit) {
+                        decrementCombinedOld(i)
+                    }
+                }
+            }
+            if (combinedNewRemaining > 0) {
+                combinedNewRemaining--
+            }
         }
     }
 

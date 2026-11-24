@@ -908,6 +908,114 @@ class DiffSyntaxLexerTest {
     }
 
     @Test
+    fun countsSpacePrefixedParentsOnlyOnNonDeletionCombinedLines() {
+        // Deletion lines with spaces in absent parent columns must not decrement those parent counters
+        val twoParentDeletions = "diff --cc app.js\n" +
+            "--- a/app.js\n" +
+            "+++ b/app.js\n" +
+            "@@@ -1,1 -1,1 +1,0 @@@\n" +
+            "- const a = 1;\n" +
+            " -const b = 2;\n" +
+            "-- \n" +
+            "2.45.0\n"
+        val twoParentTokens = assertValidSnippetHasNoInvalidTokens(
+            DiffSyntaxLexer,
+            twoParentDeletions,
+            "combined-space-absent-parent-deletions",
+        )
+        val line1Start = twoParentDeletions.indexOf("- const a = 1;")
+        val line1Tokens = twoParentTokens.filter {
+            it.startIndex >= line1Start && it.endIndex <= line1Start + "- const a = 1;".length
+        }
+        assertEquals("- ", line1Tokens[0].slice(twoParentDeletions))
+        assertEquals(SyntaxTokenKind.Punctuation, line1Tokens[0].kind)
+        assertTrue(line1Tokens.any { it.slice(twoParentDeletions) == "const" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(line1Tokens.any { it.slice(twoParentDeletions) == "1" && it.kind == SyntaxTokenKind.Number })
+
+        val line2Start = twoParentDeletions.indexOf(" -const b = 2;")
+        val line2Tokens = twoParentTokens.filter {
+            it.startIndex >= line2Start && it.endIndex <= line2Start + " -const b = 2;".length
+        }
+        assertEquals(" -", line2Tokens[0].slice(twoParentDeletions))
+        assertEquals(SyntaxTokenKind.Punctuation, line2Tokens[0].kind)
+        assertTrue(line2Tokens.any { it.slice(twoParentDeletions) == "const" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(line2Tokens.any { it.slice(twoParentDeletions) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        // After both parents reach 0, `-- ` exits combined-hunk mode cleanly
+        val sigStart = twoParentDeletions.indexOf("\n-- \n") + 1
+        val sigTokens = twoParentTokens.filter { it.startIndex >= sigStart && it.endIndex <= sigStart + 3 }
+        assertEquals(listOf("-", "- "), sigTokens.map { it.slice(twoParentDeletions) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), sigTokens.map { it.kind })
+
+        // 3-parent octopus diff with sparse deletions only (+1,0 ensures premature exit is caught)
+        val octopusDeletions = "diff --cc app.js\n" +
+            "--- a/app.js\n" +
+            "+++ b/app.js\n" +
+            "@@@@ -1,1 -1,1 -1,1 +1,0 @@@@\n" +
+            "-  const p0 = 1;\n" +
+            " - const p1 = 2;\n" +
+            "  -const p2 = 3;\n" +
+            "-- \n"
+        val octoTokens = assertValidSnippetHasNoInvalidTokens(
+            DiffSyntaxLexer,
+            octopusDeletions,
+            "combined-octopus-sparse-deletions",
+        )
+        for ((line, prefix) in listOf(
+            "-  const p0 = 1;" to "-  ",
+            " - const p1 = 2;" to " - ",
+            "  -const p2 = 3;" to "  -",
+        )) {
+            val s = octopusDeletions.indexOf(line)
+            val lt = octoTokens.filter { it.startIndex >= s && it.endIndex <= s + line.length }
+            assertEquals(prefix, lt[0].slice(octopusDeletions))
+            assertEquals(SyntaxTokenKind.Punctuation, lt[0].kind)
+            assertTrue(lt.any { it.slice(octopusDeletions) == "const" && it.kind == SyntaxTokenKind.Keyword })
+        }
+        val octoSigStart = octopusDeletions.indexOf("\n-- \n") + 1
+        val octoSigTokens = octoTokens.filter { it.startIndex >= octoSigStart && it.endIndex <= octoSigStart + 3 }
+        assertEquals(listOf("-", "- "), octoSigTokens.map { it.slice(octopusDeletions) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), octoSigTokens.map { it.kind })
+
+        // Blank added line with stripped trailing space (`+\n` from `+ \n`) decrements omitted parent column
+        val strippedBlankAdd = "diff --cc app.js\n" +
+            "--- a/app.js\n" +
+            "+++ b/app.js\n" +
+            "@@@ -1,0 -1,1 +1,1 @@@\n" +
+            "+\n" +
+            "-- \n"
+        val strippedAddTokens = assertValidSnippetHasNoInvalidTokens(
+            DiffSyntaxLexer,
+            strippedBlankAdd,
+            "combined-stripped-blank-addition",
+        )
+        val strippedSigStart = strippedBlankAdd.indexOf("\n-- \n") + 1
+        val strippedSigTokens = strippedAddTokens.filter {
+            it.startIndex >= strippedSigStart && it.endIndex <= strippedSigStart + 3
+        }
+        assertEquals(listOf("-", "- "), strippedSigTokens.map { it.slice(strippedBlankAdd) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), strippedSigTokens.map { it.kind })
+
+        // Non-deletion additions with spaces still decrement the space-marked parents and result counter
+        val nonDeletionMixed = "diff --cc app.js\n" +
+            "--- a/app.js\n" +
+            "+++ b/app.js\n" +
+            "@@@ -1,1 -1,1 +1,2 @@@\n" +
+            "+ const fromP1 = 1;\n" +
+            " +const fromP0 = 2;\n" +
+            "-- \n"
+        val mixedTokens = assertValidSnippetHasNoInvalidTokens(
+            DiffSyntaxLexer,
+            nonDeletionMixed,
+            "combined-non-deletion-mixed-spaces",
+        )
+        val mixedSigStart = nonDeletionMixed.indexOf("\n-- \n") + 1
+        val mixedSigTokens = mixedTokens.filter { it.startIndex >= mixedSigStart && it.endIndex <= mixedSigStart + 3 }
+        assertEquals(listOf("-", "- "), mixedSigTokens.map { it.slice(nonDeletionMixed) })
+        assertEquals(listOf(SyntaxTokenKind.Punctuation, SyntaxTokenKind.Keyword), mixedSigTokens.map { it.kind })
+    }
+
+    @Test
     fun linearPerformanceOnExcessParentsWithSmallWidthAndLongPathManyHunks() {
         val narrowExcessParents = "@@@ " + "-1,999999 ".repeat(80) + "+1,999999 @@@\n" + " \n".repeat(10_000)
         val longPath = "x".repeat(50_000)
