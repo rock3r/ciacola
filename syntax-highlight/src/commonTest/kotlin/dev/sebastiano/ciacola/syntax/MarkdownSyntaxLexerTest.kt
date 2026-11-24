@@ -110,7 +110,7 @@ class MarkdownSyntaxLexerTest {
     }
 
     @Test
-    fun subHighlightsFencedCodeBlocksOneLevelDeepAcrossMultipleLanguages() {
+    fun subHighlightsFencedCodeBlocksJvmAndDataLanguages() {
         val code = """
             ```kotlin title="App.kt"
             val answer = 42
@@ -128,7 +128,23 @@ class MarkdownSyntaxLexerTest {
             ```sql
             SELECT id FROM users WHERE active = TRUE;
             ```
+        """.trimIndent() + "\n"
 
+        val tokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, code, "md-fenced-subhighlight-jvm-data")
+        fun hasToken(text: String, kind: SyntaxTokenKind): Boolean =
+            tokens.any { it.slice(code) == text && it.kind == kind }
+
+        assertTrue(hasToken("val", SyntaxTokenKind.Keyword), "Expected Kotlin 'val' Keyword")
+        assertTrue(hasToken("42", SyntaxTokenKind.Number), "Expected Kotlin '42' Number")
+        assertTrue(hasToken("def", SyntaxTokenKind.Keyword), "Expected Python 'def' Keyword")
+        assertTrue(hasToken("\"enabled\"", SyntaxTokenKind.Property), "Expected JSON property")
+        assertTrue(hasToken("true", SyntaxTokenKind.Constant), "Expected JSON constant")
+        assertTrue(hasToken("SELECT", SyntaxTokenKind.Keyword), "Expected SQL SELECT Keyword")
+    }
+
+    @Test
+    fun subHighlightsFencedCodeBlocksWebAndScriptingLanguages() {
+        val code = """
             ```ruby
             def hello(x) = puts x
             ```
@@ -144,7 +160,21 @@ class MarkdownSyntaxLexerTest {
             ```css
             .box { color: #ff0; }
             ```
+        """.trimIndent() + "\n"
 
+        val tokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, code, "md-fenced-subhighlight-web-script")
+        fun hasToken(text: String, kind: SyntaxTokenKind): Boolean =
+            tokens.any { it.slice(code) == text && it.kind == kind }
+
+        assertTrue(hasToken("def", SyntaxTokenKind.Keyword), "Expected Ruby 'def' Keyword")
+        assertTrue(hasToken("export", SyntaxTokenKind.Keyword), "Expected Shell export Keyword")
+        assertTrue(hasToken("div", SyntaxTokenKind.Tag), "Expected HTML div Tag")
+        assertTrue(hasToken("color", SyntaxTokenKind.Property), "Expected CSS color Property")
+    }
+
+    @Test
+    fun subHighlightsFencedCodeBlocksSystemsLanguages() {
+        val code = """
             ```rust
             fn main() { let x = 1; }
             ```
@@ -162,20 +192,10 @@ class MarkdownSyntaxLexerTest {
             ```
         """.trimIndent() + "\n"
 
-        val tokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, code, "md-fenced-subhighlight")
-
+        val tokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, code, "md-fenced-subhighlight-systems")
         fun hasToken(text: String, kind: SyntaxTokenKind): Boolean =
             tokens.any { it.slice(code) == text && it.kind == kind }
 
-        assertTrue(hasToken("val", SyntaxTokenKind.Keyword), "Expected Kotlin 'val' Keyword")
-        assertTrue(hasToken("42", SyntaxTokenKind.Number), "Expected Kotlin '42' Number")
-        assertTrue(hasToken("def", SyntaxTokenKind.Keyword), "Expected Python/Ruby 'def' Keyword")
-        assertTrue(hasToken("\"enabled\"", SyntaxTokenKind.Property), "Expected JSON property")
-        assertTrue(hasToken("true", SyntaxTokenKind.Constant), "Expected JSON constant")
-        assertTrue(hasToken("SELECT", SyntaxTokenKind.Keyword), "Expected SQL SELECT Keyword")
-        assertTrue(hasToken("export", SyntaxTokenKind.Keyword), "Expected Shell export Keyword")
-        assertTrue(hasToken("div", SyntaxTokenKind.Tag), "Expected HTML div Tag")
-        assertTrue(hasToken("color", SyntaxTokenKind.Property), "Expected CSS color Property")
         assertTrue(hasToken("fn", SyntaxTokenKind.Keyword), "Expected Rust fn Keyword")
         assertTrue(hasToken("func", SyntaxTokenKind.Keyword), "Expected Go func Keyword")
         assertTrue(hasToken("auto", SyntaxTokenKind.Keyword), "Expected C++ auto Keyword")
@@ -330,6 +350,34 @@ class MarkdownSyntaxLexerTest {
         assertTrue(tabCloseTokens.any { it.slice(tabCloseBq) == "val" && it.kind == SyntaxTokenKind.Keyword })
         assertTrue(tabCloseTokens.any { it.slice(tabCloseBq) == "3" && it.kind == SyntaxTokenKind.Number })
         assertTrue(tabCloseTokens.any { it.slice(tabCloseBq) == "Heading" && it.kind == SyntaxTokenKind.Keyword })
+
+        val blankMarkerMultiLine = "> ```kotlin\n> /* multi-line\n>\n> comment */\n> val b = 2\n> ```\n"
+        val blankMarkerTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            blankMarkerMultiLine,
+            "md-bq-blank-marker-multiline",
+        )
+        assertTrue(blankMarkerTokens.any { it.slice(blankMarkerMultiLine).contains("comment") && it.kind == SyntaxTokenKind.Comment })
+        assertTrue(blankMarkerTokens.any { it.slice(blankMarkerMultiLine) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(blankMarkerTokens.any { it.slice(blankMarkerMultiLine) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val blankSpaceMarkerFence = "> ```kotlin\n> val a = 1\n> \n> val b = 2\n> ```\n"
+        val blankSpaceTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            blankSpaceMarkerFence,
+            "md-bq-blank-space-marker",
+        )
+        assertEquals(2, blankSpaceTokens.count { it.slice(blankSpaceMarkerFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(blankSpaceTokens.any { it.slice(blankSpaceMarkerFence) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val overIndentedTabCloseBq = "> ```kotlin\n> // `\n>   ${'\t'}```\n> val y = 2\n> ```\n`ok`\n"
+        val overIndentedTokens = assertLosslessInvariants(
+            lexer = MarkdownSyntaxLexer,
+            code = overIndentedTabCloseBq,
+            label = "md-bq-overindented-tab-close",
+        )
+        assertTrue(overIndentedTokens.any { it.slice(overIndentedTabCloseBq) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(overIndentedTokens.any { it.slice(overIndentedTabCloseBq) == "`ok`" && it.kind == SyntaxTokenKind.String })
     }
 
     @Test
@@ -389,6 +437,26 @@ class MarkdownSyntaxLexerTest {
         val unicodeTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, unicodePunct, "md-unicode-punct-emphasis")
         assertTrue(unicodeTokens.any { it.slice(unicodePunct) == "強調" && it.kind == SyntaxTokenKind.Property })
         assertTrue(unicodeTokens.any { it.slice(unicodePunct) == "hola" && it.kind == SyntaxTokenKind.Property })
+
+        val brokenThenValidPointy = "See [broken](<unclosed\nand [valid](<https://example.com/my page>)!\n"
+        val brokenThenValidTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            brokenThenValidPointy,
+            "md-broken-then-valid-pointy",
+        )
+        assertTrue(brokenThenValidTokens.any { it.slice(brokenThenValidPointy) == "valid" && it.kind == SyntaxTokenKind.Tag })
+        assertTrue(brokenThenValidTokens.any { it.slice(brokenThenValidPointy) == "page" && it.kind == SyntaxTokenKind.Attribute })
+
+        val quoteInsidePointy = "See [link](<https://example.com/a \"unclosed> \"real title\")!\n"
+        val quotePointyTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            quoteInsidePointy,
+            "md-quote-inside-pointy",
+        )
+        assertTrue(quotePointyTokens.any { it.slice(quoteInsidePointy) == "link" && it.kind == SyntaxTokenKind.Tag })
+        assertTrue(quotePointyTokens.any { it.slice(quoteInsidePointy) == "\"unclosed" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(quotePointyTokens.any { it.slice(quoteInsidePointy) == "\"real" && it.kind == SyntaxTokenKind.String })
+        assertTrue(quotePointyTokens.any { it.slice(quoteInsidePointy) == "title\"" && it.kind == SyntaxTokenKind.String })
     }
 
     @Test
@@ -516,6 +584,36 @@ class MarkdownSyntaxLexerTest {
         assertLinearPerformance(
             lexer = MarkdownSyntaxLexer,
             pathologicalInputs = listOf("nested-image-labels" to nestedImages),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnNestedFootnotes() {
+        val nestedFootnotes = "[^".repeat(8_000) + "]".repeat(8_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("nested-footnotes" to nestedFootnotes),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnNestedFootnotesWithSpace() {
+        val nestedFootnotesWithSpace = "[^".repeat(8_000) + " " + "]".repeat(8_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("nested-footnotes-with-space" to nestedFootnotesWithSpace),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnUnclosedQuotedLinkTitles() {
+        val unclosedQuotedTitle = "[a](u \"" + "x:y ".repeat(8_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("unclosed-quoted-link-titles" to unclosedQuotedTitle),
             maxMillisPerInput = 300L,
         )
     }

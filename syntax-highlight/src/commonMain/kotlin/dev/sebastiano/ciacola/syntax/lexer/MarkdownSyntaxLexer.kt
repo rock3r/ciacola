@@ -68,13 +68,16 @@ private class BqFenceLine(
 private class BqFenceAccumulator {
     var active: Boolean = false
         private set
+    var fenceBqDepth: Int = 0
+        private set
     private var targetLanguage: SyntaxLanguage? = null
     private var allowNested: Boolean = false
     private val lines = ArrayList<BqFenceLine>()
     private val buffer = StringBuilder()
 
-    fun begin(language: SyntaxLanguage?, allowNestedSubHighlighting: Boolean) {
+    fun begin(language: SyntaxLanguage?, allowNestedSubHighlighting: Boolean, bqDepth: Int) {
         active = true
+        fenceBqDepth = bqDepth
         targetLanguage = language
         allowNested = allowNestedSubHighlighting
         lines.clear()
@@ -193,6 +196,7 @@ private class BqFenceAccumulator {
         lines.clear()
         buffer.clear()
         targetLanguage = null
+        fenceBqDepth = 0
     }
 }
 
@@ -203,7 +207,7 @@ private fun processMarkdownTokens(
 ): List<SyntaxToken> {
     val out = ArrayList<SyntaxToken>(raw.size + 16)
     var currentFenceLang: SyntaxLanguage? = null
-    var inBqFenceHeader = false
+    var pendingBqFenceDepth = 0
     val bqFenceAcc = BqFenceAccumulator()
     var i = 0
 
@@ -217,13 +221,14 @@ private fun processMarkdownTokens(
         paraBuffer.clear()
     }
 
-    fun currentParaLineHasBlockquote(): Boolean {
+    fun currentParaLineBlockquoteDepth(): Int {
+        var depth = 0
         for (k in paraBuffer.lastIndex downTo 0) {
             val t = paraBuffer[k].type
-            if (t == MdTokens.NEWLINE) return false
-            if (t == MdTokens.BLOCKQUOTE_MARKER) return true
+            if (t == MdTokens.NEWLINE) break
+            if (t == MdTokens.BLOCKQUOTE_MARKER) depth++
         }
-        return false
+        return depth
     }
 
     while (i < raw.size) {
@@ -238,13 +243,25 @@ private fun processMarkdownTokens(
             val endExcl = if (hasNl) lineEnd + 1 else lineEnd
             var hasBodyLine = false
             var hasFenceClose = false
+            var bqCount = 0
+            var onlyBqWsNl = true
             for (k in lineStart until endExcl) {
                 when (raw[k].type) {
-                    MdTokens.FENCE_BODY_LINE -> hasBodyLine = true
-                    MdTokens.FENCE_CLOSE -> hasFenceClose = true
+                    MdTokens.FENCE_BODY_LINE -> {
+                        hasBodyLine = true
+                        onlyBqWsNl = false
+                    }
+                    MdTokens.FENCE_CLOSE -> {
+                        hasFenceClose = true
+                        onlyBqWsNl = false
+                    }
+                    MdTokens.BLOCKQUOTE_MARKER -> bqCount++
+                    MdTokens.WS, MdTokens.NEWLINE -> Unit
+                    else -> onlyBqWsNl = false
                 }
             }
-            if (hasBodyLine && !hasFenceClose) {
+            val isBlankBqContinuation = onlyBqWsNl && bqCount == bqFenceAcc.fenceBqDepth
+            if (!hasFenceClose && (hasBodyLine || isBlankBqContinuation)) {
                 bqFenceAcc.appendLine(source, raw.subList(lineStart, endExcl), hasNl)
                 i = endExcl
                 continue
@@ -307,10 +324,10 @@ private fun processMarkdownTokens(
             }
 
             MdTokens.FENCE_OPEN -> {
-                val isBq = currentParaLineHasBlockquote()
+                val bqDepth = currentParaLineBlockquoteDepth()
                 flushParagraph()
                 currentFenceLang = null
-                inBqFenceHeader = isBq
+                pendingBqFenceDepth = bqDepth
                 out += SyntaxToken(SyntaxTokenKind.Punctuation, tok.start, tok.end)
             }
 
@@ -336,7 +353,7 @@ private fun processMarkdownTokens(
 
             MdTokens.FENCE_BODY -> {
                 flushParagraph()
-                inBqFenceHeader = false
+                pendingBqFenceDepth = 0
                 emitSubHighlightedOrPlain(
                     source = source,
                     start = tok.start,
@@ -355,7 +372,7 @@ private fun processMarkdownTokens(
 
             MdTokens.FENCE_CLOSE -> {
                 flushParagraph()
-                inBqFenceHeader = false
+                pendingBqFenceDepth = 0
                 currentFenceLang = null
                 out += SyntaxToken(SyntaxTokenKind.Punctuation, tok.start, tok.end)
             }
@@ -376,10 +393,11 @@ private fun processMarkdownTokens(
             }
 
             else -> {
-                if (inBqFenceHeader && tok.type == MdTokens.NEWLINE) {
-                    inBqFenceHeader = false
+                if (pendingBqFenceDepth > 0 && tok.type == MdTokens.NEWLINE) {
+                    val bqDepth = pendingBqFenceDepth
+                    pendingBqFenceDepth = 0
                     out += SyntaxToken(SyntaxTokenKind.Whitespace, tok.start, tok.end)
-                    bqFenceAcc.begin(currentFenceLang, allowNestedSubHighlighting)
+                    bqFenceAcc.begin(currentFenceLang, allowNestedSubHighlighting, bqDepth)
                 } else {
                     paraBuffer += tok
                     // Flush at blank lines (two consecutive newlines with optional WS)
@@ -641,6 +659,18 @@ private fun emitParagraphTokens(
         }
     }
     val linkParensScanner = LinkParensScanner(source, raw)
+    val nextBracketIdx = IntArray(n + 1)
+    var nextBr = n
+    for (k in n - 1 downTo 0) {
+        if (!excludedFromDelim[k]) {
+            val t = raw[k].type
+            if (t == MdTokens.LBRACK || t == MdTokens.BANG_LBRACK || t == MdTokens.RBRACK) {
+                nextBr = k
+            }
+        }
+        nextBracketIdx[k] = nextBr
+    }
+    nextBracketIdx[n] = n
 
     // 4. Link reference definitions ([ref]: url "title") and footnote definitions ([^note]: ...)
     val customSplitTokens = HashMap<Int, List<SyntaxToken>>()
@@ -803,25 +833,21 @@ private fun emitParagraphTokens(
                 }
             }
 
-            // Case C: Footnote reference [^note]
-            if (!isImage && openIdx + 1 < idx && source[raw[openIdx + 1].start] == '^') {
-                var hasWs = false
+            // Case C: Footnote reference [^note] (disjoint, no inner brackets or whitespace)
+            if (!isImage &&
+                openIdx + 1 < idx &&
+                source[raw[openIdx + 1].start] == '^' &&
+                nextBracketIdx[openIdx + 1] == idx &&
+                linkParensScanner.nextWsOrNlAt(openIdx + 1) >= idx
+            ) {
+                resolvedKinds[openIdx] = SyntaxTokenKind.Punctuation
+                resolvedKinds[idx] = SyntaxTokenKind.Punctuation
+                excludedFromDelim[openIdx] = true
+                excludedFromDelim[idx] = true
                 for (k in (openIdx + 1) until idx) {
-                    if (raw[k].type == MdTokens.WS || raw[k].type == MdTokens.NEWLINE) {
-                        hasWs = true
-                        break
-                    }
-                }
-                if (!hasWs) {
-                    resolvedKinds[openIdx] = SyntaxTokenKind.Punctuation
-                    resolvedKinds[idx] = SyntaxTokenKind.Punctuation
-                    excludedFromDelim[openIdx] = true
-                    excludedFromDelim[idx] = true
-                    for (k in (openIdx + 1) until idx) {
-                        excludedFromDelim[k] = true
-                        if (resolvedKinds[k] == null) {
-                            resolvedKinds[k] = SyntaxTokenKind.Constant
-                        }
+                    excludedFromDelim[k] = true
+                    if (resolvedKinds[k] == null) {
+                        resolvedKinds[k] = SyntaxTokenKind.Constant
                     }
                 }
             }
@@ -908,6 +934,8 @@ private class LinkParensScanner(
             }
         }
     }
+
+    fun nextWsOrNlAt(idx: Int): Int = nextWsOrNl[idx]
 
     fun scan(openParenIdx: Int): Int {
         var k = openParenIdx + 1
@@ -997,7 +1025,6 @@ private class LinkParensScanner(
         while (k < n) {
             val tok = raw[k]
             if (tok.type == MdTokens.NEWLINE) {
-                noGtCloseFrom = minOf(noGtCloseFrom, startOffset)
                 return -1
             }
             if (tok.type != MdTokens.ESCAPE && tok.type != MdTokens.WS) {
@@ -1028,9 +1055,10 @@ private class LinkParensScanner(
             val tok = raw[k]
             if (tok.type == MdTokens.TEXT) {
                 val searchFrom = if (k == startTokIdx) tok.start + 1 else tok.start
-                val closePos = source.indexOf(quote, startIndex = searchFrom)
-                if (closePos in searchFrom until tok.end) {
-                    return if (closePos == tok.end - 1) k + 1 else -1
+                for (p in searchFrom until tok.end) {
+                    if (source[p] == quote) {
+                        return if (p == tok.end - 1) k + 1 else -1
+                    }
                 }
             }
             k++
@@ -1126,10 +1154,13 @@ private fun classifyLinkParensBody(
         }
         if (inPointyDest) {
             if (tok.type == MdTokens.HTML_TAG_CLOSE || (tok.type == MdTokens.TEXT && source[tok.end - 1] == '>')) {
-                if (tok.type == MdTokens.HTML_TAG_CLOSE) {
+                if (tok.type == MdTokens.HTML_TAG_CLOSE || tok.end - tok.start == 1) {
                     resolvedKinds[k] = SyntaxTokenKind.Punctuation
                 } else {
-                    resolvedKinds[k] = SyntaxTokenKind.Attribute
+                    customSplitTokens[k] = listOf(
+                        SyntaxToken(SyntaxTokenKind.Attribute, tok.start, tok.end - 1),
+                        SyntaxToken(SyntaxTokenKind.Punctuation, tok.end - 1, tok.end),
+                    )
                 }
                 inPointyDest = false
             } else {
@@ -1140,6 +1171,46 @@ private fun classifyLinkParensBody(
         }
 
         val ch0 = source[tok.start]
+        if (tok.type == MdTokens.AUTOLINK) {
+            customSplitTokens[k] = listOf(
+                SyntaxToken(SyntaxTokenKind.Punctuation, tok.start, tok.start + 1),
+                SyntaxToken(SyntaxTokenKind.Attribute, tok.start + 1, tok.end - 1),
+                SyntaxToken(SyntaxTokenKind.Punctuation, tok.end - 1, tok.end),
+            )
+            k++
+            continue
+        }
+        if (tok.type == MdTokens.HTML_TAG_OPEN) {
+            resolvedKinds[k] = SyntaxTokenKind.Punctuation
+            inPointyDest = true
+            k++
+            continue
+        }
+        if (ch0 == '<') {
+            val endsWithGt = tok.end - tok.start > 1 && source[tok.end - 1] == '>'
+            if (tok.end - tok.start == 1) {
+                resolvedKinds[k] = SyntaxTokenKind.Punctuation
+                inPointyDest = true
+            } else if (endsWithGt) {
+                val parts = ArrayList<SyntaxToken>(3)
+                parts += SyntaxToken(SyntaxTokenKind.Punctuation, tok.start, tok.start + 1)
+                if (tok.start + 1 < tok.end - 1) {
+                    parts += SyntaxToken(SyntaxTokenKind.Attribute, tok.start + 1, tok.end - 1)
+                }
+                parts += SyntaxToken(SyntaxTokenKind.Punctuation, tok.end - 1, tok.end)
+                customSplitTokens[k] = parts
+                inPointyDest = false
+            } else {
+                customSplitTokens[k] = listOf(
+                    SyntaxToken(SyntaxTokenKind.Punctuation, tok.start, tok.start + 1),
+                    SyntaxToken(SyntaxTokenKind.Attribute, tok.start + 1, tok.end),
+                )
+                inPointyDest = true
+            }
+            k++
+            continue
+        }
+
         if (ch0 == '"' || ch0 == '\'') {
             resolvedKinds[k] = SyntaxTokenKind.String
             val slice = source.substring(tok.start, tok.end)
@@ -1150,16 +1221,7 @@ private fun classifyLinkParensBody(
             continue
         }
 
-        if (tok.type == MdTokens.AUTOLINK) {
-            customSplitTokens[k] = listOf(
-                SyntaxToken(SyntaxTokenKind.Punctuation, tok.start, tok.start + 1),
-                SyntaxToken(SyntaxTokenKind.Attribute, tok.start + 1, tok.end - 1),
-                SyntaxToken(SyntaxTokenKind.Punctuation, tok.end - 1, tok.end),
-            )
-        } else if (tok.type == MdTokens.HTML_TAG_OPEN) {
-            resolvedKinds[k] = SyntaxTokenKind.Punctuation
-            inPointyDest = true
-        } else if (tok.type == MdTokens.HTML_TAG_CLOSE) {
+        if (tok.type == MdTokens.HTML_TAG_CLOSE) {
             resolvedKinds[k] = SyntaxTokenKind.Punctuation
             inPointyDest = false
         } else if (tok.type == MdTokens.HTML_NAME ||

@@ -1204,6 +1204,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         var idx = advancePastLine(afterOpenerChars, size)
         while (idx < size) {
             var pos = idx
+            var consumedMarkerSpace = false
             if (bqDepth > 0) {
                 if (!hasBlockquotePrefixAhead(pos, bqDepth)) {
                     return idx
@@ -1211,21 +1212,29 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 for (d in 0 until bqDepth) {
                     while (pos < size && codePointAtIndex(pos) == ' '.code) pos++
                     pos++ // '>'
-                    if (pos < size && codePointAtIndex(pos) == ' '.code) pos++
+                    if (pos < size && codePointAtIndex(pos) == ' '.code) {
+                        consumedMarkerSpace = true
+                        pos++
+                    } else {
+                        consumedMarkerSpace = false
+                    }
                 }
             }
             var spaces = 0
-            var streamCol = if (bqDepth > 0) 1 else 0
+            var streamCol = if (consumedMarkerSpace) 2 else if (bqDepth > 0) 1 else 0
+            var firstAfterMarker = bqDepth > 0 && !consumedMarkerSpace
             while (pos < size && spaces < 4) {
                 val ch = codePointAtIndex(pos)
                 if (ch == ' '.code) {
                     spaces++
                     streamCol++
+                    firstAfterMarker = false
                     pos++
                 } else if (ch == '\t'.code) {
                     val step = 4 - (streamCol % 4)
-                    spaces += step
+                    spaces += if (firstAfterMarker) step - 1 else step
                     streamCol += step
+                    firstAfterMarker = false
                     pos++
                 } else {
                     break
