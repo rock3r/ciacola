@@ -134,6 +134,11 @@ registerAntlrLexer("ruby")
 registerAntlrLexer("dart")
 registerAntlrLexer("groovy")
 registerAntlrLexer("powershell")
+registerAntlrLexer("dockerfile")
+registerAntlrLexer("diff")
+registerAntlrLexer("markdown")
+registerAntlrLexer("protobuf")
+registerAntlrLexer("hcl")
 
 tasks.withType(KotlinCompilationTask::class.java).configureEach {
     dependsOn(generateAntlrGrammars)

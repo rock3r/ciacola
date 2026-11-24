@@ -6,16 +6,21 @@ import dev.sebastiano.ciacola.syntax.lexer.CSharpSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CppSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CssSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.DartSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.DiffSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.DockerfileSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GlslSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GoSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GroovySyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.HclSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.HtmlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JavaScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JavaSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JsonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.KotlinSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.MarkdownSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.PhpSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.PowerShellSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.ProtobufSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.PythonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.RubySyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.RustSyntaxLexer
@@ -72,6 +77,11 @@ public object SyntaxHighlighter {
         SyntaxLanguage.Dart to DartSyntaxLexer,
         SyntaxLanguage.Groovy to GroovySyntaxLexer,
         SyntaxLanguage.PowerShell to PowerShellSyntaxLexer,
+        SyntaxLanguage.Dockerfile to DockerfileSyntaxLexer,
+        SyntaxLanguage.Diff to DiffSyntaxLexer,
+        SyntaxLanguage.Markdown to MarkdownSyntaxLexer,
+        SyntaxLanguage.Protobuf to ProtobufSyntaxLexer,
+        SyntaxLanguage.Hcl to HclSyntaxLexer,
     )
 
     /** Languages that currently have a registered [SyntaxLexer]. */

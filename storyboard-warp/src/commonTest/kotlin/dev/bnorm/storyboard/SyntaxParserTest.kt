@@ -281,10 +281,15 @@ class SyntaxParserTest {
             LangSample(Dart, "sealed class Outcome {\n  final int code = 1;\n}", "sealed class Outcome {\n  final int code = 2;\n}", "sealed"),
             LangSample(Groovy, "def compute(int x) {\n  return \"v=${'$'}x\"\n}", "def compute(int x) {\n  return \"val=${'$'}x\"\n}", "def"),
             LangSample(PowerShell, "function Get-Count {\n  param([int]${'$'}Step = 1)\n  return ${'$'}Step\n}", "function Get-Count {\n  param([int]${'$'}Step = 2)\n  return ${'$'}Step\n}", "function"),
+            LangSample(Dockerfile, "FROM alpine:3.19 AS base\nRUN echo \"ok\"", "FROM alpine:3.20 AS base\nRUN echo \"ready\"", "FROM"),
+            LangSample(Diff, "--- a/Main.kt\n+++ b/Main.kt\n@@ -1 +1 @@\n-val x = 1\n+val x = 2", "--- a/Main.kt\n+++ b/Main.kt\n@@ -1 +1 @@\n-val x = 2\n+val x = 3"),
+            LangSample(Markdown, "# Heading\n\nParagraph with *em* and `code`.", "# Heading\n\nParagraph with **strong** and `code`."),
+            LangSample(Protobuf, "syntax = \"proto3\";\nmessage Ping {\n  int32 id = 1;\n}", "syntax = \"proto3\";\nmessage Ping {\n  int32 id = 2;\n}", "message"),
+            LangSample(Hcl, "resource \"aws_s3_bucket\" \"app\" {\n  count = 1\n}", "resource \"aws_s3_bucket\" \"app\" {\n  count = 2\n}", "resource"),
         )
 
-        assertEquals(27, samples.size)
-        assertEquals(27, samples.map { it.language }.toSet().size)
+        assertEquals(32, samples.size)
+        assertEquals(32, samples.map { it.language }.toSet().size)
 
         for (sample in samples) {
             val beforeTokens = assertLosslessAndWellFormed(sample.before, sample.language)

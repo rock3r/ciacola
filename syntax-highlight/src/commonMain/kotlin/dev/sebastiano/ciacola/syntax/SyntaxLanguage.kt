@@ -36,6 +36,11 @@ public enum class SyntaxLanguage(
     Dart("dart", "source.dart", emptySet()),
     Groovy("groovy", "source.groovy", setOf("gradle", "gvy")),
     PowerShell("powershell", "source.powershell", setOf("ps1", "psm1", "psd1", "pwsh")),
+    Dockerfile("dockerfile", "source.dockerfile", setOf("docker", "containerfile")),
+    Diff("diff", "source.diff", setOf("patch")),
+    Markdown("markdown", "text.html.markdown", setOf("md", "mkd", "mdx")),
+    Protobuf("protobuf", "source.proto", setOf("proto", "proto3", "proto2")),
+    Hcl("hcl", "source.hcl", setOf("tf", "tfvars", "terraform")),
     ;
 
     public companion object {

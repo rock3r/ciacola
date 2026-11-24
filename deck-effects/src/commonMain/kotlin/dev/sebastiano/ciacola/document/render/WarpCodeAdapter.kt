@@ -46,19 +46,24 @@ import dev.bnorm.storyboard.CSharp as WarpCSharpLanguage
 import dev.bnorm.storyboard.Cpp as WarpCppLanguage
 import dev.bnorm.storyboard.Css as WarpCssLanguage
 import dev.bnorm.storyboard.Dart as WarpDartLanguage
+import dev.bnorm.storyboard.Diff as WarpDiffLanguage
 import dev.bnorm.storyboard.DiffContents
+import dev.bnorm.storyboard.Dockerfile as WarpDockerfileLanguage
 import dev.bnorm.storyboard.Frame
 import dev.bnorm.storyboard.Glsl as WarpGlslLanguage
 import dev.bnorm.storyboard.Go as WarpGoLanguage
 import dev.bnorm.storyboard.Groovy as WarpGroovyLanguage
+import dev.bnorm.storyboard.Hcl as WarpHclLanguage
 import dev.bnorm.storyboard.Html as WarpHtmlLanguage
 import dev.bnorm.storyboard.Java as WarpJavaLanguage
 import dev.bnorm.storyboard.JavaScript as WarpJavaScriptLanguage
 import dev.bnorm.storyboard.Json as WarpJsonLanguage
 import dev.bnorm.storyboard.Kotlin as WarpKotlinLanguage
 import dev.bnorm.storyboard.Language as WarpLanguage
+import dev.bnorm.storyboard.Markdown as WarpMarkdownLanguage
 import dev.bnorm.storyboard.Php as WarpPhpLanguage
 import dev.bnorm.storyboard.PowerShell as WarpPowerShellLanguage
+import dev.bnorm.storyboard.Protobuf as WarpProtobufLanguage
 import dev.bnorm.storyboard.Python as WarpPythonLanguage
 import dev.bnorm.storyboard.Ruby as WarpRubyLanguage
 import dev.bnorm.storyboard.Rust as WarpRustLanguage
@@ -629,6 +634,11 @@ internal fun resolveWarpLanguage(language: String?): WarpLanguage =
         SyntaxLanguage.Dart -> WarpDartLanguage
         SyntaxLanguage.Groovy -> WarpGroovyLanguage
         SyntaxLanguage.PowerShell -> WarpPowerShellLanguage
+        SyntaxLanguage.Dockerfile -> WarpDockerfileLanguage
+        SyntaxLanguage.Diff -> WarpDiffLanguage
+        SyntaxLanguage.Markdown -> WarpMarkdownLanguage
+        SyntaxLanguage.Protobuf -> WarpProtobufLanguage
+        SyntaxLanguage.Hcl -> WarpHclLanguage
     }
 
 private fun defaultCodeSurfaceSpec(theme: DeckTheme, density: Density): SurfaceSpec {

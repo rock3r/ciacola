@@ -10,7 +10,8 @@ licensed under the Apache License, Version 2.0).
 All ANTLR4 lexer grammars and runtime support in this module other than the third-party
 items listed below (including JSON, HTML, CSS, JavaScript/TypeScript, Rust, Go, Python,
 TOML, Java, C/C++, GLSL/SkSL/AGSL, YAML, SQL, Shell, C#, PHP, Swift, Ruby, Dart, Groovy,
-and PowerShell) are original Ciacola sources licensed under the Apache License, Version 2.0.
+PowerShell, Dockerfile, Diff/Patch, Markdown, Protobuf, and HCL/Terraform) are original
+Ciacola sources licensed under the Apache License, Version 2.0.
 
 Third-Party Grammar and Data Notices
 ====================================
