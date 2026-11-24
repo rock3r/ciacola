@@ -331,6 +331,7 @@ class GroovySyntaxLexerTest {
                 "nested-unclosed-slashy-interp-2k" to ("/\${".repeat(2_000) + "a".repeat(2_000)),
                 "offset-unclosed-slashy-interp-5k" to "x = /a\${\n".repeat(5_000),
                 "nested-closed-slashy-interp-5k" to ("/ \${ ".repeat(5_000) + " }".repeat(5_000)),
+                "repeated-succeeding-slashy-interp-4k" to ("/" + " \${ x = / }".repeat(4_000) + " /"),
                 "unclosed-dollar-slashy-10k" to ("def d = $/" + "a".repeat(12_000)),
                 "unclosed-block-comment-10k" to ("/* " + "*".repeat(12_000)),
                 "chained-division-2k" to ("10" + " / 2".repeat(2_500)),
@@ -396,16 +397,42 @@ class GroovySyntaxLexerTest {
 
     @Test
     fun preservesNestedSlashyStringInsideUnclosedNestedSlashyInterpolations() {
-        val code = "x = / \${ y = / \${ z = /b/ } }"
-        val tokens = assertValidSnippetHasNoInvalidTokens(GroovySyntaxLexer, code, "groovy-nested-slashy-interp")
+        fun assertSlashyLiteralPresent(code: String, literalText: String, label: String) {
+            val tokens = assertValidSnippetHasNoInvalidTokens(GroovySyntaxLexer, code, label)
+            val bodyToken = tokens.first { it.slice(code) == literalText }
+            assertEquals(SyntaxTokenKind.String, bodyToken.kind, "$label body")
+            val bodyIdx = tokens.indexOf(bodyToken)
+            assertEquals(SyntaxTokenKind.String, tokens[bodyIdx - 1].kind, "$label open")
+            assertEquals("/", tokens[bodyIdx - 1].slice(code), "$label open text")
+            assertEquals(SyntaxTokenKind.String, tokens[bodyIdx + 1].kind, "$label close")
+            assertEquals("/", tokens[bodyIdx + 1].slice(code), "$label close text")
+        }
 
-        val bToken = tokens.first { it.slice(code) == "b" }
-        assertEquals(SyntaxTokenKind.String, bToken.kind)
-        val bIndex = tokens.indexOf(bToken)
-        assertEquals(SyntaxTokenKind.String, tokens[bIndex - 1].kind)
-        assertEquals("/", tokens[bIndex - 1].slice(code))
-        assertEquals(SyntaxTokenKind.String, tokens[bIndex + 1].kind)
-        assertEquals("/", tokens[bIndex + 1].slice(code))
+        assertSlashyLiteralPresent("x = / \${ y = / \${ z = /b/ } }", "b", "closed-nested-interp")
+        assertSlashyLiteralPresent("x = / \${ y = /b/", "b", "open-single-frame")
+        assertSlashyLiteralPresent("x = / \${ y = / \${ z = /b/ }", "b", "open-nested-frames")
+        assertSlashyLiteralPresent("x = / \${ a = /c/ } \${ y = /b/", "c", "closed-then-open-first")
+        assertSlashyLiteralPresent("x = / \${ a = /c/ } \${ y = /b/", "b", "closed-then-open-second")
+
+        val backslashCases = """
+            def s = /a\${'$'}{b}/
+            def u = /a\\/b/
+        """.trimIndent()
+        val backslashTokens = assertValidSnippetHasNoInvalidTokens(
+            GroovySyntaxLexer,
+            backslashCases,
+            "groovy-slashy-backslash-escape",
+        )
+        assertTrue(backslashTokens.any { it.slice(backslashCases) == "\\" && it.kind == SyntaxTokenKind.String })
+        assertTrue(backslashTokens.any { it.slice(backslashCases) == "\\/" && it.kind == SyntaxTokenKind.String })
+        assertEquals(
+            SyntaxTokenKind.Plain,
+            backslashTokens.first { it.slice(backslashCases) == "b" && it.startIndex < backslashCases.indexOf("def u =") }.kind,
+        )
+        assertEquals(
+            SyntaxTokenKind.String,
+            backslashTokens.first { it.slice(backslashCases) == "b" && it.startIndex > backslashCases.indexOf("def u =") }.kind,
+        )
     }
 
     @Test
