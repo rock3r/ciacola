@@ -60,21 +60,18 @@ internal abstract class PowerShellLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun onDefaultRParen(subExprCloseType: Int) {
+        onBoundaryToken()
         val top = subExprStack.lastOrNull()
         if (top != null && _modeStack.size() == top.modeStackSize) {
             if (top.parenDepth > 0) {
                 top.parenDepth--
-                onNonBoundaryToken()
             } else {
                 subExprStack.removeAt(subExprStack.lastIndex)
                 if (!_modeStack.isEmpty) {
                     popMode()
                 }
                 type = subExprCloseType
-                onNonBoundaryToken()
             }
-        } else {
-            onNonBoundaryToken()
         }
     }
 

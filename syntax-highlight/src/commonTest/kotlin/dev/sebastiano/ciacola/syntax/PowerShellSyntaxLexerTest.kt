@@ -261,6 +261,53 @@ class PowerShellSyntaxLexerTest {
     }
 
     @Test
+    fun handlesArraySubexprInSubexprAndAdjacentInlineComments() {
+        val code = """
+            ${'$'}msg1 = "Items: ${'$'}(@(1, 2, 3) -join ', ') tail1"
+            ${'$'}msg2 = "Items: ${'$'}(@(1, 2) -join ", ") tail2"
+            ${'$'}x = ${'$'}(@(1, 2))
+            ${'$'}here = @"
+            Body ${'$'}(@(1, 2) -join ', ') after
+            "@# after-heredoc
+            function Foo { return 1 }# end-brace
+            ${'$'}y = (1 + 2)# sum-paren
+            ${'$'}z = ${'$'}arr[0]# first-brack
+            ${'$'}s1 = "hi"# dquote-comment don't break
+            ${'$'}s2 = 'hi'# squote-comment
+            ${'$'}lit = @'
+            raw
+            '@# after-lit-heredoc
+            echo foo#not-comment
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(PowerShellSyntaxLexer, code, "powershell-regressions")
+
+        assertTrue(tokens.any { it.slice(code) == " tail1" && it.kind == SyntaxTokenKind.String })
+        assertTrue(tokens.any { it.slice(code) == " tail2" && it.kind == SyntaxTokenKind.String })
+        assertTrue(tokens.any { it.slice(code) == " after" && it.kind == SyntaxTokenKind.String })
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "-join" }.kind)
+
+        for (comment in listOf(
+            "# after-heredoc",
+            "# end-brace",
+            "# sum-paren",
+            "# first-brack",
+            "# dquote-comment don't break",
+            "# squote-comment",
+            "# after-lit-heredoc",
+        )) {
+            assertTrue(
+                tokens.any { it.slice(code) == comment && it.kind == SyntaxTokenKind.Comment },
+                "Expected '$comment' to lex as Comment, got $tokens",
+            )
+        }
+
+        // Mid-word '#' must remain Plain, not Comment.
+        assertFalse(tokens.any { it.slice(code).contains("#not-comment") && it.kind == SyntaxTokenKind.Comment })
+        assertTrue(tokens.any { it.slice(code) == "#" && it.startIndex > code.indexOf("echo foo") && it.kind == SyntaxTokenKind.Plain })
+    }
+
+    @Test
     fun matchesDualOracleFixtures() {
         for (fixture in PowerShellOracleFixtures.all) {
             assertMatchesOracleFixture(fixture)

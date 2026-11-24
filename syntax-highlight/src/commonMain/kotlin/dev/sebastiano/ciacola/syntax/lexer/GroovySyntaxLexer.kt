@@ -213,12 +213,13 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
     val savedBraceTernaryDepths = ArrayList<Int>()
 
     val dropIndices = HashSet<Int>()
+    var lastEmittedVisible: RawGroovyToken? = null
     var i = 0
 
     while (i < visible.size) {
         val rawIdx = visible[i]
         val tok = raw[rawIdx]
-        val prev = if (i > 0) raw[visible[i - 1]] else null
+        val prev = lastEmittedVisible
         val next = if (i + 1 < visible.size) raw[visible[i + 1]] else null
         val wasAfterAnnotation = justEndedAnnotationArgs || prev?.kind == SyntaxTokenKind.Annotation
         justEndedAnnotationArgs = false
@@ -346,6 +347,7 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
         if (tok.type == GroovyTokens.AT && next != null) {
             if (next.type == GroovyTokens.INTERFACE) {
                 tok.kind = SyntaxTokenKind.Keyword
+                lastEmittedVisible = tok
                 i++
                 continue
             }
@@ -369,6 +371,7 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
                 if (j < visible.size && raw[visible[j]].type == GroovyTokens.LPAREN) {
                     annotationArgDepth = parenDepth + 1
                 }
+                lastEmittedVisible = raw[visible[j - 1]]
                 i = j
                 continue
             }
@@ -396,6 +399,7 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
                 tok.kind = SyntaxTokenKind.Keyword
                 dropIndices += visible[i + 1]
                 dropIndices += visible[i + 2]
+                lastEmittedVisible = tok
                 i += 3
                 continue
             }
@@ -424,6 +428,7 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
                     inTypeHeader = true
                     expectingDeclaredTypeName = true
                 }
+                lastEmittedVisible = tok
                 i++
                 continue
             }
@@ -431,6 +436,7 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
             if (expectingDeclaredTypeName) {
                 tok.kind = SyntaxTokenKind.Type
                 expectingDeclaredTypeName = false
+                lastEmittedVisible = tok
                 i++
                 continue
             }
@@ -445,6 +451,7 @@ private fun classifyAndEmitGroovyTokens(code: String, raw: MutableList<RawGroovy
             )
         }
 
+        lastEmittedVisible = tok
         i++
     }
 
@@ -614,6 +621,16 @@ private fun isGroovyDeclPredecessor(
     prevAfterAnnotation: Boolean,
 ): Boolean {
     if (prev == null || crossedNewline || prevAfterAnnotation) return true
+    if (prev.kind == SyntaxTokenKind.Keyword &&
+        prev.type != GroovyTokens.RETURN &&
+        prev.type != GroovyTokens.THROW &&
+        prev.type != GroovyTokens.IN &&
+        prev.type != GroovyTokens.INSTANCEOF &&
+        prev.type != GroovyTokens.CASE &&
+        prev.type != GroovyTokens.AS
+    ) {
+        return true
+    }
     return when (prev.type) {
         GroovyTokens.LBRACE,
         GroovyTokens.RBRACE,
@@ -678,7 +695,7 @@ private fun isGroovyTypeOrModifier(type: Int, text: String): Boolean = when (typ
     GroovyTokens.FINAL,
     GroovyTokens.STRICTFP,
     -> true
-    GroovyTokens.IDENTIFIER -> text == "trait" || text == "non" || text == "sealed"
+    GroovyTokens.IDENTIFIER -> text == "trait" || text == "record" || text == "non" || text == "sealed"
     else -> false
 }
 

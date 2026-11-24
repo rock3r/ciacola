@@ -326,12 +326,70 @@ class GroovySyntaxLexerTest {
                 "unclosed-dquote-10k" to ("def s = \"" + "a".repeat(12_000)),
                 "unclosed-tdquote-10k" to ("def s = \"\"\"" + "a".repeat(12_000)),
                 "unclosed-slashy-10k" to ("def r = /" + "a".repeat(12_000)),
+                "repeated-slashes-10k" to "/".repeat(10_000),
+                "repeated-slash-lines-5k" to "/a\n".repeat(5_000),
+                "nested-unclosed-slashy-interp-2k" to ("/\${".repeat(2_000) + "a".repeat(2_000)),
                 "unclosed-dollar-slashy-10k" to ("def d = $/" + "a".repeat(12_000)),
                 "unclosed-block-comment-10k" to ("/* " + "*".repeat(12_000)),
                 "chained-division-2k" to ("10" + " / 2".repeat(2_500)),
                 "deep-nested-gstring" to ("\"\${".repeat(150) + "x" + "}\"".repeat(150)),
             ),
         )
+    }
+
+    @Test
+    fun handlesContinuationDivisionGenericDivisionAndModifierChainedTypeHeaders() {
+        val code = """
+            def ratio = numerator
+                / denominator
+            def next = "code"
+
+            total
+                /= 2
+            def afterAssign = "ok"
+
+            def speed = dist as Quantity<Meter> / time / 2
+
+            @CompileStatic
+            sealed trait Describable permits BuildTask {
+                abstract String describe()
+            }
+            non-sealed trait OpenTrait {}
+            sealed record Pt(int x) {}
+        """.trimIndent()
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(GroovySyntaxLexer, code, "groovy-regressions")
+
+        val ratioSlashIdx = code.indexOf("/ denominator")
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.startIndex == ratioSlashIdx }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "code" }.kind)
+
+        assertEquals(SyntaxTokenKind.Operator, tokens.first { it.slice(code) == "/=" }.kind)
+        assertEquals(SyntaxTokenKind.String, tokens.first { it.slice(code) == "ok" }.kind)
+
+        val genericLineStart = code.indexOf("def speed =")
+        val genericLineTokens = tokens.filter {
+            it.startIndex > genericLineStart &&
+                it.startIndex < code.indexOf("@CompileStatic")
+        }
+        val genericSlashes = genericLineTokens.filter { it.slice(code) == "/" }
+        assertEquals(
+            2,
+            genericSlashes.size,
+            "Expected 2 '/' tokens in generic line, got tokens: " +
+                genericLineTokens.joinToString(", ") { "${it.kind}('${it.slice(code).replace("\n", "\\n")}')" },
+        )
+        assertTrue(genericSlashes.all { it.kind == SyntaxTokenKind.Operator })
+
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "sealed" }.kind)
+        assertEquals(2, tokens.count { it.slice(code) == "trait" && it.kind == SyntaxTokenKind.Keyword })
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "permits" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "Describable" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "BuildTask" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "non-sealed" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "OpenTrait" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "record" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "Pt" }.kind)
     }
 
     @Test

@@ -24,9 +24,11 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
     private var lastParenWasCondition: Boolean = false
     private var lastBraceAllowedSlashy: Boolean = true
     private var lastColonWasTernary: Boolean = false
+    private var lastGtWasGeneric: Boolean = false
     private var ternaryDepth: Int = 0
     private var parenDepth: Int = 0
     private var brackDepth: Int = 0
+    private var angleDepth: Int = 0
     private var sawNewlineSinceLastToken: Boolean = false
     private val parenConditionStack = ArrayList<Boolean>()
     private val braceAllowsSlashyStack = ArrayList<Boolean>()
@@ -34,6 +36,8 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
     private val savedParenTernaryDepthStack = ArrayList<Int>()
     private val savedBrackTernaryDepthStack = ArrayList<Int>()
     private val savedInterpTernaryDepthStack = ArrayList<Int>()
+    private val slashyCloseCache = HashMap<Int, Boolean>()
+    private var noSlashBeforeEofFrom: Int = Int.MAX_VALUE
 
     protected fun isAtStartOfInput(): Boolean = _tokenStartCharIndex == 0
 
@@ -64,19 +68,199 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         }
     }
 
-    protected fun isSlashyStart(): Boolean {
+    protected fun isExplicitSlashyPrefix(): Boolean {
         val next = _input.LA(1)
-        // '//' and '/*' are always line or block comments in Groovy, never slashy strings.
         if (next == '/'.code || next == '*'.code) return false
-        if (sawNewlineSinceLastToken && parenDepth == 0 && brackDepth == 0) {
-            return true
-        }
         return allowsSlashyAfterToken(
             type = lastNonHiddenType,
             text = lastNonHiddenText,
             lastParenWasCond = lastParenWasCondition,
             lastBraceAllowedSlashy = lastBraceAllowedSlashy,
+            lastGtWasGeneric = lastGtWasGeneric,
+        ) && hasClosingSlashyDelimiter()
+    }
+
+    protected fun isSlashyStart(): Boolean {
+        val next = _input.LA(1)
+        // '//' and '/*' are always line or block comments in Groovy, never slashy strings.
+        if (next == '/'.code || next == '*'.code) return false
+        val explicit = allowsSlashyAfterToken(
+            type = lastNonHiddenType,
+            text = lastNonHiddenText,
+            lastParenWasCond = lastParenWasCondition,
+            lastBraceAllowedSlashy = lastBraceAllowedSlashy,
+            lastGtWasGeneric = lastGtWasGeneric,
         )
+        if (!explicit) {
+            if (sawNewlineSinceLastToken && parenDepth == 0 && brackDepth == 0 &&
+                allowsSlashyAfterNewline(lastNonHiddenType)
+            ) {
+                return hasClosingSlashyDelimiter()
+            }
+            return false
+        }
+        return hasClosingSlashyDelimiter()
+    }
+
+    private fun allowsSlashyAfterNewline(prevType: Int): Boolean = when (prevType) {
+        // After an operand-ending token, a leading '/' on the next line is division/div-assign
+        // unless it followed a statement/block terminator.
+        GroovyLexer.Tokens.RBRACE,
+        GroovyLexer.Tokens.SEMI,
+        Token.INVALID_TYPE,
+        -> true
+        else -> false
+    }
+
+    /**
+     * Checks in amortized O(N) time (via [slashyCloseCache] and [noSlashBeforeEofFrom]) whether
+     * a `/` at [_tokenStartCharIndex] has a matching unescaped closing `/` before EOF.
+     */
+    private fun hasClosingSlashyDelimiter(): Boolean {
+        val entryPos = _tokenStartCharIndex
+        if (entryPos >= noSlashBeforeEofFrom) return false
+        slashyCloseCache[entryPos]?.let { return it }
+
+        var offset = 1
+        val baseIndex = _input.index()
+        var maxSlashPos = -1
+        // Tracks brace depth inside `${...}` interpolations; -1 means in slashy body.
+        var interpBraceDepth = -1
+        val nestedInterpSlashPositions = ArrayList<Int>()
+
+        while (true) {
+            val ch = _input.LA(offset)
+            if (ch == IntStream.EOF) break
+            val absPos = baseIndex + offset - 1
+
+            if (interpBraceDepth < 0) {
+                when (ch) {
+                    '/'.code -> {
+                        slashyCloseCache[entryPos] = true
+                        return true
+                    }
+                    '\\'.code -> {
+                        val next = _input.LA(offset + 1)
+                        offset += if (next == IntStream.EOF) 1 else 2
+                    }
+                    '$'.code -> {
+                        if (_input.LA(offset + 1) == '{'.code) {
+                            interpBraceDepth = 0
+                            offset += 2
+                        } else {
+                            offset++
+                        }
+                    }
+                    else -> offset++
+                }
+            } else {
+                when (ch) {
+                    '{'.code -> {
+                        interpBraceDepth++
+                        offset++
+                    }
+                    '}'.code -> {
+                        if (interpBraceDepth == 0) {
+                            interpBraceDepth = -1
+                            if (nestedInterpSlashPositions.isNotEmpty()) {
+                                nestedInterpSlashPositions.removeAt(nestedInterpSlashPositions.lastIndex)
+                            }
+                        } else {
+                            interpBraceDepth--
+                        }
+                        offset++
+                    }
+                    '"'.code -> {
+                        offset = skipQuotedInLookahead(offset, '"'.code)
+                    }
+                    '\''.code -> {
+                        offset = skipQuotedInLookahead(offset, '\''.code)
+                    }
+                    '/'.code -> {
+                        maxSlashPos = absPos
+                        val next = _input.LA(offset + 1)
+                        if (next == '/'.code) {
+                            offset += 2
+                            while (true) {
+                                val c = _input.LA(offset)
+                                if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) break
+                                offset++
+                            }
+                        } else if (next == '*'.code) {
+                            offset += 2
+                            while (true) {
+                                val c = _input.LA(offset)
+                                if (c == IntStream.EOF) break
+                                if (c == '*'.code && _input.LA(offset + 1) == '/'.code) {
+                                    offset += 2
+                                    break
+                                }
+                                offset++
+                            }
+                        } else if (next == '$'.code) {
+                            offset++
+                        } else {
+                            // Record `/${` inside `${...}` so repeated unclosed chains cache together.
+                            offset++
+                        }
+                    }
+                    '$'.code -> {
+                        if (_input.LA(offset + 1) == '{'.code) {
+                            // Look back 1 char: if this was `/${`, cache it if EOF is reached.
+                            if (offset >= 2 && _input.LA(offset - 1) == '/'.code) {
+                                nestedInterpSlashPositions.add(absPos - 1)
+                            }
+                            interpBraceDepth++
+                            offset += 2
+                        } else {
+                            offset++
+                        }
+                    }
+                    else -> offset++
+                }
+            }
+        }
+
+        slashyCloseCache[entryPos] = false
+        for (nestedPos in nestedInterpSlashPositions) {
+            slashyCloseCache[nestedPos] = false
+        }
+        if (maxSlashPos < entryPos) {
+            noSlashBeforeEofFrom = minOf(noSlashBeforeEofFrom, entryPos)
+        } else {
+            noSlashBeforeEofFrom = minOf(noSlashBeforeEofFrom, maxSlashPos + 1)
+        }
+        return false
+    }
+
+    private fun skipQuotedInLookahead(startOffset: Int, quoteCode: Int): Int {
+        var offset = startOffset + 1
+        val isTriple = _input.LA(offset) == quoteCode && _input.LA(offset + 1) == quoteCode
+        if (isTriple) {
+            offset += 2
+            while (true) {
+                val c = _input.LA(offset)
+                if (c == IntStream.EOF) return offset
+                if (c == '\\'.code) {
+                    offset += if (_input.LA(offset + 1) == IntStream.EOF) 1 else 2
+                } else if (c == quoteCode && _input.LA(offset + 1) == quoteCode && _input.LA(offset + 2) == quoteCode) {
+                    return offset + 3
+                } else {
+                    offset++
+                }
+            }
+        }
+        while (true) {
+            val c = _input.LA(offset)
+            if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) return offset
+            if (c == '\\'.code) {
+                offset += if (_input.LA(offset + 1) == IntStream.EOF) 1 else 2
+            } else if (c == quoteCode) {
+                return offset + 1
+            } else {
+                offset++
+            }
+        }
     }
 
     override fun reset() {
@@ -87,9 +271,11 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         lastParenWasCondition = false
         lastBraceAllowedSlashy = true
         lastColonWasTernary = false
+        lastGtWasGeneric = false
         ternaryDepth = 0
         parenDepth = 0
         brackDepth = 0
+        angleDepth = 0
         sawNewlineSinceLastToken = false
         parenConditionStack.clear()
         braceAllowsSlashyStack.clear()
@@ -97,6 +283,8 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         savedParenTernaryDepthStack.clear()
         savedBrackTernaryDepthStack.clear()
         savedInterpTernaryDepthStack.clear()
+        slashyCloseCache.clear()
+        noSlashBeforeEofFrom = Int.MAX_VALUE
     }
 
     override fun nextToken(): Token {
@@ -241,6 +429,54 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
 
             GroovyLexer.Tokens.SEMI -> {
                 ternaryDepth = 0
+                angleDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+                lastGtWasGeneric = false
+            }
+
+            GroovyLexer.Tokens.LT -> {
+                if (looksLikeGenericOpen(lastNonHiddenType)) {
+                    angleDepth++
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+                lastGtWasGeneric = false
+            }
+
+            GroovyLexer.Tokens.GT -> {
+                if (angleDepth > 0) {
+                    angleDepth--
+                    lastGtWasGeneric = true
+                } else {
+                    lastGtWasGeneric = false
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.RSHIFT -> {
+                if (angleDepth > 0) {
+                    angleDepth = (angleDepth - 2).coerceAtLeast(0)
+                    lastGtWasGeneric = true
+                } else {
+                    lastGtWasGeneric = false
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.URSHIFT -> {
+                if (angleDepth > 0) {
+                    angleDepth = (angleDepth - 3).coerceAtLeast(0)
+                    lastGtWasGeneric = true
+                } else {
+                    lastGtWasGeneric = false
+                }
                 lastParenWasCondition = false
                 lastBraceAllowedSlashy = false
                 lastColonWasTernary = false
@@ -250,12 +486,46 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                 lastParenWasCondition = false
                 lastBraceAllowedSlashy = false
                 lastColonWasTernary = false
+                lastGtWasGeneric = false
             }
         }
 
         lastNonHiddenType = tokType
         lastNonHiddenText = identText
         return tok
+    }
+
+    private fun looksLikeGenericOpen(prevType: Int): Boolean {
+        if (prevType != GroovyLexer.Tokens.IDENTIFIER &&
+            prevType != GroovyLexer.Tokens.DOT &&
+            prevType != GroovyLexer.Tokens.LT
+        ) {
+            return false
+        }
+        var offset = 1
+        var depth = 1
+        var nestedParens = 0
+        while (offset <= 64) {
+            val c = _input.LA(offset)
+            if (c == IntStream.EOF) return false
+            when (c) {
+                '('.code, '['.code -> nestedParens++
+                ')'.code, ']'.code -> {
+                    if (nestedParens == 0) return false
+                    nestedParens--
+                }
+                ';'.code, '{'.code, '}'.code, '='.code, '&'.code, '|'.code -> {
+                    if (nestedParens == 0) return false
+                }
+                '<'.code -> if (nestedParens == 0) depth++
+                '>'.code -> if (nestedParens == 0) {
+                    depth--
+                    if (depth == 0) return true
+                }
+            }
+            offset++
+        }
+        return false
     }
 
     private fun isHiddenTokenType(type: Int): Boolean = when (type) {
@@ -320,9 +590,16 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         text: String?,
         lastParenWasCond: Boolean,
         lastBraceAllowedSlashy: Boolean,
+        lastGtWasGeneric: Boolean,
     ): Boolean {
         if (type == GroovyLexer.Tokens.RPAREN) return lastParenWasCond
         if (type == GroovyLexer.Tokens.RBRACE) return lastBraceAllowedSlashy
+        if (type == GroovyLexer.Tokens.GT ||
+            type == GroovyLexer.Tokens.RSHIFT ||
+            type == GroovyLexer.Tokens.URSHIFT
+        ) {
+            return !lastGtWasGeneric
+        }
         return when (type) {
             Token.INVALID_TYPE,
             GroovyLexer.Tokens.LPAREN,

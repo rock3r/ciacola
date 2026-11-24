@@ -59,7 +59,7 @@ DQUOTE_START
     ;
 
 SINGLE_STRING
-    : '\'' ( '\'\'' | ~['] )* '\''? { onNonBoundaryToken(); }
+    : '\'' ( '\'\'' | ~['] )* '\''? { onBoundaryToken(); }
     ;
 
 // Subexpressions, arrays, hashtables, and variables
@@ -68,7 +68,7 @@ SUBEXPR_START
     ;
 
 ARRAY_SUBEXPR_START
-    : '@(' { onBoundaryToken(); }
+    : '@(' { onDefaultLParen(); }
     ;
 
 HASH_LITERAL_START
@@ -184,9 +184,9 @@ DASH_WORD
 LPAREN    : '(' { onDefaultLParen(); };
 RPAREN    : ')' { onDefaultRParen(Tokens.SUBEXPR_CLOSE); };
 LBRACE    : '{' { onBoundaryToken(); };
-RBRACE    : '}' { onNonBoundaryToken(); };
+RBRACE    : '}' { onBoundaryToken(); };
 LBRACK    : '[' { onBoundaryToken(); };
-RBRACK    : ']' { onNonBoundaryToken(); };
+RBRACK    : ']' { onBoundaryToken(); };
 SEMI      : ';' { onBoundaryToken(); };
 COMMA     : ',' { onBoundaryToken(); };
 DOT       : '.' { onBoundaryToken(); };
@@ -248,7 +248,7 @@ ERROR_CHAR
 mode PS_DQUOTE;
 
 DQ_ESCAPED_QUOTE  : '""' ;
-DQ_CLOSE          : '"' -> popMode ;
+DQ_CLOSE          : '"' { onBoundaryToken(); } -> popMode ;
 DQ_UNICODE_ESCAPE : '`u{' [0-9a-fA-F]+ '}' ;
 DQ_ESCAPE         : '`' . ;
 DQ_BACKTICK       : '`' ;
@@ -264,7 +264,7 @@ DQ_TEXT           : ~["`$]+ ;
 
 mode PS_HEREDOC_EXPAND;
 
-HE_CLOSE          : '"@' { isAtLineStart() }? -> popMode ;
+HE_CLOSE          : '"@' { isAtLineStart() }? { onBoundaryToken(); } -> popMode ;
 HE_UNICODE_ESCAPE : '`u{' [0-9a-fA-F]+ '}' ;
 HE_ESCAPE         : '`' . ;
 HE_BACKTICK       : '`' ;
@@ -283,7 +283,7 @@ HE_TEXT           : ~["`$\r\n]+ ;
 
 mode PS_HEREDOC_LITERAL;
 
-HL_CLOSE     : '\'@' { isAtLineStart() }? -> popMode ;
+HL_CLOSE     : '\'@' { isAtLineStart() }? { onBoundaryToken(); } -> popMode ;
 HL_NEWLINE   : '\r'? '\n' | '\r' ;
 HL_SQUOTE_AT : '\'@' ;
 HL_SQUOTE    : '\'' ;
