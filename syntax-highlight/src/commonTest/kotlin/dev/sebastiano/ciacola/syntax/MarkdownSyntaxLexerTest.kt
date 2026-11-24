@@ -1078,4 +1078,83 @@ class MarkdownSyntaxLexerTest {
         )
         assertTrue(tabBlankBqHtmlTokens.any { it.slice(tabBlankBqHtmlEnd) == "em" && it.kind == SyntaxTokenKind.Property })
     }
+
+    @Test
+    fun matchesClosingFencesRelativeToEnclosingListIndentation() {
+        // Ordered list fence (100. -> content indent 5): 5-space and 8-space closing fences close cleanly
+        val orderedListFence = "100. ~~~kotlin\n     val x = 1\n     ~~~\n# Heading\nAfter `inline`.\n"
+        val orderedTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            orderedListFence,
+            "md-list-fence-5-spaces",
+        )
+        assertTrue(orderedTokens.any { it.slice(orderedListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(orderedTokens.any { it.slice(orderedListFence) == "Heading" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(orderedTokens.any { it.slice(orderedListFence) == "`inline`" && it.kind == SyntaxTokenKind.String })
+
+        // Container indent 5 + 3 = 8 closes; 9 spaces does NOT close (remains inside JS fence body)
+        val orderedFenceBoundary = "100. ~~~js\n     const a = 1\n         ~~~\n     const b = 2\n        ~~~\n# Done\nAfter `ok`.\n"
+        val boundaryTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            orderedFenceBoundary,
+            "md-list-fence-indent-boundary",
+        )
+        assertTrue(boundaryTokens.any { it.slice(orderedFenceBoundary) == "a" })
+        assertTrue(
+            boundaryTokens.any {
+                it.slice(orderedFenceBoundary) == "const" &&
+                    it.startIndex == orderedFenceBoundary.indexOf("const b") &&
+                    it.kind == SyntaxTokenKind.Keyword
+            },
+        )
+        assertTrue(boundaryTokens.any { it.slice(orderedFenceBoundary) == "Done" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(boundaryTokens.any { it.slice(orderedFenceBoundary) == "`ok`" && it.kind == SyntaxTokenKind.String })
+
+        // Tab-indented closing fence inside ordered list (\t + space = 5 columns <= 8)
+        val tabClosingFence = "100. ~~~kotlin\n${'\t'} val t = 3\n${'\t'} ~~~\n# AfterTab\nAfter `tabok`.\n"
+        val tabTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            tabClosingFence,
+            "md-list-fence-tab-close",
+        )
+        assertTrue(tabTokens.any { it.slice(tabClosingFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tabTokens.any { it.slice(tabClosingFence) == "AfterTab" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tabTokens.any { it.slice(tabClosingFence) == "`tabok`" && it.kind == SyntaxTokenKind.String })
+
+        // Nested list fence (- 100. -> content indent 7): 7-space closing fence closes cleanly
+        val nestedListFence = "- 100. ```kotlin\n       val n = 4\n       ```\nAfter `nested`.\n"
+        val nestedTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            nestedListFence,
+            "md-nested-list-fence-close",
+        )
+        assertTrue(nestedTokens.any { it.slice(nestedListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(nestedTokens.any { it.slice(nestedListFence) == "`nested`" && it.kind == SyntaxTokenKind.String })
+
+        // Blockquoted ordered-list fence (> 100. -> list indent 5 inside blockquote)
+        val bqListFence = "> 100. ~~~kotlin\n>      val q = 5\n>      ~~~\n> After `bqlist`.\n"
+        val bqListTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            bqListFence,
+            "md-bq-ordered-list-fence",
+        )
+        assertTrue(bqListTokens.any { it.slice(bqListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(bqListTokens.any { it.slice(bqListFence) == "`bqlist`" && it.kind == SyntaxTokenKind.String })
+
+        // Top-level fence still rejects leading tab (4 cols > 3) as closing fence
+        val topLevelTabNotClose = "~~~js\nconst x = 1\n${'\t'}~~~\nconst y = 2\n~~~\nAfter `top`.\n"
+        val topTokens = assertValidSnippetHasNoInvalidTokens(
+            MarkdownSyntaxLexer,
+            topLevelTabNotClose,
+            "md-toplevel-tab-not-close",
+        )
+        assertTrue(
+            topTokens.any {
+                it.slice(topLevelTabNotClose) == "const" &&
+                    it.startIndex == topLevelTabNotClose.indexOf("const y") &&
+                    it.kind == SyntaxTokenKind.Keyword
+            },
+        )
+        assertTrue(topTokens.any { it.slice(topLevelTabNotClose) == "`top`" && it.kind == SyntaxTokenKind.String })
+    }
 }

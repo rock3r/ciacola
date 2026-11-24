@@ -35,6 +35,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private var justSawBlockquoteMarker: Boolean = false
     private var leadingIndent: Int = 0
     private var lineStreamCol: Int = 0
+    private var currentLineListIndent: Int = 0
     private var afterListMarker: Boolean = false
     private var canMatchTaskCheckbox: Boolean = false
     private var currentLineHasListMarker: Boolean = false
@@ -52,6 +53,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private var fenceChar: Int = 0
     private var fenceLen: Int = 0
     private var fenceBlockquoteDepth: Int = 0
+    private var fenceContainerIndent: Int = 0
     private var fenceLangEmitted: Boolean = false
 
     private var bqFenceSpacesAfterLastMarker: Int = 0
@@ -106,6 +108,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         justSawBlockquoteMarker = false
         leadingIndent = 0
         lineStreamCol = 0
+        currentLineListIndent = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
         currentLineHasListMarker = false
@@ -119,6 +122,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         fenceChar = 0
         fenceLen = 0
         fenceBlockquoteDepth = 0
+        fenceContainerIndent = 0
         fenceLangEmitted = false
         bqFenceSpacesAfterLastMarker = 0
         bqFenceJustSawMarker = false
@@ -241,6 +245,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun onFenceCloseNewline() {
+        fenceContainerIndent = 0
         prevLineWasParagraph = false
         prevLineBlockquoteDepth = 0
         prevLineWasIndentedCode = false
@@ -261,6 +266,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         justSawBlockquoteMarker = false
         leadingIndent = 0
         lineStreamCol = 0
+        currentLineListIndent = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
         currentLineHasListMarker = false
@@ -274,6 +280,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         val start = _tokenStartCharIndex
         val end = _input.index()
         val afterMarker = afterListMarker
+        val oldStreamCol = lineStreamCol
         var streamCol = lineStreamCol
         var col = 0
         var first = justSawBlockquoteMarker || afterMarker
@@ -313,6 +320,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 mode(indentedCodeModeId())
                 return
             }
+            currentLineListIndent += (streamCol - oldStreamCol)
             canMatchTaskCheckbox = true
             leadingIndent = col
             // Stay in DEFAULT_MODE so list items with 0..3 extra indent cols can nest blocks or checkboxes.
@@ -351,6 +359,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         justSawBlockquoteMarker = true
         leadingIndent = 0
         lineStreamCol++
+        currentLineListIndent = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
         currentLineHasListMarker = false
@@ -411,6 +420,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         fenceChar = fenceCh
         fenceLen = count
         fenceBlockquoteDepth = blockquoteDepth
+        fenceContainerIndent = if (currentLineHasListMarker) currentLineListIndent else 0
         fenceLangEmitted = false
         type = fenceOpenTokenType()
         mode(if (blockquoteDepth > 0) bqFenceInfoModeId() else fenceInfoModeId())
@@ -612,8 +622,14 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         currentLineIsParagraph = false
         currentLineAllowsNextIndentedCode = false
         currentLineHasOnlyBqAndWs = false
+        if (!currentLineHasListMarker) {
+            currentLineListIndent = leadingIndent
+        }
         currentLineHasListMarker = true
-        lineStreamCol += (_input.index() - _tokenStartCharIndex)
+        justSawBlockquoteMarker = false
+        val markerLen = _input.index() - _tokenStartCharIndex
+        currentLineListIndent += markerLen
+        lineStreamCol += markerLen
         afterListMarker = true
         canMatchTaskCheckbox = false
         type = listMarkerTokenType()
@@ -849,6 +865,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         fenceLangEmitted = false
         val nextPos = _input.index()
         if (nextPos >= _input.size()) {
+            fenceContainerIndent = 0
             resetLineState()
             mode(defaultModeId())
         } else if (isClosingFenceAt(nextPos)) {
@@ -872,12 +889,21 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private fun isClosingFenceAt(lineStart: Int): Boolean {
         val size = _input.size()
         var idx = lineStart
-        var spaces = 0
-        while (idx < size && spaces < 4 && codePointAtIndex(idx) == ' '.code) {
-            spaces++
-            idx++
+        val maxIndent = fenceContainerIndent + 3
+        var col = 0
+        while (idx < size && col <= maxIndent) {
+            val ch = codePointAtIndex(idx)
+            if (ch == ' '.code) {
+                col++
+                idx++
+            } else if (ch == '\t'.code) {
+                col += 4 - (col % 4)
+                idx++
+            } else {
+                break
+            }
         }
-        if (spaces > 3) return false
+        if (col > maxIndent) return false
         var count = 0
         while (idx < size && codePointAtIndex(idx) == fenceChar) {
             count++
@@ -902,6 +928,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         val nextPos = _input.index()
         if (nextPos >= _input.size() || !hasBlockquotePrefixAhead(nextPos, fenceBlockquoteDepth)) {
             fenceBlockquoteDepth = 0
+            fenceContainerIndent = 0
             prevLineWasParagraph = false
             prevLineBlockquoteDepth = 0
             prevLineWasIndentedCode = false
@@ -972,12 +999,13 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected fun handleBqFencePotentialClose() {
         val leadCh = codePointAtIndex(_tokenStartCharIndex)
         if (blockquoteDepth == fenceBlockquoteDepth &&
-            bqFenceSpacesAfterLastMarker <= 3 &&
+            bqFenceSpacesAfterLastMarker <= fenceContainerIndent + 3 &&
             leadCh == fenceChar &&
             isOnlyClosingFenceRest(_tokenStartCharIndex)
         ) {
             type = fenceCloseTokenType()
             fenceBlockquoteDepth = 0
+            fenceContainerIndent = 0
         } else {
             consumeBqFenceRestOfLine()
         }
@@ -1007,6 +1035,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onBqFenceBodyNewline() {
         if (fenceBlockquoteDepth == 0) {
+            fenceContainerIndent = 0
             prevLineWasParagraph = false
             prevLineBlockquoteDepth = 0
             prevLineWasIndentedCode = false
@@ -1019,6 +1048,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         val nextPos = _input.index()
         if (nextPos >= _input.size() || !hasBlockquotePrefixAhead(nextPos, fenceBlockquoteDepth)) {
             fenceBlockquoteDepth = 0
+            fenceContainerIndent = 0
             prevLineWasParagraph = false
             prevLineBlockquoteDepth = 0
             prevLineWasIndentedCode = false
@@ -1215,6 +1245,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             var tbFailStar = -1
             var tbFailUnder = -1
             var sawListMarker = false
+            var listContentIndent = 0
             var listIndentedCode = false
             val canSetextBeforeList = prevLineWasPara && !prevLineWasBlank && bqDepth == prevBqDepth
             while (col <= 3 && pos < size) {
@@ -1265,10 +1296,16 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     }
                 }
                 if (markerEnd < 0) break
+                if (!sawListMarker) {
+                    listContentIndent = col
+                }
                 sawListMarker = true
                 paraId++
-                streamCol += (markerEnd - pos)
+                val markerLen = markerEnd - pos
+                listContentIndent += markerLen
+                streamCol += markerLen
                 pos = markerEnd
+                val beforeWsStreamCol = streamCol
                 var postCol = 0
                 var firstAfterMarker = true
                 while (pos < size) {
@@ -1287,6 +1324,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                         break
                     }
                 }
+                listContentIndent += (streamCol - beforeWsStreamCol)
                 col = postCol
                 if (pos >= size || codePointAtIndex(pos) == '\r'.code || codePointAtIndex(pos) == '\n'.code) {
                     break
@@ -1325,7 +1363,14 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     val fenceCount = countSameChar(pos, size, firstCh)
                     if (fenceCount >= 3 && (firstCh == '~'.code || hasNoBacktickUntilEol(pos + fenceCount, size))) {
                         paraId++
-                        i = skipFencedBlockForBacktickIndex(pos + fenceCount, size, firstCh, fenceCount, bqDepth)
+                        i = skipFencedBlockForBacktickIndex(
+                            afterOpenerChars = pos + fenceCount,
+                            size = size,
+                            fChar = firstCh,
+                            fLen = fenceCount,
+                            bqDepth = bqDepth,
+                            containerIndent = if (sawListMarker) listContentIndent else 0,
+                        )
                         paraId++
                         prevBqDepth = bqDepth
                         prevLineWasBlank = false
@@ -1488,7 +1533,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         fChar: Int,
         fLen: Int,
         bqDepth: Int,
+        containerIndent: Int,
     ): Int {
+        val maxIndent = containerIndent + 3
         var idx = advancePastLine(afterOpenerChars, size)
         while (idx < size) {
             var pos = idx
@@ -1522,7 +1569,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 }
             }
             var spaces = 0
-            while (pos < size && spaces < 4) {
+            while (pos < size && spaces <= maxIndent) {
                 val ch = codePointAtIndex(pos)
                 if (ch == ' '.code) {
                     if (firstAfterMarker) firstAfterMarker = false else spaces++
@@ -1538,7 +1585,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     break
                 }
             }
-            if (spaces <= 3 && pos < size && codePointAtIndex(pos) == fChar) {
+            if (spaces <= maxIndent && pos < size && codePointAtIndex(pos) == fChar) {
                 val closeCount = countSameChar(pos, size, fChar)
                 if (closeCount >= fLen && isOnlyWsBeforeEolOrEofAt(pos + closeCount, size)) {
                     return advancePastLine(pos + closeCount, size)
