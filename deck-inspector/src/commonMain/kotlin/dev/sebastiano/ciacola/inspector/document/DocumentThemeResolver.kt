@@ -131,6 +131,7 @@ object DocumentThemeResolver {
             "code.type" to codePalette.type,
             "code.functionDeclaration" to codePalette.functionDeclaration,
             "code.functionCall" to codePalette.functionCall,
+            "code.function" to codePalette.functionCall,
             "code.property" to codePalette.property,
             "code.annotation" to codePalette.annotation,
             "code.punctuation" to codePalette.punctuation,
@@ -150,6 +151,8 @@ object DocumentThemeResolver {
                     "code.background" -> out["codeBackground"] = parsed
                     "codeForeground" -> out["code.foreground"] = parsed
                     "code.foreground" -> out["codeForeground"] = parsed
+                    "code.function" -> out["code.functionCall"] = parsed
+                    "code.functionCall" -> out["code.function"] = parsed
                 }
             }
         }

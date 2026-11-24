@@ -154,9 +154,11 @@ class DeckThemeTest {
             styles = mapOf(
                 SyntaxTokenKind.Keyword to SyntaxTokenStyle(foreground = SyntaxColor.fromRgb(0xFF, 0x00, 0x00), bold = true),
                 SyntaxTokenKind.Comment to SyntaxTokenStyle(foreground = SyntaxColor.fromRgb(0x88, 0x88, 0x88), italic = true),
+                SyntaxTokenKind.Function to SyntaxTokenStyle(foreground = SyntaxColor.fromRgb(0x55, 0xAA, 0xFF)),
                 SyntaxTokenKind.Attribute to SyntaxTokenStyle(foreground = SyntaxColor.fromRgb(0x00, 0xFF, 0x00), underline = true),
                 SyntaxTokenKind.Invalid to SyntaxTokenStyle(foreground = SyntaxColor.fromRgb(0xFF, 0x55, 0x55), strikethrough = true),
             ),
+            functionDeclaration = SyntaxTokenStyle(foreground = SyntaxColor.fromRgb(0xFF, 0xD1, 0x66), bold = true, italic = true),
         )
         val styledPalette = DeckCodePalette.fromScheme(styledScheme)
         val styledCodeStyle = styledPalette.toCodeStyle()
@@ -167,5 +169,14 @@ class DeckThemeTest {
         assertEquals(FontWeight.Bold, styledPalette.styleForWarpScope("keyword.control.kotlin").fontWeight)
         assertEquals(TextDecoration.Underline, styledPalette.styleForWarpScope("entity.other.attribute-name.xml").textDecoration)
         assertEquals(TextDecoration.LineThrough, styledPalette.styleForWarpScope("invalid.illegal.kotlin").textDecoration)
+
+        val fnDeclSpan = styledPalette.styleForWarpScope("entity.name.function.declaration.kotlin")
+        assertEquals(Color(0xFFFFD166), fnDeclSpan.color)
+        assertEquals(FontWeight.Bold, fnDeclSpan.fontWeight)
+        assertEquals(FontStyle.Italic, fnDeclSpan.fontStyle)
+
+        val fnCallSpan = styledPalette.styleForWarpScope("entity.name.function.call.kotlin")
+        assertEquals(Color(0xFF55AAFF), fnCallSpan.color)
+        assertNull(fnCallSpan.fontWeight)
     }
 }

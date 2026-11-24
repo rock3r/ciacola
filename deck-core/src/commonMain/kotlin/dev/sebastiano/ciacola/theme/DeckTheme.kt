@@ -130,6 +130,10 @@ data class DeckCodePalette(
                 style(SyntaxTokenKind.Number, number)
             scope.contains("constant.language") || scope.contains("constant") ->
                 style(SyntaxTokenKind.Constant, constant)
+            scope.contains("function.declaration") -> {
+                val fnDeclStyle = scheme?.effectiveFunctionDeclarationStyle()
+                fnDeclStyle?.toSpanStyle(functionDeclaration) ?: SpanStyle(color = functionDeclaration)
+            }
             scope.contains("function") -> style(SyntaxTokenKind.Function, functionCall)
             scope.contains("entity.name.type") || scope.contains("class") ->
                 style(SyntaxTokenKind.Type, type)

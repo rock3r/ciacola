@@ -249,7 +249,7 @@ internal fun pickCodeSchemeFile(): Path? {
     val dialog = FileDialog(null as Frame?, "Import IntelliJ or VS Code color scheme", FileDialog.LOAD)
     dialog.setFilenameFilter { _, name ->
         val lower = name.lowercase()
-        lower.endsWith(".icls") || lower.endsWith(".xml") || lower.endsWith(".json")
+        lower.endsWith(".icls") || lower.endsWith(".xml") || lower.endsWith(".json") || lower.endsWith(".jsonc")
     }
     dialog.isVisible = true
     val dir = dialog.directory

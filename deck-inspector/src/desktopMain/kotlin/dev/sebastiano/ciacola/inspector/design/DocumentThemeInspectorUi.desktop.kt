@@ -337,11 +337,12 @@ private fun CodeSchemeEditorSection(
                 modified = isModified,
                 label = "Code scheme",
                 tag = "ciacola-doc-theme-code-scheme-reset",
-                onReset = { controller.resetCodeScheme() },
+                onReset = if (controller.store.isReadOnly) null else ({ controller.resetCodeScheme() }),
                 resolvedTestTag = "ciacola-doc-theme-code-scheme-reset",
             )
             Text("Scheme", style = inspectorBodyStyle(), color = colors.text.info)
             Dropdown(
+                enabled = !controller.store.isReadOnly,
                 modifier = Modifier
                     .weight(1f)
                     .height(InspectorTokens.RowHeight)
@@ -403,9 +404,11 @@ private fun CodeSchemeEditorSection(
             OutlinedButton(
                 onClick = { onPickCodeSchemeFile()?.let { controller.importCodeSchemeFromFile(it) } },
                 enabled = !controller.store.isReadOnly,
-                modifier = Modifier.testTag("ciacola-doc-theme-code-scheme-import"),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ciacola-doc-theme-code-scheme-import"),
             ) {
-                Text("Import IJ / VS Code…", style = inspectorBodyStyle())
+                Text("Import IJ / VS Code\u2026", style = inspectorBodyStyle())
             }
         }
 

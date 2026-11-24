@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -18,6 +20,8 @@ import dev.sebastiano.ciacola.document.DeckDocumentStore
 import dev.sebastiano.ciacola.document.DeckLoadState
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.SlideSpec
+import dev.sebastiano.ciacola.document.SyncState
+import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
@@ -58,10 +62,15 @@ class CodeSchemeInspectorTest {
 
     @Test
     fun selectBundledSchemesUpdatesStoreStripsStaleOverridesAndSupportsUndoRedoReset() {
+        val cleanController = DocumentThemeInspectorController(
+            DeckDocumentStore(testDoc(colors = mapOf("accent" to "#FF6B5E")), initialLoad = DeckLoadState.Loaded),
+        )
+        assertFalse(cleanController.isCodeSchemeModified())
+
         val store = DeckDocumentStore(testDoc(), initialLoad = DeckLoadState.Loaded)
         val controller = DocumentThemeInspectorController(store)
 
-        assertFalse(controller.isCodeSchemeModified())
+        assertTrue(controller.isCodeSchemeModified())
         assertEquals(SyntaxColorSchemes.IntelliJIslandsDark.id, controller.activeCodeScheme().id)
 
         assertTrue(controller.selectBundledCodeScheme("github-dark"))
@@ -76,7 +85,7 @@ class CodeSchemeInspectorTest {
 
         assertTrue(store.canUndo)
         store.undo()
-        assertFalse(controller.isCodeSchemeModified())
+        assertTrue(controller.isCodeSchemeModified())
         assertEquals("#123456", store.document.themes["dark"]?.colors?.get("codeBackground"))
 
         store.redo()
@@ -86,6 +95,228 @@ class CodeSchemeInspectorTest {
         assertFalse(controller.isCodeSchemeModified())
         assertNull(store.document.themes["dark"]?.codeScheme)
         assertEquals(SyntaxColorSchemes.IntelliJIslandsDark.id, controller.activeCodeScheme().id)
+    }
+
+    @Test
+    fun fileImportEnforcesConfinementBoundedReadsStrictUtf8AndSafeErrors() {
+        val store = DeckDocumentStore(testDoc(), initialLoad = DeckLoadState.Loaded)
+        val controller = DocumentThemeInspectorController(store)
+        val tempDir = Files.createTempDirectory("ciacola-scheme-security")
+        try {
+            val themesDir = tempDir.resolve("themes").also { Files.createDirectory(it) }
+            val outsideSecret = tempDir.resolve("secret.json").apply {
+                Files.writeString(
+                    this,
+                    """{"name":"Secret","type":"dark","colors":{"editor.background":"#111111","editor.foreground":"#EEEEEE"}}""",
+                )
+            }
+
+            // 1. Relative VS Code "include" resolution + .jsonc import
+            val baseFile = themesDir.resolve("base-palette.jsonc")
+            Files.writeString(
+                baseFile,
+                """
+                {
+                  // base JSONC theme
+                  "colors": { "editor.background": "#1A1B26", "editor.foreground": "#C0CAF5", },
+                  "tokenColors": [
+                    { "scope": "keyword", "settings": { "foreground": "#BB9AF7" } },
+                  ],
+                }
+                """.trimIndent(),
+            )
+            val childFile = themesDir.resolve("tokyo-child.jsonc")
+            Files.writeString(
+                childFile,
+                """
+                {
+                  "name": "Tokyo Child",
+                  "type": "dark",
+                  "include": "./base-palette.jsonc",
+                  "tokenColors": [
+                    { "scope": "string", "settings": { "foreground": "#9ECE6A" } }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            assertTrue(controller.importCodeSchemeFromFile(childFile))
+            assertEquals("Imported 'Tokyo Child'", controller.lastCodeSchemeStatus)
+            val importedScheme = controller.activeCodeScheme()
+            assertEquals("#1A1B26", importedScheme.background.toHexRgb())
+            assertEquals("#BB9AF7", importedScheme.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            assertEquals("#9ECE6A", importedScheme.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+
+            // 2. Path-traversal include "../secret.json" rejected without leaking temp path
+            val revBefore = store.revision
+            val traversalFile = themesDir.resolve("traversal.json").apply {
+                Files.writeString(this, """{"name":"Bad","include":"../secret.json"}""")
+            }
+            assertFalse(controller.importCodeSchemeFromFile(traversalFile))
+            assertEquals(revBefore, store.revision)
+            val traversalStatus = assertNotNull(controller.lastCodeSchemeStatus)
+            assertFalse(traversalStatus.contains(tempDir.toString()), "Status must not leak path: $traversalStatus")
+
+            // 3. Symlink escape inside themesDir pointing outside rejected
+            val linkPath = themesDir.resolve("link-escape.json")
+            val createdSymlink = runCatching { Files.createSymbolicLink(linkPath, outsideSecret) }.isSuccess
+            if (createdSymlink) {
+                val symlinkIncludeFile = themesDir.resolve("via-symlink.json").apply {
+                    Files.writeString(this, """{"name":"Via Symlink","include":"./link-escape.json"}""")
+                }
+                assertFalse(controller.importCodeSchemeFromFile(symlinkIncludeFile))
+                assertEquals(revBefore, store.revision)
+            }
+
+            // 4. Directory and missing-file safe errors (no full path disclosure)
+            assertFalse(controller.importCodeSchemeFromFile(themesDir))
+            val dirStatus = assertNotNull(controller.lastCodeSchemeStatus)
+            assertTrue(dirStatus.contains("not a regular file"), dirStatus)
+            assertFalse(dirStatus.contains(tempDir.toString()), dirStatus)
+
+            val missingFile = themesDir.resolve("missing-theme.icls")
+            assertFalse(controller.importCodeSchemeFromFile(missingFile))
+            val missingStatus = assertNotNull(controller.lastCodeSchemeStatus)
+            assertTrue(missingStatus.contains("file not found"), missingStatus)
+            assertFalse(missingStatus.contains(tempDir.toString()), missingStatus)
+
+            // 5. Invalid UTF-8 bytes rejected cleanly
+            val badUtf8 = themesDir.resolve("bad-utf8.json")
+            Files.write(badUtf8, byteArrayOf(0x7B, 0xFF.toByte(), 0xFE.toByte(), 0x7D))
+            assertFalse(controller.importCodeSchemeFromFile(badUtf8))
+            val utf8Status = assertNotNull(controller.lastCodeSchemeStatus)
+            assertTrue(utf8Status.contains("invalid UTF-8"), utf8Status)
+            assertFalse(utf8Status.contains(tempDir.toString()), utf8Status)
+
+            // 6. Oversized > 4 MB file rejected cleanly
+            val hugeFile = themesDir.resolve("huge.json")
+            Files.write(hugeFile, ByteArray(4 * 1024 * 1024 + 8) { ' '.code.toByte() })
+            assertFalse(controller.importCodeSchemeFromFile(hugeFile))
+            val hugeStatus = assertNotNull(controller.lastCodeSchemeStatus)
+            assertTrue(hugeStatus.contains("exceeds 4 MB limit"), hugeStatus)
+            assertFalse(hugeStatus.contains(tempDir.toString()), hugeStatus)
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun statusClearsAcrossNavigationCodeOverridesStripAndDefaultSchemeNormalizes() {
+        val store = DeckDocumentStore(
+            testDoc(
+                colors = mapOf(
+                    "accent" to "#FF6B5E",
+                    "codeBackground" to "#112233",
+                    "code.keyword" to "#445566",
+                ),
+            ),
+            initialLoad = DeckLoadState.Loaded,
+        )
+        val controller = DocumentThemeInspectorController(store)
+
+        // Pre-existing code.* override marks code scheme as modified
+        assertTrue(controller.isCodeSchemeModified())
+
+        // Reset strips both codeBackground/codeForeground and code.* overrides
+        assertTrue(controller.resetCodeScheme())
+        assertFalse(controller.isCodeSchemeModified())
+        assertFalse("code.keyword" in store.document.themes["dark"]!!.colors)
+        assertFalse("codeBackground" in store.document.themes["dark"]!!.colors)
+        assertEquals("#FF6B5E", store.document.themes["dark"]!!.colors["accent"])
+
+        // Selecting a non-default scheme then picking the preset's own default normalizes codeScheme = null
+        assertTrue(controller.selectBundledCodeScheme("github-dark"))
+        assertTrue(controller.isCodeSchemeModified())
+        assertEquals("github-dark", store.document.themes["dark"]?.codeScheme)
+
+        assertTrue(controller.selectBundledCodeScheme("intellij-islands-dark"))
+        assertNull(store.document.themes["dark"]?.codeScheme)
+        assertFalse(controller.isCodeSchemeModified())
+
+        // Import status clears on selectTheme, setThemePreset, performUndo, performRedo
+        assertTrue(
+            controller.importCodeSchemeFromText(
+                """{"name":"Temp","type":"dark","colors":{"editor.background":"#101010","editor.foreground":"#EEEEEE"}}""",
+                fileName = "temp.json",
+            ),
+        )
+        assertNotNull(controller.lastCodeSchemeStatus)
+        controller.selectTheme("light")
+        assertNull(controller.lastCodeSchemeStatus)
+
+        controller.selectTheme("dark")
+        assertTrue(
+            controller.importCodeSchemeFromText(
+                """{"name":"Temp2","type":"dark","colors":{"editor.background":"#101010","editor.foreground":"#EEEEEE"}}""",
+                fileName = "temp2.json",
+            ),
+        )
+        assertNotNull(controller.lastCodeSchemeStatus)
+        assertTrue(controller.setThemePreset("keynoteLight"))
+        assertNull(controller.lastCodeSchemeStatus)
+
+        assertTrue(
+            controller.importCodeSchemeFromText(
+                """{"name":"Temp3","type":"dark","colors":{"editor.background":"#101010","editor.foreground":"#EEEEEE"}}""",
+                fileName = "temp3.json",
+            ),
+        )
+        assertNotNull(controller.lastCodeSchemeStatus)
+        controller.performUndo()
+        assertNull(controller.lastCodeSchemeStatus)
+
+        assertTrue(
+            controller.importCodeSchemeFromText(
+                """{"name":"Temp4","type":"dark","colors":{"editor.background":"#101010","editor.foreground":"#EEEEEE"}}""",
+                fileName = "temp4.json",
+            ),
+        )
+        controller.performUndo()
+        controller.performRedo()
+        assertNull(controller.lastCodeSchemeStatus)
+
+        // Verify DocumentThemeResolver bidirectional code.function <-> code.functionCall alias sync
+        val specFn = DeckThemeSpec(preset = "stageDark", colors = mapOf("code.function" to "#11AAFF"))
+        val mapFn = DocumentThemeResolver.resolveThemeColorMap(specFn)
+        assertEquals(Color(0xFF11AAFF), mapFn["code.function"])
+        assertEquals(Color(0xFF11AAFF), mapFn["code.functionCall"])
+
+        val specFnCall = DeckThemeSpec(preset = "stageDark", colors = mapOf("code.functionCall" to "#FFAA11"))
+        val mapFnCall = DocumentThemeResolver.resolveThemeColorMap(specFnCall)
+        assertEquals(Color(0xFFFFAA11), mapFnCall["code.functionCall"])
+        assertEquals(Color(0xFFFFAA11), mapFnCall["code.function"])
+    }
+
+    @Test
+    fun readOnlyStoreDisablesSchemeSelectorImportAndResetInUi() = runComposeUiTest {
+        val doc = testDoc(colors = mapOf("accent" to "#FF6B5E")).let { base ->
+            base.copy(
+                themes = base.themes + ("dark" to DeckThemeSpec(preset = "stageDark", codeScheme = "github-dark")),
+            )
+        }
+        val store = DeckDocumentStore(
+            doc,
+            initialLoad = DeckLoadState.Loaded,
+            initialSync = SyncState.ReadOnly("Read-only fixture"),
+        )
+        val controller = DocumentThemeInspectorController(store)
+
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(380.dp, 820.dp)) {
+                    DocumentThemeInspectorUi(
+                        controller = controller,
+                        onPickCodeSchemeFile = { null },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        onNodeWithTag("ciacola-doc-theme-code-scheme-selector", useUnmergedTree = true).assertIsNotEnabled()
+        onNodeWithTag("ciacola-doc-theme-code-scheme-import", useUnmergedTree = true).assertIsNotEnabled()
+        onNodeWithTag("ciacola-doc-theme-code-scheme-reset", useUnmergedTree = true).performClick()
+        waitForIdle()
+        assertEquals("github-dark", store.document.themes["dark"]?.codeScheme)
     }
 
     @Test
