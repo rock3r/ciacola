@@ -336,6 +336,8 @@ class GroovySyntaxLexerTest {
                 "unclosed-escaped-quote-in-slashy-interp-5k" to ("x = " + "/\${/\\'/+ ".repeat(5_000)),
                 "closed-block-comment-long-tail-slashy-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/ " + "a".repeat(20_000)),
                 "unclosed-line-comment-in-slashy-interp-5k" to ("x = " + "/\${/a//".repeat(5_000)),
+                "closed-block-comment-brace-tail-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/" + "{}".repeat(10_000)),
+                "closed-block-comment-interp-tail-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/" + "\${}".repeat(10_000)),
                 "unclosed-dollar-slashy-10k" to ("def d = $/" + "a".repeat(12_000)),
                 "unclosed-block-comment-10k" to ("/* " + "*".repeat(12_000)),
                 "chained-division-2k" to ("10" + " / 2".repeat(2_500)),

@@ -192,28 +192,22 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                     else -> offset++
                 }
             } else {
-                val isBraceBoundary =
-                    ch == '{'.code ||
-                        ch == '}'.code ||
-                        (ch == '$'.code && _input.LA(offset + 1) == '{'.code)
-                if (!isBraceBoundary) {
-                    val cachedFrameClose = inBraceCloseCache[absPos]
-                    if (cachedFrameClose != null) {
-                        if (cachedFrameClose < 0) {
-                            return finishSlashyLookahead(
-                                entryPos = entryPos,
-                                result = false,
-                                braceStack = braceStack,
-                                visitedOutside = visitedOutside,
-                                braceVisited = braceVisited,
-                            )
-                        }
-                        popBraceFrame(braceStack, braceVisitedStarts, braceVisited, cachedFrameClose)
-                        offset = cachedFrameClose - baseIndex + 2
-                        continue
+                val cachedFrameClose = inBraceCloseCache[absPos]
+                if (cachedFrameClose != null) {
+                    if (cachedFrameClose < 0) {
+                        return finishSlashyLookahead(
+                            entryPos = entryPos,
+                            result = false,
+                            braceStack = braceStack,
+                            visitedOutside = visitedOutside,
+                            braceVisited = braceVisited,
+                        )
                     }
-                    braceVisited.add(absPos)
+                    popBraceFrame(braceStack, braceVisitedStarts, braceVisited, cachedFrameClose)
+                    offset = cachedFrameClose - baseIndex + 2
+                    continue
                 }
+                braceVisited.add(absPos)
 
                 when (ch) {
                     '{'.code -> {
