@@ -206,6 +206,42 @@ class DartSyntaxLexerTest {
     }
 
     @Test
+    fun handlesShebangAndGetterAsyncAbstractMembersTypedefVoidAndMultilineImplements() {
+        val shebangCode = "#!/usr/bin/env dart\nvoid main() {}\n"
+        val shebangTokens = assertValidSnippetHasNoInvalidTokens(DartSyntaxLexer, shebangCode, "dart-shebang")
+        assertEquals(SyntaxTokenKind.Comment, shebangTokens.first { it.slice(shebangCode) == "#!/usr/bin/env dart" }.kind)
+        assertEquals(SyntaxTokenKind.Type, shebangTokens.first { it.slice(shebangCode) == "void" }.kind)
+        assertEquals(SyntaxTokenKind.Function, shebangTokens.first { it.slice(shebangCode) == "main" }.kind)
+
+        val code = """
+            abstract class C {
+              abstract int count;
+              abstract var x;
+              abstract void run();
+              Future<int> get value async => 42;
+              Stream<int> get stream async* {}
+              Iterable<int> get items sync* {}
+            }
+            typedef void Callback(int x);
+            class A
+              implements
+                C {}
+        """.trimIndent()
+        val tokens = assertValidSnippetHasNoInvalidTokens(DartSyntaxLexer, code, "dart-contextual-edge-cases")
+        val abstractTokens = tokens.filter { it.slice(code) == "abstract" }
+        assertEquals(4, abstractTokens.size)
+        for (tok in abstractTokens) {
+            assertEquals(SyntaxTokenKind.Keyword, tok.kind)
+        }
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "async" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.last { it.slice(code) == "async" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "sync" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "typedef" }.kind)
+        assertEquals(SyntaxTokenKind.Type, tokens.last { it.slice(code) == "void" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "implements" }.kind)
+    }
+
+    @Test
     fun recoversFromUnterminatedStringsCommentsAndHandlesBomCrlfUnicodeAndSurrogates() {
         val loneHigh = 0xD800.toChar()
         val loneLow = 0xDC00.toChar()

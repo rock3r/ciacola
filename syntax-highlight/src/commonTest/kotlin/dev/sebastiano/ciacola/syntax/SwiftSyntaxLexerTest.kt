@@ -249,6 +249,58 @@ class SwiftSyntaxLexerTest {
     }
 
     @Test
+    fun handlesShebangExtendedRegexEscapesBareRegexEdgeCasesAndSingleLineInterpRecovery() {
+        val shebangCode = "#!/usr/bin/env swift\nlet x = 1\n"
+        val shebangTokens = assertValidSnippetHasNoInvalidTokens(SwiftSyntaxLexer, shebangCode, "swift-shebang")
+        assertEquals(SyntaxTokenKind.Comment, shebangTokens.first { it.slice(shebangCode) == "#!/usr/bin/env swift" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, shebangTokens.first { it.slice(shebangCode) == "let" }.kind)
+
+        val extRegexCode = """
+            let r1 = #/a\/#b/#; let s = "ok"
+            let r2 = #/a\\/#; let x = 1
+            let r3 = #/
+              a\/#b
+              # comment /#
+            /#; let ok = true
+        """.trimIndent()
+        val extTokens = assertValidSnippetHasNoInvalidTokens(SwiftSyntaxLexer, extRegexCode, "swift-ext-regex-escapes")
+        assertEquals(SyntaxTokenKind.String, extTokens.first { it.slice(extRegexCode) == "#/a\\/#b/#" }.kind)
+        assertEquals(SyntaxTokenKind.String, extTokens.first { it.slice(extRegexCode) == "ok" }.kind)
+        assertEquals(SyntaxTokenKind.String, extTokens.first { it.slice(extRegexCode) == "#/a\\\\/#" }.kind)
+        assertEquals(SyntaxTokenKind.Number, extTokens.first { it.slice(extRegexCode) == "1" }.kind)
+        assertTrue(extTokens.any { it.slice(extRegexCode).contains("# comment /#") && it.kind == SyntaxTokenKind.String })
+        assertEquals(SyntaxTokenKind.Constant, extTokens.first { it.slice(extRegexCode) == "true" }.kind)
+
+        val bareEdgeCode = """
+            let r = a!/b!/2
+            let r1 = xs.reduce(64, /); let r2 = ys.reduce(64, /)
+            let ops: [(Int, Int) -> Int] = [(+), (/), (/)]
+            let trailingWs = a / b / c
+            let prefixBang = !/ok/.isEmpty
+            let trailSpace = /abc /
+        """.trimIndent()
+        val bareTokens = assertValidSnippetHasNoInvalidTokens(SwiftSyntaxLexer, bareEdgeCode, "swift-bare-regex-se0354")
+        val line1 = bareEdgeCode.indexOf("let r =")
+        assertEquals(SyntaxTokenKind.Operator, bareTokens.first { it.slice(bareEdgeCode) == "/" && it.startIndex > line1 }.kind)
+        val line2 = bareEdgeCode.indexOf("let r1 =")
+        assertEquals(SyntaxTokenKind.Operator, bareTokens.first { it.slice(bareEdgeCode) == "/" && it.startIndex > line2 }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, bareTokens.first { it.slice(bareEdgeCode) == "let" && it.startIndex > line2 + 10 }.kind)
+        val line3 = bareEdgeCode.indexOf("let ops:")
+        assertEquals(SyntaxTokenKind.Operator, bareTokens.first { it.slice(bareEdgeCode) == "/" && it.startIndex > line3 }.kind)
+        assertEquals(SyntaxTokenKind.String, bareTokens.first { it.slice(bareEdgeCode) == "/ok/" }.kind)
+        val trailSpacePos = bareEdgeCode.indexOf("let trailSpace =")
+        assertEquals(SyntaxTokenKind.Operator, bareTokens.first { it.slice(bareEdgeCode) == "/" && it.startIndex > trailSpacePos }.kind)
+
+        val unclosedInterpCode = "foo(\"unclosed \\(x\n) + \"real string\"\n\"unclosed2 \\(y\n" +
+            "a".repeat(600) + "\nlet after = 1"
+        val interpTokens = assertLosslessInvariants(SwiftSyntaxLexer, unclosedInterpCode, "swift-unclosed-interp-nextline")
+        assertEquals(SyntaxTokenKind.Operator, interpTokens.first { it.slice(unclosedInterpCode) == "+" }.kind)
+        assertEquals(SyntaxTokenKind.String, interpTokens.first { it.slice(unclosedInterpCode) == "real string" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, interpTokens.first { it.slice(unclosedInterpCode) == "let" }.kind)
+        assertEquals(SyntaxTokenKind.Number, interpTokens.last { it.slice(unclosedInterpCode) == "1" }.kind)
+    }
+
+    @Test
     fun distinguishesContextualKeywordsFromShadowedIdentifiers() {
         val code = """
             let actor = 1
@@ -328,6 +380,7 @@ class SwiftSyntaxLexerTest {
         val unclosedInterps = "\"\\(".repeat(500) + "x"
         val pathologicalRegex1 = "= " + "/ [ / ] ".repeat(2_000)
         val pathologicalRegex2 = "= " + "/ [ ".repeat(2_000)
+        val pathologicalRegexSingleClose = "/[".repeat(5_000) + "]"
         val unclosedExtRegex = "###/".repeat(1_500) + "abc"
         val repeatedDiv = "let x = a" + " / b".repeat(4_000)
 
@@ -340,6 +393,7 @@ class SwiftSyntaxLexerTest {
                 "unclosed-interps" to unclosedInterps,
                 "pathological-regex-brackets" to pathologicalRegex1,
                 "pathological-regex-unclosed-brackets" to pathologicalRegex2,
+                "pathological-regex-single-close-bracket" to pathologicalRegexSingleClose,
                 "unclosed-ext-regex" to unclosedExtRegex,
                 "repeated-division" to repeatedDiv,
             ),

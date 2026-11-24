@@ -9,8 +9,9 @@ import org.antlr.v4.kotlinruntime.Token
  * Pure Kotlin Multiplatform base lexer for [SwiftLexer], providing:
  * - iterative O(N) nested block comment scanning,
  * - arbitrary `#`-count extended string & regex delimiters with exact `\#(...)` interpolation,
- * - balanced single-line interpolation recovery on unclosed newlines, and
- * - O(N)-memoized bare `/.../` regex vs. division `/` disambiguation.
+ * - SE-0354 extended regex escape and multiline `#` comment / closing-line rules,
+ * - single-line interpolation recovery on unclosed newlines, and
+ * - O(N)-memoized SE-0354 bare `/.../` regex vs. division `/` disambiguation.
  */
 internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
 
@@ -26,11 +27,16 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
     private var lastNonHiddenType: Int = Token.INVALID_TYPE
     private var lastNonHiddenText: String? = null
     private var sawNewlineSinceLastNonHidden: Boolean = false
+    private var sawHiddenSinceLastNonHidden: Boolean = false
+    private var lastBangWasPrefix: Boolean = true
 
-    // O(N) memoization state for failed bare regex scans on pathological lines.
-    private val failedBareRegexOutside = HashSet<Int>()
+    // O(N) memoization state for bare regex validation on pathological lines.
+    private val failedBareRegexOutside = HashMap<Int, Int>()
+    private val bracketCloseCache = HashMap<Int, Int>()
     private var unclosedBracketFrom: Int = Int.MAX_VALUE
     private var unclosedBracketLineEnd: Int = -1
+    private var validatedBareRegexStart: Int = -1
+    private var validatedBareRegexEnd: Int = -1
 
     override fun reset() {
         super.reset()
@@ -38,9 +44,14 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
         lastNonHiddenType = Token.INVALID_TYPE
         lastNonHiddenText = null
         sawNewlineSinceLastNonHidden = false
+        sawHiddenSinceLastNonHidden = false
+        lastBangWasPrefix = true
         failedBareRegexOutside.clear()
+        bracketCloseCache.clear()
         unclosedBracketFrom = Int.MAX_VALUE
         unclosedBracketLineEnd = -1
+        validatedBareRegexStart = -1
+        validatedBareRegexEnd = -1
     }
 
     override fun nextToken(): Token {
@@ -48,11 +59,24 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
         val t = tok.type
         if (t != Token.EOF) {
             when {
-                isNewlineTokenType(t) -> sawNewlineSinceLastNonHidden = true
-                !isHiddenTokenType(t) -> {
+                isNewlineTokenType(t) -> {
+                    sawNewlineSinceLastNonHidden = true
+                    sawHiddenSinceLastNonHidden = true
+                }
+                isHiddenTokenType(t) -> {
+                    sawHiddenSinceLastNonHidden = true
+                }
+                else -> {
+                    if (isBangTokenType(t)) {
+                        lastBangWasPrefix = lastNonHiddenType == Token.INVALID_TYPE ||
+                            sawHiddenSinceLastNonHidden ||
+                            (lastNonHiddenType != rbraceTokenType() &&
+                                allowsBareRegexAfter(lastNonHiddenType, lastNonHiddenText, lastBangWasPrefix))
+                    }
                     lastNonHiddenType = t
                     lastNonHiddenText = if (isIdentTokenType(t)) tok.text else null
                     sawNewlineSinceLastNonHidden = false
+                    sawHiddenSinceLastNonHidden = false
                 }
             }
         }
@@ -62,7 +86,9 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
     protected abstract fun isHiddenTokenType(type: Int): Boolean
     protected abstract fun isNewlineTokenType(type: Int): Boolean
     protected abstract fun isIdentTokenType(type: Int): Boolean
-    protected abstract fun allowsBareRegexAfter(type: Int, text: String?): Boolean
+    protected abstract fun isBangTokenType(type: Int): Boolean
+    protected abstract fun rbraceTokenType(): Int
+    protected abstract fun allowsBareRegexAfter(type: Int, text: String?, lastBangWasPrefix: Boolean): Boolean
 
     protected abstract fun singleLineStringMode(): Int
     protected abstract fun multiLineStringMode(): Int
@@ -97,42 +123,89 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
 
     /**
      * Consumes an extended regex literal (`#/.../#`, `##/.../##`, including multiline `#/\n...\n/#`)
-     * in strictly O(N) time regardless of `#` count.
+     * in strictly O(N) time regardless of `#` count, honoring backslash escapes and SE-0354
+     * multiline `#` comments and standalone closing-line rules.
      */
     protected fun consumeExtendedRegex() {
         val hashes = (_input.index() - _tokenStartCharIndex - 1).coerceAtLeast(1)
         val first = _input.LA(1)
         val isMultiline = first == '\r'.code || first == '\n'.code
+        var onlyWhitespaceOnLine = true
+        var inCharClass = false
+
         while (_input.LA(1) != IntStream.EOF) {
             val ch = _input.LA(1)
             if (!isMultiline && (ch == '\r'.code || ch == '\n'.code)) {
                 return
             }
-            if (ch == '/'.code) {
-                _input.consume()
-                var matched = 0
-                while (matched < hashes && _input.LA(1) == '#'.code) {
+            when (ch) {
+                '\r'.code, '\n'.code -> {
                     _input.consume()
-                    matched++
+                    onlyWhitespaceOnLine = true
                 }
-                if (matched == hashes) {
-                    return
+                ' '.code, '\t'.code -> _input.consume()
+                '\\'.code -> {
+                    _input.consume()
+                    val esc = _input.LA(1)
+                    if (esc != IntStream.EOF && esc != '\r'.code && esc != '\n'.code) {
+                        _input.consume()
+                    }
+                    onlyWhitespaceOnLine = false
                 }
-            } else {
-                _input.consume()
+                '['.code -> {
+                    if (!inCharClass) inCharClass = true
+                    _input.consume()
+                    onlyWhitespaceOnLine = false
+                }
+                ']'.code -> {
+                    if (inCharClass) inCharClass = false
+                    _input.consume()
+                    onlyWhitespaceOnLine = false
+                }
+                '#'.code -> {
+                    if (isMultiline && !inCharClass) {
+                        // In multiline extended regex mode, unescaped `#` outside `[...]` starts a line comment.
+                        while (_input.LA(1) != IntStream.EOF && _input.LA(1) != '\r'.code && _input.LA(1) != '\n'.code) {
+                            _input.consume()
+                        }
+                    } else {
+                        _input.consume()
+                    }
+                    onlyWhitespaceOnLine = false
+                }
+                '/'.code -> {
+                    _input.consume()
+                    val canClose = !inCharClass && (!isMultiline || onlyWhitespaceOnLine)
+                    if (canClose) {
+                        var matched = 0
+                        while (matched < hashes && _input.LA(1) == '#'.code) {
+                            _input.consume()
+                            matched++
+                        }
+                        if (matched == hashes) {
+                            return
+                        }
+                    }
+                    onlyWhitespaceOnLine = false
+                }
+                else -> {
+                    _input.consume()
+                    onlyWhitespaceOnLine = false
+                }
             }
         }
     }
 
     /**
      * Returns `true` when `/` can begin a bare Swift 5.7+ `/.../` regex literal:
-     * expression-prefix context, not starting with space/tab/slash/star/newline,
-     * and closing cleanly on the same line (memoized in O(N) across pathological lines).
+     * expression-prefix context, valid opening character, balanced parentheses outside `[...]`,
+     * no unescaped trailing space/tab before `/`, and closing cleanly on the same line
+     * (memoized in strictly O(N) across pathological lines).
      */
     protected fun isBareRegexAllowed(): Boolean {
         val allowsContext = lastNonHiddenType == Token.INVALID_TYPE ||
             sawNewlineSinceLastNonHidden ||
-            allowsBareRegexAfter(lastNonHiddenType, lastNonHiddenText)
+            allowsBareRegexAfter(lastNonHiddenType, lastNonHiddenText, lastBangWasPrefix)
         if (!allowsContext) return false
 
         val next = _input.LA(1)
@@ -146,50 +219,107 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
         ) {
             return false
         }
-        return hasValidBareRegexCloseOnLine()
+        val baseIndex = _input.index()
+        val endOffset = findBareRegexEndOffset(baseIndex)
+        if (endOffset < 0) return false
+        validatedBareRegexStart = baseIndex
+        validatedBareRegexEnd = baseIndex + endOffset
+        return true
     }
 
-    private fun hasValidBareRegexCloseOnLine(): Boolean {
-        val baseIndex = _input.index()
+    protected fun consumeValidatedBareRegex() {
+        val current = _input.index()
+        if (validatedBareRegexStart == current && validatedBareRegexEnd > current) {
+            _input.seek(validatedBareRegexEnd)
+        }
+        validatedBareRegexStart = -1
+        validatedBareRegexEnd = -1
+    }
+
+    private fun findBareRegexEndOffset(baseIndex: Int): Int {
         var offset = 1
-        val visitedOutside = ArrayList<Int>()
+        var parenDepth = 0
+        var lastWasUnescapedSpaceOrTab = false
+        val visitedOutside = ArrayList<Pair<Int, Int>>()
+
+        fun recordFailure(extraMargin: Int) {
+            for ((pos, depthAtPos) in visitedOutside) {
+                val limit = if (extraMargin == Int.MAX_VALUE) Int.MAX_VALUE else depthAtPos + extraMargin
+                val existing = failedBareRegexOutside[pos]
+                if (existing == null || limit > existing) {
+                    failedBareRegexOutside[pos] = limit
+                }
+            }
+        }
+
         while (true) {
             val absPos = baseIndex + offset - 1
-            if (absPos in failedBareRegexOutside) {
-                for (pos in visitedOutside) failedBareRegexOutside.add(pos)
-                return false
+            val cachedDepth = failedBareRegexOutside[absPos]
+            if (cachedDepth != null && parenDepth <= cachedDepth) {
+                recordFailure(if (cachedDepth == Int.MAX_VALUE) Int.MAX_VALUE else cachedDepth - parenDepth)
+                return -1
             }
             val ch = _input.LA(offset)
             when (ch) {
                 IntStream.EOF, '\r'.code, '\n'.code -> {
-                    for (pos in visitedOutside) failedBareRegexOutside.add(pos)
-                    return false
+                    recordFailure(Int.MAX_VALUE)
+                    return -1
                 }
-                '/'.code -> return true
+                '/'.code -> {
+                    if (lastWasUnescapedSpaceOrTab) {
+                        recordFailure(Int.MAX_VALUE)
+                        return -1
+                    }
+                    return offset
+                }
+                '('.code -> {
+                    visitedOutside.add(absPos to parenDepth)
+                    parenDepth++
+                    lastWasUnescapedSpaceOrTab = false
+                    offset++
+                }
+                ')'.code -> {
+                    if (parenDepth == 0) {
+                        recordFailure(0)
+                        return -1
+                    }
+                    visitedOutside.add(absPos to parenDepth)
+                    parenDepth--
+                    lastWasUnescapedSpaceOrTab = false
+                    offset++
+                }
                 '\\'.code -> {
-                    visitedOutside.add(absPos)
+                    visitedOutside.add(absPos to parenDepth)
                     val esc = _input.LA(offset + 1)
                     if (esc == IntStream.EOF || esc == '\r'.code || esc == '\n'.code) {
-                        for (pos in visitedOutside) failedBareRegexOutside.add(pos)
-                        return false
+                        recordFailure(Int.MAX_VALUE)
+                        return -1
                     }
+                    lastWasUnescapedSpaceOrTab = false
                     offset += 2
                 }
                 '['.code -> {
-                    visitedOutside.add(absPos)
+                    visitedOutside.add(absPos to parenDepth)
                     if (absPos < unclosedBracketLineEnd && absPos >= unclosedBracketFrom) {
-                        for (pos in visitedOutside) failedBareRegexOutside.add(pos)
-                        return false
+                        recordFailure(Int.MAX_VALUE)
+                        return -1
                     }
                     val afterBracket = findCloseBracketOffset(baseIndex, offset + 1)
                     if (afterBracket < 0) {
-                        for (pos in visitedOutside) failedBareRegexOutside.add(pos)
-                        return false
+                        recordFailure(Int.MAX_VALUE)
+                        return -1
                     }
+                    lastWasUnescapedSpaceOrTab = false
                     offset = afterBracket
                 }
+                ' '.code, '\t'.code -> {
+                    visitedOutside.add(absPos to parenDepth)
+                    lastWasUnescapedSpaceOrTab = true
+                    offset++
+                }
                 else -> {
-                    visitedOutside.add(absPos)
+                    visitedOutside.add(absPos to parenDepth)
+                    lastWasUnescapedSpaceOrTab = false
                     offset++
                 }
             }
@@ -197,29 +327,50 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
     }
 
     private fun findCloseBracketOffset(baseIndex: Int, startOffset: Int): Int {
+        val openAbsPos = baseIndex + startOffset - 2
+        bracketCloseCache[openAbsPos]?.let { cachedCloseAbs ->
+            return if (cachedCloseAbs < 0) -1 else cachedCloseAbs - baseIndex + 2
+        }
+
+        val visitedBrackets = ArrayList<Int>()
+        visitedBrackets.add(openAbsPos)
         var offset = startOffset
         while (true) {
             val ch = _input.LA(offset)
             when (ch) {
                 IntStream.EOF, '\r'.code, '\n'.code -> {
                     val lineEnd = baseIndex + offset - 1
-                    val bracketStart = baseIndex + startOffset - 2
                     if (lineEnd > unclosedBracketLineEnd) {
                         unclosedBracketLineEnd = lineEnd
-                        unclosedBracketFrom = bracketStart
-                    } else if (bracketStart < unclosedBracketFrom) {
-                        unclosedBracketFrom = bracketStart
+                        unclosedBracketFrom = openAbsPos
+                    } else if (openAbsPos < unclosedBracketFrom) {
+                        unclosedBracketFrom = openAbsPos
                     }
+                    for (pos in visitedBrackets) bracketCloseCache[pos] = -1
                     return -1
                 }
                 '\\'.code -> {
                     val esc = _input.LA(offset + 1)
                     if (esc == IntStream.EOF || esc == '\r'.code || esc == '\n'.code) {
-                        return findCloseBracketOffset(baseIndex, offset + 1)
+                        offset += 1
+                    } else {
+                        offset += 2
                     }
-                    offset += 2
                 }
-                ']'.code -> return offset + 1
+                '['.code -> {
+                    val nestedAbs = baseIndex + offset - 1
+                    bracketCloseCache[nestedAbs]?.let { cachedCloseAbs ->
+                        for (pos in visitedBrackets) bracketCloseCache[pos] = cachedCloseAbs
+                        return if (cachedCloseAbs < 0) -1 else cachedCloseAbs - baseIndex + 2
+                    }
+                    visitedBrackets.add(nestedAbs)
+                    offset++
+                }
+                ']'.code -> {
+                    val closeAbs = baseIndex + offset - 1
+                    for (pos in visitedBrackets) bracketCloseCache[pos] = closeAbs
+                    return offset + 1
+                }
                 else -> offset++
             }
         }
@@ -281,7 +432,7 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
 
     protected fun onDefaultNewline() {
         val top = activeExprFrame() ?: return
-        if (!top.isMultiline && !hasBalancedSingleLineInterpOnLine()) {
+        if (!top.isMultiline) {
             unwindSingleLineStrings()
         }
     }
@@ -312,7 +463,6 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
         }
         when {
             hashes < top.hashCount -> {
-                // Fewer `#` than delimiter: leave any trailing char (e.g. closing `"`) in the stream.
                 val consumed = 1 + hashes
                 if (consumed < lexeme.length) {
                     _input.seek(_tokenStartCharIndex + consumed)
@@ -331,7 +481,6 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
                 }
             }
             else -> {
-                // `hashes > top.hashCount`: `\` + `top.hashCount` `#`s followed by the next `#` (escaped char).
                 val consumed = 1 + top.hashCount + 1
                 if (consumed < lexeme.length) {
                     _input.seek(_tokenStartCharIndex + consumed)
@@ -347,107 +496,6 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
     private fun activeExprFrame(): StringFrame? =
         stringStack.lastOrNull()?.takeIf { it.inExpression }
 
-    private fun hasBalancedSingleLineInterpOnLine(): Boolean {
-        val top = stringStack.lastOrNull() ?: return true
-        val afterParen = skipExprOnLine(1, top.parenDepth + 1, depth = 0)
-        if (afterParen < 0) return false
-        if (afterParen > SINGLE_LINE_LOOKAHEAD_LIMIT) return true
-        return scanSingleLineStringTailOnLine(afterParen, top.hashCount, depth = 0) > 0
-    }
-
-    private fun skipExprOnLine(startOffset: Int, initialParenDepth: Int, depth: Int): Int {
-        if (depth > MAX_LOOKAHEAD_DEPTH) return SINGLE_LINE_LOOKAHEAD_LIMIT + 1
-        var offset = startOffset
-        var parenDepth = initialParenDepth
-        while (offset <= SINGLE_LINE_LOOKAHEAD_LIMIT) {
-            val ch = _input.LA(offset)
-            if (ch == IntStream.EOF || ch == '\r'.code || ch == '\n'.code) {
-                return -1
-            }
-            when (ch) {
-                '('.code -> {
-                    parenDepth++
-                    offset++
-                }
-                ')'.code -> {
-                    parenDepth--
-                    offset++
-                    if (parenDepth == 0) return offset
-                }
-                '#'.code -> {
-                    var hashes = 0
-                    while (_input.LA(offset + hashes) == '#'.code && offset + hashes <= SINGLE_LINE_LOOKAHEAD_LIMIT) {
-                        hashes++
-                    }
-                    if (_input.LA(offset + hashes) == '"'.code) {
-                        offset = scanSingleLineStringTailOnLine(offset + hashes + 1, hashes, depth + 1)
-                        if (offset < 0) return -1
-                    } else {
-                        offset += hashes
-                    }
-                }
-                '"'.code -> {
-                    offset = scanSingleLineStringTailOnLine(offset + 1, 0, depth + 1)
-                    if (offset < 0) return -1
-                }
-                '/'.code -> {
-                    val next = _input.LA(offset + 1)
-                    when (next) {
-                        '/'.code -> return -1
-                        '*'.code -> {
-                            offset += 2
-                            while (offset <= SINGLE_LINE_LOOKAHEAD_LIMIT) {
-                                val c = _input.LA(offset)
-                                if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) return -1
-                                if (c == '*'.code && _input.LA(offset + 1) == '/'.code) {
-                                    offset += 2
-                                    break
-                                }
-                                offset++
-                            }
-                        }
-                        else -> offset++
-                    }
-                }
-                else -> offset++
-            }
-        }
-        return SINGLE_LINE_LOOKAHEAD_LIMIT + 1
-    }
-
-    private fun scanSingleLineStringTailOnLine(startOffset: Int, hashCount: Int, depth: Int): Int {
-        var offset = startOffset
-        while (offset <= SINGLE_LINE_LOOKAHEAD_LIMIT) {
-            when (_input.LA(offset)) {
-                IntStream.EOF, '\r'.code, '\n'.code -> return -1
-                '\\'.code -> {
-                    var hashes = 0
-                    while (_input.LA(offset + 1 + hashes) == '#'.code && offset + 1 + hashes <= SINGLE_LINE_LOOKAHEAD_LIMIT) {
-                        hashes++
-                    }
-                    if (hashes == hashCount && _input.LA(offset + 1 + hashes) == '('.code) {
-                        val afterExpr = skipExprOnLine(offset + 2 + hashes, 1, depth + 1)
-                        if (afterExpr < 0) return -1
-                        offset = afterExpr
-                    } else {
-                        offset += 2
-                    }
-                }
-                '"'.code -> {
-                    if (hashCount == 0) return offset + 1
-                    var matched = 0
-                    while (matched < hashCount && _input.LA(offset + 1 + matched) == '#'.code) {
-                        matched++
-                    }
-                    if (matched == hashCount) return offset + 1 + matched
-                    offset += 1 + matched
-                }
-                else -> offset++
-            }
-        }
-        return SINGLE_LINE_LOOKAHEAD_LIMIT + 1
-    }
-
     private fun unwindSingleLineStrings() {
         while (stringStack.isNotEmpty() && !stringStack.last().isMultiline) {
             val frame = stringStack.removeAt(stringStack.lastIndex)
@@ -455,10 +503,5 @@ internal abstract class SwiftLexerBase(input: CharStream) : Lexer(input) {
                 popMode()
             }
         }
-    }
-
-    private companion object {
-        const val SINGLE_LINE_LOOKAHEAD_LIMIT = 512
-        const val MAX_LOOKAHEAD_DEPTH = 6
     }
 }

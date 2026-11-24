@@ -68,6 +68,7 @@ private fun emitRawDartToken(
         DartTokens.NEWLINE ->
             out += RawDartToken(type, start, end, SyntaxTokenKind.Whitespace, isHidden = true, isNewline = true)
 
+        DartTokens.SHEBANG,
         DartTokens.DOC_LINE_COMMENT,
         DartTokens.LINE_COMMENT,
         DartTokens.BLOCK_COMMENT,
@@ -345,7 +346,14 @@ private fun classifyDartContextualKeyword(
             }
         }
 
-        "abstract",
+        "abstract" -> {
+            val validPrev = isDartStatementStart(prev, lineStart) || prevText in DART_CLASS_MODIFIERS || prevType == DartTokens.FINAL
+            val validNext = next != null && !nextOnNewline &&
+                (nextType == DartTokens.CLASS || nextType == DartTokens.FINAL ||
+                    nextType == DartTokens.VAR || nextType == DartTokens.VOID || nextType == DartTokens.IDENT)
+            if (validPrev && validNext) SyntaxTokenKind.Keyword else null
+        }
+
         "base",
         "interface",
         "sealed",
@@ -378,9 +386,9 @@ private fun classifyDartContextualKeyword(
             }
         }
 
-        "typedef",
-        "implements",
-        -> if (nextType == DartTokens.IDENT && !nextOnNewline) SyntaxTokenKind.Keyword else null
+        "typedef" -> if ((nextType == DartTokens.IDENT || nextType == DartTokens.VOID) && !nextOnNewline) SyntaxTokenKind.Keyword else null
+
+        "implements" -> if (nextType == DartTokens.IDENT) SyntaxTokenKind.Keyword else null
 
         "factory",
         "external",
@@ -430,7 +438,11 @@ private fun classifyDartContextualKeyword(
         "async",
         "sync",
         -> {
-            val validPrev = prevType == DartTokens.RPAREN || prevType == DartTokens.RBRACK
+            val isGetterTail = prevType == DartTokens.IDENT && index >= 2 &&
+                raw[visible[index - 2]].type == DartTokens.IDENT &&
+                raw[visible[index - 2]].kind == SyntaxTokenKind.Keyword &&
+                code.substring(raw[visible[index - 2]].start, raw[visible[index - 2]].end) == "get"
+            val validPrev = prevType == DartTokens.RPAREN || prevType == DartTokens.RBRACK || isGetterTail
             val validNext = nextType == DartTokens.STAR || nextType == DartTokens.LBRACE || nextType == DartTokens.FAT_ARROW
             if (validPrev && validNext) SyntaxTokenKind.Keyword else null
         }

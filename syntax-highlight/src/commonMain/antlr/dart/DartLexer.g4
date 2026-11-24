@@ -36,6 +36,10 @@ NEWLINE
       ) { onDefaultNewline(); }
     ;
 
+SHEBANG
+    : '#!' { _tokenStartCharIndex == 0 }? ~[\r\n]*
+    ;
+
 DOC_LINE_COMMENT
     : '///' ~[\r\n]*
     ;

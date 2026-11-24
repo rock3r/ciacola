@@ -24,6 +24,7 @@ tokens {
     override fun isHiddenTokenType(type: Int): Boolean =
         type == Tokens.WS ||
             type == Tokens.NEWLINE ||
+            type == Tokens.SHEBANG ||
             type == Tokens.DOC_LINE_COMMENT ||
             type == Tokens.LINE_COMMENT ||
             type == Tokens.BLOCK_COMMENT
@@ -32,18 +33,20 @@ tokens {
 
     override fun isIdentTokenType(type: Int): Boolean = type == Tokens.IDENT
 
-    override fun allowsBareRegexAfter(type: Int, text: String?): Boolean = when (type) {
+    override fun isBangTokenType(type: Int): Boolean = type == Tokens.BANG
+
+    override fun rbraceTokenType(): Int = Tokens.RBRACE
+
+    override fun allowsBareRegexAfter(type: Int, text: String?, lastBangWasPrefix: Boolean): Boolean = when (type) {
         Tokens.LPAREN,
         Tokens.LBRACK,
         Tokens.LBRACE,
-        Tokens.RBRACE,
         Tokens.COMMA,
         Tokens.SEMI,
         Tokens.COLON,
         Tokens.ASSIGN,
         Tokens.ARROW,
         Tokens.QUESTION,
-        Tokens.BANG,
         Tokens.TILDE,
         Tokens.PLUS,
         Tokens.MINUS,
@@ -105,6 +108,7 @@ tokens {
         Tokens.CATCH,
         -> true
 
+        Tokens.BANG -> lastBangWasPrefix
         Tokens.IDENT -> text == "await" || text == "consume" || text == "copy" || text == "yield"
         else -> false
     }
@@ -130,6 +134,10 @@ NEWLINE
       ) { onDefaultNewline(); }
     ;
 
+SHEBANG
+    : '#!' { _tokenStartCharIndex == 0 }? ~[\r\n]*
+    ;
+
 DOC_LINE_COMMENT
     : '///' ~[\r\n]*
     ;
@@ -147,10 +155,7 @@ EXTENDED_REGEX_LITERAL
     ;
 
 REGEX_LITERAL
-    : '/' { isBareRegexAllowed() }?
-      ( ~[/\\*\r\n \t[] | '\\' ~[\r\n] | '[' ( ~[\]\\\r\n] | '\\' ~[\r\n] )* ']' )
-      ( ~[/\\\r\n[] | '\\' ~[\r\n] | '[' ( ~[\]\\\r\n] | '\\' ~[\r\n] )* ']' )*
-      '/'
+    : '/' { isBareRegexAllowed() }? { consumeValidatedBareRegex(); }
     ;
 
 EXT_MULTILINE_STRING_START

@@ -68,6 +68,7 @@ private fun emitRawSwiftToken(
         SwiftTokens.NEWLINE ->
             out += RawSwiftToken(type, start, end, SyntaxTokenKind.Whitespace, isHidden = true, isNewline = true)
 
+        SwiftTokens.SHEBANG,
         SwiftTokens.DOC_LINE_COMMENT,
         SwiftTokens.LINE_COMMENT,
         SwiftTokens.BLOCK_COMMENT,
