@@ -6,8 +6,10 @@ import dev.bnorm.storyboard.C
 import dev.bnorm.storyboard.CSharp
 import dev.bnorm.storyboard.Cpp
 import dev.bnorm.storyboard.Css
+import dev.bnorm.storyboard.Dart
 import dev.bnorm.storyboard.Glsl
 import dev.bnorm.storyboard.Go
+import dev.bnorm.storyboard.Groovy
 import dev.bnorm.storyboard.Html
 import dev.bnorm.storyboard.Java
 import dev.bnorm.storyboard.JavaScript
@@ -15,11 +17,14 @@ import dev.bnorm.storyboard.Json
 import dev.bnorm.storyboard.Kotlin
 import dev.bnorm.storyboard.Language
 import dev.bnorm.storyboard.Php
+import dev.bnorm.storyboard.PowerShell
 import dev.bnorm.storyboard.Python
+import dev.bnorm.storyboard.Ruby
 import dev.bnorm.storyboard.Rust
 import dev.bnorm.storyboard.Shell
 import dev.bnorm.storyboard.Sksl
 import dev.bnorm.storyboard.Sql
+import dev.bnorm.storyboard.Swift
 import dev.bnorm.storyboard.Toml
 import dev.bnorm.storyboard.TypeScript
 import dev.bnorm.storyboard.Xml
@@ -60,8 +65,13 @@ class WarpLanguageResolutionTest {
             SyntaxLanguage.Shell to Shell,
             SyntaxLanguage.CSharp to CSharp,
             SyntaxLanguage.Php to Php,
+            SyntaxLanguage.Swift to Swift,
+            SyntaxLanguage.Ruby to Ruby,
+            SyntaxLanguage.Dart to Dart,
+            SyntaxLanguage.Groovy to Groovy,
+            SyntaxLanguage.PowerShell to PowerShell,
         )
-        assertEquals(22, expectedBySyntaxLanguage.size)
+        assertEquals(27, expectedBySyntaxLanguage.size)
         assertEquals(SyntaxLanguage.entries.toSet(), expectedBySyntaxLanguage.keys)
 
         for ((syntaxLang, expectedWarpLang) in expectedBySyntaxLanguage) {
@@ -116,8 +126,13 @@ class WarpLanguageResolutionTest {
             "zsh" to "if [[ -n \"${'$'}USER\" ]]; then echo \"hi ${'$'}USER\"; fi",
             "c#" to "[Serializable] public record User(string Name) { public int Id => 1; }",
             "phtml" to "<?php #[Route('/api')] function ok(int ${'$'}x): string { return \"v=${'$'}x\"; } ?>",
+            "swift" to "@MainActor struct Counter { var count = 0; let re = /\\d+/ }",
+            "gemspec" to "class Greeter\n  def greet(name) = \"Hello, #{name}!\"\nend",
+            "dart" to "sealed class Result { final int code = 200; }",
+            "gradle" to "@CompileStatic def greet(String s) { return \"hi ${'$'}s\" }",
+            "pwsh" to "function Get-Status { param([string]${'$'}Env = 'prod') return ${'$'}Env }",
         )
-        assertEquals(22, snippetsById.size)
+        assertEquals(27, snippetsById.size)
 
         for ((langId, code) in snippetsById) {
             val warpLang = resolveWarpLanguage(langId)

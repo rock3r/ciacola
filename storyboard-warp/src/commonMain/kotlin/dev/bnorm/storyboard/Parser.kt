@@ -17,7 +17,7 @@ interface Parser {
 /**
  * Parses [code] into line-indexed, syntax-scoped [Token]s for [language].
  *
- * All 22 built-in languages use ANTLR4 DFA lexers from `:syntax-highlight` in common code across
+ * All 27 built-in languages use ANTLR4 DFA lexers from `:syntax-highlight` in common code across
  * all targets (JVM, JS, and WasmJs) with no regular-expression grammar engines.
  */
 fun parse(code: String, language: Language): List<Token> = when (language) {
@@ -44,6 +44,11 @@ fun parse(code: String, language: Language): List<Token> = when (language) {
     Shell -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Shell)
     CSharp -> parseWithSyntaxLexer(code, language, SyntaxLanguage.CSharp)
     Php -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Php)
+    Swift -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Swift)
+    Ruby -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Ruby)
+    Dart -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Dart)
+    Groovy -> parseWithSyntaxLexer(code, language, SyntaxLanguage.Groovy)
+    PowerShell -> parseWithSyntaxLexer(code, language, SyntaxLanguage.PowerShell)
 }
 
 private fun parseWithSyntaxLexer(

@@ -31,6 +31,11 @@ public enum class SyntaxLanguage(
     Shell("shell", "source.shell", setOf("sh", "bash", "zsh", "shellscript", "shell-script")),
     CSharp("csharp", "source.cs", setOf("cs", "c#")),
     Php("php", "source.php", setOf("phtml")),
+    Swift("swift", "source.swift", emptySet()),
+    Ruby("ruby", "source.ruby", setOf("rb", "rake", "gemspec")),
+    Dart("dart", "source.dart", emptySet()),
+    Groovy("groovy", "source.groovy", setOf("gradle", "gvy")),
+    PowerShell("powershell", "source.powershell", setOf("ps1", "psm1", "psd1", "pwsh")),
     ;
 
     public companion object {

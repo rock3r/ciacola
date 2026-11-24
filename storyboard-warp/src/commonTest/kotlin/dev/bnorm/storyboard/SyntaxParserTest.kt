@@ -276,10 +276,15 @@ class SyntaxParserTest {
             LangSample(Shell, "if [[ -n \"${'$'}ENV\" ]]; then\n  echo \"ok\"\nfi", "if [[ -n \"${'$'}ENV\" ]]; then\n  echo \"ready\"\nfi", "if"),
             LangSample(CSharp, "public record Point(int X, int Y) {\n  public int Sum => X + Y;\n}", "public record Point(int X, int Y) {\n  public int Sum => X + Y + 1;\n}", "record"),
             LangSample(Php, "<?php\nfunction add(int ${'$'}a, int ${'$'}b): int {\n  return ${'$'}a + ${'$'}b;\n}", "<?php\nfunction add(int ${'$'}a, int ${'$'}b): int {\n  return ${'$'}a + ${'$'}b + 1;\n}", "function"),
+            LangSample(Swift, "struct Counter {\n  var count = 1\n  func next() -> Int { count + 1 }\n}", "struct Counter {\n  var count = 2\n  func next() -> Int { count + 2 }\n}", "struct"),
+            LangSample(Ruby, "class Greeter\n  def greet(name)\n    \"Hello, #{name}!\"\n  end\nend", "class Greeter\n  def greet(name)\n    \"Hi, #{name}!\"\n  end\nend", "def"),
+            LangSample(Dart, "sealed class Outcome {\n  final int code = 1;\n}", "sealed class Outcome {\n  final int code = 2;\n}", "sealed"),
+            LangSample(Groovy, "def compute(int x) {\n  return \"v=${'$'}x\"\n}", "def compute(int x) {\n  return \"val=${'$'}x\"\n}", "def"),
+            LangSample(PowerShell, "function Get-Count {\n  param([int]${'$'}Step = 1)\n  return ${'$'}Step\n}", "function Get-Count {\n  param([int]${'$'}Step = 2)\n  return ${'$'}Step\n}", "function"),
         )
 
-        assertEquals(22, samples.size)
-        assertEquals(22, samples.map { it.language }.toSet().size)
+        assertEquals(27, samples.size)
+        assertEquals(27, samples.map { it.language }.toSet().size)
 
         for (sample in samples) {
             val beforeTokens = assertLosslessAndWellFormed(sample.before, sample.language)

@@ -33,6 +33,11 @@ class DualOracleSuiteTest {
             addAll(shellOracleFixtures)
             addAll(CSharpOracleFixtures.all)
             addAll(PhpOracleFixtures.all)
+            addAll(SwiftOracleFixtures.all)
+            addAll(RubyOracleFixtures.all)
+            addAll(DartOracleFixtures.all)
+            addAll(GroovyOracleFixtures.all)
+            addAll(PowerShellOracleFixtures.all)
         }
         val coveredLanguages = allFixtures.map { it.language }.toSet()
         assertEquals(SyntaxLanguage.entries.toSet(), coveredLanguages)
@@ -155,6 +160,31 @@ class DualOracleSuiteTest {
     @Test
     fun phpMatchesDualOracle() {
         assertAllOracleFixtures(PhpOracleFixtures.all)
+    }
+
+    @Test
+    fun swiftMatchesDualOracle() {
+        assertAllOracleFixtures(SwiftOracleFixtures.all)
+    }
+
+    @Test
+    fun rubyMatchesDualOracle() {
+        assertAllOracleFixtures(RubyOracleFixtures.all)
+    }
+
+    @Test
+    fun dartMatchesDualOracle() {
+        assertAllOracleFixtures(DartOracleFixtures.all)
+    }
+
+    @Test
+    fun groovyMatchesDualOracle() {
+        assertAllOracleFixtures(GroovyOracleFixtures.all)
+    }
+
+    @Test
+    fun powerShellMatchesDualOracle() {
+        assertAllOracleFixtures(PowerShellOracleFixtures.all)
     }
 
     @Test
