@@ -122,6 +122,7 @@ class DeckDocumentStore(
     assetExists: ((String) -> Boolean)? = null,
 ) {
     private val stateLock = Any()
+    private val incrementalValidator = IncrementalDeckValidator()
     private val explicitValidator: ((DeckDocument) -> List<DocumentIssue>)? = validator
     private var validationSpecimens: DeckSpecimenRegistry = specimens
     private var validationEffects: BuildEffectRegistry = effects
@@ -214,13 +215,16 @@ class DeckDocumentStore(
         val (specimens, effects, assets) = withDocumentLock(stateLock) {
             Triple(validationSpecimens, validationEffects, validationAssetExists)
         }
-        return DeckDocumentCodec.validate(
+        return incrementalValidator.validate(
             document = doc,
             specimens = specimens,
             effects = effects,
             assetExists = assets,
         )
     }
+
+    internal fun lastValidationStatsForTesting(): IncrementalValidationStats =
+        incrementalValidator.lastStatsForTesting()
 
     /**
      * Atomically applies [transform] as one undoable edit (`begin` + `update` + `commit`).
@@ -326,6 +330,7 @@ class DeckDocumentStore(
         readOnlyReason: String? = null,
         issues: List<DocumentIssue>? = null,
     ) {
+        incrementalValidator.clear()
         val resolvedIssues = issues ?: validateDocument(doc)
         mutateState {
             invalidateActiveTransactionLocked()

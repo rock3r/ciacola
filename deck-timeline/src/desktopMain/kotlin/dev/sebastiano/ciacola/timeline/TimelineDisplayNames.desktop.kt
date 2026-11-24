@@ -23,6 +23,8 @@ internal object TimelineDisplayNames {
     private val WhitespaceRunRegex = Regex("\\s+")
     private val CamelBoundaryRegex = Regex("([a-z0-9])([A-Z])")
     private val DelimiterRunRegex = Regex("[-_.]+")
+    private val MarkdownPunctuationRegex = Regex("\\*+|`+|~~|__")
+    private val MarkdownHeadingPrefixRegex = Regex("(?m)^\\s*#+\\s*")
 
     /** `Base` for beat 0, `Build N` afterwards. */
     fun beatLabel(beatIndex: Int): String = DeckDisplayNames.beatDisplayName(beatIndex)
@@ -38,8 +40,19 @@ internal object TimelineDisplayNames {
     }
 
     /** Drops raw markdown punctuation (`**`, `__`, backticks, leading `#`) so excerpts read as prose. */
-    fun stripMarkdownPunctuation(text: String): String =
-        text.replace(Regex("\\*+|`+|~~|__"), "").replace(Regex("(?m)^\\s*#+\\s*"), "").trim()
+    fun stripMarkdownPunctuation(text: String): String {
+        var hasMarkdownChar = false
+        for (i in 0 until text.length) {
+            when (text[i]) {
+                '*', '`', '~', '_', '#' -> {
+                    hasMarkdownChar = true
+                    break
+                }
+            }
+        }
+        if (!hasMarkdownChar) return text.trim()
+        return text.replace(MarkdownPunctuationRegex, "").replace(MarkdownHeadingPrefixRegex, "").trim()
+    }
 
     /** Trims and collapses whitespace, ellipsizing anything longer than [maxChars]. */
     fun excerpt(text: String, maxChars: Int = EXCERPT_MAX_CHARS): String {
