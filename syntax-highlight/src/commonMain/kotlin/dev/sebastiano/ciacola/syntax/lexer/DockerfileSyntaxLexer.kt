@@ -70,13 +70,30 @@ private fun emitRawDfToken(
         DfTokens.BACKTICK_LINE_CONT,
         DfTokens.NEWLINE,
         DfTokens.DQ_NEWLINE,
+        DfTokens.DQ_AFTER_COMMENT_NEWLINE,
         DfTokens.PE_WS,
+        DfTokens.PE_BACKSLASH_LINE_CONT,
+        DfTokens.PE_BACKTICK_LINE_CONT,
+        DfTokens.PE_NEWLINE,
         DfTokens.HL_NEWLINE,
         DfTokens.HE_NEWLINE,
         -> out += RawDfToken(type, start, end, SyntaxTokenKind.Whitespace, isHidden = true)
 
         DfTokens.COMMENT ->
             out += RawDfToken(type, start, end, SyntaxTokenKind.Comment, isHidden = true)
+
+        DfTokens.DQ_COMMENT -> {
+            var wsEnd = start
+            while (wsEnd < end && (source[wsEnd] == ' ' || source[wsEnd] == '\t')) {
+                wsEnd++
+            }
+            if (wsEnd > start) {
+                out += RawDfToken(DfTokens.WS, start, wsEnd, SyntaxTokenKind.Whitespace, isHidden = true)
+            }
+            if (wsEnd < end) {
+                out += RawDfToken(DfTokens.COMMENT, wsEnd, end, SyntaxTokenKind.Comment, isHidden = true)
+            }
+        }
 
         DfTokens.HEREDOC_OPEN -> {
             val opLen = if (start + 2 < end && source[start + 2] == '-') 3 else 2
@@ -104,6 +121,8 @@ private fun emitRawDfToken(
         DfTokens.PE_PARAM_EXP_OPEN,
         DfTokens.HE_PARAM_EXP_OPEN,
         DfTokens.PARAM_EXP_CLOSE,
+        DfTokens.PE_LBRACE,
+        DfTokens.PE_RBRACE,
         DfTokens.LBRACK,
         DfTokens.RBRACK,
         DfTokens.LPAREN,
@@ -144,6 +163,7 @@ private fun emitRawDfToken(
         DfTokens.DQ_DOLLAR,
         DfTokens.DQ_BS_LITERAL,
         DfTokens.DQ_BT_LITERAL,
+        DfTokens.DQ_HASH,
         DfTokens.PE_DQUOTE_OPEN,
         DfTokens.SINGLE_STRING,
         DfTokens.PE_SINGLE_STRING,
@@ -231,9 +251,12 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
     val paramExpBraceDepthStack = ArrayList<Int>()
     var seenJsonOpen = false
     var afterFlagEq = false
+    var inFlagPosition = false
+    var inFlagValue = false
     var pendingHeredocCount = 0
     var continuationPending = false
     var commentLineInContinuation = false
+    var atLineStartInClassifier = true
 
     val result = ArrayList<RawDfToken>(raw.size)
 
@@ -249,6 +272,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         afterArgEq = false
         seenJsonOpen = false
         afterFlagEq = false
+        inFlagPosition = false
+        inFlagValue = false
         continuationPending = false
         commentLineInContinuation = false
     }
@@ -259,6 +284,9 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
 
         if (tok.type == SYNTHETIC_HEREDOC_OP) {
             pendingHeredocCount++
+            atLineStartInClassifier = false
+            inFlagPosition = false
+            inFlagValue = false
             result += tok
             i++
             continue
@@ -267,8 +295,10 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         if (tok.type == DfTokens.BACKSLASH_LINE_CONT || tok.type == DfTokens.BACKTICK_LINE_CONT) {
             continuationPending = true
             commentLineInContinuation = false
+            atLineStartInClassifier = true
             if (paramExpNeedsIdentStack.isEmpty()) {
                 afterArgEq = false
+                inFlagValue = false
             }
             result += tok
             i++
@@ -279,6 +309,7 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             if (continuationPending) {
                 commentLineInContinuation = true
             }
+            atLineStartInClassifier = false
             result += tok
             i++
             continue
@@ -291,6 +322,7 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             if (pendingHeredocCount == 0) {
                 // Next line starts a fresh Dockerfile instruction once the final heredoc closes.
                 resetInstructionState()
+                atLineStartInClassifier = true
             }
             result += tok
             i++
@@ -299,18 +331,42 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
 
         if (tok.type == DfTokens.NEWLINE ||
             tok.type == DfTokens.DQ_NEWLINE ||
+            tok.type == DfTokens.DQ_AFTER_COMMENT_NEWLINE ||
+            tok.type == DfTokens.PE_NEWLINE ||
             tok.type == DfTokens.HL_NEWLINE ||
             tok.type == DfTokens.HE_NEWLINE
         ) {
-            if (commentLineInContinuation && tok.type == DfTokens.NEWLINE) {
+            if (tok.type == DfTokens.DQ_AFTER_COMMENT_NEWLINE) {
+                result += tok
+                i++
+                continue
+            }
+            if (tok.type == DfTokens.PE_NEWLINE) {
+                paramExpNeedsIdentStack.clear()
+                paramExpBraceDepthStack.clear()
+                if (pendingHeredocCount == 0) {
+                    resetInstructionState()
+                    atLineStartInClassifier = true
+                }
+                result += tok
+                i++
+                continue
+            }
+            if (tok.type == DfTokens.NEWLINE && (commentLineInContinuation || (continuationPending && atLineStartInClassifier))) {
                 commentLineInContinuation = false
+                atLineStartInClassifier = true
                 result += tok
                 i++
                 continue
             }
             continuationPending = false
+            atLineStartInClassifier = true
             val isDefaultModeNewline = tok.type == DfTokens.NEWLINE || tok.type == DfTokens.DQ_NEWLINE
             if (paramExpNeedsIdentStack.isEmpty() && isDefaultModeNewline && pendingHeredocCount == 0) {
+                resetInstructionState()
+            } else if (tok.type == DfTokens.DQ_NEWLINE && pendingHeredocCount == 0) {
+                paramExpNeedsIdentStack.clear()
+                paramExpBraceDepthStack.clear()
                 resetInstructionState()
             }
             result += tok
@@ -321,11 +377,14 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
         if (tok.isHidden) {
             if (tok.type == DfTokens.WS && paramExpNeedsIdentStack.isEmpty()) {
                 afterArgEq = false
+                inFlagValue = false
             }
             result += tok
             i++
             continue
         }
+
+        atLineStartInClassifier = false
 
         if (tok.type == DfTokens.PARAM_EXP_OPEN ||
             tok.type == DfTokens.DQ_PARAM_EXP_OPEN ||
@@ -343,6 +402,10 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             val topIdx = paramExpNeedsIdentStack.lastIndex
             if (tok.type == DfTokens.PE_LBRACE) {
                 paramExpBraceDepthStack[topIdx] = paramExpBraceDepthStack[topIdx] + 1
+            } else if (tok.type == DfTokens.PE_RBRACE) {
+                if (paramExpBraceDepthStack[topIdx] > 0) {
+                    paramExpBraceDepthStack[topIdx] = paramExpBraceDepthStack[topIdx] - 1
+                }
             } else if (tok.type == DfTokens.PARAM_EXP_CLOSE) {
                 if (paramExpBraceDepthStack[topIdx] > 0) {
                     paramExpBraceDepthStack[topIdx] = paramExpBraceDepthStack[topIdx] - 1
@@ -379,6 +442,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
                 afterArgEq = false
                 seenJsonOpen = false
                 afterFlagEq = false
+                inFlagValue = false
+                inFlagPosition = upper != "ONBUILD"
                 // ONBUILD nests a full instruction immediately on the same logical line.
                 atInstructionStart = upper == "ONBUILD"
                 result += tok
@@ -394,6 +459,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             if (upper == "CMD" || upper == "NONE") {
                 tok.kind = SyntaxTokenKind.Keyword
                 inHealthcheckHeader = false
+                inFlagPosition = false
+                inFlagValue = false
                 if (upper == "CMD") {
                     inShellCommand = true
                 }
@@ -405,26 +472,41 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
 
         if (inFromInstruction && tok.type == DfTokens.WORD && text.equals("AS", ignoreCase = true)) {
             tok.kind = SyntaxTokenKind.Keyword
+            inFlagPosition = false
+            inFlagValue = false
             result += tok
             i++
             continue
         }
 
         if (tok.type == DfTokens.FLAG) {
-            afterFlagEq = isNextNonHiddenText(raw, source, i + 1, "=")
+            if (inFlagPosition) {
+                afterFlagEq = isNextNonHiddenText(raw, source, i + 1, "=")
+                inFlagValue = false
+            } else {
+                tok.kind = SyntaxTokenKind.Plain
+                afterFlagEq = false
+            }
             result += tok
             i++
             continue
         }
 
         if (tok.type == DfTokens.OP && text == "=") {
-            afterFlagEq = false
+            if (afterFlagEq) {
+                afterFlagEq = false
+                inFlagValue = true
+            }
             if (currentInstruction == "ARG") {
                 afterArgEq = true
             }
             result += tok
             i++
             continue
+        }
+
+        if (!inFlagValue) {
+            inFlagPosition = false
         }
 
         if (tok.type == DfTokens.LBRACK) {
@@ -436,7 +518,8 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
 
         // Key=Value instructions (ARG / ENV / LABEL) & BuildKit --mount=type=cache,target=... keys.
         if (tok.type == DfTokens.WORD) {
-            if (!inLegacyEnvValue && isNextNonHiddenText(raw, source, i + 1, "=")) {
+            val allowsKeyBeforeEq = (inKeyValueInstruction && !inLegacyEnvValue) || inFlagValue
+            if (allowsKeyBeforeEq && isNextNonHiddenText(raw, source, i + 1, "=")) {
                 tok.kind = SyntaxTokenKind.Property
                 if (currentInstruction != "ARG") {
                     expectLegacyKey = false
@@ -482,10 +565,6 @@ private fun classifyDockerfileTokens(source: String, raw: MutableList<RawDfToken
             }
         }
 
-        if (afterFlagEq && tok.type == DfTokens.COMMA) {
-            afterFlagEq = false
-        }
-
         result += tok
         i++
     }
@@ -503,7 +582,12 @@ private fun isNextNonHiddenText(
     var idx = startIndex
     while (idx < raw.size) {
         val tok = raw[idx]
-        if (tok.type == DfTokens.NEWLINE || tok.type == DfTokens.HL_NEWLINE || tok.type == DfTokens.HE_NEWLINE) {
+        if (tok.type == DfTokens.NEWLINE ||
+            tok.type == DfTokens.DQ_NEWLINE ||
+            tok.type == DfTokens.PE_NEWLINE ||
+            tok.type == DfTokens.HL_NEWLINE ||
+            tok.type == DfTokens.HE_NEWLINE
+        ) {
             return false
         }
         if (!tok.isHidden) {

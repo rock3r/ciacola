@@ -4,9 +4,13 @@ import dev.sebastiano.ciacola.syntax.lexer.HclSyntaxLexer
 import dev.sebastiano.ciacola.syntax.oracle.HclOracleFixtures
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class HclSyntaxLexerTest {
+
+    @Test
+    fun matchesDualOracleFixtures() {
+        assertAllOracleFixtures(HclOracleFixtures.all)
+    }
 
     @Test
     fun classifiesHcl2BlocksIdentifiersHyphensOperatorsAndTypes() {

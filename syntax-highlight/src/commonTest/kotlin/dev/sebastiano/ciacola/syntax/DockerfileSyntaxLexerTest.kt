@@ -10,6 +10,11 @@ import kotlin.test.assertTrue
 class DockerfileSyntaxLexerTest {
 
     @Test
+    fun matchesDualOracleFixtures() {
+        assertAllOracleFixtures(DockerfileOracleFixtures.all)
+    }
+
+    @Test
     fun classifiesParserDirectivesCaseInsensitiveInstructionsAndFlags() {
         val code = """
             # syntax=docker/dockerfile:1
@@ -65,7 +70,7 @@ class DockerfileSyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Keyword, firstKind("run"))
         assertEquals(SyntaxTokenKind.Attribute, firstKind("--mount"))
         assertEquals(SyntaxTokenKind.Keyword, firstKind("expose"))
-        assertEquals(SyntaxTokenKind.Number, firstKind("8080"))
+        assertEquals(SyntaxTokenKind.Number, firstKind("8080", after = code.indexOf("expose")))
         assertEquals(SyntaxTokenKind.Constant, firstKind("tcp"))
         assertEquals(SyntaxTokenKind.Number, firstKind("53"))
         assertEquals(SyntaxTokenKind.Constant, firstKind("udp"))
@@ -105,6 +110,14 @@ class DockerfileSyntaxLexerTest {
         val nonContCode = "# escape=`\nRUN echo \\\nFROM alpine\n"
         val nonContTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, nonContCode, "dockerfile-non-cont")
         assertEquals(SyntaxTokenKind.Keyword, nonContTokens.first { it.slice(nonContCode) == "FROM" }.kind)
+
+        // Late `# escape=` after FROM must NOT switch the escape character away from `\`.
+        val lateEscapeCode = "FROM alpine\n# escape=`\nRUN echo ` \nFROM busybox\n"
+        val lateEscapeTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, lateEscapeCode, "dockerfile-late-escape")
+        assertEquals(
+            SyntaxTokenKind.Keyword,
+            lateEscapeTokens.first { it.slice(lateEscapeCode) == "FROM" && it.startIndex > 0 }.kind,
+        )
     }
 
     @Test
@@ -219,6 +232,105 @@ class DockerfileSyntaxLexerTest {
     }
 
     @Test
+    fun handlesParamExpBracesUnclosedExpansionsSingleQuotedContinuationsAndDQuoteComments() {
+        val paramBracesCode = "ENV CFG=${'$'}{CFG:-{}}\nFROM alpine\n"
+        val paramBracesTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            paramBracesCode,
+            "dockerfile-param-exp-braces",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, paramBracesTokens.first { it.slice(paramBracesCode) == "FROM" }.kind)
+
+        val unclosedParamCode = "ENV A=${'$'}{UNCLOSED\nFROM alpine\n"
+        val unclosedParamTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            unclosedParamCode,
+            "dockerfile-unclosed-param",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, unclosedParamTokens.first { it.slice(unclosedParamCode) == "FROM" }.kind)
+
+        val unclosedParamInHeredoc = "RUN <<EOF\necho ${'$'}{UNCLOSED\nEOF\nFROM alpine\n"
+        val unclosedParamHeredocTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            unclosedParamInHeredoc,
+            "dockerfile-unclosed-param-heredoc",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, unclosedParamHeredocTokens.first { it.slice(unclosedParamInHeredoc) == "EOF" && it.startIndex > unclosedParamInHeredoc.indexOf("UNCLOSED") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, unclosedParamHeredocTokens.first { it.slice(unclosedParamInHeredoc) == "FROM" }.kind)
+
+        val heredocInterpCommentCode = "RUN <<EOF\necho \"${'$'}{HOME}\"\nEOF\n# see <<NOTE\n# don't\nFROM alpine\n"
+        val heredocInterpCommentTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            heredocInterpCommentCode,
+            "dockerfile-heredoc-interp-comment",
+        )
+        assertEquals(SyntaxTokenKind.Comment, heredocInterpCommentTokens.first { it.slice(heredocInterpCommentCode) == "# see <<NOTE" }.kind)
+        assertEquals(SyntaxTokenKind.Comment, heredocInterpCommentTokens.first { it.slice(heredocInterpCommentCode) == "# don't" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, heredocInterpCommentTokens.first { it.slice(heredocInterpCommentCode) == "FROM" }.kind)
+
+        val heredocTrailingBackslash = "RUN <<EOF\nline ending with \\\nEOF\nFROM alpine\n"
+        val heredocTrailingBsTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            heredocTrailingBackslash,
+            "dockerfile-heredoc-trailing-bs",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, heredocTrailingBsTokens.last { it.slice(heredocTrailingBackslash) == "EOF" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, heredocTrailingBsTokens.first { it.slice(heredocTrailingBackslash) == "FROM" }.kind)
+
+        val singleContBs = "RUN echo 'deb http://x \\\n    stable main' > f\nFROM alpine\n"
+        val singleContBsTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, singleContBs, "dockerfile-single-cont-bs")
+        assertEquals(SyntaxTokenKind.String, singleContBsTokens.first { it.slice(singleContBs).startsWith("'deb") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, singleContBsTokens.first { it.slice(singleContBs) == "FROM" }.kind)
+
+        val singleContBt = "# escape=`\nRUN echo 'deb http://x `\n    stable main' > f\nFROM alpine\n"
+        val singleContBtTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, singleContBt, "dockerfile-single-cont-bt")
+        assertEquals(SyntaxTokenKind.String, singleContBtTokens.first { it.slice(singleContBt).startsWith("'deb") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, singleContBtTokens.first { it.slice(singleContBt) == "FROM" }.kind)
+
+        val blankLineCont = "RUN echo a \\\n\n    \n    && echo b\nFROM alpine\n"
+        val blankContTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, blankLineCont, "dockerfile-blank-cont")
+        val echoToks = blankContTokens.filter { it.slice(blankLineCont) == "echo" }
+        assertEquals(2, echoToks.size)
+        assertTrue(echoToks.all { it.kind == SyntaxTokenKind.Function })
+        assertEquals(SyntaxTokenKind.Keyword, blankContTokens.first { it.slice(blankLineCont) == "FROM" }.kind)
+
+        val dquoteCommentCont = "RUN echo \"hello \\\n    # dquote comment\n    world\"\nFROM alpine\n"
+        val dqCommentTokens = assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, dquoteCommentCont, "dockerfile-dq-comment-cont")
+        assertEquals(SyntaxTokenKind.Comment, dqCommentTokens.first { it.slice(dquoteCommentCont) == "# dquote comment" }.kind)
+        assertEquals(SyntaxTokenKind.String, dqCommentTokens.first { it.slice(dquoteCommentCont).contains("world") }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, dqCommentTokens.first { it.slice(dquoteCommentCont) == "FROM" }.kind)
+    }
+
+    @Test
+    fun restrictsHeredocsAndFlagsAndKeyValueAssignmentsByPosition() {
+        val falseHeredocCode = "RUN echo ${'$'}((x<<y))\nENV A=<<EOF\nFROM alpine\n"
+        val falseHeredocTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            falseHeredocCode,
+            "dockerfile-no-false-heredoc",
+        )
+        assertEquals(SyntaxTokenKind.Keyword, falseHeredocTokens.first { it.slice(falseHeredocCode) == "ENV" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, falseHeredocTokens.first { it.slice(falseHeredocCode) == "FROM" }.kind)
+
+        val shellEqAndFlagsCode = """
+            RUN --mount=type=cache,target=/cache apt-get install --no-install-recommends curl
+            RUN [ x = y ]
+            COPY --from=builder /a /b
+        """.trimIndent() + "\n"
+        val shellEqTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            shellEqAndFlagsCode,
+            "dockerfile-position-flags-eq",
+        )
+        assertEquals(SyntaxTokenKind.Attribute, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "--mount" }.kind)
+        assertEquals(SyntaxTokenKind.Property, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "type" }.kind)
+        assertEquals(SyntaxTokenKind.Property, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "target" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "--no-install-recommends" }.kind)
+        assertEquals(SyntaxTokenKind.Plain, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "x" }.kind)
+        assertEquals(SyntaxTokenKind.Attribute, shellEqTokens.first { it.slice(shellEqAndFlagsCode) == "--from" }.kind)
+    }
+
+    @Test
     fun handlesBomCrlfUnicodeAndLoneSurrogatesLosslessly() {
         val loneHigh = 0xD800.toChar()
         val loneLow = 0xDC00.toChar()
@@ -248,12 +360,14 @@ class DockerfileSyntaxLexerTest {
 
     @Test
     fun lexesUnclosedHeredocsAndQuotesInLinearTime() {
+        val unclosedParam = "RUN echo \${VAR:-" + "{a:".repeat(2_000)
+        assertValidSnippetHasNoInvalidTokens(DockerfileSyntaxLexer, unclosedParam, "dockerfile-unclosed-param-valid")
         assertLinearPerformance(
             lexer = DockerfileSyntaxLexer,
             pathologicalInputs = listOf(
                 "unclosed-heredoc-4k" to ("RUN <<EOF\n" + "echo \${VAR:-a/b/c}\n".repeat(2_000)),
                 "unclosed-dquote-4k" to ("LABEL a=\"" + "hello \${X} ".repeat(2_000)),
-                "unclosed-param-exp-4k" to ("RUN echo \${VAR:-" + "{a:".repeat(2_000)),
+                "unclosed-param-exp-4k" to unclosedParam,
                 "continuations-4k" to ("RUN echo 1 \\\n" + "    # comment\n    && echo 2 \\\n".repeat(1_000) + "    && true\n"),
             ),
             maxMillisPerInput = 300L,

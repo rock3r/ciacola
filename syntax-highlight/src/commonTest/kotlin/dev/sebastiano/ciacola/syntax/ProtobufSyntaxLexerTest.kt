@@ -4,9 +4,13 @@ import dev.sebastiano.ciacola.syntax.lexer.ProtobufSyntaxLexer
 import dev.sebastiano.ciacola.syntax.oracle.ProtobufOracleFixtures
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class ProtobufSyntaxLexerTest {
+
+    @Test
+    fun matchesDualOracleFixtures() {
+        assertAllOracleFixtures(ProtobufOracleFixtures.all)
+    }
 
     @Test
     fun classifiesProto2Proto3EditionsAndAllKeywordCategories() {
@@ -167,6 +171,25 @@ class ProtobufSyntaxLexerTest {
         }
         assertEquals(SyntaxTokenKind.Constant, angleTokens.first { it.slice(angleOptionCode) == "true" }.kind)
         assertEquals(SyntaxTokenKind.Constant, angleTokens.first { it.slice(angleOptionCode) == "false" }.kind)
+
+        val importOptionCode = "edition = \"2024\";\nimport option \"foo.proto\";\n"
+        val importOptionTokens = assertValidSnippetHasNoInvalidTokens(ProtobufSyntaxLexer, importOptionCode, "protobuf-import-option")
+        assertEquals(SyntaxTokenKind.Keyword, importOptionTokens.first { it.slice(importOptionCode) == "import" }.kind)
+        assertEquals(SyntaxTokenKind.Keyword, importOptionTokens.first { it.slice(importOptionCode) == "option" }.kind)
+
+        val unclosedScopesCode = """
+            message Broken {
+              string a = 1 [deprecated = true;
+              option (unclosed.opt = "x";
+              map<string, int32 broken = 2;
+            }
+            message After { int32 ok = 1; }
+        """.trimIndent() + "\n"
+        val unclosedScopeTokens = assertValidSnippetHasNoInvalidTokens(ProtobufSyntaxLexer, unclosedScopesCode, "protobuf-unclosed-scopes")
+        val afterStart = unclosedScopesCode.indexOf("message After")
+        val afterTokens = unclosedScopeTokens.filter { it.startIndex >= afterStart }
+        assertEquals(SyntaxTokenKind.Keyword, afterTokens.first { it.slice(unclosedScopesCode) == "message" }.kind)
+        assertEquals(SyntaxTokenKind.Type, afterTokens.first { it.slice(unclosedScopesCode) == "After" }.kind)
     }
 
     @Test

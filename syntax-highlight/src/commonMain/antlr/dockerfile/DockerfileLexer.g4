@@ -35,15 +35,15 @@ COMMENT
     ;
 
 DQUOTE_OPEN
-    : '"' { onNonWsToken(); pushMode(Modes.DQUOTE); }
+    : '"' { pushDQuote(Modes.DQUOTE); }
     ;
 
 SINGLE_STRING
-    : '\'' ~['\r\n]* '\''? { onNonWsToken(); }
+    : '\'' { consumeSingleString(); onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 HEREDOC_OPEN
-    : '<<' '-'? ( '\'' ~['\r\n]+ '\'' | '"' ~["\r\n]+ '"' | [a-zA-Z_][a-zA-Z0-9_-]* ) { enqueueHeredoc(text); }
+    : '<<' '-'? { isHeredocAllowed() }? ( '\'' ~['\r\n]+ '\'' | '"' ~["\r\n]+ '"' | [a-zA-Z_][a-zA-Z0-9_-]* ) { enqueueHeredoc(text); }
     ;
 
 PARAM_EXP_OPEN
@@ -51,66 +51,66 @@ PARAM_EXP_OPEN
     ;
 
 SIMPLE_VAR
-    : '$' [a-zA-Z_][a-zA-Z0-9_]* { onNonWsToken(); }
+    : '$' [a-zA-Z_][a-zA-Z0-9_]* { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 SPECIAL_VAR
-    : '$' [0-9@#?$!*-] { onNonWsToken(); }
+    : '$' [0-9@#?$!*-] { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 DOLLAR
-    : '$' { onNonWsToken(); }
+    : '$' { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 FLAG
-    : '--' [a-zA-Z0-9][a-zA-Z0-9_-]* { onNonWsToken(); }
+    : '--' [a-zA-Z0-9][a-zA-Z0-9_-]* { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
-LBRACK : '[' { onNonWsToken(); } ;
-RBRACK : ']' { onNonWsToken(); } ;
-LPAREN : '(' { onNonWsToken(); } ;
-RPAREN : ')' { onNonWsToken(); } ;
-LBRACE : '{' { onNonWsToken(); } ;
-RBRACE : '}' { onNonWsToken(); } ;
-COMMA  : ',' { onNonWsToken(); } ;
-SEMI   : ';' { onNonWsToken(); } ;
+LBRACK : '[' { onDelimiterToken(keepsWordBoundary = true); } ;
+RBRACK : ']' { onDelimiterToken(keepsWordBoundary = false); } ;
+LPAREN : '(' { onDelimiterToken(keepsWordBoundary = true); } ;
+RPAREN : ')' { onDelimiterToken(keepsWordBoundary = false); } ;
+LBRACE : '{' { onDelimiterToken(keepsWordBoundary = true); } ;
+RBRACE : '}' { onDelimiterToken(keepsWordBoundary = false); } ;
+COMMA  : ',' { onDelimiterToken(keepsWordBoundary = true); } ;
+SEMI   : ';' { onDelimiterToken(keepsWordBoundary = true); } ;
 
 OP_MULTI
-    : ( '&&' | '||' | '>>' | '<<' | '<<-' ) { onNonWsToken(); }
+    : ( '&&' | '||' | '>>' | '<<' | '<<-' ) { onDelimiterToken(keepsWordBoundary = true); }
     ;
 
 OP
-    : ( '=' | '|' | '>' | '<' | '&' ) { onNonWsToken(); }
+    : ( '=' | '|' | '>' | '<' | '&' ) { onDelimiterToken(keepsWordBoundary = true); }
     ;
 
 NUMBER
-    : [0-9]+ { onNonWsToken(); }
+    : [0-9]+ { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 BACKSLASH_ESC
-    : '\\' { isEscapeBackslash() }? ~[\r\n] { onNonWsToken(); }
+    : '\\' { isEscapeBackslash() }? ~[\r\n] { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 BACKTICK_ESC
-    : '`' { isEscapeBacktick() }? ~[\r\n] { onNonWsToken(); }
+    : '`' { isEscapeBacktick() }? ~[\r\n] { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 BACKSLASH_LITERAL
-    : '\\' { onNonWsToken(); }
+    : '\\' { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 BACKTICK_LITERAL
-    : '`' { onNonWsToken(); }
+    : '`' { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 WORD
-    : ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&0-9-] ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&]* { onNonWsToken(); }
-    | '-' ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&]* { onNonWsToken(); }
-    | [0-9]+ ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&0-9] ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&]* { onNonWsToken(); }
+    : ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&0-9-] ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&]* { onWord(text); }
+    | '-' ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&]* { onWord(text); }
+    | [0-9]+ ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&0-9] ~[ \t\r\n\uFEFF"'`\\$[\](){},;=|><&]* { onWord(text); }
     ;
 
 ERROR_CHAR
-    : . { onNonWsToken(); }
+    : . { onDelimiterToken(keepsWordBoundary = false); }
     ;
 
 // ---------------- Double-Quoted String ----------------
@@ -118,47 +118,59 @@ ERROR_CHAR
 mode DQUOTE;
 
 DQ_CLOSE
-    : '"' { popMode(); }
+    : '"' { onDQuoteClose(); }
+    ;
+
+DQ_AFTER_COMMENT_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { isDqAfterComment() }? { onDQuoteAfterCommentNewline(); }
     ;
 
 DQ_NEWLINE
     : ( '\r'? '\n' | '\r' ) { onDQuoteNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
     ;
 
+DQ_COMMENT
+    : [ \t]* '#' { isDqCommentStart() }? ~[\r\n]* { onDQuoteComment(); }
+    ;
+
 DQ_ESC_BS
-    : '\\' { isEscapeBackslash() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )?
+    : '\\' { isEscapeBackslash() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )? { onDQuoteEscape(text); }
     ;
 
 DQ_ESC_BT
-    : '`' { isEscapeBacktick() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )?
+    : '`' { isEscapeBacktick() }? ( [ \t]* ( '\r'? '\n' | '\r' ) | . )? { onDQuoteEscape(text); }
     ;
 
 DQ_PARAM_EXP_OPEN
-    : '${' { pushParamExp(Modes.PARAM_EXP); }
+    : '${' { onDQuoteNonComment(); pushParamExp(Modes.PARAM_EXP); }
     ;
 
 DQ_SIMPLE_VAR
-    : '$' [a-zA-Z_][a-zA-Z0-9_]*
+    : '$' [a-zA-Z_][a-zA-Z0-9_]* { onDQuoteNonComment(); }
     ;
 
 DQ_SPECIAL_VAR
-    : '$' [0-9@#?$!*-]
+    : '$' [0-9@#?$!*-] { onDQuoteNonComment(); }
     ;
 
 DQ_DOLLAR
-    : '$'
+    : '$' { onDQuoteNonComment(); }
     ;
 
 DQ_BS_LITERAL
-    : '\\'
+    : '\\' { onDQuoteNonComment(); }
     ;
 
 DQ_BT_LITERAL
-    : '`'
+    : '`' { onDQuoteNonComment(); }
+    ;
+
+DQ_HASH
+    : '#' { onDQuoteNonComment(); }
     ;
 
 DQ_TEXT
-    : ~["\\`$\r\n]+
+    : ~["\\`$\r\n#]+ { onDQuoteNonComment(); }
     ;
 
 // ---------------- Parameter Expansion (${...}) ----------------
@@ -166,7 +178,19 @@ DQ_TEXT
 mode PARAM_EXP;
 
 PE_WS
-    : [ \t\r\n]+
+    : [ \t]+
+    ;
+
+PE_BACKSLASH_LINE_CONT
+    : '\\' { isEscapeBackslash() }? [ \t]* ( '\r'? '\n' | '\r' )
+    ;
+
+PE_BACKTICK_LINE_CONT
+    : '`' { isEscapeBacktick() }? [ \t]* ( '\r'? '\n' | '\r' )
+    ;
+
+PE_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onParamExpUnclosedNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); }
     ;
 
 PE_LBRACE
@@ -190,19 +214,19 @@ PE_SPECIAL_VAR
     ;
 
 PE_DQUOTE_OPEN
-    : '"' { pushMode(Modes.DQUOTE); }
+    : '"' { pushDQuote(Modes.DQUOTE); }
     ;
 
 PE_SINGLE_STRING
-    : '\'' ~['\r\n]* '\''?
+    : '\'' { consumeSingleString(); }
     ;
 
 PE_ESC_BS
-    : '\\' { isEscapeBackslash() }? ( '\r'? '\n' | '\r' | . )?
+    : '\\' { isEscapeBackslash() }? ~[\r\n]?
     ;
 
 PE_ESC_BT
-    : '`' { isEscapeBacktick() }? ( '\r'? '\n' | '\r' | . )?
+    : '`' { isEscapeBacktick() }? ~[\r\n]?
     ;
 
 PE_OP
@@ -244,11 +268,11 @@ HE_NEWLINE
     ;
 
 HE_ESC_BS
-    : '\\' { isEscapeBackslash() }? ( '\r'? '\n' | '\r' | ~[\r\n] )? { markHeredocLineBody(); }
+    : '\\' { isEscapeBackslash() }? ~[\r\n]? { markHeredocLineBody(); }
     ;
 
 HE_ESC_BT
-    : '`' { isEscapeBacktick() }? ( '\r'? '\n' | '\r' | ~[\r\n] )? { markHeredocLineBody(); }
+    : '`' { isEscapeBacktick() }? ~[\r\n]? { markHeredocLineBody(); }
     ;
 
 HE_BS_LITERAL

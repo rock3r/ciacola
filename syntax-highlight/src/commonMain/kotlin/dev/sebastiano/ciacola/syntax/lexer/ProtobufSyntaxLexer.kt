@@ -223,7 +223,11 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoTokens.RBRACE -> {
-                if (scopeStack.size > 1 && !(scope.kind == ProtoScopeKind.OPTION_AGGREGATE && scope.isAngleDelimited)) {
+                while (scopeStack.size > 1 && isTemporaryProtoScope(currentScope().kind)) {
+                    scopeStack.removeAt(scopeStack.lastIndex)
+                }
+                val braceScope = currentScope()
+                if (scopeStack.size > 1 && !(braceScope.kind == ProtoScopeKind.OPTION_AGGREGATE && braceScope.isAngleDelimited)) {
                     scopeStack.removeAt(scopeStack.lastIndex)
                 }
                 val parent = currentScope()
@@ -333,10 +337,14 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoTokens.SEMI -> {
-                if (scope.kind != ProtoScopeKind.OPTION_AGGREGATE) {
-                    scope.stmtState = ProtoStmtState.START
-                    scope.pendingBraceScope = null
-                    scope.isOptionValueContext = false
+                while (scopeStack.size > 1 && isTemporaryProtoScope(currentScope().kind)) {
+                    scopeStack.removeAt(scopeStack.lastIndex)
+                }
+                val enclosing = currentScope()
+                if (enclosing.kind != ProtoScopeKind.OPTION_AGGREGATE) {
+                    enclosing.stmtState = ProtoStmtState.START
+                    enclosing.pendingBraceScope = null
+                    enclosing.isOptionValueContext = false
                 }
                 vi++
                 continue
@@ -466,7 +474,7 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
                     }
                     isAtStmtStart && text == "import" &&
                         (nextType == ProtoTokens.STRING || nextType == ProtoTokens.SINGLE_STRING ||
-                            nextText == "weak" || nextText == "public") -> {
+                            nextText == "weak" || nextText == "public" || nextText == "option") -> {
                         tok.kind = SyntaxTokenKind.Keyword
                         scope.stmtState = ProtoStmtState.IN_IMPORT_MODIFIER
                     }
@@ -543,7 +551,7 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
             }
 
             ProtoStmtState.IN_IMPORT_MODIFIER -> {
-                if (type == ProtoTokens.IDENT && (text == "weak" || text == "public")) {
+                if (type == ProtoTokens.IDENT && (text == "weak" || text == "public" || text == "option")) {
                     tok.kind = SyntaxTokenKind.Keyword
                 }
                 scope.stmtState = ProtoStmtState.IN_IMPORT_PATH
@@ -667,4 +675,13 @@ private fun classifyProtobufTokens(source: String, raw: List<RawProtoToken>) {
 
         vi++
     }
+}
+
+private fun isTemporaryProtoScope(kind: ProtoScopeKind): Boolean = when (kind) {
+    ProtoScopeKind.BRACK_FIELD_OPTS,
+    ProtoScopeKind.PAREN_CUSTOM_OPT,
+    ProtoScopeKind.PAREN_RPC_PARAM,
+    ProtoScopeKind.ANGLE_MAP,
+    -> true
+    else -> false
 }
