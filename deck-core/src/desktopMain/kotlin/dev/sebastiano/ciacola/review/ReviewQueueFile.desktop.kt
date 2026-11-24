@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola.review
 import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
+import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -51,7 +52,9 @@ object ReviewQueueFile {
 
     /** The queue is held by someone else and did not come free in time. */
     class Busy(val file: Path, waited: Duration) : IOException(
-        "Review queue at ${file.toAbsolutePath()} was still locked after ${waited.toSeconds()}s",
+        // Milliseconds, not seconds: a sub-second deadline rounds down to "after 0s", which reads
+        // as a bug in the message rather than a lock somebody else is holding.
+        "Review queue at ${file.toAbsolutePath()} was still locked after ${waited.toMillis()}ms",
     )
 
     /**
@@ -136,7 +139,14 @@ object ReviewQueueFile {
     private fun acquireFileLock(channel: FileChannel, deadlineNanos: Long?): FileLock? {
         if (deadlineNanos == null) return channel.lock()
         while (true) {
-            val attempt = runCatching { channel.tryLock() }.getOrNull()
+            // Only the one exception that means "another thread of ours holds it, come back":
+            // a filesystem with no lock support, or a vanished file, throws IOException, and
+            // swallowing that spins for the whole deadline and then blames the other holder.
+            val attempt = try {
+                channel.tryLock()
+            } catch (_: OverlappingFileLockException) {
+                null
+            }
             if (attempt != null) return attempt
             val remainingNanos = deadlineNanos - System.nanoTime()
             if (remainingNanos <= 0L) return null

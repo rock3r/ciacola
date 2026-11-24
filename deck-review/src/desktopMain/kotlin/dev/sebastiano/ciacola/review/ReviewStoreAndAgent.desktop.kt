@@ -369,7 +369,18 @@ class ReviewCommentStore(
      * able to freeze the deck for ever; [ReviewQueueFile.Busy] surfaces as a notice instead.
      */
     private fun <T> inQueueTransaction(block: () -> T): T =
-        ReviewQueueFile.withLock(storyboardDir, QUEUE_LOCK_WAIT) { synchronized(this) { block() } }
+        ReviewQueueFile.withLock(storyboardDir, QUEUE_LOCK_WAIT) {
+            synchronized(this) {
+                // Every mutation starts from what disk says, not from what the 250 ms poll last
+                // saw. The in-memory list lags by up to a tick, and a mutation built on that lag
+                // commits a delta against a state that no longer exists: Send Queued pressed just
+                // after an agent resolved a comment would push its verdict back to applying and
+                // dispatch the finished note again. The mtime guard makes this free when nothing
+                // has changed, which is the normal case.
+                reloadFromDisk()
+                block()
+            }
+        }
 
     /** As [inQueueTransaction], but reports a busy queue to the author rather than throwing. */
     private fun <T> inQueueTransactionOrNotify(block: () -> T): T? =
@@ -598,7 +609,9 @@ class ReviewCommentStore(
         inQueueTransactionOrNotify {
             var changed = false
             val updated = comments.map { existing ->
-                if (existing.id == commentId) {
+                // Already applied, by an agent that got there first: leave its resolution alone
+                // rather than replacing it with this placeholder.
+                if (existing.id == commentId && existing.status != ReviewCommentStatus.Applied) {
                     changed = true
                     existing.copy(
                         status = ReviewCommentStatus.Applied,
@@ -771,22 +784,12 @@ class ReviewCommentStore(
         reason: String,
     ): List<SlideReviewComment> = inQueueTransactionOrNotify {
         val ids = items.map { it.id }.toSet()
-        // Ask disk, not the in-memory list, which lags it by up to the 250 ms poll. A push can
-        // time out after 15 seconds, by which time the agent may already have written Applied
-        // through :deck:reviewResolve; transitioning on the stale copy would merge that verdict
-        // away. Only a comment disk still calls Applying is still being pushed.
-        val stillApplying = runCatching {
-            val raw = ReviewQueueFile.readTextOrNull(commentsFile)?.takeIf { it.isNotBlank() }
-                ?: return@runCatching null
-            json.decodeFromString<List<SlideReviewComment>>(raw)
-        }.getOrNull()
-            ?.filter { it.status == ReviewCommentStatus.Applying }
-            ?.map { it.id }
-            ?.toSet()
+        // The transaction has already synced `comments` from disk, so this reads the live status.
+        // A push can time out after 15 seconds, by which time the agent may already have written
+        // Applied through :deck:reviewResolve; transitioning on a stale copy would merge that
+        // verdict away. Only a comment still being pushed is a delivery failure.
         val updated = comments.map { existing ->
-            val applying = stillApplying?.contains(existing.id)
-                ?: (existing.status == ReviewCommentStatus.Applying)
-            if (existing.id in ids && applying) {
+            if (existing.id in ids && existing.status == ReviewCommentStatus.Applying) {
                 existing.copy(status = fallbackStatus, deliveryError = reason)
             } else {
                 existing
@@ -931,7 +934,7 @@ class ReviewCommentStore(
             // it — the race this whole file's locking exists to close.
             appendLine(
                 "3. Close each comment with `$gradlePrefix :deck:reviewResolve " +
-                    "-Pciacola.deck=$primaryDeckId -Pciacola.comment=<commentId> " +
+                    "-Pciacola.deck=${shellQuote(primaryDeckId)} -Pciacola.comment=<commentId> " +
                     "-Pciacola.resolution=\"<what you changed>\"`, which takes the queue lock and " +
                     "turns the live viewer's pin green. Do not edit `$absComments` by hand: that " +
                     "bypasses the lock and can erase a comment queued at the same moment."

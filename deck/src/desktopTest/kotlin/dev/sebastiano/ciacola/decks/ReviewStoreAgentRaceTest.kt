@@ -289,4 +289,72 @@ class ReviewStoreAgentRaceTest {
             "the author has to be told the queue was busy",
         )
     }
+
+    @Test
+    fun sendQueuedRightAfterAVerdictDoesNotPushTheFinishedCommentAgain() {
+        val dir = Files.createTempDirectory("review-store-stale-send")
+        val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        val pushLog = dir.resolve("pushed.txt")
+        val fakeAgent = dir.resolve("logging-agentapi.sh").apply {
+            Files.writeString(this, "#!/bin/sh\necho pushed >> '" + pushLog.toAbsolutePath() + "'\nexit 0\n")
+            toFile().setExecutable(true)
+        }
+        val store = ReviewCommentStore(
+            storyboardDir = dir,
+            workspaceRoot = dir,
+            envProvider = { key ->
+                if (key == "CIACOLA_AGENTAPI_BIN") fakeAgent.toAbsolutePath().toString() else null
+            },
+            systemPropertyProvider = { null },
+        )
+        store.saveConfig(ReviewConfig(conversationId = "conv-1"))
+        runBlocking { store.submitComment(comment("rc-just-done"), dispatchImmediate = false) }
+
+        // The agent resolves it, which also hands the claim back. The deck has not polled yet, so
+        // its in-memory copy still says queued and unclaimed — the window this used to lose work
+        // in, because the push would commit that stale status over the verdict.
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-just-done",
+            resolution = "fixed the title",
+            takenFile = dir.resolve(ReviewClaims.FILE_NAME),
+            out = {},
+        )
+
+        val sent = runBlocking { store.flushQueued() }
+
+        assertEquals(0, sent, "a resolved comment must not be pushed again")
+        assertTrue(Files.notExists(pushLog), "nothing should have been dispatched")
+        val onDisk = DeckReviewCli.readComments(commentsFile).single()
+        assertEquals(ReviewCommentStatus.Applied, onDisk.status)
+        assertEquals("fixed the title", onDisk.resolution)
+    }
+
+    @Test
+    fun markingAppliedByHandLeavesAnAgentsVerdictAlone() {
+        val dir = Files.createTempDirectory("review-store-stale-mark")
+        val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        val store = ReviewCommentStore(
+            storyboardDir = dir,
+            workspaceRoot = dir,
+            envProvider = { null },
+            systemPropertyProvider = { null },
+        )
+        runBlocking { store.submitComment(comment("rc-raced"), dispatchImmediate = false) }
+
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-raced",
+            resolution = "rotated the stamp",
+            out = {},
+        )
+
+        store.markCommentApplied("rc-raced")
+
+        assertEquals(
+            "rotated the stamp",
+            DeckReviewCli.readComments(commentsFile).single().resolution,
+            "the placeholder replaced what the agent had written",
+        )
+    }
 }

@@ -57,6 +57,7 @@ internal fun BoxScope.ReviewHudToolbar(
     applyingCount: Int,
     deliveringCount: Int = 0,
     appliedCount: Int,
+    needsAttentionCount: Int = 0,
     onHudBoundsChanged: (Rect) -> Unit = {},
     onToggleInspectMode: () -> Unit,
     onToggleTimeline: (() -> Unit)? = null,
@@ -64,7 +65,12 @@ internal fun BoxScope.ReviewHudToolbar(
     onFlushQueued: () -> Unit,
 ) {
     val appBarOwned = LocalReviewHudOwnedByAppBar.current
-    if (appBarOwned && queuedCount == 0 && applyingCount == 0 && appliedCount == 0) {
+    if (appBarOwned &&
+        queuedCount == 0 &&
+        applyingCount == 0 &&
+        appliedCount == 0 &&
+        needsAttentionCount == 0
+    ) {
         SideEffect { onHudBoundsChanged(Rect.Zero) }
         return
     }
@@ -166,6 +172,36 @@ internal fun BoxScope.ReviewHudToolbar(
                         text = if (timelineDocked) "Timeline ●" else "Timeline",
                         style = JewelTheme.typography.small,
                         color = if (timelineDocked) statusPalette.inspectAccent else globalColors.text.info,
+                    )
+                }
+            }
+        }
+
+        // An agent that took a comment and reported it could not do it is counted neither as
+        // waiting nor as in progress, which is right — and would leave the author with nothing on
+        // screen to tell them, on a slide whose pins they cannot see.
+        if (needsAttentionCount > 0) {
+            Tooltip(
+                tooltip = {
+                    Text("Open Review panel (F4) — $needsAttentionCount comment(s) need attention")
+                },
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClick = onOpenReviewPanel)
+                        .padding(horizontal = 3.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Icon(
+                        key = AllIconsKeys.General.Error,
+                        contentDescription = "Comments needing attention",
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        text = needsAttentionCount.toString(),
+                        style = JewelTheme.typography.small,
+                        color = statusPalette.failed,
                     )
                 }
             }

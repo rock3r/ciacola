@@ -392,6 +392,11 @@ private fun ReviewOuterWindowOverlay(
                             (it.status == ReviewCommentStatus.Queued && it.id in store.claimedIds)
                     }
                     val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
+                    // Failed counts as waiting again once the claim is gone, so this is only the
+                    // case nothing else reports: an agent holds it and has said it cannot do it.
+                    val needsAttentionCount = store.comments.count {
+                        it.status == ReviewCommentStatus.Failed && it.id in store.claimedIds
+                    }
 
                     ReviewHudToolbar(
                         inspectActive = coordinator.inspectModeEnabled || coordinator.isCtrlKeyHeld,
@@ -403,6 +408,7 @@ private fun ReviewOuterWindowOverlay(
                         applyingCount = applyingCount,
                         deliveringCount = store.deliveringIds.size,
                         appliedCount = appliedCount,
+                        needsAttentionCount = needsAttentionCount,
                         onHudBoundsChanged = { coordinator.hudBoundsInRoot = it },
                         onToggleInspectMode = {
                             coordinator.inspectModeEnabled = !coordinator.inspectModeEnabled

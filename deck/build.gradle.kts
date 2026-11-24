@@ -228,6 +228,7 @@ tasks.register<JavaExec>("exportVideo") {
 
 val requestedTimeoutProp = ciacolaArgProp("ciacola.timeout")
 val requestedStoryboardDirProp = ciacolaArgProp("ciacola.storyboardDir")
+val requestedIncludeTakenProp = ciacolaArgProp("ciacola.includeTaken")
 
 tasks.register<JavaExec>("reviewWait") {
     description =
@@ -284,7 +285,6 @@ tasks.register<JavaExec>("reviewExport") {
 
 val requestedCommentProp = ciacolaArgProp("ciacola.comment")
 val requestedResolutionProp = ciacolaArgProp("ciacola.resolution")
-val requestedIncludeTakenProp = ciacolaArgProp("ciacola.includeTaken")
 val requestedReviewStatusProp = ciacolaArgProp("ciacola.reviewStatus")
 
 tasks.register<JavaExec>("reviewResolve") {
