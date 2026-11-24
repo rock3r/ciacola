@@ -352,8 +352,13 @@ class ReviewCommentStore(
         }
         if (comments.toList() == parsed) return false
 
-        comments.clear()
-        comments.addAll(parsed)
+        // One snapshot for both writes, as in persistCommentsInternal: this runs on
+        // Dispatchers.IO inside every mutation now, and composition reading between the clear and
+        // the add would draw an empty feed for a frame.
+        Snapshot.withMutableSnapshot {
+            comments.clear()
+            comments.addAll(parsed)
+        }
         return true
     }
 

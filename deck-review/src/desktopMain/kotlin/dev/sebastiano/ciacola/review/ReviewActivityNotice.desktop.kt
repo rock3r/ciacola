@@ -240,17 +240,24 @@ internal fun isExecutableAvailable(
     val trimmed = bin.trim().removeSurrounding("\"")
     if (trimmed.isEmpty()) return false
 
-    // On Windows a bare name resolves through PATHEXT, so "agentapi" has to find agentapi.exe.
-    // An empty extension first keeps the POSIX case unchanged.
-    //
     // Only the extensions the push itself can launch count. Windows CreateProcess appends .exe
     // to a bare name and nothing else: a .cmd or .bat shim on PATH is found by a PATHEXT search
     // but ProcessBuilder cannot start it, so counting those would offer Send for a command every
     // push would then fail to run. On POSIX there is no PATHEXT, so this adds nothing.
-    val suffixes = listOf("") + pathExt.orEmpty()
+    val exeSuffixes = pathExt.orEmpty()
         .split(pathSeparator)
         .map { it.trim() }
         .filter { it.equals(".exe", ignoreCase = true) }
+    // Trying the name as given is right on POSIX and wrong on Windows. npm installs an
+    // extensionless shell script beside its .cmd shim, and Files.isExecutable says yes to any
+    // ordinary file there, so the bare name matches something CreateProcess cannot start.
+    val onWindows = pathSeparator == ';' || pathExt != null
+    val asGiven = if (onWindows && !trimmed.endsWith(".exe", ignoreCase = true)) {
+        emptyList()
+    } else {
+        listOf("")
+    }
+    val suffixes = asGiven + exeSuffixes
 
     fun candidate(parent: String?, name: String): java.nio.file.Path? = runCatching {
         val raw = if (parent == null) {

@@ -119,7 +119,11 @@ class RelativePushCommandTest {
         // CreateProcess appends .exe to a bare name and nothing else, so ProcessBuilder("agentapi")
         // cannot start an npm-style agentapi.cmd. Counting the shim would offer Send for a command
         // every push then fails to run, and report it in red as a delivery failure.
-        val present = setOf("c:/tools/agentapi.cmd", "c:/tools/agentapi.bat")
+        //
+        // The extensionless entry is npm's own shell script, which sits beside the .cmd and which
+        // Files.isExecutable happily accepts on Windows: trying the name as given is right on
+        // POSIX and wrong here.
+        val present = setOf("c:/tools/agentapi.cmd", "c:/tools/agentapi.bat", "c:/tools/agentapi")
         val isExecutable: (java.nio.file.Path) -> Boolean = {
             it.toString().replace('\\', '/').lowercase() in present
         }

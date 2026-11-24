@@ -554,6 +554,42 @@ class DeckReviewCliTest {
     }
 
     @Test
+    fun claimingAFailedCommentPutsItBackToQueuedSoTheDeckSaysWithAnAgent() {
+        val dir = Files.createTempDirectory("review-wait-failed")
+        val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        // A live push that could not be delivered. The comment is still open and is handed over
+        // deliberately, but the status has to go, or the deck shows a comment an agent is working
+        // on as needing the author's attention, with Release offering it to a second agent.
+        Files.writeString(
+            commentsFile,
+            json.encodeToString(
+                listOf(
+                    comment("rc-undelivered").copy(
+                        status = ReviewCommentStatus.Failed,
+                        deliveryError = "agentapi exited with 1",
+                    ),
+                ),
+            ),
+        )
+
+        val lines = mutableListOf<String>()
+        val code = DeckReviewCli.runWait(
+            commentsFile = commentsFile,
+            takenFile = takenFile,
+            timeoutMillis = 1_000L,
+            out = { lines += it },
+        )
+
+        assertEquals(DeckReviewCli.EXIT_OK, code)
+        assertTrue(lines.single().contains("rc-undelivered"), lines.toString())
+        assertEquals(setOf("rc-undelivered"), DeckReviewCli.readTaken(takenFile) {})
+        val onDisk = DeckReviewCli.readComments(commentsFile).single()
+        assertEquals(ReviewCommentStatus.Queued, onDisk.status)
+        assertEquals(null, onDisk.deliveryError)
+    }
+
+    @Test
     fun timeoutsAreParsedInEveryUnitTheUsageTextOffers() {
         assertEquals(30 * 60_000L, parseReviewTimeout("30m"))
         assertEquals(45_000L, parseReviewTimeout("45s"))

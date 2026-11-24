@@ -174,12 +174,13 @@ internal object DeckReviewCli {
                         null
                     } else {
                         val taken = readTaken(takenFile)
-                        val pending = pendingComments(readComments(commentsFile), taken)
+                        val all = readComments(commentsFile)
+                        val pending = pendingComments(all, taken)
                         if (pending.isEmpty()) {
                             null
                         } else {
                             claim(takenFile, pending.map { it.id })
-                            pending
+                            requeueClaimedFailures(commentsFile, all, pending)
                         }
                     }
                 }
@@ -206,6 +207,32 @@ internal object DeckReviewCli {
             // Never sleep past the deadline: --timeout=100ms must not block for a whole poll.
             sleep(minOf(pollMillis, remaining))
         }
+    }
+
+    /**
+     * Clears a stale push failure off the comments this wait just claimed.
+     *
+     * A [ReviewCommentStatus.Failed] comment is handed over deliberately: it means a live push
+     * could not be delivered, not that the author changed their mind. But leaving the status
+     * behind means the deck shows a comment an agent is actively working on as needing the
+     * author's attention, with a Release button inviting them to hand it to a second agent.
+     * Reset inside the claiming transaction, `Failed` and claimed can only mean one thing: the
+     * agent tried and said it could not.
+     *
+     * Returns the comments as the caller should report them.
+     */
+    private fun requeueClaimedFailures(
+        commentsFile: Path,
+        all: List<SlideReviewComment>,
+        claimed: List<SlideReviewComment>,
+    ): List<SlideReviewComment> {
+        val failedIds = claimed.filter { it.status == ReviewCommentStatus.Failed }.map { it.id }.toSet()
+        if (failedIds.isEmpty()) return claimed
+        fun requeue(comment: SlideReviewComment) =
+            comment.copy(status = ReviewCommentStatus.Queued, deliveryError = null)
+        val updated = all.map { if (it.id in failedIds) requeue(it) else it }
+        ReviewQueueFile.writeAtomically(commentsFile, encodeComments(updated) + "\n")
+        return claimed.map { if (it.id in failedIds) requeue(it) else it }
     }
 
     /**
