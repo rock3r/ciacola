@@ -20,6 +20,7 @@ NEWLINE
 
 GIT_DIFF_HEADER
     : 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+    | 'diff' [ \t]+ DiffPathArg [ \t]+ DiffPathArg [ \t]*
     ;
 
 GIT_INDEX_HEADER
@@ -80,7 +81,7 @@ CONTEXT_HUNK_DASH_HEADER
     ;
 
 CONTEXT_SEPARATOR
-    : '***************' '*'* [ \t]*
+    : '***************' '*'* ~[\r\n]*
     ;
 
 CONTEXT_FILE_HEADER
@@ -160,7 +161,9 @@ UH_NEWLINE
     ;
 
 UH_GIT_DIFF
-    : 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+    : ( 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+      | 'diff' [ \t]+ DiffPathArg [ \t]+ DiffPathArg [ \t]*
+      )
       { resetHunkCounts(); } -> mode(DEFAULT_MODE)
     ;
 
@@ -199,7 +202,7 @@ UH_CTX_PREFIX
     ;
 
 UH_NO_NEWLINE
-    : '\\' [ \t]* 'No newline at end of file' [ \t]*
+    : '\\' [ \t]* 'No newline at end of file' [ \t]* { onHunkNoNewline(); }
     ;
 
 UH_BACKSLASH_LINE
@@ -217,7 +220,9 @@ CH_NEWLINE
     ;
 
 CH_GIT_DIFF
-    : 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+    : ( 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+      | 'diff' [ \t]+ DiffPathArg [ \t]+ DiffPathArg [ \t]*
+      )
       { resetHunkCounts(); } -> mode(DEFAULT_MODE)
     ;
 
@@ -244,7 +249,7 @@ CH_PREFIX
     ;
 
 CH_NO_NEWLINE
-    : '\\' [ \t]* 'No newline at end of file' [ \t]*
+    : '\\' [ \t]* 'No newline at end of file' [ \t]* { onHunkNoNewline(); }
     ;
 
 CH_BACKSLASH_LINE
@@ -263,7 +268,9 @@ CX_NEWLINE
     ;
 
 CX_GIT_DIFF
-    : 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )? -> mode(DEFAULT_MODE)
+    : ( 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+      | 'diff' [ \t]+ DiffPathArg [ \t]+ DiffPathArg [ \t]*
+      ) -> mode(DEFAULT_MODE)
     ;
 
 CX_SVN_INDEX
@@ -289,7 +296,7 @@ CX_HUNK_NORMAL
     ;
 
 CX_SEPARATOR
-    : '***************' '*'* [ \t]*
+    : '***************' '*'* ~[\r\n]*
     ;
 
 CX_HUNK_STAR
@@ -344,7 +351,9 @@ NH_NEWLINE
     ;
 
 NH_GIT_DIFF
-    : 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )? -> mode(DEFAULT_MODE)
+    : ( 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+      | 'diff' [ \t]+ DiffPathArg [ \t]+ DiffPathArg [ \t]*
+      ) -> mode(DEFAULT_MODE)
     ;
 
 NH_SVN_INDEX
@@ -404,7 +413,9 @@ BP_NEWLINE
     ;
 
 BP_GIT_DIFF
-    : 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )? -> mode(DEFAULT_MODE)
+    : ( 'diff' [ \t]+ ( '--git' | '--cc' | '--combined' | '-' ~[\r\n \t]+ ) ( [ \t] ~[\r\n]* )?
+      | 'diff' [ \t]+ DiffPathArg [ \t]+ DiffPathArg [ \t]*
+      ) -> mode(DEFAULT_MODE)
     ;
 
 BP_SVN_INDEX
@@ -452,4 +463,9 @@ BODY_TEXT
 
 BODY_NEWLINE
     : ( '\r'? '\n' | '\r' ) { onBodyNewline(Modes.DEFAULT_MODE, Modes.UNIFIED_HUNK_MODE, Modes.COMBINED_HUNK_MODE); }
+    ;
+
+fragment DiffPathArg
+    : '"' ( '\\' ~[\r\n] | ~["\\\r\n] )* '"'
+    | ~[ \t\r\n]* [/.\\] ~[ \t\r\n]*
     ;

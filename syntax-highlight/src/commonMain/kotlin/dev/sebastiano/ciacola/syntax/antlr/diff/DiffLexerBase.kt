@@ -17,6 +17,7 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
     private var combinedOldCount: Int = 0
     private var combinedNewRemaining: Int = 0
     private var activeHunkKind: Int = HUNK_NONE
+    private var atHunkLineStart: Boolean = false
 
     override fun reset() {
         super.reset()
@@ -30,6 +31,7 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         combinedOldCount = 0
         combinedNewRemaining = 0
         activeHunkKind = HUNK_NONE
+        atHunkLineStart = false
     }
 
     protected fun onUnifiedHunkHeader(defaultMode: Int, unifiedHunkMode: Int) {
@@ -163,16 +165,36 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         if (unifiedNewRemaining > 0) unifiedNewRemaining--
     }
 
+    protected fun onHunkNoNewline() {
+        atHunkLineStart = false
+    }
+
     protected fun onUnifiedNewline(defaultMode: Int) {
+        if (!atHunkLineStart) {
+            atHunkLineStart = true
+        } else if (unifiedOldRemaining > 0 && unifiedNewRemaining > 0) {
+            unifiedOldRemaining--
+            unifiedNewRemaining--
+        }
         if (unifiedOldRemaining <= 0 && unifiedNewRemaining <= 0) {
             activeHunkKind = HUNK_NONE
+            atHunkLineStart = false
             mode(defaultMode)
         }
     }
 
     protected fun onCombinedNewline(defaultMode: Int) {
+        if (!atHunkLineStart) {
+            atHunkLineStart = true
+        } else if (combinedNewRemaining > 0 && allCombinedOldRemainingPositive()) {
+            combinedNewRemaining--
+            for (i in 0 until combinedOldCount) {
+                combinedOldRemaining[i]--
+            }
+        }
         if (isCombinedExhausted()) {
             activeHunkKind = HUNK_NONE
+            atHunkLineStart = false
             mode(defaultMode)
         }
     }
@@ -191,14 +213,24 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         }
         // Update combined hunk counters based on the prefix characters just consumed.
         var hasMinus = false
+        var allSpaces = true
         for (i in 0 until consumed) {
             val ch = _input.LA(-(consumed - i))
+            if (ch != ' '.code) allSpaces = false
             if (ch == '-'.code) {
                 hasMinus = true
                 if (i < combinedOldCount && combinedOldRemaining[i] > 0) {
                     combinedOldRemaining[i]--
                 }
             } else if (ch == ' '.code) {
+                if (i < combinedOldCount && combinedOldRemaining[i] > 0) {
+                    combinedOldRemaining[i]--
+                }
+            }
+        }
+        if (allSpaces && consumed < targetWidth) {
+            // Stripped trailing space(s) on a blank combined context line
+            for (i in consumed until targetWidth) {
                 if (i < combinedOldCount && combinedOldRemaining[i] > 0) {
                     combinedOldRemaining[i]--
                 }
@@ -213,13 +245,23 @@ internal abstract class DiffLexerBase(input: CharStream) : Lexer(input) {
         if (!_modeStack.isEmpty) {
             popMode()
         }
+        atHunkLineStart = true
         if (_mode == unifiedHunkMode && unifiedOldRemaining <= 0 && unifiedNewRemaining <= 0) {
             activeHunkKind = HUNK_NONE
+            atHunkLineStart = false
             mode(defaultMode)
         } else if (_mode == combinedHunkMode && isCombinedExhausted()) {
             activeHunkKind = HUNK_NONE
+            atHunkLineStart = false
             mode(defaultMode)
         }
+    }
+
+    private fun allCombinedOldRemainingPositive(): Boolean {
+        for (i in 0 until combinedOldCount) {
+            if (combinedOldRemaining[i] <= 0) return false
+        }
+        return true
     }
 
     private fun isCombinedExhausted(): Boolean {

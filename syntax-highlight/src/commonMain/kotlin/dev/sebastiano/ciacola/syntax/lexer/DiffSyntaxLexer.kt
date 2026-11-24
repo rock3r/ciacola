@@ -82,9 +82,30 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.UH_NEWLINE,
                 DiffTokens.CH_NEWLINE,
                 DiffTokens.CX_NEWLINE,
-                DiffTokens.NH_NEWLINE,
                 -> {
                     if (hunk.isActive) {
+                        if (hunk.awaitingHeaderNewline) {
+                            hunk.awaitingHeaderNewline = false
+                        } else if (hunk.subHighlightLanguage != null) {
+                            hunk.appendBodyLine(
+                                source = source,
+                                role = LineRole.CONTEXT,
+                                bodyStart = -1,
+                                bodyEnd = -1,
+                                newlineText = source.substring(start, end),
+                                fallbackKind = SyntaxTokenKind.Plain,
+                            )
+                        }
+                        hunk.addFixed(SyntaxTokenKind.Whitespace, start, end)
+                    } else {
+                        out += SyntaxToken(SyntaxTokenKind.Whitespace, start, end)
+                    }
+                    i++
+                }
+
+                DiffTokens.NH_NEWLINE -> {
+                    if (hunk.isActive) {
+                        hunk.awaitingHeaderNewline = false
                         hunk.addFixed(SyntaxTokenKind.Whitespace, start, end)
                     } else {
                         out += SyntaxToken(SyntaxTokenKind.Whitespace, start, end)
@@ -170,7 +191,7 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.CX_SEPARATOR,
                 -> {
                     hunk.flushIfActive(out)
-                    emitTrimmedPunctuation(source, start, end, out)
+                    emitContextSeparator(source, start, end, out)
                     i++
                 }
 
@@ -179,7 +200,7 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.BP_CONTEXT_FILE,
                 -> {
                     hunk.flushIfActive(out)
-                    state.onFromFile(parsePrefixedPath(source, start, end, 3))
+                    state.onContextFromFile(parsePrefixedPath(source, start, end, 3))
                     emitPrefixedFileHeader(source, start, end, 3, SyntaxTokenKind.Keyword, out)
                     i++
                 }
@@ -215,9 +236,11 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.CX_HUNK_STAR,
                 -> {
                     hunk.flushIfActive(out)
+                    state.onHunkStarted()
                     hunk.begin(
                         targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
                         contextSide = ContextSide.OLD,
+                        awaitingHeaderNewline = true,
                     )
                     emitContextHunkHeader(source, start, end, out)
                     i++
@@ -226,15 +249,14 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.CONTEXT_HUNK_DASH_HEADER,
                 DiffTokens.CX_HUNK_DASH,
                 -> {
-                    if (!hunk.isActive) {
-                        hunk.begin(
-                            targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
-                            contextSide = ContextSide.NEW,
-                        )
-                    } else {
-                        hunk.contextSide = ContextSide.NEW
-                    }
-                    hunk.addAll { target -> emitContextHunkHeader(source, start, end, target) }
+                    hunk.flushIfActive(out)
+                    state.onHunkStarted()
+                    emitContextHunkHeader(source, start, end, out)
+                    hunk.begin(
+                        targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
+                        contextSide = ContextSide.NEW,
+                        awaitingHeaderNewline = true,
+                    )
                     i++
                 }
 
@@ -246,9 +268,11 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.BP_HUNK_UNIFIED,
                 -> {
                     hunk.flushIfActive(out)
+                    state.onHunkStarted()
                     hunk.begin(
                         targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
                         contextSide = ContextSide.NEW,
+                        awaitingHeaderNewline = true,
                     )
                     emitAtHunkHeader(source, start, end, out)
                     i++
@@ -260,9 +284,11 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.CX_HUNK_COMBINED,
                 -> {
                     hunk.flushIfActive(out)
+                    state.onHunkStarted()
                     hunk.begin(
                         targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
                         contextSide = ContextSide.NEW,
+                        awaitingHeaderNewline = true,
                     )
                     emitAtHunkHeader(source, start, end, out)
                     i++
@@ -274,9 +300,11 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.NH_HUNK_NORMAL,
                 -> {
                     hunk.flushIfActive(out)
+                    state.onHunkStarted()
                     hunk.begin(
                         targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
                         contextSide = ContextSide.NEW,
+                        awaitingHeaderNewline = true,
                     )
                     emitNormalHunkHeader(source, start, end, out)
                     i++
@@ -298,6 +326,7 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 DiffTokens.NH_NO_NEWLINE,
                 -> {
                     if (hunk.isActive) {
+                        hunk.awaitingHeaderNewline = true
                         hunk.addFixed(SyntaxTokenKind.Comment, start, end)
                     } else {
                         out += SyntaxToken(SyntaxTokenKind.Comment, start, end)
@@ -342,11 +371,13 @@ internal object DiffSyntaxLexer : SyntaxLexer, SubHighlightableSyntaxLexer {
                 -> {
                     val lineKind = classifyLinePrefix(type, source, start, end, hunk.contextSide)
                     if (!hunk.isActive) {
+                        state.onHunkStarted()
                         hunk.begin(
                             targetLanguage = state.resolveSubHighlightLanguage(allowNestedSubHighlighting),
                             contextSide = hunk.contextSide,
                         )
                     }
+                    hunk.awaitingHeaderNewline = false
 
                     // Emit the leading diff prefix marker
                     val markerKind = if (lineKind == LineRole.CONTEXT) {
@@ -469,6 +500,13 @@ private class DiffSectionState {
     private var indexPath: String? = null
     private var fromPath: String? = null
     private var toPath: String? = null
+    private var sawHunkInSection: Boolean = false
+    private var lastHeaderWasContextFrom: Boolean = false
+
+    fun onHunkStarted() {
+        sawHunkInSection = true
+        lastHeaderWasContextFrom = false
+    }
 
     fun onGitDiffHeader(line: String) {
         gitFromPath = null
@@ -476,33 +514,31 @@ private class DiffSectionState {
         indexPath = null
         fromPath = null
         toPath = null
+        sawHunkInSection = false
+        lastHeaderWasContextFrom = false
 
         val trimmed = line.trimEnd()
         val afterDiff = skipWs(trimmed, 4)
         when {
             trimmed.startsWith("--git", startIndex = afterDiff) -> {
                 val p1Start = skipWs(trimmed, afterDiff + 5)
-                val (p1, nextIdx) = parseCliPathToken(trimmed, p1Start)
-                val p2Start = skipWs(trimmed, nextIdx)
-                val (p2, _) = parseCliPathToken(trimmed, p2Start)
+                val (p1, p2) = parseGitDiffPair(trimmed, p1Start)
                 gitFromPath = p1
                 gitToPath = p2
             }
 
             trimmed.startsWith("--cc", startIndex = afterDiff) -> {
                 val pStart = skipWs(trimmed, afterDiff + 4)
-                val (p, _) = parseCliPathToken(trimmed, pStart)
-                gitToPath = p
+                gitToPath = parseSingleRemainderPath(trimmed, pStart)
             }
 
             trimmed.startsWith("--combined", startIndex = afterDiff) -> {
                 val pStart = skipWs(trimmed, afterDiff + 10)
-                val (p, _) = parseCliPathToken(trimmed, pStart)
-                gitToPath = p
+                gitToPath = parseSingleRemainderPath(trimmed, pStart)
             }
 
             else -> {
-                // Standard `diff -u old new` style command header: skip `-flags` and collect trailing paths.
+                // Standard `diff -u old new` or `diff dir1/f dir2/f` header: skip `-flags` and collect trailing paths.
                 var cursor = afterDiff
                 var firstPath: String? = null
                 var lastPath: String? = null
@@ -533,6 +569,8 @@ private class DiffSectionState {
         gitToPath = null
         fromPath = null
         toPath = null
+        sawHunkInSection = false
+        lastHeaderWasContextFrom = false
         val colonIdx = line.indexOf(':')
         indexPath = if (colonIdx >= 0) {
             parseHeaderPathValue(line.substring(colonIdx + 1))
@@ -542,6 +580,7 @@ private class DiffSectionState {
     }
 
     fun onCopyRenameHeader(line: String) {
+        lastHeaderWasContextFrom = false
         when {
             line.startsWith("rename from") -> fromPath = parseHeaderPathValue(line.substring(11))
             line.startsWith("copy from") -> fromPath = parseHeaderPathValue(line.substring(9))
@@ -550,13 +589,38 @@ private class DiffSectionState {
         }
     }
 
-    fun onFromFile(path: String?) {
+    fun onContextFromFile(path: String?) {
+        if (sawHunkInSection) {
+            gitFromPath = null
+            gitToPath = null
+            indexPath = null
+            sawHunkInSection = false
+        }
         fromPath = path
         toPath = null
+        lastHeaderWasContextFrom = true
+    }
+
+    fun onFromFile(path: String?) {
+        if (lastHeaderWasContextFrom && !sawHunkInSection) {
+            toPath = path
+            lastHeaderWasContextFrom = false
+            return
+        }
+        if (sawHunkInSection) {
+            gitFromPath = null
+            gitToPath = null
+            indexPath = null
+            sawHunkInSection = false
+        }
+        fromPath = path
+        toPath = null
+        lastHeaderWasContextFrom = false
     }
 
     fun onToFile(path: String?) {
         toPath = path
+        lastHeaderWasContextFrom = false
     }
 
     fun resolveSubHighlightLanguage(allowNestedSubHighlighting: Boolean): SyntaxLanguage? {
@@ -572,7 +636,7 @@ private class DiffSectionState {
         for (raw in candidates) {
             if (raw == null) continue
             val normalized = normalizeDiffPath(raw) ?: continue
-            return resolveLanguageForNormalizedPath(normalized)
+            resolveLanguageForNormalizedPath(normalized)?.let { return it }
         }
         return null
     }
@@ -598,6 +662,7 @@ private class HunkAccumulator {
     var subHighlightLanguage: SyntaxLanguage? = null
         private set
     var contextSide: ContextSide = ContextSide.NEW
+    var awaitingHeaderNewline: Boolean = false
 
     private val entries = ArrayList<HunkEntry>()
     private val oldBuffer = StringBuilder()
@@ -607,11 +672,16 @@ private class HunkAccumulator {
     private var hasOldMappedLines = false
     private var hasNewMappedLines = false
 
-    fun begin(targetLanguage: SyntaxLanguage?, contextSide: ContextSide) {
+    fun begin(
+        targetLanguage: SyntaxLanguage?,
+        contextSide: ContextSide,
+        awaitingHeaderNewline: Boolean = false,
+    ) {
         reset()
         isActive = true
         subHighlightLanguage = targetLanguage
         this.contextSide = contextSide
+        this.awaitingHeaderNewline = awaitingHeaderNewline
     }
 
     fun addFixed(kind: SyntaxTokenKind, start: Int, end: Int) {
@@ -815,6 +885,7 @@ private class HunkAccumulator {
         isActive = false
         subHighlightLanguage = null
         contextSide = ContextSide.NEW
+        awaitingHeaderNewline = false
         entries.clear()
         oldBuffer.setLength(0)
         newBuffer.setLength(0)
@@ -887,6 +958,34 @@ private fun emitTrimmedPunctuation(
     while (e > s && isInlineWs(source[e - 1])) e--
     if (e > s) out += SyntaxToken(SyntaxTokenKind.Punctuation, s, e)
     if (e < end) out += SyntaxToken(SyntaxTokenKind.Whitespace, e, end)
+}
+
+private fun emitContextSeparator(
+    source: String,
+    start: Int,
+    end: Int,
+    out: MutableList<SyntaxToken>,
+) {
+    var starsEnd = start
+    while (starsEnd < end && source[starsEnd] == '*') starsEnd++
+    if (starsEnd > start) {
+        out += SyntaxToken(SyntaxTokenKind.Punctuation, start, starsEnd)
+    }
+    var wsEnd = starsEnd
+    while (wsEnd < end && isInlineWs(source[wsEnd])) wsEnd++
+    if (wsEnd > starsEnd) {
+        out += SyntaxToken(SyntaxTokenKind.Whitespace, starsEnd, wsEnd)
+    }
+    if (wsEnd < end) {
+        var trimmedEnd = end
+        while (trimmedEnd > wsEnd && isInlineWs(source[trimmedEnd - 1])) trimmedEnd--
+        if (trimmedEnd > wsEnd) {
+            out += SyntaxToken(SyntaxTokenKind.Plain, wsEnd, trimmedEnd)
+        }
+        if (trimmedEnd < end) {
+            out += SyntaxToken(SyntaxTokenKind.Whitespace, trimmedEnd, end)
+        }
+    }
 }
 
 private fun emitPrefixedFileHeader(
@@ -1131,6 +1230,77 @@ private fun parseCliPathToken(text: String, from: Int): Pair<String?, Int> {
     return text.substring(from, end) to end
 }
 
+private fun parseSingleRemainderPath(text: String, from: Int): String? {
+    if (from >= text.length) return null
+    if (text[from] == '"') {
+        val (unquoted, _) = unquoteCPath(text, from)
+        return unquoted
+    }
+    return text.substring(from).trimEnd(' ', '\t').ifEmpty { null }
+}
+
+private fun parseGitDiffPair(text: String, from: Int): Pair<String?, String?> {
+    if (from >= text.length) return null to null
+    if (text[from] == '"') {
+        val (p1, nextIdx) = unquoteCPath(text, from)
+        val p2Start = skipWs(text, nextIdx)
+        val p2 = parseSingleRemainderPath(text, p2Start)
+        return p1 to p2
+    }
+    val remainder = text.substring(from)
+    val quotedSecondIdx = remainder.indexOf(" \"")
+    if (quotedSecondIdx > 0) {
+        val p1 = remainder.substring(0, quotedSecondIdx).trimEnd(' ', '\t')
+        val p2Start = skipWs(remainder, quotedSecondIdx + 1)
+        val (p2, _) = parseCliPathToken(remainder, p2Start)
+        return p1.ifEmpty { null } to p2
+    }
+    splitUnquotedGitPaths(remainder)?.let { return it }
+    val (p1, nextIdx) = parseCliPathToken(text, from)
+    val p2Start = skipWs(text, nextIdx)
+    val (p2, _) = parseCliPathToken(text, p2Start)
+    return p1 to p2
+}
+
+private fun splitUnquotedGitPaths(remainder: String): Pair<String, String>? {
+    val prefixes = arrayOf("a/", "b/", "i/", "w/", "c/", "o/")
+    val startsWithPrefix = prefixes.any { remainder.startsWith(it) }
+    if (startsWithPrefix) {
+        val leftBody = remainder.substring(2)
+        // Prefer an exact symmetrical split `<p1>/<same> <p2>/<same>` when paths have spaces.
+        for (p2 in prefixes) {
+            val sep = " $p2"
+            var searchFrom = 1
+            while (searchFrom < remainder.length) {
+                val idx = remainder.indexOf(sep, searchFrom)
+                if (idx < 0) break
+                val p1Str = remainder.substring(0, idx)
+                val p2Str = remainder.substring(idx + 1)
+                if (p1Str.substring(2) == p2Str.substring(2)) {
+                    return p1Str to p2Str
+                }
+                searchFrom = idx + 1
+            }
+        }
+        // Fallback for renames with spaces (`a/old dir/A.kt b/new dir/B.kt`): split at `" b/"` (or other prefix).
+        for (p2 in prefixes) {
+            val sep = " $p2"
+            val idx = remainder.indexOf(sep, startIndex = 2)
+            if (idx > 0 && leftBody.isNotEmpty()) {
+                return remainder.substring(0, idx) to remainder.substring(idx + 1)
+            }
+        }
+    }
+    val len = remainder.length
+    if (len >= 3 && len % 2 == 1) {
+        val mid = len / 2
+        if (remainder[mid] == ' ' && remainder.substring(0, mid) == remainder.substring(mid + 1)) {
+            return remainder.substring(0, mid) to remainder.substring(mid + 1)
+        }
+    }
+    return null
+}
+
 private fun parsePrefixedPath(source: String, start: Int, end: Int, prefixLen: Int): String? {
     val contentStart = (start + prefixLen).coerceAtMost(end)
     if (contentStart >= end) return null
@@ -1147,7 +1317,71 @@ private fun parseHeaderPathValue(raw: String): String? {
     val tabIdx = raw.indexOf('\t', start)
     val end = if (tabIdx >= 0) tabIdx else raw.length
     val trimmed = raw.substring(start, end).trimEnd(' ', '\t')
-    return trimmed.ifEmpty { null }
+    val stripped = stripSpaceSeparatedHeaderSuffix(trimmed)
+    return stripped.ifEmpty { null }
+}
+
+private fun stripSpaceSeparatedHeaderSuffix(text: String): String {
+    if (text.endsWith(')')) {
+        val openIdx = text.lastIndexOf(" (")
+        if (openIdx > 0) {
+            val tag = text.substring(openIdx + 2, text.length - 1).lowercase()
+            if (tag.startsWith("revision ") ||
+                tag == "working copy" ||
+                tag == "nonexistent" ||
+                tag == "left" ||
+                tag == "right" ||
+                tag == "original" ||
+                tag == "mine" ||
+                tag == "theirs"
+            ) {
+                return text.substring(0, openIdx).trimEnd(' ')
+            }
+        }
+    }
+    // Strip space-separated ISO dates (` 2026-11-23...`) or ctime timestamps (` Mon Nov 23 ...`).
+    for (i in 1 until text.length) {
+        if (text[i] == ' ' && (isIsoDateAt(text, i + 1) || isCtimeDateAt(text, i + 1))) {
+            return text.substring(0, i).trimEnd(' ')
+        }
+    }
+    return text
+}
+
+private fun isIsoDateAt(text: String, pos: Int): Boolean {
+    if (pos + 10 > text.length) return false
+    if (!(text[pos] in '0'..'9' &&
+            text[pos + 1] in '0'..'9' &&
+            text[pos + 2] in '0'..'9' &&
+            text[pos + 3] in '0'..'9' &&
+            text[pos + 4] == '-' &&
+            text[pos + 5] in '0'..'9' &&
+            text[pos + 6] in '0'..'9' &&
+            text[pos + 7] == '-' &&
+            text[pos + 8] in '0'..'9' &&
+            text[pos + 9] in '0'..'9')
+    ) {
+        return false
+    }
+    return pos + 10 == text.length ||
+        text[pos + 10] == ' ' ||
+        text[pos + 10] == 'T' ||
+        text[pos + 10] == 't'
+}
+
+private fun isCtimeDateAt(text: String, pos: Int): Boolean {
+    if (pos + 10 > text.length) return false
+    val dow = text.substring(pos, pos + 3)
+    if (dow != "Mon" && dow != "Tue" && dow != "Wed" && dow != "Thu" &&
+        dow != "Fri" && dow != "Sat" && dow != "Sun"
+    ) {
+        return false
+    }
+    return text[pos + 3] == ' ' &&
+        text[pos + 4] in 'A'..'Z' &&
+        text[pos + 5] in 'a'..'z' &&
+        text[pos + 6] in 'a'..'z' &&
+        text[pos + 7] == ' '
 }
 
 private fun unquoteCPath(text: String, openQuoteIdx: Int): Pair<String, Int> {

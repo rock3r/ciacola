@@ -422,6 +422,157 @@ class DiffSyntaxLexerTest {
     }
 
     @Test
+    fun handlesStrippedBlankContextLinesAcrossMultiFileUnifiedAndCombinedHunks() {
+        val diff = "--- a/Main.kt\n" +
+            "+++ b/Main.kt\n" +
+            "@@ -1,3 +1,3 @@\n" +
+            " val a = 1\n" +
+            "\n" +
+            "-val b = 2\n" +
+            "+val b = 3\n" +
+            "--- a/app.py\n" +
+            "+++ b/app.py\n" +
+            "@@ -1 +1 @@\n" +
+            "-def f(): return 1\n" +
+            "+def f(): return 2\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, diff, "stripped-blank-ctx")
+        val pyLineStart = diff.indexOf("+def f(): return 2")
+        val pyLineEnd = pyLineStart + "+def f(): return 2".length
+        val pyTokens = tokens.filter { it.startIndex >= pyLineStart && it.endIndex <= pyLineEnd }
+        assertTrue(pyTokens.any { it.slice(diff) == "def" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(pyTokens.any { it.slice(diff) == "2" && it.kind == SyntaxTokenKind.Number })
+        assertTrue(tokens.any { it.slice(diff) == "a/app.py" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tokens.any { it.slice(diff) == "b/app.py" && it.kind == SyntaxTokenKind.String })
+
+        // Combined diff with stripped blank context line followed by another file
+        val combinedDiff = "--- a/Main.kt\n" +
+            "+++ b/Main.kt\n" +
+            "@@@ -1,3 -1,3 +1,3 @@@\n" +
+            "  val a = 1\n" +
+            "\n" +
+            "--val b = 2\n" +
+            "++val b = 3\n" +
+            "--- a/app.py\n" +
+            "+++ b/app.py\n" +
+            "@@ -1 +1 @@\n" +
+            "-def g(): return 1\n" +
+            "+def g(): return 2\n"
+        val combTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, combinedDiff, "combined-stripped-blank-ctx")
+        val pyCombStart = combinedDiff.indexOf("+def g(): return 2")
+        val pyCombEnd = pyCombStart + "+def g(): return 2".length
+        val pyCombTokens = combTokens.filter { it.startIndex >= pyCombStart && it.endIndex <= pyCombEnd }
+        assertTrue(pyCombTokens.any { it.slice(combinedDiff) == "def" && it.kind == SyntaxTokenKind.Keyword })
+    }
+
+    @Test
+    fun fallsBackToFromPathOnUnknownToExtensionAndResetsGitSectionStateAcrossPlainHeaders() {
+        val backupDiff = "--- Main.kt\n" +
+            "+++ Main.kt.bak\n" +
+            "@@ -1 +1 @@\n" +
+            "-val x = 1\n" +
+            "+val x = 2\n"
+        val backupTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, backupDiff, "backup-fallback")
+        assertTrue(backupTokens.any { it.slice(backupDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(backupTokens.any { it.slice(backupDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val mixedDiff = "diff --git a/Main.kt b/Main.kt\n" +
+            "--- a/Main.kt\n" +
+            "+++ b/Main.kt\n" +
+            "@@ -1 +1 @@\n" +
+            "-val a = 1\n" +
+            "+val a = 2\n" +
+            "--- notes.txt\n" +
+            "+++ notes.txt\n" +
+            "@@ -1 +1 @@\n" +
+            "-val x = 1\n" +
+            "+val x = 2\n"
+        val mixedTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, mixedDiff, "plain-reset-after-git")
+        val notesLineStart = mixedDiff.indexOf("+val x = 2")
+        val notesLineEnd = notesLineStart + "+val x = 2".length
+        val notesTokens = mixedTokens.filter { it.startIndex >= notesLineStart && it.endIndex <= notesLineEnd }
+        assertEquals(2, notesTokens.size)
+        assertEquals(SyntaxTokenKind.Punctuation, notesTokens[0].kind)
+        assertEquals(SyntaxTokenKind.String, notesTokens[1].kind)
+        assertEquals("val x = 2", notesTokens[1].slice(mixedDiff))
+    }
+
+    @Test
+    fun handlesSvnSpaceAnnotationsUnquotedGitSpacesAndFlaglessDiffHeaders() {
+        val svnDiff = "Index: src/Main.kt\n" +
+            "===================================================================\n" +
+            "--- src/Main.kt (revision 42)\n" +
+            "+++ src/Main.kt (working copy)\n" +
+            "@@ -1 +1 @@\n" +
+            "-val x = 1\n" +
+            "+val x = 2\n"
+        val svnTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, svnDiff, "svn-annotations")
+        assertTrue(svnTokens.any { it.slice(svnDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(svnTokens.any { it.slice(svnDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val ccDiff = "diff --cc dir with spaces/Main.kt\n" +
+            "index 111,222..333\n" +
+            "@@@ -1,1 -1,1 +1,1 @@@\n" +
+            "- val a = 1\n" +
+            "++val a = 2\n"
+        val ccTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, ccDiff, "cc-unquoted-spaces")
+        assertTrue(ccTokens.any { it.slice(ccDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(ccTokens.any { it.slice(ccDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val gitSpaceDiff = "diff --git a/dir with spaces/Main.kt b/dir with spaces/Main.kt\n" +
+            "@@ -1 +1 @@\n" +
+            "-val s = 1\n" +
+            "+val s = 2\n"
+        val gitSpaceTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, gitSpaceDiff, "git-unquoted-spaces")
+        assertTrue(gitSpaceTokens.any { it.slice(gitSpaceDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(gitSpaceTokens.any { it.slice(gitSpaceDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+
+        val flaglessDiff = "diff dir1/Main.kt dir2/Main.kt\n" +
+            "1c1\n" +
+            "< val old = 1\n" +
+            "---\n" +
+            "> val new = 2\n"
+        val flaglessTokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, flaglessDiff, "flagless-diff")
+        assertEquals(SyntaxTokenKind.Keyword, flaglessTokens.first { it.slice(flaglessDiff).startsWith("diff dir1") }.kind)
+        assertTrue(flaglessTokens.any { it.slice(flaglessDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(flaglessTokens.any { it.slice(flaglessDiff) == "2" && it.kind == SyntaxTokenKind.Number })
+    }
+
+    @Test
+    fun isolatesContextDiffOldAndNewHalvesAndParsesSeparatorFunctionLabels() {
+        val ctxDiff = "*** a/Main.kt\t2026-11-23\n" +
+            "--- b/Main.kt\t2026-11-23\n" +
+            "*************** fun greet()\n" +
+            "*** 1,2 ****\n" +
+            "  val s = \"\"\"\n" +
+            "- old\"\"\"\n" +
+            "--- 1,2 ----\n" +
+            "  val s = \"\"\"\n" +
+            "+ new\"\"\"\n" +
+            "*************** fun tail()\n" +
+            "*** 5,5 ****\n" +
+            "  val ok = true\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(DiffSyntaxLexer, ctxDiff, "context-halves-and-sep-label")
+        assertTrue(tokens.any { it.slice(ctxDiff) == "***************" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(tokens.any { it.slice(ctxDiff) == "fun greet()" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(tokens.any { it.slice(ctxDiff) == "fun tail()" && it.kind == SyntaxTokenKind.Plain })
+
+        val newHalfStart = ctxDiff.indexOf("--- 1,2 ----")
+        val newCtxStart = ctxDiff.indexOf("  val s = \"\"\"", startIndex = newHalfStart)
+        val newCtxEnd = newCtxStart + "  val s = \"\"\"".length
+        val newCtxTokens = tokens.filter { it.startIndex >= newCtxStart && it.endIndex <= newCtxEnd }
+        assertTrue(newCtxTokens.any { it.slice(ctxDiff) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(newCtxTokens.any { it.slice(ctxDiff) == "=" && it.kind == SyntaxTokenKind.Operator })
+
+        val newAddStart = ctxDiff.indexOf("+ new\"\"\"")
+        val newAddEnd = newAddStart + "+ new\"\"\"".length
+        val newAddTokens = tokens.filter { it.startIndex >= newAddStart && it.endIndex <= newAddEnd }
+        assertTrue(newAddTokens.any { it.slice(ctxDiff) == "new" && it.kind == SyntaxTokenKind.String })
+        assertTrue(newAddTokens.any { it.slice(ctxDiff) == "\"\"\"" && it.kind == SyntaxTokenKind.String })
+    }
+
+    @Test
     fun linearPerformanceOnLargeUnifiedDiffWithSubHighlighting() {
         val largeKtDiff = buildString {
             append("diff --git a/Large.kt b/Large.kt\n")
