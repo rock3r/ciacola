@@ -110,9 +110,15 @@ class ReviewUnconfiguredConversationTest {
         assertEquals(1, store.comments.size)
         assertEquals(ReviewCommentStatus.Queued, store.comments.single().status)
 
+        // Queueing has to say so. The pin it leaves behind looks the same whether the click was
+        // Queue or a Send that quietly fell back to the queue, which is exactly the confusion.
+        onNodeWithTag("ciacola-review-notice").assertIsDisplayed()
+        onNode(hasText("Queued comment #1")).assertIsDisplayed()
+        onNode(hasText("reviewWait", substring = true)).assertIsDisplayed()
+
         // Clicking the HUD queued button when unconfigured must open the F4 Review configuration panel
         // instead of silently looping Queued -> Applying -> Queued.
-        onNode(hasText("Set Agent (1)") or hasText("Send 1")).performClick()
+        onNode(hasText("Set Agent") or hasText("Send now")).performClick()
         waitForIdle()
 
         assertTrue(reviewWindow.visible, "HUD queued button must open the F4 Review configuration panel when unconfigured")

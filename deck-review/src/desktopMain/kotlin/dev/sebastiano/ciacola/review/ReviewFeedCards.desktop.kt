@@ -411,6 +411,7 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 item = item,
                                 statusColor = statusPalette.colorFor(item.status),
                                 agentConfigured = effectiveConvId.isNotBlank(),
+                                delivering = item.id in store.deliveringIds,
                                 onJumpToSlide = {
                                     scope.launch {
                                         val target = Storyboard.Index(item.sceneIndex, item.frameIndex)
@@ -453,6 +454,7 @@ private fun ReviewCommentRowCard(
     item: SlideReviewComment,
     statusColor: Color,
     agentConfigured: Boolean,
+    delivering: Boolean,
     onJumpToSlide: () -> Unit,
     onMarkApplied: () -> Unit,
     onRetry: () -> Unit,
@@ -497,11 +499,11 @@ private fun ReviewCommentRowCard(
             ) {
                 Icon(
                     key = item.status.iconKey(),
-                    contentDescription = item.status.labelText(),
+                    contentDescription = item.status.labelText(delivering),
                     modifier = Modifier.size(13.dp),
                 )
                 Text(
-                    text = item.status.labelText(),
+                    text = item.status.labelText(delivering),
                     style = JewelTheme.typography.small,
                     color = statusColor,
                 )

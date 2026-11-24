@@ -105,17 +105,24 @@ fun rememberReviewStatusPalette(): ReviewStatusPalette {
 }
 
 fun ReviewCommentStatus.iconKey(): IconKey = when (this) {
-    ReviewCommentStatus.Queued -> AllIconsKeys.General.Warning
+    // Not a warning: waiting in the outbox for an agent to collect is the normal, expected state
+    // of a comment, and a warning triangle on it teaches the author to ignore the whole row.
+    ReviewCommentStatus.Queued -> AllIconsKeys.Actions.Upload
     ReviewCommentStatus.Applying -> AllIconsKeys.Actions.Refresh
     ReviewCommentStatus.Applied -> AllIconsKeys.General.GreenCheckmark
     ReviewCommentStatus.Failed -> AllIconsKeys.General.Error
 }
 
-fun ReviewCommentStatus.labelText(): String = when (this) {
+/**
+ * @param delivering `true` while a push of this comment is in flight. `Applying` is persisted both
+ *   for the seconds a push takes and for however long the agent then holds the comment, and those
+ *   are different answers to "what is happening right now?".
+ */
+fun ReviewCommentStatus.labelText(delivering: Boolean = false): String = when (this) {
     // "Queued" read as something the author still had to do; the comment is in fact already
     // waiting where an agent reads it, which is the whole point when nothing is being pushed to.
     ReviewCommentStatus.Queued -> "Waiting for an agent"
-    ReviewCommentStatus.Applying -> "Applying…"
+    ReviewCommentStatus.Applying -> if (delivering) "Sending to the agent…" else "With the agent"
     ReviewCommentStatus.Applied -> "Applied"
     ReviewCommentStatus.Failed -> "Delivery failed"
 }

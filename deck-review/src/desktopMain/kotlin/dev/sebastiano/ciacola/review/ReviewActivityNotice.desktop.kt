@@ -1,0 +1,191 @@
+package dev.sebastiano.ciacola.review
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import dev.sebastiano.ciacola.ui.ReviewStatusPalette
+import dev.sebastiano.ciacola.ui.rememberReviewStatusPalette
+import kotlinx.coroutines.delay
+import org.jetbrains.jewel.foundation.theme.JewelTheme
+import org.jetbrains.jewel.ui.component.Icon
+import org.jetbrains.jewel.ui.component.IconButton
+import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.Tooltip
+import org.jetbrains.jewel.ui.icon.IconKey
+import org.jetbrains.jewel.ui.icons.AllIconsKeys
+import org.jetbrains.jewel.ui.typography
+
+/**
+ * What just happened to one or more review comments, as the author needs to read it.
+ *
+ * The statuses on a pin say where a comment *is*; a notice says what the last click *did*, which
+ * is the part Queue and Send otherwise leave indistinguishable.
+ */
+enum class ReviewNoticeKind {
+    /** Saved to the queue, waiting for an agent to pick it up. */
+    Queued,
+
+    /** Being pushed to a configured agent conversation right now. */
+    Sending,
+
+    /** The push succeeded; the agent now has it. */
+    Delivered,
+
+    /** A push was asked for but there was nothing to push to; the comment stayed queued. */
+    NothingToPushTo,
+
+    /** The push was attempted and failed. */
+    Failed,
+}
+
+/** A short-lived message shown over the stage after a review action. */
+data class ReviewActivityNotice(
+    val id: Long,
+    val kind: ReviewNoticeKind,
+    val title: String,
+    val detail: String,
+    /** How long before it fades on its own; `null` keeps it up until something replaces it. */
+    val autoDismissMillis: Long?,
+)
+
+/** Long enough to read two lines without having to hunt for them. */
+internal const val QUEUED_NOTICE_MILLIS = 6_000L
+
+/** Something did not go the way the click asked for: give it time to be read. */
+internal const val STICKY_NOTICE_MILLIS = 14_000L
+
+/** Renders `#9`, `#9 and #10`, `#9, #10 and #11`. */
+internal fun formatCommentNumbers(numbers: List<Int>): String = when (numbers.size) {
+    0 -> "the comment"
+    1 -> "#${numbers.single()}"
+    else -> numbers.dropLast(1).joinToString(", ") { "#$it" } + " and #${numbers.last()}"
+}
+
+private fun plural(numbers: List<Int>, one: String, many: String) =
+    if (numbers.size == 1) one else many
+
+internal fun queuedNotice(numbers: List<Int>, agentConfigured: Boolean): Pair<String, String> {
+    val subject = formatCommentNumbers(numbers)
+    val title = "Queued ${plural(numbers, "comment", "comments")} $subject"
+    val push = if (agentConfigured) " Or press Send in the top right to push it now." else ""
+    return title to "An agent waiting on :deck:reviewWait picks it up within seconds.$push"
+}
+
+internal fun sendingNotice(numbers: List<Int>): Pair<String, String> =
+    "Sending ${formatCommentNumbers(numbers)} to the agent…" to
+        "Pushing to the configured conversation."
+
+internal fun deliveredNotice(numbers: List<Int>): Pair<String, String> =
+    "The agent has ${formatCommentNumbers(numbers)}" to
+        "The pin turns green once the agent reports it applied."
+
+internal fun nothingToPushToNotice(numbers: List<Int>): Pair<String, String> =
+    "${formatCommentNumbers(numbers)} is still queued" to
+        "No push command is installed, so nothing was pushed. An agent waiting on " +
+        ":deck:reviewWait picks it up from the queue instead."
+
+internal fun deliveryFailedNotice(numbers: List<Int>, reason: String): Pair<String, String> =
+    "Could not send ${formatCommentNumbers(numbers)}" to
+        reason.ifBlank { "The agent command failed." }
+
+private fun ReviewNoticeKind.color(palette: ReviewStatusPalette): Color = when (this) {
+    ReviewNoticeKind.Queued, ReviewNoticeKind.NothingToPushTo -> palette.queued
+    ReviewNoticeKind.Sending -> palette.applying
+    ReviewNoticeKind.Delivered -> palette.applied
+    ReviewNoticeKind.Failed -> palette.failed
+}
+
+private fun ReviewNoticeKind.iconKey(): IconKey = when (this) {
+    ReviewNoticeKind.Queued, ReviewNoticeKind.NothingToPushTo -> AllIconsKeys.Actions.Upload
+    ReviewNoticeKind.Sending -> AllIconsKeys.Actions.Refresh
+    ReviewNoticeKind.Delivered -> AllIconsKeys.General.InspectionsOK
+    ReviewNoticeKind.Failed -> AllIconsKeys.General.Error
+}
+
+/**
+ * Bottom-centre notice over the stage telling the author what their last Queue or Send did, and
+ * what happens to the comment next.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun BoxScope.ReviewActivityNoticeBar(
+    notice: ReviewActivityNotice,
+    onDismiss: () -> Unit,
+    onOpenReviewPanel: () -> Unit,
+) {
+    val palette = rememberReviewStatusPalette()
+    val globalColors = JewelTheme.globalColors
+    val accent = notice.kind.color(palette)
+    val shape = RoundedCornerShape(8.dp)
+
+    LaunchedEffect(notice.id) {
+        val millis = notice.autoDismissMillis ?: return@LaunchedEffect
+        delay(millis)
+        onDismiss()
+    }
+
+    Row(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 24.dp)
+            .widthIn(max = 520.dp)
+            .background(globalColors.panelBackground.copy(alpha = 0.96f), shape)
+            .border(1.dp, accent, shape)
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .testTag("ciacola-review-notice"),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Icon(
+            key = notice.kind.iconKey(),
+            contentDescription = null,
+            modifier = Modifier.size(14.dp).padding(top = 2.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = notice.title,
+                style = JewelTheme.typography.medium,
+                color = accent,
+                modifier = Modifier.testTag("ciacola-review-notice-title"),
+            )
+            Text(
+                text = notice.detail,
+                style = JewelTheme.typography.small,
+                color = globalColors.text.info,
+            )
+        }
+        Tooltip(tooltip = { Text("Open the Review panel (F4)") }) {
+            IconButton(onClick = onOpenReviewPanel, modifier = Modifier.size(20.dp)) {
+                Icon(
+                    key = AllIconsKeys.Actions.Preview,
+                    contentDescription = "Open the Review panel",
+                    modifier = Modifier.size(12.dp),
+                )
+            }
+        }
+        Tooltip(tooltip = { Text("Dismiss") }) {
+            IconButton(onClick = onDismiss, modifier = Modifier.size(20.dp)) {
+                Icon(
+                    key = AllIconsKeys.General.Close,
+                    contentDescription = "Dismiss this notice",
+                    modifier = Modifier.size(12.dp),
+                )
+            }
+        }
+    }
+}

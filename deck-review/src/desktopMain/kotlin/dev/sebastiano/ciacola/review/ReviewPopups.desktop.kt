@@ -498,6 +498,7 @@ internal fun AnchoredSelectedPinPopup(
     stageBoundsInRoot: Rect?,
     stageFormatSize: IntSize,
     agentConfigured: Boolean = true,
+    delivering: Boolean = false,
     onClose: (fromEscapeKey: Boolean) -> Unit,
     onDelete: () -> Unit,
     onMarkApplied: () -> Unit = {},
@@ -600,11 +601,11 @@ internal fun AnchoredSelectedPinPopup(
                     ) {
                         Icon(
                             key = comment.status.iconKey(),
-                            contentDescription = comment.status.labelText(),
+                            contentDescription = comment.status.labelText(delivering),
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = "#$displayNumber · ${comment.status.labelText()}",
+                            text = "#$displayNumber · ${comment.status.labelText(delivering)}",
                             style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                             color = statusPalette.colorFor(comment.status),
                         )

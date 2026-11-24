@@ -54,6 +54,7 @@ internal fun BoxScope.ReviewHudToolbar(
     agentConfigured: Boolean = true,
     queuedCount: Int,
     applyingCount: Int,
+    deliveringCount: Int = 0,
     appliedCount: Int,
     onHudBoundsChanged: (Rect) -> Unit = {},
     onToggleInspectMode: () -> Unit,
@@ -117,7 +118,12 @@ internal fun BoxScope.ReviewHudToolbar(
         }
 
         if (applyingCount > 0) {
-            Tooltip(tooltip = { Text("Open Review panel (F4) — $applyingCount comment(s) applying") }) {
+            val applyingLabel = if (deliveringCount > 0) {
+                "sending $deliveringCount…"
+            } else {
+                "$applyingCount with the agent"
+            }
+            Tooltip(tooltip = { Text("Open Review panel (F4) — $applyingLabel") }) {
                 Row(
                     modifier = Modifier
                         .clickable(onClick = onOpenReviewPanel)
@@ -132,7 +138,7 @@ internal fun BoxScope.ReviewHudToolbar(
                         modifier = Modifier.size(12.dp),
                     )
                     Text(
-                        text = "$applyingCount applying…",
+                        text = applyingLabel,
                         style = JewelTheme.typography.small,
                         color = statusPalette.applying,
                     )
@@ -188,26 +194,54 @@ internal fun BoxScope.ReviewHudToolbar(
         }
 
         if (queuedCount > 0) {
+            // The count is a state, not a chore: these comments are already where an agent reading
+            // the queue will find them. Pushing is the optional shortcut, so it is the button and
+            // the waiting is the label, rather than the other way round.
+            Tooltip(
+                tooltip = {
+                    Text("$queuedCount comment(s) waiting — an agent on :deck:reviewWait picks them up")
+                },
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClick = onOpenReviewPanel)
+                        .padding(horizontal = 3.dp, vertical = 2.dp)
+                        .testTag("ciacola-hud-queued-badge"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Icon(
+                        key = AllIconsKeys.Actions.Upload,
+                        contentDescription = "Comments waiting for an agent",
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        text = "$queuedCount waiting",
+                        style = JewelTheme.typography.small,
+                        color = statusPalette.queued,
+                    )
+                }
+            }
             if (agentConfigured) {
-                Tooltip(tooltip = { Text("Dispatch $queuedCount queued comment(s) to agent") }) {
+                Tooltip(tooltip = { Text("Push $queuedCount waiting comment(s) to the agent now") }) {
                     DefaultButton(
                         onClick = onFlushQueued,
                         modifier = Modifier.testTag("ciacola-hud-send-queued"),
                     ) {
-                        Text("Send $queuedCount", style = JewelTheme.typography.small)
+                        Text("Send now", style = JewelTheme.typography.small)
                     }
                 }
             } else {
                 Tooltip(
                     tooltip = {
-                        Text("No Conversation ID configured — open Review panel (F4) to connect an agent for $queuedCount queued comment(s)")
+                        Text("No Conversation ID configured — open Review panel (F4) to push instead of waiting")
                     },
                 ) {
                     OutlinedButton(
                         onClick = onOpenReviewPanel,
                         modifier = Modifier.testTag("ciacola-hud-send-queued"),
                     ) {
-                        Text("Set Agent ($queuedCount)", style = JewelTheme.typography.small)
+                        Text("Set Agent", style = JewelTheme.typography.small)
                     }
                 }
             }

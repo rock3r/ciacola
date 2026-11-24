@@ -78,6 +78,42 @@ class ReviewCommentStore(
     var config by mutableStateOf(ReviewConfig())
         private set
 
+    /**
+     * Comment ids whose push to the agent is in flight right now. A comment is `Applying` both
+     * while it is being pushed and for as long as the agent holds it afterwards, and those two
+     * mean very different things to whoever just clicked Send, so the in-flight half is tracked
+     * here rather than persisted.
+     */
+    val deliveringIds = SnapshotStateList<String>()
+
+    /** What the last review action did, for [ReviewActivityNoticeBar]. */
+    var activityNotice: ReviewActivityNotice? by mutableStateOf(null)
+        private set
+
+    private var noticeSeq: Long = 0L
+
+    private fun postNotice(
+        kind: ReviewNoticeKind,
+        text: Pair<String, String>,
+        autoDismissMillis: Long?,
+    ) {
+        noticeSeq += 1
+        activityNotice = ReviewActivityNotice(
+            id = noticeSeq,
+            kind = kind,
+            title = text.first,
+            detail = text.second,
+            autoDismissMillis = autoDismissMillis,
+        )
+    }
+
+    fun dismissNotice(noticeId: Long) {
+        if (activityNotice?.id == noticeId) activityNotice = null
+    }
+
+    private fun displayNumbersOf(items: List<SlideReviewComment>): List<Int> =
+        items.map { reviewDisplayNumber(comments, it.id) }.sorted()
+
     private var lastObservedModifiedMillis: Long = -1L
     private var lastObservedFileSize: Long = -1L
     private var lastConfigModifiedMillis: Long = -1L
@@ -247,7 +283,17 @@ class ReviewCommentStore(
             prepared
         }
 
-        if (!dispatchImmediate) return snapshot
+        if (!dispatchImmediate) {
+            postNotice(
+                kind = ReviewNoticeKind.Queued,
+                text = queuedNotice(
+                    numbers = displayNumbersOf(listOf(snapshot)),
+                    agentConfigured = effectiveConversationId().isNotBlank(),
+                ),
+                autoDismissMillis = QUEUED_NOTICE_MILLIS,
+            )
+            return snapshot
+        }
         return dispatchItemsToAgent(listOf(snapshot)).single()
     }
 
@@ -353,8 +399,14 @@ class ReviewCommentStore(
     private suspend fun dispatchItemsToAgent(
         items: List<SlideReviewComment>,
     ): List<SlideReviewComment> = withContext(Dispatchers.IO) {
+        val numbers = displayNumbersOf(items)
         val convId = effectiveConversationId()
         if (convId.isBlank()) {
+            postNotice(
+                kind = ReviewNoticeKind.NothingToPushTo,
+                text = queuedNotice(numbers = numbers, agentConfigured = false),
+                autoDismissMillis = STICKY_NOTICE_MILLIS,
+            )
             return@withContext markDeliveryFailure(
                 items = items,
                 fallbackStatus = ReviewCommentStatus.Queued,
@@ -364,6 +416,12 @@ class ReviewCommentStore(
 
         val bin = effectiveAgentApiBin()
         val message = formatAgentMessage(items)
+        deliveringIds.addAll(items.map { it.id }.filterNot { it in deliveringIds })
+        postNotice(
+            kind = ReviewNoticeKind.Sending,
+            text = sendingNotice(numbers),
+            autoDismissMillis = null,
+        )
         val result = runCatching {
             val pb = ProcessBuilder(
                 bin,
@@ -387,6 +445,8 @@ class ReviewCommentStore(
             }
         }
 
+        deliveringIds.removeAll(items.map { it.id }.toSet())
+
         if (result.isFailure) {
             val cause = result.exceptionOrNull()
             val err = cause?.message ?: "Unknown agentapi error"
@@ -395,12 +455,26 @@ class ReviewCommentStore(
             // an agent that polls (`:deck:reviewWait`). Reporting it in red trains the author to
             // ignore the one signal that should mean something went wrong.
             val noAgentInstalled = isAgentBinaryMissing(cause)
+            postNotice(
+                kind = if (noAgentInstalled) ReviewNoticeKind.NothingToPushTo else ReviewNoticeKind.Failed,
+                text = if (noAgentInstalled) {
+                    nothingToPushToNotice(numbers)
+                } else {
+                    deliveryFailedNotice(numbers, err.take(300))
+                },
+                autoDismissMillis = STICKY_NOTICE_MILLIS,
+            )
             markDeliveryFailure(
                 items = items,
                 fallbackStatus = if (noAgentInstalled) ReviewCommentStatus.Queued else ReviewCommentStatus.Failed,
                 reason = if (noAgentInstalled) "" else err.take(300),
             )
         } else {
+            postNotice(
+                kind = ReviewNoticeKind.Delivered,
+                text = deliveredNotice(numbers),
+                autoDismissMillis = QUEUED_NOTICE_MILLIS,
+            )
             items
         }
     }

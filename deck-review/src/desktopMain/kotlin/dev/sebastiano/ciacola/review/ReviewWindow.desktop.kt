@@ -367,6 +367,7 @@ private fun ReviewOuterWindowOverlay(
                         agentConfigured = agentConfigured,
                         queuedCount = queuedCount,
                         applyingCount = applyingCount,
+                        deliveringCount = store.deliveringIds.size,
                         appliedCount = appliedCount,
                         onHudBoundsChanged = { coordinator.hudBoundsInRoot = it },
                         onToggleInspectMode = {
@@ -385,6 +386,22 @@ private fun ReviewOuterWindowOverlay(
                                 windowController.openForAgentConfiguration()
                             } else {
                                 scope.launch { store.flushQueued() }
+                            }
+                        },
+                    )
+                }
+
+                val notice = store.activityNotice
+                if (notice != null && !overviewOpen && !hideForAudience) {
+                    ReviewActivityNoticeBar(
+                        notice = notice,
+                        onDismiss = { store.dismissNotice(notice.id) },
+                        onOpenReviewPanel = {
+                            store.dismissNotice(notice.id)
+                            if (agentConfigured) {
+                                windowController.visible = true
+                            } else {
+                                windowController.openForAgentConfiguration()
                             }
                         },
                     )
@@ -441,6 +458,7 @@ private fun ReviewOuterWindowOverlay(
                         stageBoundsInRoot = coordinator.stageBoundsInRoot,
                         stageFormatSize = coordinator.stageFormatSize,
                         agentConfigured = agentConfigured,
+                        delivering = activePinComment.id in store.deliveringIds,
                         onClose = { fromEsc ->
                             coordinator.dismissActivePopups(fromEscapeKey = fromEsc)
                         },
