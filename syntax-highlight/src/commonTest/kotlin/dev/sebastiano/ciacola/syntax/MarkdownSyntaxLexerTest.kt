@@ -310,10 +310,85 @@ class MarkdownSyntaxLexerTest {
         assertTrue(tokens.any { it.slice(indentedAndBq) == "code" && it.kind == SyntaxTokenKind.Plain })
         assertTrue(tokens.any { it.slice(indentedAndBq) == "val a = 1" && it.kind == SyntaxTokenKind.String })
         assertTrue(tokens.any { it.slice(indentedAndBq) == "val b = 2" && it.kind == SyntaxTokenKind.String })
-        assertTrue(tokens.any { it.slice(indentedAndBq) == "val q = 3" && it.kind == SyntaxTokenKind.String })
+        assertTrue(tokens.any { it.slice(indentedAndBq) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tokens.any { it.slice(indentedAndBq) == "3" && it.kind == SyntaxTokenKind.Number })
         assertTrue(tokens.any { it.slice(indentedAndBq) == "After" && it.kind == SyntaxTokenKind.Plain })
         assertTrue(tokens.any { it.slice(indentedAndBq) == "quote" && it.kind == SyntaxTokenKind.Plain })
         assertTrue(tokens.any { it.slice(indentedAndBq) == "fence" && it.kind == SyntaxTokenKind.Plain })
+
+        val noRecurseBq = "> ```kotlin\n> val q = 3\n> ```\n"
+        val noRecurseTokens = assertLosslessInvariants(
+            code = noRecurseBq,
+            tokens = MarkdownSyntaxLexer.lex(noRecurseBq, allowNestedSubHighlighting = false),
+            label = "md-bq-no-recurse",
+        )
+        assertFalse(noRecurseTokens.any { it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(noRecurseTokens.any { it.slice(noRecurseBq) == "val q = 3" && it.kind == SyntaxTokenKind.String })
+
+        val tabCloseBq = "> ```kotlin\n> val q = 3\n>${'\t'}```\n# Heading\n"
+        val tabCloseTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, tabCloseBq, "md-bq-tab-close")
+        assertTrue(tabCloseTokens.any { it.slice(tabCloseBq) == "val" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(tabCloseTokens.any { it.slice(tabCloseBq) == "3" && it.kind == SyntaxTokenKind.Number })
+        assertTrue(tabCloseTokens.any { it.slice(tabCloseBq) == "Heading" && it.kind == SyntaxTokenKind.Keyword })
+    }
+
+    @Test
+    fun unmatchedInlineBacktickDoesNotCrossBlockBoundaries() {
+        val listCase = "Literal ` backtick in item 1\n- Item 2 with `code` here\n"
+        val listTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, listCase, "md-backtick-list-boundary")
+        assertTrue(listTokens.any { it.slice(listCase) == "`" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(listTokens.any { it.slice(listCase) == "-" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(listTokens.any { it.slice(listCase) == "`code`" && it.kind == SyntaxTokenKind.String })
+
+        val bqFenceCase = "> Literal ` backtick\n> ```js\n> const x = `tpl`;\n> ```\n"
+        val bqTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, bqFenceCase, "md-backtick-bq-fence-boundary")
+        assertTrue(bqTokens.any { it.slice(bqFenceCase) == "`" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(bqTokens.any { it.slice(bqFenceCase) == "const" && it.kind == SyntaxTokenKind.Keyword })
+    }
+
+    @Test
+    fun setextUnderlinesOnlyApplyToImmediateParagraphLines() {
+        val listThenDash = "- List item\n---\n"
+        val listDashTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, listThenDash, "md-setext-after-list")
+        assertTrue(listDashTokens.any { it.slice(listThenDash) == "List" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(listDashTokens.any { it.slice(listThenDash) == "item" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(listDashTokens.any { it.slice(listThenDash) == "---" && it.kind == SyntaxTokenKind.Punctuation })
+
+        val listThenParaSetext = "- Item 1\nSetext Title\n============\n"
+        val mixedTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, listThenParaSetext, "md-setext-after-list-item")
+        assertTrue(mixedTokens.any { it.slice(listThenParaSetext) == "Item" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(mixedTokens.any { it.slice(listThenParaSetext) == "1" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(mixedTokens.any { it.slice(listThenParaSetext) == "Setext" && it.kind == SyntaxTokenKind.Keyword })
+        assertTrue(mixedTokens.any { it.slice(listThenParaSetext) == "Title" && it.kind == SyntaxTokenKind.Keyword })
+
+        val refDefThenDash = "[ref]: https://example.com\n---\n"
+        val refTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, refDefThenDash, "md-setext-after-refdef")
+        assertTrue(refTokens.any { it.slice(refDefThenDash) == "ref" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(refTokens.any { it.slice(refDefThenDash) == "https://example.com" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(refTokens.any { it.slice(refDefThenDash) == "---" && it.kind == SyntaxTokenKind.Punctuation })
+    }
+
+    @Test
+    fun handlesParensInsideLinkQuotedTitlesAndUnicodePunctuationEmphasis() {
+        val smileyTitle = "Click [here](https://example.com \"Say hi :)\") and (more)!\n"
+        val smileyTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, smileyTitle, "md-link-title-smiley")
+        assertTrue(smileyTokens.any { it.slice(smileyTitle) == "here" && it.kind == SyntaxTokenKind.Tag })
+        assertTrue(smileyTokens.any { it.slice(smileyTitle) == "https://example.com" && it.kind == SyntaxTokenKind.Attribute })
+        assertTrue(smileyTokens.any { it.slice(smileyTitle).contains("Say") && it.kind == SyntaxTokenKind.String })
+        assertTrue(smileyTokens.any { it.slice(smileyTitle) == ")" && it.kind == SyntaxTokenKind.String })
+        assertTrue(smileyTokens.any { it.slice(smileyTitle) == ")" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(smileyTokens.any { it.slice(smileyTitle).contains("more") && it.kind == SyntaxTokenKind.Plain })
+
+        val openParenTitle = "Click [here](https://example.com \"part (1\") and **bold** (later)!\n"
+        val openParenTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, openParenTitle, "md-link-title-open-paren")
+        assertTrue(openParenTokens.any { it.slice(openParenTitle) == "here" && it.kind == SyntaxTokenKind.Tag })
+        assertTrue(openParenTokens.any { it.slice(openParenTitle) == "bold" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(openParenTokens.any { it.slice(openParenTitle).contains("later") && it.kind == SyntaxTokenKind.Plain })
+
+        val unicodePunct = "「_強調_」と¡_hola_!\n"
+        val unicodeTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, unicodePunct, "md-unicode-punct-emphasis")
+        assertTrue(unicodeTokens.any { it.slice(unicodePunct) == "強調" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(unicodeTokens.any { it.slice(unicodePunct) == "hola" && it.kind == SyntaxTokenKind.Property })
     }
 
     @Test
@@ -389,18 +464,58 @@ class MarkdownSyntaxLexerTest {
     }
 
     @Test
-    fun linearPerformanceOnUnclosedEmphasisAndTildes() {
-        val unclosedStars = "*a ".repeat(8_000)
-        val unclosedUnderscores = "_a ".repeat(8_000)
-        val unclosedTildes = "~~a ".repeat(6_000)
-
+    fun linearPerformanceOnUnclosedStars() {
         assertLinearPerformance(
             lexer = MarkdownSyntaxLexer,
-            pathologicalInputs = listOf(
-                "unclosed-stars" to unclosedStars,
-                "unclosed-underscores" to unclosedUnderscores,
-                "unclosed-tildes" to unclosedTildes,
-            ),
+            pathologicalInputs = listOf("unclosed-stars" to "*a ".repeat(8_000)),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnUnclosedUnderscores() {
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("unclosed-underscores" to "_a ".repeat(8_000)),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnUnclosedTildes() {
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("unclosed-tildes" to "~~a ".repeat(6_000)),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnDeadEmphasisStackDeactivation() {
+        val mixedDelim = "*a ".repeat(4_000) + "_b ".repeat(4_000) + " c*".repeat(4_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("dead-emphasis-stack" to mixedDelim),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnActiveLinkStackDeactivation() {
+        val nestedOpenBrackets = "[".repeat(8_000) + "[a](b)".repeat(8_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("active-link-stack" to nestedOpenBrackets),
+            maxMillisPerInput = 300L,
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnNestedImageLabels() {
+        val nestedImages = "![x ".repeat(4_000) + "](u)".repeat(4_000)
+        assertLinearPerformance(
+            lexer = MarkdownSyntaxLexer,
+            pathologicalInputs = listOf("nested-image-labels" to nestedImages),
             maxMillisPerInput = 300L,
         )
     }

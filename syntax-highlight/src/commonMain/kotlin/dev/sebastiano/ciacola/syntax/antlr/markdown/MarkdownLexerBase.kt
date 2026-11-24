@@ -33,6 +33,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private var leadingIndent: Int = 0
     private var afterListMarker: Boolean = false
     private var canMatchTaskCheckbox: Boolean = false
+    private var currentLineHasListMarker: Boolean = false
+    private var currentLineIsRefDef: Boolean = false
 
     // Frontmatter state: 0 = none, 1 = YAML (---), 2 = TOML (+++)
     private var frontmatterType: Int = 0
@@ -75,6 +77,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         leadingIndent = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
+        currentLineHasListMarker = false
+        currentLineIsRefDef = false
 
         frontmatterType = 0
         fenceChar = 0
@@ -187,22 +191,31 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         leadingIndent = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
+        currentLineHasListMarker = false
+        currentLineIsRefDef = false
     }
 
     protected fun onLineStartWs() {
         val start = _tokenStartCharIndex
         val end = _input.index()
+        var streamCol = if (justSawBlockquoteMarker) 1 else leadingIndent
         var col = 0
-        var first = true
+        var first = justSawBlockquoteMarker
         for (cp in start until end) {
             val ch = codePointAtIndex(cp)
-            if (first && justSawBlockquoteMarker && ch == ' '.code) {
-                // Consume the single optional space after '>' without counting it toward inner indent.
+            if (ch == '\t'.code) {
+                val step = 4 - (streamCol % 4)
+                streamCol += step
+                col += if (first) step - 1 else step
                 first = false
-                continue
+            } else {
+                streamCol++
+                if (first) {
+                    first = false
+                } else {
+                    col++
+                }
             }
-            first = false
-            col += if (ch == '\t'.code) 4 - (col % 4) else 1
         }
         justSawBlockquoteMarker = false
 
@@ -243,6 +256,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         leadingIndent = 0
         afterListMarker = false
         canMatchTaskCheckbox = false
+        currentLineHasListMarker = false
+        currentLineIsRefDef = false
     }
 
     protected fun handleLineStartHash() {
@@ -464,6 +479,9 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 return
             }
         }
+        if (!currentLineHasListMarker && isLinkRefDefStart(_tokenStartCharIndex)) {
+            currentLineIsRefDef = true
+        }
         markInlineParagraphStart()
         type = lbrackTokenType()
         mode(inlineModeId())
@@ -473,6 +491,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         atDocStart = false
         currentLineIsBlank = false
         currentLineIsParagraph = false
+        currentLineHasListMarker = true
         afterListMarker = true
         canMatchTaskCheckbox = false
         type = listMarkerTokenType()
@@ -494,10 +513,37 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private fun markInlineParagraphStart() {
         atDocStart = false
         currentLineIsBlank = false
-        currentLineIsParagraph = true
+        currentLineIsParagraph = !currentLineHasListMarker && !currentLineIsRefDef
         justSawBlockquoteMarker = false
         afterListMarker = false
         canMatchTaskCheckbox = false
+    }
+
+    private fun isLinkRefDefStart(lbrackIdx: Int): Boolean {
+        val size = _input.size()
+        var idx = lbrackIdx + 1
+        var hasNonWs = false
+        while (idx < size) {
+            val ch = codePointAtIndex(idx)
+            when (ch) {
+                '\r'.code, '\n'.code, '['.code -> return false
+                '\\'.code -> {
+                    hasNonWs = true
+                    idx += 2
+                    continue
+                }
+                ']'.code -> {
+                    if (!hasNonWs) return false
+                    return idx + 1 < size &&
+                        codePointAtIndex(idx + 1) == ':'.code &&
+                        (idx + 2 >= size || isSpaceTabEolOrEof(codePointAtIndex(idx + 2)))
+                }
+                ' '.code, '\t'.code -> Unit
+                else -> hasNonWs = true
+            }
+            idx++
+        }
+        return false
     }
 
     private fun isAtDocumentOffsetZero(): Boolean =
@@ -727,22 +773,27 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected fun onBqFenceWs() {
         val start = _tokenStartCharIndex
         val end = _input.index()
+        var streamCol = if (bqFenceJustSawMarker) 1 else bqFenceSpacesAfterLastMarker
         var spaces = 0
-        var first = true
+        var first = bqFenceJustSawMarker
         for (cp in start until end) {
             val ch = codePointAtIndex(cp)
-            if (first && bqFenceJustSawMarker && ch == ' '.code) {
+            if (ch == '\t'.code) {
+                val step = 4 - (streamCol % 4)
+                streamCol += step
+                spaces += if (first) step - 1 else step
                 first = false
-                continue
+            } else {
+                streamCol++
+                if (first) {
+                    first = false
+                } else {
+                    spaces++
+                }
             }
-            first = false
-            spaces += if (ch == '\t'.code) 4 else 1
         }
         bqFenceJustSawMarker = false
         bqFenceSpacesAfterLastMarker += spaces
-        if (blockquoteDepth >= fenceBlockquoteDepth && bqFenceSpacesAfterLastMarker >= 4) {
-            // 4+ spaces inside blockquote fence body line cannot be a closing fence.
-        }
     }
 
     protected fun handleBqFenceMarker() {
@@ -899,75 +950,340 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
 
         var paraId = 0
         var i = 0
-        var atLineStart = true
-        var lineHasNonWs = false
-        var lineSpaces = 0
+        if (i < size && codePointAtIndex(0) == 0xFEFF) {
+            i++
+        }
 
-        while (i < size) {
-            val ch = codePointAtIndex(i)
-            when (ch) {
-                '\r'.code, '\n'.code -> {
-                    if (atLineStart || !lineHasNonWs) {
-                        paraId++
-                    }
-                    i = skipNewlineAt(i, size)
-                    atLineStart = true
-                    lineHasNonWs = false
-                    lineSpaces = 0
-                }
-                ' '.code, '\t'.code -> {
-                    if (!lineHasNonWs) {
-                        lineSpaces += if (ch == '\t'.code) 4 else 1
-                    }
-                    i++
-                }
-                '`'.code -> {
-                    val runStart = i
-                    while (i < size && codePointAtIndex(i) == '`'.code) {
-                        i++
-                    }
-                    val len = i - runStart
-                    if (!lineHasNonWs && lineSpaces <= 3 && len >= 3 && hasNoBacktickUntilEol(i, size)) {
-                        // Fenced code block opener breaks any preceding paragraph.
-                        paraId++
-                    } else {
-                        paraIds[runStart] = paraId
-                        byLen.getOrPut(len) { ArrayList() }.add(runStart)
-                    }
-                    atLineStart = false
-                    lineHasNonWs = true
-                }
-                '~'.code -> {
-                    if (!lineHasNonWs && lineSpaces <= 3 && countSameChar(i, size, '~'.code) >= 3) {
-                        paraId++
-                    }
-                    atLineStart = false
-                    lineHasNonWs = true
-                    i++
-                }
-                '#'.code -> {
-                    if (!lineHasNonWs && lineSpaces <= 3) {
-                        val hashes = countSameChar(i, size, '#'.code)
-                        val after = if (i + hashes < size) codePointAtIndex(i + hashes) else IntStream.EOF
-                        if (hashes in 1..6 && isSpaceTabEolOrEof(after)) {
-                            paraId++
-                        }
-                    }
-                    atLineStart = false
-                    lineHasNonWs = true
-                    i++
-                }
-                else -> {
-                    atLineStart = false
-                    lineHasNonWs = true
-                    i++
+        // Skip YAML/TOML frontmatter at offset 0 (or directly after BOM) without indexing backticks inside it.
+        if (i + 3 <= size) {
+            val c0 = codePointAtIndex(i)
+            val c1 = codePointAtIndex(i + 1)
+            val c2 = codePointAtIndex(i + 2)
+            val fmType = when {
+                c0 == '-'.code && c1 == '-'.code && c2 == '-'.code -> 1
+                c0 == '+'.code && c1 == '+'.code && c2 == '+'.code -> 2
+                else -> 0
+            }
+            if (fmType != 0 && isOnlyWsAfterUntilNewline(i + 3, size)) {
+                val closeEnd = findFrontmatterEndOffset(i + 3, size, fmType)
+                if (closeEnd > 0) {
+                    i = closeEnd
+                    paraId++
                 }
             }
+        }
+
+        var prevBqDepth = 0
+        var prevLineWasBlank = true
+        var prevWasIndentedCode = false
+
+        while (i < size) {
+            // 1. Parse blockquote prefix ('>' markers with <= 3 spaces before each and optional 1 space/tab)
+            var bqDepth = 0
+            var pos = i
+            while (pos < size) {
+                var spaces = 0
+                var p = pos
+                while (p < size && spaces < 4 && codePointAtIndex(p) == ' '.code) {
+                    spaces++
+                    p++
+                }
+                if (spaces <= 3 && p < size && codePointAtIndex(p) == '>'.code) {
+                    bqDepth++
+                    p++
+                    if (p < size && codePointAtIndex(p) == ' '.code) {
+                        p++
+                    }
+                    pos = p
+                } else {
+                    break
+                }
+            }
+
+            // 2. Count leading indentation after blockquote prefix
+            var col = 0
+            var streamCol = if (bqDepth > 0) 1 else 0
+            var firstAfterBq = bqDepth > 0
+            while (pos < size) {
+                val ch = codePointAtIndex(pos)
+                if (ch == ' '.code) {
+                    streamCol++
+                    if (firstAfterBq) firstAfterBq = false else col++
+                    pos++
+                } else if (ch == '\t'.code) {
+                    val step = 4 - (streamCol % 4)
+                    streamCol += step
+                    col += if (firstAfterBq) step - 1 else step
+                    firstAfterBq = false
+                    pos++
+                } else {
+                    break
+                }
+            }
+
+            // 3. Blank line
+            if (pos >= size || codePointAtIndex(pos) == '\r'.code || codePointAtIndex(pos) == '\n'.code) {
+                paraId++
+                i = skipNewlineAt(pos, size)
+                prevBqDepth = bqDepth
+                prevLineWasBlank = true
+                prevWasIndentedCode = false
+                continue
+            }
+
+            // Blockquote depth transition breaks inline code spans across lines
+            if (bqDepth != prevBqDepth) {
+                paraId++
+            }
+
+            // 4. Indented code block (>= 4 columns after blank/doc-start/indented-code)
+            if ((prevLineWasBlank || prevWasIndentedCode) && col >= 4) {
+                paraId++
+                i = advancePastLine(pos, size)
+                paraId++
+                prevBqDepth = bqDepth
+                prevLineWasBlank = false
+                prevWasIndentedCode = true
+                continue
+            }
+
+            // 5. Block-level starters at indent <= 3
+            val firstCh = codePointAtIndex(pos)
+            if (col <= 3) {
+                // Fenced code block opener (``` or ~~~)
+                if ((firstCh == '`'.code || firstCh == '~'.code)) {
+                    val fenceCount = countSameChar(pos, size, firstCh)
+                    if (fenceCount >= 3 && (firstCh == '~'.code || hasNoBacktickUntilEol(pos + fenceCount, size))) {
+                        paraId++
+                        i = skipFencedBlockForBacktickIndex(pos + fenceCount, size, firstCh, fenceCount, bqDepth)
+                        paraId++
+                        prevBqDepth = bqDepth
+                        prevLineWasBlank = false
+                        prevWasIndentedCode = false
+                        continue
+                    }
+                }
+
+                // ATX heading (#..###### followed by space/tab/EOL/EOF)
+                if (firstCh == '#'.code) {
+                    val hashes = countSameChar(pos, size, '#'.code)
+                    val after = if (pos + hashes < size) codePointAtIndex(pos + hashes) else IntStream.EOF
+                    if (hashes in 1..6 && isSpaceTabEolOrEof(after)) {
+                        paraId++
+                        i = indexBackticksOnLine(pos + hashes, size, paraId, paraIds, byLen)
+                        paraId++
+                        prevBqDepth = bqDepth
+                        prevLineWasBlank = false
+                        prevWasIndentedCode = false
+                        continue
+                    }
+                }
+
+                // Thematic break (---, ***, ___) or Setext underline (===, ---)
+                if ((firstCh == '-'.code || firstCh == '*'.code || firstCh == '_'.code) &&
+                    isThematicOrSetextLine(pos, size, firstCh)
+                ) {
+                    paraId++
+                    i = advancePastLine(pos, size)
+                    paraId++
+                    prevBqDepth = bqDepth
+                    prevLineWasBlank = false
+                    prevWasIndentedCode = false
+                    continue
+                }
+                if (firstCh == '='.code && isSetextEqualsLine(pos, size)) {
+                    paraId++
+                    i = advancePastLine(pos, size)
+                    paraId++
+                    prevBqDepth = bqDepth
+                    prevLineWasBlank = false
+                    prevWasIndentedCode = false
+                    continue
+                }
+
+                // Unordered list marker (-, *, + followed by space/tab/EOL/EOF)
+                if ((firstCh == '-'.code || firstCh == '*'.code || firstCh == '+'.code) &&
+                    isSpaceTabEolOrEof(if (pos + 1 < size) codePointAtIndex(pos + 1) else IntStream.EOF)
+                ) {
+                    paraId++
+                    pos++
+                } else if (firstCh in '0'.code..'9'.code) {
+                    var digits = 0
+                    var dp = pos
+                    while (dp < size && digits < 10 && codePointAtIndex(dp) in '0'.code..'9'.code) {
+                        digits++
+                        dp++
+                    }
+                    if (digits in 1..9 && dp < size) {
+                        val sep = codePointAtIndex(dp)
+                        val afterSep = if (dp + 1 < size) codePointAtIndex(dp + 1) else IntStream.EOF
+                        if ((sep == '.'.code || sep == ')'.code) && isSpaceTabEolOrEof(afterSep)) {
+                            paraId++
+                            pos = dp + 1
+                        }
+                    }
+                } else if (firstCh == '<'.code &&
+                    pos + 3 < size &&
+                    codePointAtIndex(pos + 1) == '!'.code &&
+                    codePointAtIndex(pos + 2) == '-'.code &&
+                    codePointAtIndex(pos + 3) == '-'.code
+                ) {
+                    paraId++
+                }
+            }
+
+            // 6. Index backtick runs across the rest of this line
+            i = indexBackticksOnLine(pos, size, paraId, paraIds, byLen)
+            prevBqDepth = bqDepth
+            prevLineWasBlank = false
+            prevWasIndentedCode = false
         }
 
         backtickRunParaIds = paraIds
         backtickRunsByLength = byLen
         backtickCursorByLength = cursors
+    }
+
+    private fun indexBackticksOnLine(
+        startPos: Int,
+        size: Int,
+        paraId: Int,
+        paraIds: HashMap<Int, Int>,
+        byLen: HashMap<Int, ArrayList<Int>>,
+    ): Int {
+        var i = startPos
+        while (i < size) {
+            val ch = codePointAtIndex(i)
+            when (ch) {
+                '\r'.code, '\n'.code -> return skipNewlineAt(i, size)
+                '`'.code -> {
+                    val runStart = i
+                    while (i < size && codePointAtIndex(i) == '`'.code) {
+                        i++
+                    }
+                    paraIds[runStart] = paraId
+                    byLen.getOrPut(i - runStart) { ArrayList() }.add(runStart)
+                }
+                else -> i++
+            }
+        }
+        return size
+    }
+
+    private fun isOnlyWsAfterUntilNewline(start: Int, size: Int): Boolean {
+        var idx = start
+        while (idx < size) {
+            val ch = codePointAtIndex(idx)
+            when (ch) {
+                ' '.code, '\t'.code -> idx++
+                '\r'.code, '\n'.code -> return true
+                else -> return false
+            }
+        }
+        return false
+    }
+
+    private fun findFrontmatterEndOffset(afterOpenDelim: Int, size: Int, fmType: Int): Int {
+        var idx = advancePastLine(afterOpenDelim, size)
+        while (idx < size) {
+            if (isFrontmatterCloseAt(idx, fmType)) {
+                return advancePastLine(idx, size)
+            }
+            idx = advancePastLine(idx, size)
+        }
+        return -1
+    }
+
+    private fun skipFencedBlockForBacktickIndex(
+        afterOpenerChars: Int,
+        size: Int,
+        fChar: Int,
+        fLen: Int,
+        bqDepth: Int,
+    ): Int {
+        var idx = advancePastLine(afterOpenerChars, size)
+        while (idx < size) {
+            var pos = idx
+            if (bqDepth > 0) {
+                if (!hasBlockquotePrefixAhead(pos, bqDepth)) {
+                    return idx
+                }
+                for (d in 0 until bqDepth) {
+                    while (pos < size && codePointAtIndex(pos) == ' '.code) pos++
+                    pos++ // '>'
+                    if (pos < size && codePointAtIndex(pos) == ' '.code) pos++
+                }
+            }
+            var spaces = 0
+            var streamCol = if (bqDepth > 0) 1 else 0
+            while (pos < size && spaces < 4) {
+                val ch = codePointAtIndex(pos)
+                if (ch == ' '.code) {
+                    spaces++
+                    streamCol++
+                    pos++
+                } else if (ch == '\t'.code) {
+                    val step = 4 - (streamCol % 4)
+                    spaces += step
+                    streamCol += step
+                    pos++
+                } else {
+                    break
+                }
+            }
+            if (spaces <= 3 && pos < size && codePointAtIndex(pos) == fChar) {
+                val closeCount = countSameChar(pos, size, fChar)
+                if (closeCount >= fLen && isOnlyWsBeforeEolOrEofAt(pos + closeCount, size)) {
+                    return advancePastLine(pos + closeCount, size)
+                }
+            }
+            idx = advancePastLine(idx, size)
+        }
+        return size
+    }
+
+    private fun isOnlyWsBeforeEolOrEofAt(start: Int, size: Int): Boolean {
+        var idx = start
+        while (idx < size) {
+            val ch = codePointAtIndex(idx)
+            when (ch) {
+                ' '.code, '\t'.code -> idx++
+                '\r'.code, '\n'.code -> return true
+                else -> return false
+            }
+        }
+        return true
+    }
+
+    private fun isThematicOrSetextLine(start: Int, size: Int, marker: Int): Boolean {
+        var count = 0
+        var idx = start
+        while (idx < size) {
+            val ch = codePointAtIndex(idx)
+            when (ch) {
+                marker -> {
+                    count++
+                    idx++
+                }
+                ' '.code, '\t'.code -> idx++
+                '\r'.code, '\n'.code -> return count >= 3
+                else -> return false
+            }
+        }
+        return count >= 3
+    }
+
+    private fun isSetextEqualsLine(start: Int, size: Int): Boolean {
+        var idx = start
+        while (idx < size) {
+            val ch = codePointAtIndex(idx)
+            when (ch) {
+                '='.code, ' '.code, '\t'.code -> idx++
+                '\r'.code, '\n'.code -> return true
+                else -> return false
+            }
+        }
+        return true
     }
 
     // -------------------------------------------------------------------------
