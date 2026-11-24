@@ -252,10 +252,12 @@ internal object DeckReviewCli {
                 // writes, this order leaves a resolved comment unclaimed, so an agent sees it
                 // again; the other order leaves it queued and claimed, which is stranded for ever.
                 //
-                // Only an explicit requeue releases it. `--review-status=failed` says the agent
-                // tried and could not, and handing that straight back would have the next wait
+                // Requeued or resolved, the comment is no longer with this agent: holding the
+                // claim past an Applied verdict leaves the deck's HUD counting it as in progress
+                // for ever. Only `--review-status=failed` keeps it, because that says the agent
+                // tried and could not, and handing it straight back would have the next wait
                 // deliver the same comment to the same agent for ever.
-                if (takenFile != null && status == ReviewCommentStatus.Queued) {
+                if (takenFile != null && status != ReviewCommentStatus.Failed) {
                     release(takenFile, listOf(commentId))
                 }
                 ReviewQueueFile.writeAtomically(commentsFile, encodeComments(updated) + "\n")

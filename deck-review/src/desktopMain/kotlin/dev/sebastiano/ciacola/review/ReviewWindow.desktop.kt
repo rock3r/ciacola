@@ -385,7 +385,11 @@ private fun ReviewOuterWindowOverlay(
                             it.id !in store.claimedIds
                     }
                     val applyingCount = store.comments.count {
-                        it.status == ReviewCommentStatus.Applying || it.id in store.claimedIds
+                        // A claim only means work in progress while the comment is still waiting
+                        // for a verdict. Resolved or failed, it is no longer with anybody, and
+                        // counting a stale sidecar entry here spins the HUD for ever.
+                        it.status == ReviewCommentStatus.Applying ||
+                            (it.status == ReviewCommentStatus.Queued && it.id in store.claimedIds)
                     }
                     val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
 
@@ -467,15 +471,23 @@ private fun ReviewOuterWindowOverlay(
                             lastSeenPending = null
                             draftWasRestored = false
                             restoredFromTarget = null
+                            val submittedNote = composerNoteState.text.toString()
                             coordinator.clearComposerDraft()
                             composerNoteState.setTextAndPlaceCursorAtEnd("")
                             coordinator.dismissActivePopups(fromEscapeKey = false)
                             scope.launch {
-                                store.submitComment(
+                                val saved = store.submitComment(
                                     comment = comment,
                                     dispatchImmediate = dispatchImmediate,
                                     pngBytes = pngBytes,
                                 )
+                                if (saved == null) {
+                                    // The queue was busy and nothing was written. A notice alone
+                                    // would leave the author retyping a note they had already
+                                    // sent, so the draft comes back with its target.
+                                    coordinator.composerDraftText = submittedNote
+                                    coordinator.composerDraftTarget = comment.target
+                                }
                             }
                         },
                     )
@@ -495,7 +507,7 @@ private fun ReviewOuterWindowOverlay(
                         delivering = activePinComment.id in store.deliveringIds,
                         claimed = activePinComment.id in store.claimedIds,
                         onReleaseClaim = {
-                            store.releaseClaim(activePinComment.id)
+                            scope.launch { store.releaseClaim(activePinComment.id) }
                             coordinator.dismissActivePopups(fromEscapeKey = false)
                         },
                         onClose = { fromEsc ->

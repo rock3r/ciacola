@@ -552,4 +552,19 @@ class DeckReviewCliTest {
         assertTrue(line.contains("Senior Android Engineer"), line)
         assertTrue(line.contains("wrong job title"), line)
     }
+
+    @Test
+    fun timeoutsAreParsedInEveryUnitTheUsageTextOffers() {
+        assertEquals(30 * 60_000L, parseReviewTimeout("30m"))
+        assertEquals(45_000L, parseReviewTimeout("45s"))
+        assertEquals(2 * 3_600_000L, parseReviewTimeout("2h"))
+        // Documented in the usage text and in this file's own KDoc, but "100ms" used to be read
+        // as "100m" with the s stripped, which parses as nothing at all.
+        assertEquals(100L, parseReviewTimeout("100ms"))
+        assertEquals(250L, parseReviewTimeout("250"))
+        // A deadline is now plus this: an overflowed product lands in the past, so a wait asked
+        // for an absurdly long time would return at once.
+        assertFailsWith<IllegalArgumentException> { parseReviewTimeout("9223372036854775807h") }
+        assertFailsWith<IllegalStateException> { parseReviewTimeout("soon") }
+    }
 }

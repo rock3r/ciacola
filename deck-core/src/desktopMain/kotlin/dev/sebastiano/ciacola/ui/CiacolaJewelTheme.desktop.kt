@@ -129,7 +129,10 @@ fun ReviewCommentStatus.labelText(delivering: Boolean = false, claimed: Boolean 
         ReviewCommentStatus.Queued -> if (claimed) "With an agent" else "Waiting for an agent"
         ReviewCommentStatus.Applying -> if (delivering) "Sending to the agent…" else "With the agent"
         ReviewCommentStatus.Applied -> "Applied"
-        ReviewCommentStatus.Failed -> if (claimed) "With an agent" else "Delivery failed"
+        // Claimed and failed is not work in progress: an agent took the note and reported that it
+        // could not do it. Calling that "with an agent" leaves the comment looking busy for ever,
+        // when what it actually needs is the author's attention.
+        ReviewCommentStatus.Failed -> if (claimed) "Needs attention" else "Delivery failed"
     }
 
 /**

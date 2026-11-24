@@ -242,10 +242,15 @@ internal fun isExecutableAvailable(
 
     // On Windows a bare name resolves through PATHEXT, so "agentapi" has to find agentapi.exe.
     // An empty extension first keeps the POSIX case unchanged.
+    //
+    // Only the extensions the push itself can launch count. Windows CreateProcess appends .exe
+    // to a bare name and nothing else: a .cmd or .bat shim on PATH is found by a PATHEXT search
+    // but ProcessBuilder cannot start it, so counting those would offer Send for a command every
+    // push would then fail to run. On POSIX there is no PATHEXT, so this adds nothing.
     val suffixes = listOf("") + pathExt.orEmpty()
         .split(pathSeparator)
         .map { it.trim() }
-        .filter { it.isNotEmpty() }
+        .filter { it.equals(".exe", ignoreCase = true) }
 
     fun candidate(parent: String?, name: String): java.nio.file.Path? = runCatching {
         val raw = if (parent == null) {
@@ -280,4 +285,13 @@ internal fun commandExistsAnywhere(
     bin: String,
     path: String?,
     baseDir: java.nio.file.Path? = null,
-): Boolean = isExecutableAvailable(bin, path, baseDir, isExecutable = { java.nio.file.Files.exists(it) })
+    pathExt: String? = System.getenv("PATHEXT"),
+): Boolean = isExecutableAvailable(
+    bin = bin,
+    path = path,
+    baseDir = baseDir,
+    pathExt = pathExt,
+    // A directory named like the command is not the command: without this, a "tools/agentapi/"
+    // folder on PATH would be reported as a present-but-unrunnable binary.
+    isExecutable = { java.nio.file.Files.exists(it) && !java.nio.file.Files.isDirectory(it) },
+)

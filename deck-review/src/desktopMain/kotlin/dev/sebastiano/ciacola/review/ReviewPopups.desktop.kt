@@ -363,7 +363,9 @@ internal fun AnchoredCommentComposerPopup(
                     )
                 }
 
-                if (store.effectiveConversationId().isBlank()) {
+                // Only worth asking for when something could push with it. With no push command
+                // the composer only queues, and the field is a question with no purpose.
+                if (store.effectiveConversationId().isBlank() && store.agentPushAvailable()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextField(
                             state = convIdState,
@@ -656,16 +658,27 @@ internal fun AnchoredSelectedPinPopup(
 
                 if (comment.resolution.isNotBlank()) {
                     val resShape = RoundedCornerShape(4.dp)
+                    // Green only for a comment that is actually done: an agent reporting that it
+                    // could not do something writes a resolution too.
+                    val resolved = comment.status == ReviewCommentStatus.Applied
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, statusPalette.applied, resShape)
+                            .border(
+                                1.dp,
+                                if (resolved) statusPalette.applied else statusPalette.queued,
+                                resShape,
+                            )
                             .padding(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
                         Icon(
-                            key = AllIconsKeys.General.GreenCheckmark,
+                            key = if (resolved) {
+                                AllIconsKeys.General.GreenCheckmark
+                            } else {
+                                AllIconsKeys.General.Information
+                            },
                             contentDescription = "Resolution",
                             modifier = Modifier.size(14.dp),
                         )

@@ -76,8 +76,11 @@ object ReviewQueueFile {
         // OverlappingFileLockException even on the thread that already holds it — nesting would
         // fail at the inner call rather than waiting, which is the opposite of what a reentrant
         // lock should do.
+        // One deadline for both halves of the wait. Timing them separately lets a caller that
+        // asked for five seconds block for ten and still be told it waited five.
+        val deadlineNanos = timeout?.let { System.nanoTime() + it.toNanos() }
         val alreadyHeld = inProcess.isHeldByCurrentThread
-        if (!acquire(inProcess, timeout)) throw Busy(lockFile, timeout ?: Duration.ZERO)
+        if (!acquire(inProcess, deadlineNanos)) throw Busy(lockFile, timeout ?: Duration.ZERO)
         try {
             if (alreadyHeld) return block()
             FileChannel.open(
@@ -87,7 +90,7 @@ object ReviewQueueFile {
             ).use { channel ->
                 var lock: FileLock? = null
                 try {
-                    lock = acquireFileLock(channel, timeout) ?: throw Busy(lockFile, timeout!!)
+                    lock = acquireFileLock(channel, deadlineNanos) ?: throw Busy(lockFile, timeout!!)
                     return block()
                 } finally {
                     runCatching { lock?.release() }
@@ -117,12 +120,12 @@ object ReviewQueueFile {
         return text
     }
 
-    private fun acquire(lock: ReentrantLock, timeout: Duration?): Boolean {
-        if (timeout == null) {
+    private fun acquire(lock: ReentrantLock, deadlineNanos: Long?): Boolean {
+        if (deadlineNanos == null) {
             lock.lock()
             return true
         }
-        return lock.tryLock(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        return lock.tryLock((deadlineNanos - System.nanoTime()).coerceAtLeast(0L), TimeUnit.NANOSECONDS)
     }
 
     /**
@@ -130,16 +133,18 @@ object ReviewQueueFile {
      * The poll is coarse on purpose: these transactions are milliseconds, so anything that has to
      * wait at all is already an anomaly worth a few extra of them.
      */
-    private fun acquireFileLock(channel: FileChannel, timeout: Duration?): FileLock? {
-        if (timeout == null) return channel.lock()
-        val deadline = System.nanoTime() + timeout.toNanos()
+    private fun acquireFileLock(channel: FileChannel, deadlineNanos: Long?): FileLock? {
+        if (deadlineNanos == null) return channel.lock()
         while (true) {
             val attempt = runCatching { channel.tryLock() }.getOrNull()
             if (attempt != null) return attempt
-            if (System.nanoTime() >= deadline) return null
-            Thread.sleep(25)
+            val remainingNanos = deadlineNanos - System.nanoTime()
+            if (remainingNanos <= 0L) return null
+            Thread.sleep(minOf(POLL_MILLIS, remainingNanos / 1_000_000L + 1L))
         }
     }
+
+    private const val POLL_MILLIS = 25L
 
     /** Replaces [file] through a temporary file in the same directory and an atomic move. */
     fun writeAtomically(file: Path, content: String) {

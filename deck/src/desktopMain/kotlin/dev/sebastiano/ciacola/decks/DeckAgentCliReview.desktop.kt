@@ -17,23 +17,24 @@ internal fun parseReviewStatus(raw: String): ReviewCommentStatus =
         else -> error("Invalid --review-status '$raw' (expected applied, failed or queued)")
     }
 
-/**
- * Wiring for the review modes of [DeckAgentCli], kept out of that file so it stays under the
- * repository's god-file limit.
- */
-
-/** Accepts `30m`, `45s`, `2h` or bare milliseconds, as `cav review wait --timeout` does. */
+/** Accepts `30m`, `45s`, `2h`, `100ms` or bare milliseconds, as `cav review wait --timeout` does. */
 internal fun parseReviewTimeout(raw: String): Long {
     require(raw.isNotEmpty()) { "Empty --timeout value" }
-    val (numberPart, multiplier) = when (raw.last()) {
-        's', 'S' -> raw.dropLast(1) to 1_000L
-        'm', 'M' -> raw.dropLast(1) to 60_000L
-        'h', 'H' -> raw.dropLast(1) to 3_600_000L
+    // "ms" first: tested on the last character alone, 100ms leaves "100m", which parses as
+    // nothing at all even though the usage text and the docs both offer it.
+    val (numberPart, multiplier) = when {
+        raw.endsWith("ms", ignoreCase = true) -> raw.dropLast(2) to 1L
+        raw.last() in "sS" -> raw.dropLast(1) to 1_000L
+        raw.last() in "mM" -> raw.dropLast(1) to 60_000L
+        raw.last() in "hH" -> raw.dropLast(1) to 3_600_000L
         else -> raw to 1L
     }
     val value = numberPart.trim().toLongOrNull()
-        ?: error("Invalid --timeout value '$raw' (expected e.g. 30m, 45s, 2h or milliseconds)")
+        ?: error("Invalid --timeout value '$raw' (expected e.g. 30m, 45s, 2h, 100ms or milliseconds)")
     require(value > 0) { "--timeout must be positive, got '$raw'" }
+    // A deadline is now + this, so an overflowed product lands in the past and the wait returns
+    // at once — the opposite of what an absurdly large timeout asked for.
+    require(value <= Long.MAX_VALUE / multiplier) { "--timeout is too large: '$raw'" }
     return value * multiplier
 }
 

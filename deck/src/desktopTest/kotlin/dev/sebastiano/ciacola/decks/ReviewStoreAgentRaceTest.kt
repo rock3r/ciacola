@@ -4,6 +4,7 @@ import dev.sebastiano.ciacola.review.ReviewClaims
 import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.review.ReviewCommentStore
 import dev.sebastiano.ciacola.review.ReviewConfig
+import dev.sebastiano.ciacola.review.ReviewQueueFile
 import dev.sebastiano.ciacola.review.ReviewTargetHit
 import dev.sebastiano.ciacola.review.SlideReviewComment
 import java.nio.file.Files
@@ -151,9 +152,141 @@ class ReviewStoreAgentRaceTest {
         assertTrue("rc-held" in store.claimedIds)
 
         // The author's escape hatch when the agent holding a comment is gone.
-        store.releaseClaim("rc-held")
+        runBlocking { store.releaseClaim("rc-held") }
 
         assertTrue(store.claimedIds.isEmpty())
         assertTrue(ReviewClaims.readIds(claimsFile) {}.isEmpty())
+    }
+
+    @Test
+    fun resolvingAcommentGivesItsClaimBackSoTheHudStopsCountingIt() {
+        val dir = Files.createTempDirectory("review-store-resolve-claim")
+        val store = ReviewCommentStore(
+            storyboardDir = dir,
+            workspaceRoot = dir,
+            envProvider = { null },
+            systemPropertyProvider = { null },
+        )
+        runBlocking { store.submitComment(comment("rc-done"), dispatchImmediate = false) }
+        val claimsFile = dir.resolve(ReviewClaims.FILE_NAME)
+        val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        DeckReviewCli.claim(claimsFile, listOf("rc-done"))
+
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-done",
+            resolution = "done",
+            takenFile = claimsFile,
+            out = {},
+        )
+
+        // A claim held past the verdict leaves the deck counting a finished comment as being with
+        // an agent, with no way back short of deleting it.
+        assertTrue(ReviewClaims.readIds(claimsFile) {}.isEmpty(), "Applied must release the claim")
+
+        // Failed is the one verdict that keeps it: handing that straight back would deliver the
+        // same comment to the same agent on every later wait.
+        DeckReviewCli.claim(claimsFile, listOf("rc-done"))
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-done",
+            resolution = "could not",
+            status = ReviewCommentStatus.Failed,
+            takenFile = claimsFile,
+            out = {},
+        )
+        assertEquals(setOf("rc-done"), ReviewClaims.readIds(claimsFile) {})
+    }
+
+    @Test
+    fun clearingAppliedCommentsDropsTheirClaims() {
+        val dir = Files.createTempDirectory("review-store-clear-claims")
+        val store = ReviewCommentStore(
+            storyboardDir = dir,
+            workspaceRoot = dir,
+            envProvider = { null },
+            systemPropertyProvider = { null },
+        )
+        runBlocking { store.submitComment(comment("rc-gone"), dispatchImmediate = false) }
+        val claimsFile = dir.resolve(ReviewClaims.FILE_NAME)
+        DeckReviewCli.claim(claimsFile, listOf("rc-gone"))
+        store.reloadClaims()
+
+        store.markCommentApplied("rc-gone")
+        store.clearAppliedComments()
+
+        assertTrue(ReviewClaims.readIds(claimsFile) {}.isEmpty())
+        assertTrue(store.comments.isEmpty())
+    }
+
+    @Test
+    fun aVerdictWrittenDuringAPushIsNotOverwrittenByTheDeliveryFailure() {
+        val dir = Files.createTempDirectory("review-store-late-verdict")
+        val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        // Stands in for an agent that resolves the comment and only then fails to answer the
+        // push: the deck's in-memory copy still says applying while disk already says applied.
+        val fakeAgent = dir.resolve("late-verdict-agentapi.sh").apply {
+            Files.writeString(
+                this,
+                "#!/bin/sh\n" +
+                    "sed 's/\"applying\"/\"applied\"/' '" + commentsFile.toAbsolutePath() + "' > '" +
+                    commentsFile.toAbsolutePath() + ".tmp'\n" +
+                    "mv '" + commentsFile.toAbsolutePath() + ".tmp' '" + commentsFile.toAbsolutePath() + "'\n" +
+                    "exit 3\n",
+            )
+            toFile().setExecutable(true)
+        }
+        val store = ReviewCommentStore(
+            storyboardDir = dir,
+            workspaceRoot = dir,
+            envProvider = { key ->
+                if (key == "CIACOLA_AGENTAPI_BIN") fakeAgent.toAbsolutePath().toString() else null
+            },
+            systemPropertyProvider = { null },
+        )
+        store.saveConfig(ReviewConfig(conversationId = "conv-1"))
+
+        runBlocking { store.submitComment(comment("rc-late"), dispatchImmediate = true) }
+
+        val onDisk = DeckReviewCli.readComments(commentsFile).single()
+        assertEquals(
+            ReviewCommentStatus.Applied,
+            onDisk.status,
+            "the agent's verdict was replaced by the push's own failure",
+        )
+    }
+
+    @Test
+    fun aQueueHeldByAnotherProcessKeepsTheNoteInsteadOfLosingIt() {
+        val dir = Files.createTempDirectory("review-store-busy")
+        val store = ReviewCommentStore(
+            storyboardDir = dir,
+            workspaceRoot = dir,
+            envProvider = { null },
+            systemPropertyProvider = { null },
+        )
+
+        val locked = CyclicBarrier(2)
+        val release = CyclicBarrier(2)
+        val holder = Thread {
+            ReviewQueueFile.withLock(dir) {
+                locked.await()
+                release.await()
+            }
+        }
+        holder.start()
+        locked.await()
+
+        // The lock wait is bounded, so this returns rather than freezing: a note that could not be
+        // written must come back as null, so the composer keeps the author's words.
+        val saved = runBlocking { store.submitComment(comment("rc-busy"), dispatchImmediate = false) }
+        release.await()
+        holder.join()
+
+        assertTrue(saved == null, "a busy queue must report failure, not a saved comment")
+        assertTrue(
+            store.activityNotice?.title.orEmpty().isNotEmpty(),
+            "the author has to be told the queue was busy",
+        )
     }
 }

@@ -94,8 +94,11 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
         }
     }
 
+    // Claimed comments are with an agent, not waiting for one: counting them here would keep
+    // Send Queued live, and the missing-Conversation-ID banner up, for work already under way.
     val queuedCount = store.comments.count {
-        it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+        (it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed) &&
+            it.id !in store.claimedIds
     }
     val hasApplied = store.comments.any { it.status == ReviewCommentStatus.Applied }
     val typedConvId = convIdState.text.toString().trim()
@@ -181,7 +184,9 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 )
                             }
 
-                            effectiveConvId.isBlank() -> {
+                            // Only a problem if there is something to push with it; with no push
+                            // command the queue is the path and nothing is misconfigured.
+                            effectiveConvId.isBlank() && store.agentPushAvailable() -> {
                                 Text(
                                     text = "Not configured",
                                     style = JewelTheme.typography.small,
@@ -294,7 +299,9 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
             if (store.comments.isNotEmpty()) {
                 val pushAvailable = store.agentPushAvailable()
                 val queuedItems = store.comments.filter {
-                    it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+                    (it.status == ReviewCommentStatus.Queued ||
+                        it.status == ReviewCommentStatus.Failed) &&
+                        it.id !in store.claimedIds
                 }
                 @OptIn(ExperimentalLayoutApi::class)
                 FlowRow(
@@ -430,7 +437,7 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 pushAvailable = store.agentPushAvailable(),
                                 delivering = item.id in store.deliveringIds,
                                 claimed = item.id in store.claimedIds,
-                                onReleaseClaim = { store.releaseClaim(item.id) },
+                                onReleaseClaim = { scope.launch { store.releaseClaim(item.id) } },
                                 onJumpToSlide = {
                                     scope.launch {
                                         val target = Storyboard.Index(item.sceneIndex, item.frameIndex)
@@ -566,7 +573,13 @@ private fun ReviewCommentRowCard(
                 verticalAlignment = Alignment.Top,
             ) {
                 Icon(
-                    key = AllIconsKeys.General.GreenCheckmark,
+                    // An agent reporting that it could not do something writes a resolution too.
+                    // A green tick on that reads as done.
+                    key = if (item.status == ReviewCommentStatus.Applied) {
+                        AllIconsKeys.General.GreenCheckmark
+                    } else {
+                        AllIconsKeys.General.Information
+                    },
                     contentDescription = "Resolution",
                     modifier = Modifier.size(13.dp),
                 )

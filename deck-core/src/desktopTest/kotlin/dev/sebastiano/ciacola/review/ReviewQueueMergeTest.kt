@@ -2,6 +2,8 @@ package dev.sebastiano.ciacola.review
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class ReviewQueueMergeTest {
 
@@ -91,5 +93,34 @@ class ReviewQueueLockTest {
         java.nio.file.Files.writeString(file, "{ not json")
         // Losing a claim costs a repeat, not a comment, so this one recovers rather than throws.
         assertEquals(emptySet<String>(), ReviewClaims.readIds(file) {})
+    }
+
+    @Test
+    fun aBoundedWaitHonoursOneDeadlineForBothHalvesOfTheLock() {
+        val dir = java.nio.file.Files.createTempDirectory("review-queue-deadline")
+        val held = java.util.concurrent.CyclicBarrier(2)
+        val finish = java.util.concurrent.CyclicBarrier(2)
+        val holder = Thread {
+            ReviewQueueFile.withLock(dir) {
+                held.await()
+                finish.await()
+            }
+        }
+        holder.start()
+        held.await()
+
+        val timeout = java.time.Duration.ofMillis(300)
+        val startedAt = System.nanoTime()
+        val failure = assertFailsWith<ReviewQueueFile.Busy> {
+            ReviewQueueFile.withLock(dir, timeout) { }
+        }
+        val waitedMillis = (System.nanoTime() - startedAt) / 1_000_000L
+        finish.await()
+        holder.join()
+
+        // The in-process wait and the file-lock wait used to carry a timeout each, so a caller
+        // that asked for five seconds could block for ten and still be told it waited five.
+        assertTrue(waitedMillis < 600L, "waited ${waitedMillis}ms for a 300ms deadline")
+        assertTrue(failure.message.orEmpty().isNotEmpty())
     }
 }

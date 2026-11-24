@@ -91,7 +91,7 @@ class RelativePushCommandTest {
 
     @Test
     fun aWindowsPathAndPathExtAreUnderstood() {
-        val present = setOf("c:/tools/agentapi.exe", "c:/program files/bin/agentapi.cmd")
+        val present = setOf("c:/tools/agentapi.exe", "c:/program files/bin/agentapi.exe")
         // This test runs on POSIX, where Path joins with "/" and names are case-sensitive, so the
         // predicate stands in for a Windows filesystem. What is under test is which candidates
         // get tried — the separator and the extension — not how the JDK spells them.
@@ -111,6 +111,20 @@ class RelativePushCommandTest {
         // A quoted PATH entry is ordinary on Windows and must not throw during store init.
         assertTrue(
             isExecutableAvailable("agentapi", "\"C:\\Program Files\\bin\"", null, ".EXE;.CMD", ';', isExecutable),
+        )
+    }
+
+    @Test
+    fun aWindowsShimTheLaunchCannotRunDoesNotCountAsAvailable() {
+        // CreateProcess appends .exe to a bare name and nothing else, so ProcessBuilder("agentapi")
+        // cannot start an npm-style agentapi.cmd. Counting the shim would offer Send for a command
+        // every push then fails to run, and report it in red as a delivery failure.
+        val present = setOf("c:/tools/agentapi.cmd", "c:/tools/agentapi.bat")
+        val isExecutable: (java.nio.file.Path) -> Boolean = {
+            it.toString().replace('\\', '/').lowercase() in present
+        }
+        assertTrue(
+            !isExecutableAvailable("agentapi", "C:\\tools", null, ".COM;.EXE;.BAT;.CMD", ';', isExecutable),
         )
     }
 

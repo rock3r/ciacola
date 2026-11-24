@@ -125,8 +125,9 @@ object DeckAgentCli {
         else -> runReviewResolveMode(
             o.storyboardDirArg,
             o.deckArg,
-            o.resolveCommentId?.takeIf { it.isNotEmpty() }
-                ?: error("Missing --review-resolve=<commentId> (or -Pciacola.comment=<commentId>)"),
+            // parseArgs has already insisted on this, so that a missing comment id prints
+            // "Error: ..." and the usage text rather than a stack trace.
+            o.resolveCommentId.orEmpty(),
             o.resolution,
             o.reviewStatus,
         )
@@ -247,6 +248,11 @@ object DeckAgentCli {
         // forgot the flag waits half an hour on a queue nobody is writing to.
         val resolvedDeck = deckArg?.takeIf { it.isNotEmpty() }
             ?: error("Missing --deck=<id|path> (or -Pciacola.deck=<id|path>)")
+        // Checked here, with --deck, so the diagnostic goes through runCatching in runCli: thrown
+        // later it escapes as a stack trace instead of an error line and the usage text.
+        if (resolvedMode == CliMode.ReviewResolve && resolveCommentId.isNullOrEmpty()) {
+            error("Missing --review-resolve=<commentId> (or -Pciacola.comment=<commentId>)")
+        }
 
         return CliOptions(
             mode = resolvedMode,

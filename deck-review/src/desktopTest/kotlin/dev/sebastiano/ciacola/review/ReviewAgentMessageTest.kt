@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola.review
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
@@ -196,6 +197,7 @@ class ReviewAgentMessageTest {
                 ),
                 dispatchImmediate = false,
             )
+            assertNotNull(saved)
             assertEquals("foundation", saved.deckId)
             assertEquals("/tmp/foundation.deck.json", saved.deckFilePath)
             assertEquals("s01", saved.slideId)
