@@ -290,7 +290,7 @@ class GroovySyntaxLexerTest {
     }
 
     @Test
-    fun recoversFromUnterminatedConstructsAndMatchesPrefixFuzzAndLinearPerformance() {
+    fun recoversFromUnterminatedConstructsPrefixTruncationAndFuzz() {
         val unterminated = listOf(
             "def a = \"unclosed\ndef b = 1",
             "def a = \"unclosed\\",
@@ -319,7 +319,10 @@ class GroovySyntaxLexerTest {
         """.trimIndent()
         assertPrefixTruncationSafety(GroovySyntaxLexer, prefixSample, maxStep = 1)
         assertMalformedAndFuzzSafety(GroovySyntaxLexer, seed = 0x60071AL, iterations = 80)
+    }
 
+    @Test
+    fun linearPerformanceOnGeneralPathologicalInputs() {
         assertLinearPerformance(
             GroovySyntaxLexer,
             listOf(
@@ -328,20 +331,47 @@ class GroovySyntaxLexerTest {
                 "unclosed-slashy-10k" to ("def r = /" + "a".repeat(12_000)),
                 "repeated-slashes-10k" to "/".repeat(10_000),
                 "repeated-slash-lines-5k" to "/a\n".repeat(5_000),
-                "nested-unclosed-slashy-interp-2k" to ("/\${".repeat(2_000) + "a".repeat(2_000)),
-                "offset-unclosed-slashy-interp-5k" to "x = /a\${\n".repeat(5_000),
-                "nested-closed-slashy-interp-5k" to ("/ \${ ".repeat(5_000) + " }".repeat(5_000)),
-                "repeated-succeeding-slashy-interp-4k" to ("/" + " \${ x = / }".repeat(4_000) + " /"),
-                "unclosed-block-comment-in-slashy-interp-5k" to ("x = " + "/\${/a/* ".repeat(5_000)),
-                "unclosed-escaped-quote-in-slashy-interp-5k" to ("x = " + "/\${/\\'/+ ".repeat(5_000)),
-                "closed-block-comment-long-tail-slashy-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/ " + "a".repeat(20_000)),
-                "unclosed-line-comment-in-slashy-interp-5k" to ("x = " + "/\${/a//".repeat(5_000)),
-                "closed-block-comment-brace-tail-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/" + "{}".repeat(10_000)),
-                "closed-block-comment-interp-tail-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/" + "\${}".repeat(10_000)),
                 "unclosed-dollar-slashy-10k" to ("def d = $/" + "a".repeat(12_000)),
                 "unclosed-block-comment-10k" to ("/* " + "*".repeat(12_000)),
                 "chained-division-2k" to ("10" + " / 2".repeat(2_500)),
                 "deep-nested-gstring" to ("\"\${".repeat(150) + "x" + "}\"".repeat(150)),
+            ),
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnSlashyInterpolationNesting() {
+        assertLinearPerformance(
+            GroovySyntaxLexer,
+            listOf(
+                "nested-unclosed-slashy-interp-2k" to ("/\${".repeat(2_000) + "a".repeat(2_000)),
+                "offset-unclosed-slashy-interp-5k" to "x = /a\${\n".repeat(5_000),
+                "nested-closed-slashy-interp-5k" to ("/ \${ ".repeat(5_000) + " }".repeat(5_000)),
+                "repeated-succeeding-slashy-interp-4k" to ("/" + " \${ x = / }".repeat(4_000) + " /"),
+            ),
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnSlashyUnclosedCommentAndQuoteWitnesses() {
+        assertLinearPerformance(
+            GroovySyntaxLexer,
+            listOf(
+                "unclosed-block-comment-in-slashy-interp-5k" to ("x = " + "/\${/a/* ".repeat(5_000)),
+                "unclosed-escaped-quote-in-slashy-interp-5k" to ("x = " + "/\${/\\'/+ ".repeat(5_000)),
+                "unclosed-line-comment-in-slashy-interp-5k" to ("x = " + "/\${/a//".repeat(5_000)),
+            ),
+        )
+    }
+
+    @Test
+    fun linearPerformanceOnSlashyClosedCommentTailWitnesses() {
+        assertLinearPerformance(
+            GroovySyntaxLexer,
+            listOf(
+                "closed-block-comment-long-tail-slashy-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/ " + "a".repeat(20_000)),
+                "closed-block-comment-brace-tail-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/" + "{}".repeat(10_000)),
+                "closed-block-comment-interp-tail-2k" to ("x = " + "/\${/a/* ".repeat(2_000) + "*/" + "\${}".repeat(10_000)),
             ),
         )
     }
