@@ -838,6 +838,7 @@ private fun RenderTravellingChildEntry(
                     colorResolver = ctx.colorResolver,
                     reducedMotion = ctx.reducedMotion,
                     modifier = childMod,
+                    fontResolverHandle = ctx.fontResolverHandle,
                 )
                 NodeKind.Specimen -> {
                     val payload = node.specimen!!

@@ -299,10 +299,6 @@ class DeckTextWrapAndArrowAuditTest {
         )
 
         // Permanent audit: zero accidental MagicMove ID collisions across all 4 decks
-        val allowedCodeTextMorphs = setOf(
-            "shaders-quickie-2025/s26->s27/return-half4-uv-x-uv-y",
-            "shaders-quickie-2025/s38->s39/vec2-uv-fragcoord-xy-iresolu",
-        )
         val mmCollisions = mutableListOf<String>()
         for (entry in DeckCatalog.entries) {
             val doc = loadClasspathDeckDocument(entry)
@@ -328,7 +324,7 @@ class DeckTextWrapAndArrowAuditTest {
                             val ta = na.text!!.value.plainText.replace(Regex("\\s+"), " ").trim()
                             val tb = nb.text!!.value.plainText.replace(Regex("\\s+"), " ").trim()
                             val key = "${doc.id}/${sa.id}->${sb.id}/${nb.id}"
-                            if (ta != tb && key !in allowedCodeTextMorphs) {
+                            if (ta != tb) {
                                 mmCollisions += "$key text='$ta' vs '$tb'"
                             }
                         }

@@ -35,6 +35,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -148,6 +150,7 @@ fun WarpCodeAdapter(
     colorResolver: DocumentColorResolver,
     reducedMotion: Boolean,
     modifier: Modifier = Modifier,
+    fontResolverHandle: Any? = null,
 ) {
     val beatCount = slide.beats.size.coerceAtLeast(1)
     val density = LocalDensity.current
@@ -266,7 +269,15 @@ fun WarpCodeAdapter(
     val effectivePadding = surface.padding?.toPaddingValues(density)
         ?: androidx.compose.foundation.layout.PaddingValues(theme.styles.codeCard.padding)
     val codePalette: DeckCodePalette = theme.colors.code
-    val baseTextStyle: TextStyle = theme.typography.code
+    val baseTextStyle: TextStyle = remember(theme.typography, colorResolver.themeSpec, payload.fit, density, fontResolverHandle) {
+        resolveDocumentCodeTextStyle(
+            theme = theme,
+            colorResolver = colorResolver,
+            fit = payload.fit,
+            density = density,
+            fontResolverHandle = fontResolverHandle,
+        )
+    }
 
     val textMeasurer = rememberTextMeasurer()
     val horizontalPadPx = with(density) {
@@ -662,6 +673,45 @@ private fun colorToHex(color: Color): String {
     return "#${h(a)}${h(r)}${h(g)}${h(b)}"
 }
 
+internal fun resolveDocumentCodeTextStyle(
+    theme: DeckTheme,
+    colorResolver: DocumentColorResolver,
+    fit: String?,
+    density: Density,
+    fontResolverHandle: Any? = null,
+): TextStyle {
+    val isCompact = fit == "compact"
+    val fallback = if (isCompact) theme.typography.codeCompact else theme.typography.code
+    val roles = colorResolver.themeSpec?.typography.orEmpty()
+    val override = if (isCompact) roles["codeCompact"] else roles["code"]
+    val base = if (override != null) {
+        val fontSizeSp = override.size?.toStageSp(density) ?: fallback.fontSize
+        val explicitLineHeight = override.lineHeight
+        val lineHeightSp = when {
+            explicitLineHeight != null -> if (explicitLineHeight < 6.0) {
+                (explicitLineHeight * fontSizeSp.value.toDouble()).sp
+            } else {
+                explicitLineHeight.toStageSp(density)
+            }
+            override.size != null -> (fontSizeSp.value * 1.35f).sp
+            else -> fallback.lineHeight
+        }
+        fallback.copy(
+            fontSize = fontSizeSp,
+            lineHeight = lineHeightSp,
+            fontWeight = override.weight?.let { FontWeight(it.coerceIn(1, 1000)) } ?: fallback.fontWeight,
+            fontStyle = override.italic?.let { if (it) FontStyle.Italic else FontStyle.Normal } ?: fallback.fontStyle,
+            letterSpacing = override.tracking?.toStageSp(density) ?: fallback.letterSpacing,
+        )
+    } else if (isCompact) {
+        fallback.copy(fontSize = 18.sp, lineHeight = 26.sp)
+    } else {
+        fallback
+    }
+    val fontFamilyName = override?.font ?: roles["code"]?.font
+    return resolveDocumentFontStyle(fontResolverHandle, fontFamilyName, base)
+}
+
 private fun computeFittedCodeStyle(
     diffList: List<DiffContents>,
     baseStyle: TextStyle,
@@ -669,9 +719,6 @@ private fun computeFittedCodeStyle(
     innerMaxWidthPx: Int,
     textMeasurer: androidx.compose.ui.text.TextMeasurer,
 ): TextStyle {
-    if (fit == "compact") {
-        return baseStyle.copy(fontSize = 18.sp, lineHeight = 26.sp)
-    }
     if (fit != "shrinkToWidth" || innerMaxWidthPx == Int.MAX_VALUE) return baseStyle
     fun measureMaxRow(style: TextStyle): Int {
         var widest = 0

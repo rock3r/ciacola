@@ -5,6 +5,7 @@
   "themes": {
     "dark": {
       "preset": "dark",
+      "codeScheme": "intellij-islands-dark",
       "colors": {
         "accent": "#60A5FA",
         "canvas": "#1C1E26",
@@ -14,13 +15,20 @@
       },
       "typography": {
         "body": { "font": "Oscine", "size": 34, "weight": 400, "color": "ink" },
-        "code": { "font": "JetBrains Mono", "size": 24, "weight": 400, "color": "ink" },
+        "code": {
+          "font": "JetBrains Mono",
+          "size": 36,
+          "weight": 400,
+          "color": "ink",
+          "lineHeight": 48
+        },
         "heading": { "font": "Novecento Sans", "size": 48, "weight": 600, "color": "ink" },
         "title": { "font": "Oscine", "size": 84, "weight": 700, "color": "ink" }
       }
     },
     "light": {
       "preset": "light",
+      "codeScheme": "intellij-light",
       "colors": {
         "accent": "#3B82F6",
         "canvas": "#F5F2EB",
@@ -30,7 +38,13 @@
       },
       "typography": {
         "body": { "font": "Oscine", "size": 34, "weight": 400, "color": "ink" },
-        "code": { "font": "JetBrains Mono", "size": 24, "weight": 400, "color": "ink" },
+        "code": {
+          "font": "JetBrains Mono",
+          "size": 36,
+          "weight": 400,
+          "color": "ink",
+          "lineHeight": 48
+        },
         "heading": { "font": "Novecento Sans", "size": 48, "weight": 600, "color": "ink" },
         "title": { "font": "Oscine", "size": 84, "weight": 700, "color": "ink" }
       }
@@ -1532,27 +1546,16 @@
         },
         {
           "id": "overflow-wrap-break-word",
-          "frame": { "x": 656, "y": 800, "w": 608, "h": 103 },
-          "stack": {
-            "children": [
-              {
-                "id": "overflow-wrap-br-bg-1",
-                "frame": { "x": 1.1, "y": 1.3, "w": 605.79, "h": 100 },
-                "shape": { "geometry": "rect", "fill": "#626972", "cornerRadius": 28.5 }
-              },
-              {
-                "id": "overflow-wrap-brea-label",
-                "align": "center",
-                "text": {
-                  "value": "overflow-wrap: break-word;",
-                  "font": "JetBrains Mono",
-                  "size": 35,
-                  "color": "#F2F2F0",
-                  "lineHeight": 46.2,
-                  "align": "center"
-                }
-              }
-            ]
+          "frame": { "x": 651.2, "y": 805, "w": 656, "h": 110 },
+          "code": {
+            "value": "overflow-wrap: break-word;",
+            "language": "css",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 28.5,
+              "padding": { "bottom": 22, "left": 28, "right": 28, "top": 22 }
+            }
           },
           "builds": [
             { "kind": "enter", "beat": 3, "effect": "appear" }
@@ -1594,11 +1597,6 @@
           }
         },
         {
-          "id": "bg-path-3",
-          "frame": { "x": 657.1, "y": 801.3, "w": 605.79, "h": 100 },
-          "shape": { "geometry": "rect", "fill": "#626972", "cornerRadius": 28.5 }
-        },
-        {
           "id": "https-www-codewitht-heitalia",
           "frame": { "x": 718.16, "y": 479.46, "w": 651.13, "h": 125.04 },
           "text": {
@@ -1611,23 +1609,16 @@
         },
         {
           "id": "overflow-wrap-break-word",
-          "frame": { "x": 657.1, "y": 801.3, "w": 605.79, "h": 100 },
-          "stack": {
-            "children": [
-              {
-                "id": "overflow-wrap-brea-label",
-                "align": "center",
-                "text": {
-                  "value": "overflow-wrap: break-word;",
-                  "font": "JetBrains Mono",
-                  "size": 35,
-                  "color": "#F2F2F0",
-                  "lineHeight": 46.2,
-                  "align": "center"
-                }
-              }
-            ],
-            "alignItems": "center"
+          "frame": { "x": 651.2, "y": 805, "w": 656, "h": 110 },
+          "code": {
+            "value": "overflow-wrap: break-word;",
+            "language": "css",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 28.5,
+              "padding": { "bottom": 22, "left": 28, "right": 28, "top": 22 }
+            }
           }
         },
         {
@@ -1654,21 +1645,6 @@
       ],
       "nodes": [
         {
-          "id": "path-1",
-          "frame": { "x": 656, "y": 800, "w": 605.79, "h": 100 },
-          "shape": { "geometry": "rect", "fill": "#626972", "cornerRadius": 28.5 },
-          "builds": [
-            {
-              "kind": "change",
-              "beat": 1,
-              "set": { "opacity": 0.346 },
-              "after": "fix-with-css",
-              "delayMs": 500,
-              "durationMs": 500
-            }
-          ]
-        },
-        {
           "id": "path-2",
           "frame": { "x": 717, "y": 405, "w": 6, "h": 270 },
           "shape": {
@@ -1694,14 +1670,27 @@
         },
         {
           "id": "overflow-wrap-break-word",
-          "frame": { "x": 687, "y": 828.6, "w": 686.8, "h": 56 },
-          "text": {
+          "frame": { "x": 651.2, "y": 805, "w": 656, "h": 110 },
+          "code": {
             "value": "overflow-wrap: break-word;",
-            "font": "JetBrains Mono",
-            "size": 35,
-            "color": "#F2F2F0",
-            "lineHeight": 46.2
-          }
+            "language": "css",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 28.5,
+              "padding": { "bottom": 22, "left": 28, "right": 28, "top": 22 }
+            }
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 1,
+              "set": { "opacity": 0.346 },
+              "after": "fix-with-css",
+              "delayMs": 500,
+              "durationMs": 500
+            }
+          ]
         },
         {
           "id": "does-not-work",
@@ -1783,11 +1772,6 @@
       "background": "#F2F2F0",
       "nodes": [
         {
-          "id": "bg-path",
-          "frame": { "x": 657.1, "y": 801.3, "w": 605.79, "h": 100 },
-          "shape": { "geometry": "rect", "fill": "#626972", "cornerRadius": 28.5 }
-        },
-        {
           "id": "bg-path-2",
           "frame": { "x": 719.53, "y": 406.26, "w": 1, "h": 267.48 },
           "shape": {
@@ -1850,23 +1834,16 @@
         },
         {
           "id": "overflow-wrap-break-word",
-          "frame": { "x": 657.1, "y": 801.3, "w": 605.79, "h": 100 },
-          "stack": {
-            "children": [
-              {
-                "id": "overflow-wrap-brea-label",
-                "align": "center",
-                "text": {
-                  "value": "overflow-wrap: break-word;",
-                  "font": "JetBrains Mono",
-                  "size": 35,
-                  "color": "#F2F2F0",
-                  "lineHeight": 46.2,
-                  "align": "center"
-                }
-              }
-            ],
-            "alignItems": "center"
+          "frame": { "x": 651.2, "y": 805, "w": 656, "h": 110 },
+          "code": {
+            "value": "overflow-wrap: break-word;",
+            "language": "css",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 28.5,
+              "padding": { "bottom": 22, "left": 28, "right": 28, "top": 22 }
+            }
           }
         },
         {
@@ -2837,13 +2814,16 @@
       "nodes": [
         {
           "id": "hello-font-color-red-world-f",
-          "frame": { "x": 441.1, "y": 439.71, "w": 1292.9, "h": 76.8 },
-          "text": {
+          "frame": { "x": 532.4, "y": 436, "w": 904, "h": 102 },
+          "code": {
             "value": "Hello <font color='red'>world </font>",
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#000000",
-            "lineHeight": 63.36
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           }
         }
       ],
@@ -2860,25 +2840,23 @@
       "nodes": [
         {
           "id": "hello-font-color-red-world-f",
-          "frame": { "x": 444, "y": 439.64, "w": 1287.04, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<font color='red'>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</font>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 532.4, "y": 436, "w": 904, "h": 102 },
+          "code": {
+            "value": "Hello <font color='red'>world </font>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           },
           "builds": [
             {
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 443.9, "y": 324.64 }
+                "frame": { "x": 532.4, "y": 318 }
               },
               "durationMs": 200,
               "curve": "easeOut"
@@ -3101,18 +3079,16 @@
         },
         {
           "id": "hello-font-color-0068da-worl",
-          "frame": { "x": 383.5, "y": 324.93, "w": 1433.44, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<font color='#0068DA'>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</font>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 489.2, "y": 318, "w": 992, "h": 102 },
+          "code": {
+            "value": "Hello <font color='#0068DA'>world </font>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           }
         },
         {
@@ -3307,23 +3283,21 @@
         },
         {
           "id": "hello-font-color-0068da-worl",
-          "frame": { "x": 386, "y": 324.93, "w": 1427.34, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<font color='#0068DA'>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</font>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 489.2, "y": 318, "w": 992, "h": 102 },
+          "code": {
+            "value": "Hello <font color='#0068DA'>world </font>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           }
         },
         {
           "id": "line-9",
-          "frame": { "x": 946, "y": 378, "w": 191, "h": 10 },
+          "frame": { "x": 924, "y": 384, "w": 158, "h": 10 },
           "shape": {
             "geometry": "line",
             "stroke": {
@@ -3522,23 +3496,21 @@
         },
         {
           "id": "hello-font-color-0068da-worl",
-          "frame": { "x": 386, "y": 324.93, "w": 1427.34, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<font color='#0068DA'>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</font>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 489.2, "y": 318, "w": 992, "h": 102 },
+          "code": {
+            "value": "Hello <font color='#0068DA'>world </font>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           }
         },
         {
           "id": "line-9",
-          "frame": { "x": 946, "y": 378, "w": 191, "h": 10 },
+          "frame": { "x": 924, "y": 384, "w": 158, "h": 10 },
           "shape": {
             "geometry": "line",
             "stroke": {
@@ -3688,48 +3660,22 @@
           }
         },
         {
-          "id": "0068da",
-          "frame": { "x": 961, "y": 324.93, "w": 236.62, "h": 76.8 },
-          "text": {
-            "value": "0068DA",
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
-          }
-        },
-        {
-          "id": "world-font",
-          "frame": { "x": 1142, "y": 324.93, "w": 505.02, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "'>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</font>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
-          }
-        },
-        {
-          "id": "hello-font-color",
-          "frame": { "x": 386, "y": 324.93, "w": 728.28, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<font color='#" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "id": "hello-font-color-0068da-worl",
+          "frame": { "x": 489.2, "y": 318, "w": 992, "h": 102 },
+          "code": {
+            "value": "Hello <font color='#0068DA'>world </font>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           }
         },
         {
           "id": "line-10",
-          "frame": { "x": 946, "y": 378, "w": 191, "h": 10 },
+          "frame": { "x": 924, "y": 384, "w": 158, "h": 10 },
           "shape": {
             "geometry": "line",
             "stroke": {
@@ -3851,20 +3797,16 @@
         },
         {
           "id": "hello-font-color-color-world",
-          "frame": { "x": 311.5, "y": 324.93, "w": 1608.5, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<font color='#" },
-              { "text": "%%%COLOR%%%", "weight": 700, "color": "#626972" },
-              { "text": "'>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</font>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 435.2, "y": 318, "w": 1104, "h": 102 },
+          "code": {
+            "value": "Hello <font color='#%%%COLOR%%%'>world </font>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 28, "right": 28, "top": 18 }
+            }
           }
         },
         {
@@ -3993,25 +3935,23 @@
       "nodes": [
         {
           "id": "hello-world",
-          "frame": { "x": 747, "y": 314.64, "w": 552.6, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello " },
-              { "text": "**", "color": "#D9A404" },
-              { "text": "world" },
-              { "text": "**", "color": "#D9A404" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#000000",
-            "lineHeight": 63.36
+          "frame": { "x": 774, "y": 305, "w": 404, "h": 102 },
+          "code": {
+            "value": "Hello **world**",
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           },
           "builds": [
             {
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 279, "y": 314.64 }
+                "frame": { "x": 316, "y": 305 }
               },
               "durationMs": 600,
               "curve": "easeInOut"
@@ -4139,18 +4079,16 @@
         },
         {
           "id": "hello-strong-world-strong",
-          "frame": { "x": 839, "y": 314.64, "w": 1006.44, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<strong>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</strong>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 858, "y": 305, "w": 716, "h": 102 },
+          "code": {
+            "value": "Hello <strong>world </strong>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           },
           "builds": [
             { "kind": "enter", "beat": 1, "effect": "appear", "after": "line-4" }
@@ -4308,34 +4246,30 @@
         },
         {
           "id": "hello-world-2",
-          "frame": { "x": 275.93, "y": 314.64, "w": 555.04, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello " },
-              { "text": "**", "color": "#D9A404" },
-              { "text": "world" },
-              { "text": "**", "color": "#D9A404" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#000000",
-            "lineHeight": 63.36
+          "frame": { "x": 316, "y": 305, "w": 404, "h": 102 },
+          "code": {
+            "value": "Hello **world**",
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         },
         {
           "id": "hello-strong-world-strong",
-          "frame": { "x": 836.67, "y": 314.64, "w": 1011.81, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<strong>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</strong>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 858, "y": 305, "w": 716, "h": 102 },
+          "code": {
+            "value": "Hello <strong>world </strong>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         }
       ],
@@ -4451,18 +4385,16 @@
         },
         {
           "id": "hello-world",
-          "frame": { "x": 275.93, "y": 314.64, "w": 555.04, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello " },
-              { "text": "**", "color": "#D9A404" },
-              { "text": "world" },
-              { "text": "**", "color": "#D9A404" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#000000",
-            "lineHeight": 63.36
+          "frame": { "x": 316, "y": 305, "w": 404, "h": 102 },
+          "code": {
+            "value": "Hello **world**",
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         },
         {
@@ -4481,18 +4413,16 @@
         },
         {
           "id": "hello-strong-world-strong",
-          "frame": { "x": 836.67, "y": 314.64, "w": 1011.81, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<strong>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</strong>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 858, "y": 305, "w": 716, "h": 102 },
+          "code": {
+            "value": "Hello <strong>world </strong>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         }
       ],
@@ -4619,34 +4549,30 @@
         },
         {
           "id": "hello-world-2",
-          "frame": { "x": 275.93, "y": 314.64, "w": 555.04, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello " },
-              { "text": "**", "color": "#D9A404" },
-              { "text": "world" },
-              { "text": "**", "color": "#D9A404" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#000000",
-            "lineHeight": 63.36
+          "frame": { "x": 316, "y": 305, "w": 404, "h": 102 },
+          "code": {
+            "value": "Hello **world**",
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         },
         {
           "id": "hello-strong-world-strong",
-          "frame": { "x": 836.67, "y": 314.64, "w": 1011.81, "h": 76.8 },
-          "text": {
-            "value": [
-              { "text": "Hello ", "color": "#000000" },
-              { "text": "<strong>" },
-              { "text": "world ", "color": "#000000" },
-              { "text": "</strong>" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 48,
-            "color": "#D9A404",
-            "lineHeight": 63.36
+          "frame": { "x": 858, "y": 305, "w": 716, "h": 102 },
+          "code": {
+            "value": "Hello <strong>world </strong>",
+            "language": "html",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         }
       ],
@@ -13418,13 +13344,16 @@
         },
         {
           "id": "this-pr-adds-animations-to-t-2",
-          "frame": { "x": 477, "y": 354.92, "w": 1443, "h": 70.4 },
-          "text": {
+          "frame": { "x": 477, "y": 342, "w": 1164, "h": 102 },
+          "code": {
             "value": "This PR adds animations to the `Onboarding` flow.",
-            "font": "JetBrains Mono",
-            "size": 44,
-            "color": "#000000",
-            "lineHeight": 58.08
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         }
       ],
@@ -13455,13 +13384,16 @@
         },
         {
           "id": "this-pr-adds-animations-to-t",
-          "frame": { "x": 477, "y": 354.92, "w": 1443, "h": 70.4 },
-          "text": {
+          "frame": { "x": 477, "y": 342, "w": 1164, "h": 102 },
+          "code": {
             "value": "This PR adds animations to the `Onboarding` flow.",
-            "font": "JetBrains Mono",
-            "size": 44,
-            "color": "#000000",
-            "lineHeight": 58.08
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         },
         {
@@ -13820,13 +13752,16 @@
         },
         {
           "id": "this-pr-adds-animations-to-t",
-          "frame": { "x": 477, "y": 354.92, "w": 1443, "h": 70.4 },
-          "text": {
+          "frame": { "x": 477, "y": 342, "w": 1164, "h": 102 },
+          "code": {
             "value": "This PR adds animations to the `Onboarding` flow.",
-            "font": "JetBrains Mono",
-            "size": 44,
-            "color": "#000000",
-            "lineHeight": 58.08
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         },
         {
@@ -14153,18 +14088,16 @@
         },
         {
           "id": "i-reckon-you-could-improve-i",
-          "frame": { "x": 479, "y": 328.54, "w": 1441, "h": 116.72 },
-          "text": {
-            "value": [
-              {
-                "text": "I reckon you could improve it by using\n`animateFloatAsState(target, tween(1000, 1500))` "
-              },
-              { "text": "🙂", "font": "Noto Emoji", "color": "#00000000" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 44,
-            "color": "#000000",
-            "lineHeight": 52.2
+          "frame": { "x": 479, "y": 318, "w": 1210, "h": 150 },
+          "code": {
+            "value": "I reckon you could improve it by using\n`animateFloatAsState(target, tween(1000, 1500))` 🙂",
+            "language": "markdown",
+            "surface": {
+              "fill": "codeBackground",
+              "stroke": { "color": "border", "width": 2 },
+              "cornerRadius": 16,
+              "padding": { "bottom": 18, "left": 24, "right": 24, "top": 18 }
+            }
           }
         },
         {

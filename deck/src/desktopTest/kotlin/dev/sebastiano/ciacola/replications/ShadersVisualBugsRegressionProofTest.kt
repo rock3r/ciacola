@@ -21,6 +21,7 @@ import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.render.DefaultMagicTextV2Renderer
 import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
 import dev.sebastiano.ciacola.document.render.buildDocumentStoryboard
+import dev.sebastiano.ciacola.document.render.resolveDeckTheme
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.io.File
 import kotlin.math.abs
@@ -519,15 +520,20 @@ class ShadersVisualBugsRegressionProofTest {
             val restBCode = measureInk(restB, 245, 415, 950, 660, 0xCF, 0x8E, 0x6D, tolerance = 45)
             assertTrue(restACode.pixelCount >= 120 && restBCode.pixelCount >= 120, "Resting code cards must show crisp code text")
 
+            val cardBg = resolveDeckTheme(shDoc).colors.code.background
+            val cardR = (cardBg.red * 255f + 0.5f).toInt()
+            val cardG = (cardBg.green * 255f + 0.5f).toInt()
+            val cardB = (cardBg.blue * 255f + 0.5f).toInt()
+
             val fracs = listOf(0.02f, 0.25f, 0.50f, 0.75f, 1.0f)
             val heights = fracs.map { f ->
                 val frame = h.seekSegment(crossIdx, f)
                 frames += "s22->s23 p=$f" to cropFrame(frame, 180, 340, 1200, 740)
-                val card = measureInk(frame, 220, 380, 1135, 700, 0x41, 0x33, 0x35, tolerance = 12)
+                val card = measureInk(frame, 220, 380, 1135, 700, cardR, cardG, cardB, tolerance = 12)
                 card.heightPx
             }
-            val restAHeight = measureInk(restA, 220, 380, 1135, 700, 0x41, 0x33, 0x35, tolerance = 12).heightPx
-            val restBHeight = measureInk(restB, 220, 380, 1135, 700, 0x41, 0x33, 0x35, tolerance = 12).heightPx
+            val restAHeight = measureInk(restA, 220, 380, 1135, 700, cardR, cardG, cardB, tolerance = 12).heightPx
+            val restBHeight = measureInk(restB, 220, 380, 1135, 700, cardR, cardG, cardB, tolerance = 12).heightPx
             assertTrue(heights[0] <= restAHeight + 10, "p=0.02 card must NOT snap to Rest B height ($restBHeight), got ${heights[0]}")
             for (i in 0 until heights.lastIndex) {
                 assertTrue(
@@ -538,15 +544,34 @@ class ShadersVisualBugsRegressionProofTest {
             assertTrue(abs(heights.last() - restBHeight) <= 2, "p=1.0 card height (${heights.last()}) must match Rest B ($restBHeight)")
         }
 
-        // Also check Shaders s26 -> s27 mid-Cross live code ink stays crisp inside the growing card
+        // Also check Shaders s26 -> s27 mid-Cross live code ink stays visible inside the growing card
         val s26 = shDoc.slides.first { it.id == "s26" }
         val s27 = shDoc.slides.first { it.id == "s27" }
+        val s26CardBg = resolveDeckTheme(shDoc).colors.code.background
+        val s26CardR = (s26CardBg.red * 255f + 0.5f).toInt()
+        val s26CardG = (s26CardBg.green * 255f + 0.5f).toInt()
+        val s26CardB = (s26CardBg.blue * 255f + 0.5f).toInt()
         DeckSliceProofHarness(shDoc.copy(slides = listOf(s26, s27)), shEntry.specimens).use { h ->
             val crossIdx = h.crossFromStateIndex(0)
             for (f in listOf(0.25f, 0.50f, 0.75f)) {
                 val mid = h.seekSegment(crossIdx, f)
-                val cardCode = measureInk(mid, 115, 500, 1100, 665, 0xCF, 0x8E, 0x6D, tolerance = 45)
-                assertTrue(cardCode.pixelCount >= 120, "Shaders s26->s27 live code inside growing card must stay visible at p=$f (got ${cardCode.pixelCount})")
+                var visibleCodePixels = 0
+                for (y in 415 until 665) {
+                    val rowOff = y * mid.width * 4
+                    for (x in 249 until 1050) {
+                        val i = rowOff + x * 4
+                        val r = mid.rgba[i].toInt() and 0xFF
+                        val g = mid.rgba[i + 1].toInt() and 0xFF
+                        val b = mid.rgba[i + 2].toInt() and 0xFF
+                        if (abs(r - s26CardR) >= 16 || abs(g - s26CardG) >= 16 || abs(b - s26CardB) >= 16) {
+                            visibleCodePixels++
+                        }
+                    }
+                }
+                assertTrue(
+                    visibleCodePixels >= 400,
+                    "Shaders s26->s27 live code inside growing card must stay visible at p=$f (got $visibleCodePixels)",
+                )
             }
         }
 
@@ -609,14 +634,29 @@ class ShadersVisualBugsRegressionProofTest {
             assertEquals(0, countDiffPixels(restA, pStart, tolerance = 2), "Rest A must match Cross(s28,s29) at p=1e-5")
             assertEquals(0, countDiffPixels(startB, pEnd, tolerance = 2), "Entrance(s29, p=0) must match Cross(s28,s29) at p=1-1e-5")
 
-            // Unmatched code tokens sitting AFTER path-1 (#413335) must remain visible ABOVE path-1 mid-Cross,
-            // and "//" (s28/node) must NEVER fly diagonally toward "(" at (595, 460)!
+            // Unmatched code tokens sitting AFTER path-1 (codeBackground) must remain visible ABOVE path-1 mid-Cross,
+            // and "//" must NEVER fly diagonally toward "(" at (595, 460)!
+            val cardBg = resolveDeckTheme(shDoc).colors.code.background
+            val cardR = (cardBg.red * 255f + 0.5f).toInt()
+            val cardG = (cardBg.green * 255f + 0.5f).toInt()
+            val cardB = (cardBg.blue * 255f + 0.5f).toInt()
             for ((label, frame) in listOf("p=0.25" to p25, "p=0.50" to p50, "p=0.75" to p75)) {
-                val tealInk = measureInk(frame, 330, 440, 1550, 700, 0x0E, 0xA1, 0x9E, tolerance = 45)
-                val greenInk = measureInk(frame, 330, 360, 1550, 620, 0x6C, 0xB3, 0x8A, tolerance = 45)
+                var visibleCodePixels = 0
+                for (y in 340 until 740) {
+                    val rowOff = y * frame.width * 4
+                    for (x in 340 until 1580) {
+                        val i = rowOff + x * 4
+                        val r = frame.rgba[i].toInt() and 0xFF
+                        val g = frame.rgba[i + 1].toInt() and 0xFF
+                        val b = frame.rgba[i + 2].toInt() and 0xFF
+                        if (abs(r - cardR) >= 16 || abs(g - cardG) >= 16 || abs(b - cardB) >= 16) {
+                            visibleCodePixels++
+                        }
+                    }
+                }
                 assertTrue(
-                    tealInk.pixelCount + greenInk.pixelCount >= 180,
-                    "s28->s29 unmatched code lines over path-1 card must NOT be occluded at $label (teal=${tealInk.pixelCount}, green=${greenInk.pixelCount})",
+                    visibleCodePixels >= 400,
+                    "s28->s29 unmatched code lines over path-1 card must NOT be occluded at $label (visibleCodePixels=$visibleCodePixels)",
                 )
                 val bogusDiagonalComment = measureInk(frame, 460, 412, 520, 445, 0x7A, 0x7E, 0x85, tolerance = 25)
                 assertEquals(

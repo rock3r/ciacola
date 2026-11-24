@@ -5,6 +5,7 @@
   "themes": {
     "dark": {
       "preset": "dark",
+      "codeScheme": "intellij-islands-dark",
       "colors": {
         "accent": "#EF5350",
         "canvas": "#29223A",
@@ -21,6 +22,7 @@
     },
     "light": {
       "preset": "light",
+      "codeScheme": "intellij-light",
       "colors": {
         "accent": "#EF5350",
         "canvas": "#FAF7F5",

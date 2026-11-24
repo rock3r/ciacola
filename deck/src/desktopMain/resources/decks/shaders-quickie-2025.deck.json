@@ -5,32 +5,48 @@
   "themes": {
     "dark": {
       "preset": "dark",
+      "codeScheme": "intellij-islands-dark",
       "colors": {
         "accent": "#F4B942",
         "canvas": "#594548",
+        "codeCallout": "#62EDCB",
         "ink": "#EBEDEC",
         "muted": "#C8C2C0",
         "surface": "#3F3134"
       },
       "typography": {
         "body": { "font": "Assistant", "size": 36, "weight": 400, "color": "ink" },
-        "code": { "font": "JetBrains Mono", "size": 24, "weight": 400, "color": "ink" },
+        "code": {
+          "font": "JetBrains Mono",
+          "size": 30,
+          "weight": 400,
+          "color": "ink",
+          "lineHeight": 40
+        },
         "heading": { "font": "Fredoka", "size": 56, "weight": 600, "color": "ink" },
         "title": { "font": "Fredoka", "size": 96, "weight": 700, "color": "ink" }
       }
     },
     "light": {
       "preset": "light",
+      "codeScheme": "intellij-light",
       "colors": {
         "accent": "#C95D63",
         "canvas": "#EBEDEC",
+        "codeCallout": "#054A3B",
         "ink": "#594548",
         "muted": "#7A6A6D",
         "surface": "#FFFFFF"
       },
       "typography": {
         "body": { "font": "Assistant", "size": 36, "weight": 400, "color": "ink" },
-        "code": { "font": "JetBrains Mono", "size": 24, "weight": 400, "color": "ink" },
+        "code": {
+          "font": "JetBrains Mono",
+          "size": 30,
+          "weight": 400,
+          "color": "ink",
+          "lineHeight": 40
+        },
         "heading": { "font": "Fredoka", "size": 56, "weight": 600, "color": "ink" },
         "title": { "font": "Fredoka", "size": 96, "weight": 700, "color": "ink" }
       }
@@ -1627,7 +1643,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -1639,22 +1655,11 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(0.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -1693,7 +1698,7 @@
               "path": "M 22.93 0 L 283.29 0 C 290.02 0 294.06 0 296.75 1.12 C 300.63 2.54 303.69 5.59 305.1 9.47 C 306.22 12.16 306.22 16.2 306.22 22.93 L 306.22 24.03 C 306.22 30.76 306.22 34.8 305.1 37.49 C 303.69 41.37 300.63 44.43 296.75 45.84 C 294.06 46.96 290.02 46.96 283.29 46.96 L 22.93 46.96 C 16.2 46.96 12.16 46.96 9.47 45.84 C 5.59 44.43 2.54 41.37 1.12 37.49 C 0 34.8 0 30.76 0 24.03 L 0 22.93 C 0 16.2 0 12.16 1.12 9.47 C 2.54 5.59 5.59 2.54 9.47 1.12 C 12.16 0 16.2 0 22.93 0 Z M 22.93 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -1725,7 +1730,7 @@
             "value": "current pixel’s\ncoordinates",
             "font": "Fredoka",
             "size": 38,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 41.4
           },
           "builds": [
@@ -1882,7 +1887,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -1894,22 +1899,11 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(0.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -1947,7 +1941,7 @@
               "path": "M 22.93 0 L 294.95 0 C 301.68 0 305.72 0 308.41 1.12 C 312.29 2.54 315.35 5.59 316.76 9.47 C 317.88 12.16 317.88 16.2 317.88 22.93 L 317.88 24.03 C 317.88 30.76 317.88 34.8 316.76 37.49 C 315.35 41.37 312.29 44.43 308.41 45.84 C 305.72 46.96 301.68 46.96 294.95 46.96 L 22.93 46.96 C 16.2 46.96 12.16 46.96 9.47 45.84 C 5.59 44.43 2.54 41.37 1.12 37.49 C 0 34.8 0 30.76 0 24.03 L 0 22.93 C 0 16.2 0 12.16 1.12 9.47 C 2.54 5.59 5.59 2.54 9.47 1.12 C 12.16 0 16.2 0 22.93 0 Z M 22.93 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -1991,7 +1985,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2003,22 +1997,11 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(0.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -2387,7 +2370,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2399,22 +2382,11 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(0.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -2509,7 +2481,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2524,7 +2496,7 @@
           "frame": { "x": 277, "y": 556, "w": 265, "h": 8 },
           "shape": {
             "geometry": "line",
-            "stroke": { "color": "#62EDCB", "width": 5 }
+            "stroke": { "color": "codeCallout", "width": 5 }
           },
           "builds": [
             {
@@ -2541,31 +2513,20 @@
         {
           "id": "rect-4",
           "frame": { "x": 241, "y": 489, "w": 312, "h": 102 },
-          "shape": { "geometry": "rect", "fill": "#413335" }
+          "shape": { "geometry": "rect", "fill": "codeBackground" }
         },
         {
           "id": "rect-5",
           "frame": { "x": 611, "y": 489, "w": 312, "h": 102 },
-          "shape": { "geometry": "rect", "fill": "#413335" }
+          "shape": { "geometry": "rect", "fill": "codeBackground" }
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(0.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         }
       ],
@@ -2583,7 +2544,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2595,45 +2556,20 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
           "id": "half4-1-0-1-0-1-0-1-0",
-          "frame": { "x": 449, "y": 568.4, "w": 572.12, "h": 48 },
-          "opacity": 0.6,
-          "text": {
-            "value": [
-              { "text": "half4", "color": "#CF8E6D" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ", ", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ", ", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ", ", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ")", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#2AACB8",
-            "lineHeight": 39.6
+          "frame": { "x": 449, "y": 568.4, "w": 572.12, "h": 56 },
+          "code": {
+            "value": "half4(1.0, 1.0, 1.0, 1.0)",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
@@ -2664,7 +2600,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2676,96 +2612,23 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 689.24, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 " },
-              { "text": "main(", "color": "#BCBEC4" },
-              { "text": "float2 " },
-              { "text": "fragCoord) {\n    ", "color": "#BCBEC4" },
-              { "text": "return half4" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ");\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "rect-4",
-          "frame": { "x": 443, "y": 521, "w": 201, "h": 38 },
-          "shape": { "geometry": "rect", "fill": "#413335" },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 1,
-              "effect": "dissolve",
-              "durationMs": 300,
-              "curve": "easeInOut"
-            }
-          ]
-        },
-        {
-          "id": "half4-1-0-1-0-1-0-1-0",
-          "frame": { "x": 449, "y": 568.4, "w": 572.12, "h": 48 },
-          "opacity": 0.598,
-          "text": {
-            "value": [
-              { "text": "half4", "color": "#CF8E6D" },
-              { "text": "(", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ", ", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ", ", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ", ", "color": "#BCBEC4" },
-              { "text": "1.0" },
-              { "text": ")", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#2AACB8",
-            "lineHeight": 39.6
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 448.83, "y": 520.4 },
-                "opacity": 1
+                "code": {
+                  "value": "half4 main(float2 fragCoord) {\n    return half4(1.0, 1.0, 1.0, 1.0);\n}"
+                }
               },
-              "delayMs": 100,
               "durationMs": 500,
               "curve": "easeInOut"
-            }
-          ]
-        },
-        {
-          "id": "node",
-          "frame": { "x": 903, "y": 520.4, "w": 38.98, "h": 48 },
-          "text": {
-            "value": ";",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 1,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 34.7 },
-              "delayMs": 400,
-              "durationMs": 300,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
             }
           ]
         }
@@ -2784,7 +2647,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2799,7 +2662,7 @@
           "frame": { "x": 369, "y": 556, "w": 265, "h": 8 },
           "shape": {
             "geometry": "line",
-            "stroke": { "color": "#62EDCB", "width": 5 }
+            "stroke": { "color": "codeCallout", "width": 5 }
           },
           "builds": [
             {
@@ -2816,37 +2679,20 @@
         {
           "id": "rect-4",
           "frame": { "x": 333, "y": 489, "w": 312, "h": 102 },
-          "shape": { "geometry": "rect", "fill": "#413335" }
+          "shape": { "geometry": "rect", "fill": "codeBackground" }
         },
         {
           "id": "rect-5",
           "frame": { "x": 793, "y": 489, "w": 312, "h": 102 },
-          "shape": { "geometry": "rect", "fill": "#413335" }
+          "shape": { "geometry": "rect", "fill": "codeBackground" }
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 842.96, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "return half4", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ");\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(1.0, 1.0, 1.0, 1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         }
       ],
@@ -2864,7 +2710,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 459, "w": 902.45, "h": 159.12 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2876,28 +2722,11 @@
         },
         {
           "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 480.09, "w": 842.96, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "return half4", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "0.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ");\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 480.09, "w": 854, "h": 136 },
+          "code": {
+            "value": "half4 main(float2 fragCoord) {\n    return half4(1.0, 0.0, 0.0, 1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
@@ -2925,7 +2754,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 392, "w": 902.45, "h": 292.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-color-preview",
@@ -2953,28 +2782,11 @@
         },
         {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 249, "y": 420.09, "w": 1040.6, "h": 248.4 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "return half4", "color": "#CF8E6D" },
-              { "text": "(uv.x, uv.y, " },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": "1.0", "color": "#2AACB8" },
-              { "text": ");\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
+          "frame": { "x": 249, "y": 420.09, "w": 874, "h": 256 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    float2 uv = fragCoord.xy / iResolution.xy;\n    return half4(uv.x, uv.y, 1.0, 1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
@@ -3049,7 +2861,7 @@
               "path": "M 22.93 0 L 125.78 0 C 132.51 0 136.54 0 139.23 1.12 C 143.11 2.54 146.17 5.59 147.58 9.47 C 148.71 12.16 148.71 16.2 148.71 22.93 L 148.71 24.03 C 148.71 30.76 148.71 34.8 147.58 37.49 C 146.17 41.37 143.11 44.43 139.23 45.84 C 136.54 46.96 132.51 46.96 125.78 46.96 L 22.93 46.96 C 16.2 46.96 12.16 46.96 9.47 45.84 C 5.59 44.43 2.54 41.37 1.12 37.49 C 0 34.8 0 30.76 0 24.03 L 0 22.93 C 0 16.2 0 12.16 1.12 9.47 C 2.54 5.59 5.59 2.54 9.47 1.12 C 12.16 0 16.2 0 22.93 0 Z M 22.93 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -3081,7 +2893,7 @@
             "value": "parameter",
             "font": "Fredoka",
             "size": 38,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 45.98
           },
           "builds": [
@@ -3139,56 +2951,15 @@
               {
                 "id": "val-compiledshad-bg-1",
                 "frame": { "x": 1.9, "y": 1.06, "w": 1174.19, "h": 735.88 },
-                "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
+                "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
               },
               {
                 "id": "val-compiledshader-label",
                 "frame": { "x": 38.94, "y": 29.09, "w": 1139.06, "h": 708.91 },
-                "text": {
-                  "value": [
-                    { "text": "val ", "color": "#CF8E6D" },
-                    { "text": "compiledShader = " },
-                    { "text": "remember ", "color": "#6CB38A" },
-                    { "text": "{ ", "weight": 700 },
-                    { "text": "RuntimeShader(shaderCode) " },
-                    { "text": "}\n", "weight": 700 },
-                    { "text": "val ", "color": "#CF8E6D" },
-                    { "text": "brush = " },
-                    { "text": "remember", "color": "#6CB38A" },
-                    { "text": "(compiledShader) " },
-                    { "text": "{\n    ", "weight": 700 },
-                    { "text": "ShaderBrush", "italic": true },
-                    { "text": "(compiledShader)\n" },
-                    { "text": "}\n\n", "weight": 700 },
-                    { "text": "Box", "color": "#6CB38A" },
-                    { "text": "(\n    Modifier\n        ." },
-                    { "text": "fillMaxSize", "italic": true, "color": "#57AAF7" },
-                    { "text": "()\n        ." },
-                    { "text": "drawBehind ", "color": "#0EA19E" },
-                    { "text": "{\n            ", "weight": 700 },
-                    { "text": "compiledShader.setFloatUniform(\n                " },
-                    { "text": "/* uniformName = */ ", "color": "#7A7E85" },
-                    { "text": "\"iResolution\"", "color": "#6AAB73" },
-                    { "text": ",\n                " },
-                    { "text": "/* value1 = */ ", "color": "#7A7E85" },
-                    { "text": "size", "color": "#C77DBB" },
-                    { "text": "." },
-                    { "text": "width", "color": "#C77DBB" },
-                    { "text": ",\n                " },
-                    { "text": "/* value2 = */ ", "color": "#7A7E85" },
-                    { "text": "size", "color": "#C77DBB" },
-                    { "text": "." },
-                    { "text": "height", "color": "#C77DBB" },
-                    { "text": ",\n            )\n            " },
-                    { "text": "drawRect", "color": "#0EA19E" },
-                    { "text": "(brush)\n        " },
-                    { "text": "}", "weight": 700 },
-                    { "text": ",\n)" }
-                  ],
-                  "font": "JetBrains Mono",
-                  "size": 30,
-                  "color": "#BCBEC4",
-                  "lineHeight": 40
+                "code": {
+                  "value": "val compiledShader = remember { RuntimeShader(shaderCode) }\nval brush = remember(compiledShader) {\n    ShaderBrush(compiledShader)\n}\n\nBox(\n    Modifier\n        .fillMaxSize()\n        .drawBehind {\n            compiledShader.setFloatUniform(\n                /* uniformName = */ \"iResolution\",\n                /* value1 = */ size.width,\n                /* value2 = */ size.height,\n            )\n            drawRect(brush)\n        },\n)",
+                  "language": "kotlin",
+                  "surface": { "padding": 0 }
                 }
               }
             ]
@@ -3229,7 +3000,7 @@
               "path": "M 24.73 0 L 1060.21 0 C 1067.47 0 1071.83 0 1074.73 1.21 C 1078.91 2.73 1082.21 6.03 1083.73 10.22 C 1084.94 13.12 1084.94 17.47 1084.94 24.73 L 1084.94 156.6 C 1084.94 163.85 1084.94 168.21 1083.73 171.11 C 1082.21 175.29 1078.91 178.59 1074.73 180.11 C 1071.83 181.33 1067.47 181.33 1060.21 181.33 L 24.73 181.33 C 17.47 181.33 13.12 181.33 10.22 180.11 C 6.03 178.59 2.73 175.29 1.21 171.11 C 0 168.21 0 163.85 0 156.6 L 0 24.73 C 0 17.47 0 13.12 1.21 10.22 C 2.73 6.03 6.03 2.73 10.22 1.21 C 13.12 0 17.47 0 24.73 0 Z M 24.73 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -3269,56 +3040,15 @@
               {
                 "id": "val-compiledshad-bg-1",
                 "frame": { "x": 1.9, "y": 1.06, "w": 1174.19, "h": 735.88 },
-                "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
+                "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
               },
               {
                 "id": "val-compiledshader-label",
                 "frame": { "x": 38.94, "y": 29.09, "w": 1139.06, "h": 708.91 },
-                "text": {
-                  "value": [
-                    { "text": "val ", "color": "#CF8E6D" },
-                    { "text": "compiledShader = " },
-                    { "text": "remember ", "color": "#6CB38A" },
-                    { "text": "{ ", "weight": 700 },
-                    { "text": "RuntimeShader(shaderCode) " },
-                    { "text": "}\n", "weight": 700 },
-                    { "text": "val ", "color": "#CF8E6D" },
-                    { "text": "brush = " },
-                    { "text": "remember", "color": "#6CB38A" },
-                    { "text": "(compiledShader) " },
-                    { "text": "{\n    ", "weight": 700 },
-                    { "text": "ShaderBrush", "italic": true },
-                    { "text": "(compiledShader)\n" },
-                    { "text": "}\n\n", "weight": 700 },
-                    { "text": "Box", "color": "#6CB38A" },
-                    { "text": "(\n    Modifier\n        ." },
-                    { "text": "fillMaxSize", "italic": true, "color": "#57AAF7" },
-                    { "text": "()\n        ." },
-                    { "text": "drawBehind ", "color": "#0EA19E" },
-                    { "text": "{\n            ", "weight": 700 },
-                    { "text": "compiledShader.setFloatUniform(\n                " },
-                    { "text": "/* uniformName = */ ", "color": "#7A7E85" },
-                    { "text": "\"iResolution\"", "color": "#6AAB73" },
-                    { "text": ",\n                " },
-                    { "text": "/* value1 = */ ", "color": "#7A7E85" },
-                    { "text": "size", "color": "#C77DBB" },
-                    { "text": "." },
-                    { "text": "width", "color": "#C77DBB" },
-                    { "text": ",\n                " },
-                    { "text": "/* value2 = */ ", "color": "#7A7E85" },
-                    { "text": "size", "color": "#C77DBB" },
-                    { "text": "." },
-                    { "text": "height", "color": "#C77DBB" },
-                    { "text": ",\n            )\n            " },
-                    { "text": "drawRect", "color": "#0EA19E" },
-                    { "text": "(brush)\n        " },
-                    { "text": "}", "weight": 700 },
-                    { "text": ",\n)" }
-                  ],
-                  "font": "JetBrains Mono",
-                  "size": 30,
-                  "color": "#BCBEC4",
-                  "lineHeight": 40
+                "code": {
+                  "value": "val compiledShader = remember { RuntimeShader(shaderCode) }\nval brush = remember(compiledShader) {\n    ShaderBrush(compiledShader)\n}\n\nBox(\n    Modifier\n        .fillMaxSize()\n        .drawBehind {\n            compiledShader.setFloatUniform(\n                /* uniformName = */ \"iResolution\",\n                /* value1 = */ size.width,\n                /* value2 = */ size.height,\n            )\n            drawRect(brush)\n        },\n)",
+                  "language": "kotlin",
+                  "surface": { "padding": 0 }
                 }
               }
             ]
@@ -3352,7 +3082,7 @@
               "path": "M 24.73 0 L 676.34 0 C 683.6 0 687.95 0 690.86 1.21 C 695.04 2.73 698.34 6.03 699.86 10.22 C 701.07 13.12 701.07 17.47 701.07 24.73 L 701.07 180.33 C 701.07 187.59 701.07 191.95 699.86 194.85 C 698.34 199.03 695.04 202.33 690.86 203.85 C 687.95 205.06 683.6 205.06 676.34 205.06 L 24.73 205.06 C 17.47 205.06 13.12 205.06 10.22 203.85 C 6.03 202.33 2.73 199.03 1.21 194.85 C 0 191.95 0 187.59 0 180.33 L 0 24.73 C 0 17.47 0 13.12 1.21 10.22 C 2.73 6.03 6.03 2.73 10.22 1.21 C 13.12 0 17.47 0 24.73 0 Z M 24.73 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -3391,7 +3121,7 @@
         {
           "id": "path-1",
           "frame": { "x": 225, "y": 392, "w": 902.45, "h": 292.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-live-uv-static",
@@ -3423,6 +3153,15 @@
                 }
               }
             ]
+          }
+        },
+        {
+          "id": "uniform-float2-iresolution-h",
+          "frame": { "x": 249, "y": 420.09, "w": 874, "h": 256 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    float2 uv = fragCoord.xy / iResolution.xy;\n    return half4(uv.x, uv.y, 1.0, 1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -3460,7 +3199,7 @@
               "path": "M 22.93 0 L 755.21 0 C 761.94 0 765.98 0 768.67 1.12 C 772.55 2.54 775.6 5.59 777.02 9.47 C 778.14 12.16 778.14 16.2 778.14 22.93 L 778.14 24.03 C 778.14 30.76 778.14 34.8 777.02 37.49 C 775.6 41.37 772.55 44.43 768.67 45.84 C 765.98 46.96 761.94 46.96 755.21 46.96 L 22.93 46.96 C 16.2 46.96 12.16 46.96 9.47 45.84 C 5.59 44.43 2.54 41.37 1.12 37.49 C 0 34.8 0 30.76 0 24.03 L 0 22.93 C 0 16.2 0 12.16 1.12 9.47 C 2.54 5.59 5.59 2.54 9.47 1.12 C 12.16 0 16.2 0 22.93 0 Z M 22.93 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -3483,74 +3222,6 @@
               "curve": "easeInOut"
             }
           ]
-        },
-        {
-          "id": "return-half4-uv-x-uv-y",
-          "frame": { "x": 249, "y": 580.09, "w": 886.88, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return half4", "color": "#CF8E6D" },
-              { "text": "(uv.x, uv.y,    ,    );\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 249, "y": 500.09, "w": 1033.28, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "uniform-float2-iresolution",
-          "frame": { "x": 250, "y": 420.4, "w": 614.82, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 " },
-              { "text": "iResolution;", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "1-0",
-          "frame": { "x": 771.79, "y": 580.35, "w": 107.56, "h": 61 },
-          "text": {
-            "value": "1.0",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#2AACB8",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "1-0-2",
-          "frame": { "x": 861.79, "y": 580.35, "w": 107.56, "h": 61 },
-          "text": {
-            "value": "1.0",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#2AACB8",
-            "lineHeight": 39.6
-          }
         }
       ],
       "transition": { "type": "magicMove", "durationMs": 600, "curve": "easeInOut" }
@@ -3567,7 +3238,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 372, "w": 1112.58, "h": 332.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-live-uv-animated",
@@ -3587,7 +3258,7 @@
               "beat": 1,
               "effect": "wipe",
               "direction": "right",
-              "after": "0-5-0-5-sin-itime-1-0",
+              "after": "uniform-float2-iresolution-h",
               "delayMs": 300,
               "durationMs": 200,
               "curve": "easeInOut"
@@ -3622,106 +3293,24 @@
           }
         },
         {
-          "id": "return-half4-uv-x-uv-y",
-          "frame": { "x": 115, "y": 600.09, "w": 1304.12, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return half4", "color": "#CF8E6D" },
-              { "text": "(uv.x, uv.y,                            );\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 115, "y": 520.09, "w": 1033.28, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "uniform-float2-iresolution",
-          "frame": { "x": 116, "y": 400.4, "w": 614.82, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 " },
-              { "text": "iResolution;", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "uniform-float-itime",
-          "frame": { "x": 116, "y": 440.4, "w": 461.1, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "uniform float " },
-              { "text": "iTime;", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
+          "id": "uniform-float2-iresolution-h",
+          "frame": { "x": 115, "y": 400.09, "w": 1100, "h": 296 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    float2 uv = fragCoord.xy / iResolution.xy;\n    return half4(uv.x, uv.y, 1.0, 1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
-              "kind": "enter",
+              "kind": "change",
               "beat": 1,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 43.9 },
-              "durationMs": 400,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
-            }
-          ]
-        },
-        {
-          "id": "0-5-0-5-sin-itime-1-0",
-          "frame": { "x": 638, "y": 600.36, "w": 619.7, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "0.5 ", "color": "#2AACB8" },
-              { "text": "+ " },
-              { "text": "0.5 ", "color": "#2AACB8" },
-              { "text": "* sin(iTime), " },
-              { "text": "1.0", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 1,
-              "effect": "fadeMove",
-              "direction": "up",
-              "args": { "distance": 43.9 },
-              "delayMs": 200,
-              "durationMs": 400,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
+              "set": {
+                "code": {
+                  "value": "uniform float2 iResolution;\nuniform float iTime;\n\nhalf4 main(float2 fragCoord) {\n    float2 uv = fragCoord.xy / iResolution.xy;\n    return half4(uv.x, uv.y, 0.5 + 0.5 * sin(iTime), 1.0);\n}"
+                }
+              },
+              "durationMs": 500,
+              "curve": "easeInOut"
             }
           ]
         }
@@ -3743,231 +3332,15 @@
         {
           "id": "path-1",
           "frame": { "x": 303, "y": 308, "w": 1310.46, "h": 462 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
         },
         {
-          "id": "modifier-fillmaxsize",
-          "frame": { "x": 414, "y": 500.48, "w": 506.24, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "Modifier." },
-              { "text": "fillMaxSize", "italic": true, "color": "#57AAF7" },
-              { "text": "()" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "box",
-          "frame": { "x": 342, "y": 460.4, "w": 95.1, "h": 48 },
-          "text": {
-            "value": "Box",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#6CB38A",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "val",
-          "frame": { "x": 341, "y": 380.4, "w": 95.1, "h": 48 },
-          "text": {
-            "value": "val",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node",
-          "frame": { "x": 340, "y": 340.4, "w": 70.7, "h": 48 },
-          "text": {
-            "value": "//",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#7A7E85",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-2",
-          "frame": { "x": 522, "y": 380.4, "w": 48.74, "h": 48 },
-          "text": {
-            "value": "=",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "brush",
-          "frame": { "x": 414, "y": 380.4, "w": 136.58, "h": 48 },
-          "text": {
-            "value": "brush",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "shaderbrush-compiledshader",
-          "frame": { "x": 1043, "y": 380.4, "w": 617.26, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "ShaderBrush", "italic": true },
-              { "text": "(compiledShader)" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "remember-compiledshader",
-          "frame": { "x": 559, "y": 380.4, "w": 548.94, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "remember", "color": "#6CB38A" },
-              { "text": "(compiledShader)" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-3",
-          "frame": { "x": 1548, "y": 380.4, "w": 48.74, "h": 48 },
-          "text": {
-            "value": "}",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-4",
-          "frame": { "x": 394, "y": 340.4, "w": 86.56, "h": 48 },
-          "text": {
-            "value": "...",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#7A7E85",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-5",
-          "frame": { "x": 1008, "y": 380.4, "w": 48.74, "h": 48 },
-          "text": {
-            "value": "{",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "weight": 700,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "compiledshader-setfloatunifo",
-          "frame": { "x": 559, "y": 580.4, "w": 751.46, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "compiledShader.setFloatUniform( " },
-              { "text": "/*", "color": "#8C8C8C" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-6",
-          "frame": { "x": 1169, "y": 580.4, "w": 85.34, "h": 48 },
-          "text": {
-            "value": "...",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#8C8C8C",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-7",
-          "frame": { "x": 1260, "y": 580.4, "w": 71.92, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "*/" },
-              { "text": ")", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#8C8C8C",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "drawrect-brush",
-          "frame": { "x": 559, "y": 620.4, "w": 351.3, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "drawRect" },
-              { "text": "(brush)", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#0EA19E",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-8",
-          "frame": { "x": 341.5, "y": 660.09, "w": 269.56, "h": 100 },
-          "text": {
-            "value": [
-              { "text": "        }", "weight": 700 },
-              { "text": ",\n)" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "open-paren",
-          "frame": { "x": 396.5, "y": 460.4, "w": 77.41, "h": 60 },
-          "text": {
-            "value": "(",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "drawbehind",
-          "frame": { "x": 341.8, "y": 540.4, "w": 1549.58, "h": 60 },
-          "text": {
-            "value": [
-              { "text": "        .", "color": "#BCBEC4" },
-              { "text": "drawBehind " },
-              { "text": "{", "weight": 700, "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#0EA19E",
-            "lineHeight": 39.6
+          "id": "val-brush-remember-compileds",
+          "frame": { "x": 341.8, "y": 340.09, "w": 1284, "h": 421 },
+          "code": {
+            "value": "// ...\nval brush = remember(compiledShader) { ShaderBrush(compiledShader) }\n\nBox(\n    Modifier.fillMaxSize()\n        .drawBehind {\n            compiledShader.setFloatUniform(/* ... */)\n            drawRect(brush)\n        },\n)",
+            "language": "kotlin",
+            "surface": { "padding": 0 }
           }
         }
       ],
@@ -3984,151 +3357,25 @@
         {
           "id": "path-1",
           "frame": { "x": 303, "y": 308, "w": 1310.46, "h": 462 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
-        },
-        {
-          "id": "modifier-fillmaxsize",
-          "frame": { "x": 613, "y": 460.48, "w": 506.24, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "Modifier." },
-              { "text": "fillMaxSize", "italic": true, "color": "#57AAF7" },
-              { "text": "()" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "animated-canvas",
-          "frame": { "x": 341, "y": 460.4, "w": 335.44, "h": 48 },
-          "text": {
-            "value": "AnimatedCanvas",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#6CB38A",
-            "lineHeight": 39.6
-          }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
         },
         {
           "id": "val-brush-remember-compileds",
-          "frame": { "x": 340, "y": 340.09, "w": 1522.5, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "// ...\n", "color": "#7A7E85" },
-              { "text": "val ", "color": "#CF8E6D" },
-              { "text": "brush = " },
-              { "text": "remember", "color": "#6CB38A" },
-              { "text": "(compiledShader) " },
-              { "text": "{ ", "weight": 700 },
-              { "text": "ShaderBrush", "italic": true },
-              { "text": "(compiledShader) }" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "time-lambda",
-          "frame": { "x": 1007, "y": 460.4, "w": 267.12, "h": 48 },
-          "text": {
-            "value": [
-              { "text": ") " },
-              { "text": "{ ", "weight": 700 },
-              { "text": "time " },
-              { "text": "->", "weight": 700 }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "compiledshader-setfloatunifo-full",
-          "frame": { "x": 342, "y": 500.4, "w": 1011.32, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "    compiledShader.setFloatUniform( " },
-              { "text": "/* ... */", "color": "#8C8C8C" },
-              { "text": ")" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "drawrect-brush",
-          "frame": { "x": 342, "y": 620.4, "w": 528.2, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "        drawRect" },
-              { "text": "(brush)", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#0EA19E",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "compiledshader-setfloatunifo-2",
-          "frame": { "x": 341, "y": 540.4, "w": 1100.38, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "    compiledShader.setFloatUniform(" },
-              { "text": "\"iTime\"", "color": "#6AAB73" },
-              { "text": ", time)" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 341.8, "y": 340.09, "w": 1284, "h": 421 },
+          "code": {
+            "value": "// ...\nval brush = remember(compiledShader) { ShaderBrush(compiledShader) }\n\nAnimatedCanvas(Modifier.fillMaxSize()) { time ->\n    compiledShader.setFloatUniform(/* ... */)\n    compiledShader.setFloatUniform(\"iTime\", time)\n    onDrawBehind {\n        drawRect(brush)\n    }\n}",
+            "language": "kotlin",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
               "kind": "enter",
               "beat": 0,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 43.9 },
+              "effect": "dissolve",
               "durationMs": 400,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
+              "curve": "easeInOut"
             }
           ]
-        },
-        {
-          "id": "ondrawbehind",
-          "frame": { "x": 341, "y": 580.42, "w": 425.72, "h": 168.4 },
-          "text": {
-            "value": [
-              { "text": "    onDrawBehind " },
-              { "text": "{\n\n    }\n}", "weight": 700, "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#0EA19E",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "open-paren",
-          "frame": { "x": 595.5, "y": 460.4, "w": 77.41, "h": 60 },
-          "text": {
-            "value": "(",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
         }
       ],
       "transition": { "type": "none" }
@@ -4145,43 +3392,15 @@
         {
           "id": "path-1",
           "frame": { "x": 303, "y": 308, "w": 1310.46, "h": 462 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
         },
         {
           "id": "val-brush-remember-compileds",
-          "frame": { "x": 341.8, "y": 340.09, "w": 1549.58, "h": 421 },
-          "text": {
-            "value": [
-              { "text": "// ...\n", "color": "#7A7E85" },
-              { "text": "val ", "color": "#CF8E6D" },
-              { "text": "brush = " },
-              { "text": "remember", "color": "#6CB38A" },
-              { "text": "(compiledShader) " },
-              { "text": "{ ", "weight": 700 },
-              { "text": "ShaderBrush", "italic": true },
-              { "text": "(compiledShader) }\n\n" },
-              { "text": "AnimatedCanvas", "color": "#6CB38A" },
-              { "text": "(Modifier." },
-              { "text": "fillMaxSize", "italic": true, "color": "#57AAF7" },
-              { "text": "()) " },
-              { "text": "{ ", "weight": 700 },
-              { "text": "time " },
-              { "text": "->\n    ", "weight": 700 },
-              { "text": "compiledShader.setFloatUniform( " },
-              { "text": "/* ... */", "color": "#8C8C8C" },
-              { "text": ")\n    compiledShader.setFloatUniform(" },
-              { "text": "\"iTime\"", "color": "#6AAB73" },
-              { "text": ", time)\n    " },
-              { "text": "onDrawBehind ", "color": "#0EA19E" },
-              { "text": "{\n        ", "weight": 700 },
-              { "text": "drawRect", "color": "#0EA19E" },
-              { "text": "(brush)\n    " },
-              { "text": "}\n}", "weight": 700 }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
+          "frame": { "x": 341.8, "y": 340.09, "w": 1284, "h": 421 },
+          "code": {
+            "value": "// ...\nval brush = remember(compiledShader) { ShaderBrush(compiledShader) }\n\nAnimatedCanvas(Modifier.fillMaxSize()) { time ->\n    compiledShader.setFloatUniform(/* ... */)\n    compiledShader.setFloatUniform(\"iTime\", time)\n    onDrawBehind {\n        drawRect(brush)\n    }\n}",
+            "language": "kotlin",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
@@ -4208,36 +3427,15 @@
         {
           "id": "path-1",
           "frame": { "x": 348, "y": 311, "w": 1221.45, "h": 454.89 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
         },
         {
           "id": "composable-fun-animatedcanva",
-          "frame": { "x": 385, "y": 340.09, "w": 1415.14, "h": 408.4 },
-          "text": {
-            "value": [
-              { "text": "@Composable\n", "color": "#B3AE60" },
-              { "text": "fun ", "color": "#CF8E6D" },
-              { "text": "AnimatedCanvas", "color": "#56A8F5" },
-              {
-                "text": "(\n    modifier: Modifier = Modifier,\n    onDrawWithCache: CacheDrawScope.(time: Float) -> DrawResult\n) {\n    "
-              },
-              { "text": "val ", "color": "#CF8E6D" },
-              { "text": "time " },
-              { "text": "by ", "color": "#CF8E6D" },
-              { "text": "produceAnimationTime", "color": "#6CB38A" },
-              { "text": "()\n    " },
-              { "text": "Box", "color": "#6CB38A" },
-              { "text": "(\n        modifier." },
-              { "text": "drawWithCache ", "italic": true, "color": "#57AAF7" },
-              { "text": "{ ", "weight": 700 },
-              { "text": "onDrawWithCache(time) " },
-              { "text": "}\n    ", "weight": 700 },
-              { "text": ")\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
+          "frame": { "x": 385, "y": 340.09, "w": 1192, "h": 416 },
+          "code": {
+            "value": "@Composable\nfun AnimatedCanvas(\n    modifier: Modifier = Modifier,\n    onDrawWithCache: CacheDrawScope.(time: Float) -> DrawResult\n) {\n    val time by produceAnimationTime()\n    Box(\n        modifier.drawWithCache { onDrawWithCache(time) }\n    )\n}",
+            "language": "kotlin",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
@@ -4271,7 +3469,25 @@
         {
           "id": "path-1",
           "frame": { "x": 318, "y": 244, "w": 1281.07, "h": 588.69 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 16.6 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 16.6 }
+        },
+        {
+          "id": "private-val-maxtimevalue-24",
+          "frame": { "x": 355, "y": 280.09, "w": 1266, "h": 538 },
+          "code": {
+            "value": "private val maxTimeValue = 24.hours.inWholeMilliseconds\n\n@Composable\nfun produceAnimationTime(): State<Float> =\n    produceState(0f) {\n        while (true) {\n            withInfiniteAnimationFrameMillis { frameTime ->\n                val newTime = frameTime / 1000f\n                // Reset every 24h to avoid precision issues\n                value = if (newTime < maxTimeValue) newTime else 0f\n            }\n        }\n    }",
+            "language": "kotlin",
+            "surface": { "padding": 0 }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 0,
+              "effect": "dissolve",
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
         },
         {
           "id": "path-2",
@@ -4301,7 +3517,7 @@
               "path": "M 24.73 0 L 914.94 0 C 922.19 0 926.55 0 929.45 1.21 C 933.64 2.73 936.93 6.03 938.45 10.22 C 939.67 13.12 939.67 17.47 939.67 24.73 L 939.67 70.31 C 939.67 77.57 939.67 81.92 938.45 84.82 C 936.93 89.01 933.64 92.3 929.45 93.83 C 926.55 95.04 922.19 95.04 914.94 95.04 L 24.73 95.04 C 17.47 95.04 13.12 95.04 10.22 93.83 C 6.03 92.3 2.73 89.01 1.21 84.82 C 0 81.92 0 77.57 0 70.31 L 0 24.73 C 0 17.47 0 13.12 1.21 10.22 C 2.73 6.03 6.03 2.73 10.22 1.21 C 13.12 0 17.47 0 24.73 0 Z M 24.73 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -4313,69 +3529,6 @@
               "effect": "lineDraw",
               "direction": "clockwise",
               "durationMs": 700,
-              "curve": "easeInOut"
-            }
-          ]
-        },
-        {
-          "id": "private-val-maxtimevalue-24",
-          "frame": { "x": 355, "y": 280.09, "w": 1502.98, "h": 528.4 },
-          "text": {
-            "value": [
-              { "text": "private val ", "color": "#CF8E6D" },
-              { "text": "maxTimeValue ", "italic": true, "color": "#C77DBB" },
-              { "text": "= " },
-              { "text": "24", "color": "#2AACB8" },
-              { "text": "." },
-              { "text": "hours", "italic": true, "color": "#C77DBB" },
-              { "text": "." },
-              { "text": "inWholeMilliseconds\n\n", "color": "#C77DBB" },
-              { "text": "@Composable\n", "color": "#B3AE60" },
-              { "text": "fun ", "color": "#CF8E6D" },
-              { "text": "produceAnimationTime", "color": "#56A8F5" },
-              { "text": "(): State<Float> =\n    " },
-              { "text": "produceState", "color": "#6CB38A" },
-              { "text": "(" },
-              { "text": "0f", "color": "#2AACB8" },
-              { "text": ") " },
-              { "text": "{\n        ", "weight": 700 },
-              { "text": "while ", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": "true", "color": "#CF8E6D" },
-              { "text": ") {\n            withInfiniteAnimationFrameMillis " },
-              { "text": "{ ", "weight": 700 },
-              { "text": "frameTime " },
-              { "text": "->\n                ", "weight": 700 },
-              { "text": "val ", "color": "#CF8E6D" },
-              { "text": "newTime = frameTime / " },
-              { "text": "1000f\n                ", "color": "#2AACB8" },
-              {
-                "text": "// Reset every 24h to avoid precision issues\n                ",
-                "color": "#7A7E85"
-              },
-              { "text": "value ", "color": "#C77DBB" },
-              { "text": "= " },
-              { "text": "if ", "color": "#CF8E6D" },
-              { "text": "(newTime < " },
-              { "text": "maxTimeValue", "italic": true, "color": "#C77DBB" },
-              { "text": ") newTime " },
-              { "text": "else ", "color": "#CF8E6D" },
-              { "text": "0f\n            ", "color": "#2AACB8" },
-              { "text": "}\n        ", "weight": 700 },
-              { "text": "}\n    " },
-              { "text": "}", "weight": 700 }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 0,
-              "effect": "dissolve",
-              "durationMs": 300,
               "curve": "easeInOut"
             }
           ]
@@ -4407,27 +3560,15 @@
               {
                 "id": "uniform-float2-i-bg-1",
                 "frame": { "x": 1.88, "y": 1.53, "w": 1112.58, "h": 292.95 },
-                "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+                "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
               },
               {
                 "id": "uniform-float2-ire-label",
                 "frame": { "x": 25.37, "y": 28.09, "w": 1070.63, "h": 267.91 },
-                "text": {
-                  "value": [
-                    { "text": "uniform float2 ", "color": "#CF8E6D" },
-                    { "text": "iResolution;\n\n" },
-                    { "text": "half4 ", "color": "#CF8E6D" },
-                    { "text": "main(" },
-                    { "text": "float2 ", "color": "#CF8E6D" },
-                    { "text": "fragCoord) {\n    " },
-                    { "text": "// TODO\n    ", "color": "#8C8C8C" },
-                    { "text": "return vec4", "color": "#CF8E6D" },
-                    { "text": "(1.0);\n}" }
-                  ],
-                  "font": "JetBrains Mono",
-                  "size": 30,
-                  "color": "#BCBEC4",
-                  "lineHeight": 40
+                "code": {
+                  "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    // TODO\n    return vec4(1.0);\n}",
+                  "language": "agsl",
+                  "surface": { "padding": 0 }
                 }
               }
             ]
@@ -4511,7 +3652,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 392, "w": 1112.58, "h": 292.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-goal",
@@ -4674,91 +3815,27 @@
           ]
         },
         {
-          "id": "node",
-          "frame": { "x": 459, "y": 580.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "1-0",
-          "frame": { "x": 404, "y": 580.4, "w": 92.66, "h": 48 },
-          "text": {
-            "value": "1.0",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          },
-          "builds": [
-            {
-              "kind": "exit",
-              "beat": 4,
-              "effect": "dissolve",
-              "after": "path-8",
-              "delayMs": 300,
-              "durationMs": 300,
-              "curve": "easeInOut"
-            }
-          ]
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 580.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "todo",
-          "frame": { "x": 115, "y": 540.4, "w": 269.56, "h": 48 },
-          "text": {
-            "value": "    // TODO",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#8C8C8C",
-            "lineHeight": 39.6
-          },
-          "builds": [
-            {
-              "kind": "exit",
-              "beat": 4,
-              "effect": "dissolve",
-              "after": "path-8",
-              "delayMs": 200,
-              "durationMs": 300,
-              "curve": "easeInOut"
-            }
-          ]
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 420.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
+          "frame": { "x": 115, "y": 420.09, "w": 600, "h": 256 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    // TODO\n    return vec4(1.0);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
+          },
+          "builds": [
+            {
+              "kind": "change",
+              "beat": 4,
+              "set": {
+                "code": {
+                  "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n\n    return vec4();\n}"
+                }
+              },
+              "after": "path-8",
+              "durationMs": 300,
+              "curve": "easeInOut"
+            }
+          ]
         }
       ],
       "transition": { "type": "magicMove", "durationMs": 600, "curve": "easeInOut" }
@@ -4775,7 +3852,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "rect-3",
@@ -4825,114 +3902,20 @@
           }
         },
         {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 115, "y": 460.09, "w": 996.68, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(d);" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 0,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 29.8 },
-              "durationMs": 500,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
-            }
-          ]
-        },
-        {
-          "id": "node",
-          "frame": { "x": 567, "y": 660.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 660.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 340.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
-        },
-        {
-          "id": "color-1",
-          "frame": { "x": 404, "y": 660.4, "w": 219.54, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "color, " },
-              { "text": "1.", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(d);\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
               "kind": "enter",
               "beat": 0,
-              "effect": "fadeMove",
-              "direction": "up",
-              "args": { "distance": 29.6 },
-              "delayMs": 100,
+              "effect": "dissolve",
               "durationMs": 400,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
+              "curve": "easeInOut"
             }
           ]
         }
@@ -4954,7 +3937,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-raw",
@@ -4989,88 +3972,12 @@
           }
         },
         {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 115, "y": 460.09, "w": 996.68, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(d);" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "node",
-          "frame": { "x": 567, "y": 660.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 660.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 340.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
-        },
-        {
-          "id": "color-1",
-          "frame": { "x": 404, "y": 660.4, "w": 219.54, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "color, " },
-              { "text": "1.", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(d);\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -5109,7 +4016,7 @@
               "path": "M 26.34 0 L 720.41 0 C 728.14 0 732.77 0 735.87 0.42 C 740.32 0.96 743.83 2.11 745.46 3.57 C 746.75 4.58 746.75 6.1 746.75 8.64 L 746.75 82.58 C 746.75 85.12 746.75 86.64 745.46 87.65 C 743.83 89.12 740.32 90.27 735.87 90.8 C 732.77 91.22 728.14 91.22 720.41 91.22 L 26.34 91.22 C 18.61 91.22 13.97 91.22 10.88 90.8 C 6.42 90.27 2.91 89.12 1.29 87.65 C 0 86.64 0 85.12 0 82.58 L 0 8.64 C 0 6.1 0 4.58 1.29 3.57 C 2.91 2.11 6.42 0.96 10.88 0.42 C 13.97 0 18.61 0 26.34 0 Z M 26.34 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -5141,7 +4048,7 @@
             "value": "swizzling",
             "font": "Fredoka",
             "size": 38,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 45.98
           },
           "builds": [
@@ -5177,7 +4084,7 @@
             "value": "xy",
             "font": "JetBrains Mono",
             "size": 30,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 39.6
           },
           "builds": [
@@ -5207,7 +4114,7 @@
             "value": "xy",
             "font": "JetBrains Mono",
             "size": 30,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 39.6
           },
           "builds": [
@@ -5236,7 +4143,7 @@
             "value": "xyzw",
             "font": "JetBrains Mono",
             "size": 38,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 50.16
           },
           "builds": [
@@ -5268,7 +4175,7 @@
             "value": "rgba",
             "font": "JetBrains Mono",
             "size": 38,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 50.16
           },
           "builds": [
@@ -5301,7 +4208,7 @@
             "value": "stuv",
             "font": "JetBrains Mono",
             "size": 38,
-            "color": "#62EDCB",
+            "color": "codeCallout",
             "lineHeight": 50.16
           },
           "builds": [
@@ -5342,7 +4249,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-raw",
@@ -5377,88 +4284,12 @@
           }
         },
         {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 115, "y": 460.09, "w": 996.68, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(d);" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "node",
-          "frame": { "x": 567, "y": 660.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 660.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 340.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
-        },
-        {
-          "id": "color-1",
-          "frame": { "x": 404, "y": 660.4, "w": 219.54, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "color, " },
-              { "text": "1.", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(d);\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -5496,7 +4327,7 @@
               "path": "M 23.74 0 L 649.31 0 C 656.28 0 660.46 0 663.25 0.19 C 667.26 0.43 670.43 0.95 671.89 1.61 C 673.05 2.07 673.05 2.76 673.05 3.9 L 673.05 37.33 C 673.05 38.47 673.05 39.16 671.89 39.62 C 670.43 40.28 667.26 40.8 663.25 41.04 C 660.46 41.23 656.28 41.23 649.31 41.23 L 23.74 41.23 C 16.77 41.23 12.59 41.23 9.81 41.04 C 5.79 40.8 2.63 40.28 1.16 39.62 C 0 39.16 0 38.47 0 37.33 L 0 3.9 C 0 2.76 0 2.07 1.16 1.61 C 2.63 0.95 5.79 0.43 9.81 0.19 C 12.59 0 16.77 0 23.74 0 Z M 23.74 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -5535,7 +4366,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-raw",
@@ -5570,88 +4401,12 @@
           }
         },
         {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 115, "y": 460.09, "w": 996.68, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(d);" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "node",
-          "frame": { "x": 567, "y": 660.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 660.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 340.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
-        },
-        {
-          "id": "color-1",
-          "frame": { "x": 404, "y": 660.4, "w": 219.54, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "color, " },
-              { "text": "1.", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(d);\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -5689,7 +4444,7 @@
               "path": "M 14.22 0 L 388.89 0 C 393.07 0 395.57 0 397.24 0.19 C 399.64 0.43 401.54 0.95 402.42 1.61 C 403.11 2.07 403.11 2.76 403.11 3.9 L 403.11 37.33 C 403.11 38.47 403.11 39.16 402.42 39.62 C 401.54 40.28 399.64 40.8 397.24 41.04 C 395.57 41.23 393.07 41.23 388.89 41.23 L 14.22 41.23 C 10.05 41.23 7.54 41.23 5.87 41.04 C 3.47 40.8 1.57 40.28 0.7 39.62 C 0 39.16 0 38.47 0 37.33 L 0 3.9 C 0 2.76 0 2.07 0.7 1.61 C 1.57 0.95 3.47 0.43 5.87 0.19 C 7.54 0 10.05 0 14.22 0 Z M 14.22 0"
             },
             "stroke": {
-              "color": "#62EDCB",
+              "color": "codeCallout",
               "width": 5,
               "dash": [10, 10]
             }
@@ -5728,7 +4483,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-raw",
@@ -5745,7 +4500,7 @@
               "beat": 0,
               "effect": "wipe",
               "direction": "right",
-              "after": "step-d-0",
+              "after": "uniform-float2-iresolution-h",
               "durationMs": 300,
               "curve": "easeInOut"
             }
@@ -5779,124 +4534,22 @@
           }
         },
         {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 115, "y": 460.09, "w": 996.68, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "node",
-          "frame": { "x": 567, "y": 660.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 660.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 340.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
-        },
-        {
-          "id": "color-1",
-          "frame": { "x": 404, "y": 660.4, "w": 219.54, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "color, " },
-              { "text": "1.", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "step-d-0",
-          "frame": { "x": 512, "y": 620.4, "w": 264.68, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "step(d, " },
-              { "text": "0.", "color": "#2AACB8" },
-              { "text": ")" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
               "kind": "enter",
               "beat": 0,
-              "effect": "fromDarkness",
+              "effect": "dissolve",
               "durationMs": 400,
               "curve": "easeInOut"
             }
           ]
-        },
-        {
-          "id": "node-2",
-          "frame": { "x": 711, "y": 620.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
         },
         {
           "id": "sdf",
@@ -5939,7 +4592,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-step",
@@ -5974,60 +4627,12 @@
           }
         },
         {
-          "id": "node",
-          "frame": { "x": 567, "y": 660.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4",
-          "frame": { "x": 115, "y": 660.09, "w": 381.8, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    return vec4" },
-              { "text": "(\n}", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 340.4, "w": 686.8, "h": 114.6 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 35.4
-          }
-        },
-        {
-          "id": "color-1",
-          "frame": { "x": 404, "y": 660.4, "w": 219.54, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "color, " },
-              { "text": "1.", "color": "#2AACB8" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         },
         {
@@ -6100,60 +4705,6 @@
               "curve": "easeInOut"
             }
           ]
-        },
-        {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 115, "y": 460.09, "w": 996.68, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "step-d-0",
-          "frame": { "x": 512, "y": 620.4, "w": 264.68, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "step(d, " },
-              { "text": "0.", "color": "#2AACB8" },
-              { "text": ")" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node-2",
-          "frame": { "x": 711, "y": 620.4, "w": 64.6, "h": 48 },
-          "text": {
-            "value": ");",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
         }
       ],
       "transition": { "type": "none" }
@@ -6166,7 +4717,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 312, "w": 1112.58, "h": 452.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-step",
@@ -6201,164 +4752,12 @@
           }
         },
         {
-          "id": "vec2-uv-fragcoord-xy-iresolu",
-          "frame": { "x": 187, "y": 460.4, "w": 901.52, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "uniform-float2-iresolution",
-          "frame": { "x": 116, "y": 340.4, "w": 614.82, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 " },
-              { "text": "iResolution;", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "half4-main-float2-fragcoord",
-          "frame": { "x": 116, "y": 420.4, "w": 685.58, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "float-d",
-          "frame": { "x": 187, "y": 580.4, "w": 181.72, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "float " },
-              { "text": "d", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "vec2-center-vec2-5",
-          "frame": { "x": 187, "y": 500.4, "w": 528.2, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "node",
-          "frame": { "x": 116, "y": 700.4, "w": 48.74, "h": 48 },
-          "text": {
-            "value": "}",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "return-vec4-color-1",
-          "frame": { "x": 189, "y": 660.4, "w": 525.76, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "return vec4" },
-              { "text": "(color, ", "color": "#BCBEC4" },
-              { "text": "1.", "color": "#2AACB8" },
-              { "text": ");", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "vec3-color-vec3-step-d-0",
-          "frame": { "x": 187, "y": 620.4, "w": 703.88, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(step(d, " },
-              { "text": "0.", "color": "#2AACB8" },
-              { "text": "));" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "assign-eq",
-          "frame": { "x": 332, "y": 580.4, "w": 48.74, "h": 48 },
-          "text": {
-            "value": "=",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "float-d-2",
-          "frame": { "x": 187, "y": 580.4, "w": 184.16, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "float " },
-              { "text": "d", "color": "#BCBEC4" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#CF8E6D",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "distance-uv-center-5",
-          "frame": { "x": 348, "y": 580.4, "w": 617.26, "h": 48 },
-          "text": {
-            "value": [
-              { "text": " distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "id": "uniform-float2-iresolution-h",
+          "frame": { "x": 115, "y": 340.09, "w": 874, "h": 416 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d = distance(uv, center) - .5;\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           }
         }
       ],
@@ -6375,7 +4774,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 252, "w": 1112.58, "h": 572.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-step",
@@ -6392,7 +4791,7 @@
               "beat": 0,
               "effect": "wipe",
               "direction": "right",
-              "after": "float-d2-distance-uv-vec2-62",
+              "after": "uniform-float2-iresolution-h",
               "durationMs": 300,
               "curve": "easeInOut"
             }
@@ -6426,155 +4825,20 @@
           }
         },
         {
-          "id": "vec3-color-return-block",
-          "frame": { "x": 115, "y": 680.09, "w": 799.04, "h": 128.4 },
-          "text": {
-            "value": [
-              { "text": "    vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(step(d, " },
-              { "text": "0.", "color": "#2AACB8" },
-              { "text": "));\n    " },
-              { "text": "return vec4", "color": "#CF8E6D" },
-              { "text": "(color, " },
-              { "text": "1.", "color": "#2AACB8" },
-              { "text": ");\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "uniform-float2-iresolution-block",
-          "frame": { "x": 115, "y": 280.09, "w": 996.68, "h": 288.4 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "d-suffix-1",
-          "frame": { "x": 314, "y": 520.4, "w": 51.18, "h": 48 },
-          "text": {
-            "value": "1",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "id": "uniform-float2-iresolution-h",
+          "frame": { "x": 115, "y": 280.09, "w": 1080, "h": 536 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d1 = distance(uv, center) - .5;\n    float d2 = distance(uv, vec2(.625, .625)) - .25;\n    float d = max(d1, -d2); // == d1 - d2\n\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
               "kind": "enter",
               "beat": 0,
-              "effect": "fadeMove",
-              "direction": "down",
-              "args": { "distance": 39.6 },
-              "durationMs": 300,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
-            }
-          ]
-        },
-        {
-          "id": "distance-uv-center-5",
-          "frame": { "x": 386, "y": 520.4, "w": 592.86, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 0,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 39.6 },
-              "delayMs": 100,
-              "durationMs": 500,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
-            }
-          ]
-        },
-        {
-          "id": "assign-eq",
-          "frame": { "x": 350, "y": 520.4, "w": 48.74, "h": 48 },
-          "text": {
-            "value": "=",
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          }
-        },
-        {
-          "id": "float-d2-distance-uv-vec2-62",
-          "frame": { "x": 115, "y": 560.09, "w": 1172.36, "h": 88.4 },
-          "text": {
-            "value": [
-              { "text": "    float ", "color": "#CF8E6D" },
-              { "text": "d2 = distance(uv, " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ")) - " },
-              { "text": ".25", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d = max(d1, -d2); " },
-              { "text": "// == d1 - d2", "color": "#7A7E85" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 0,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 39.6 },
-              "delayMs": 200,
-              "durationMs": 500,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
+              "effect": "dissolve",
+              "durationMs": 400,
+              "curve": "easeInOut"
             }
           ]
         }
@@ -6593,7 +4857,7 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 252, "w": 1112.58, "h": 572.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "specimen-sdf-csg-sub",
@@ -6628,93 +4892,24 @@
           }
         },
         {
-          "id": "float-d-vec3-color-vec3-step",
-          "frame": { "x": 115, "y": 600.09, "w": 799.04, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    float ", "color": "#CF8E6D" },
-              { "text": "d =\n\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(step(d, " },
-              { "text": "0.", "color": "#2AACB8" },
-              { "text": "));\n    " },
-              { "text": "return vec4", "color": "#CF8E6D" },
-              { "text": "(color, " },
-              { "text": "1.", "color": "#2AACB8" },
-              { "text": ");\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 280.09, "w": 1165.04, "h": 328.4 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d1 = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d2 = distance(uv, " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ")) - " },
-              { "text": ".25", "color": "#2AACB8" },
-              { "text": ";" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "max-d1-d2-d1-d2",
-          "frame": { "x": 115, "y": 600.4, "w": 928.36, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "              max(d1, -d2); " },
-              { "text": "// == d1 - d2", "color": "#7A7E85" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 280.09, "w": 1080, "h": 536 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d1 = distance(uv, center) - .5;\n    float d2 = distance(uv, vec2(.625, .625)) - .25;\n    float d = max(d1, -d2); // == d1 - d2\n\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
-              "kind": "exit",
+              "kind": "change",
               "beat": 1,
-              "effect": "fadeMove",
-              "direction": "right",
-              "args": { "distance": 56.8 },
+              "set": {
+                "code": {
+                  "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d1 = distance(uv, center) - .5;\n    float d2 = distance(uv, vec2(.625, .625)) - .25;\n    float d =\n\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}"
+                }
+              },
               "durationMs": 400,
-              "curve": {
-                "bezier": [0.7, 0, 0.56, 0.757]
-              }
+              "curve": "easeInOut"
             }
           ]
         }
@@ -6741,7 +4936,7 @@
               "beat": 0,
               "effect": "wipe",
               "direction": "right",
-              "after": "min-max-d1-d2-d3-d1-d2-d3",
+              "after": "uniform-float2-iresolution-h",
               "delayMs": 300,
               "durationMs": 300,
               "curve": "easeInOut"
@@ -6778,132 +4973,23 @@
         {
           "id": "path-1",
           "frame": { "x": 90, "y": 232, "w": 1112.58, "h": 612.95 },
-          "shape": { "geometry": "rect", "fill": "#413335", "cornerRadius": 12.8 }
-        },
-        {
-          "id": "float-d-vec3-color-vec3-step",
-          "frame": { "x": 115, "y": 620.09, "w": 799.04, "h": 208.4 },
-          "text": {
-            "value": [
-              { "text": "    float ", "color": "#CF8E6D" },
-              { "text": "d =\n\n    " },
-              { "text": "vec3 ", "color": "#CF8E6D" },
-              { "text": "color = " },
-              { "text": "vec3", "color": "#CF8E6D" },
-              { "text": "(step(d, " },
-              { "text": "0.", "color": "#2AACB8" },
-              { "text": "));\n    " },
-              { "text": "return vec4", "color": "#CF8E6D" },
-              { "text": "(color, " },
-              { "text": "1.", "color": "#2AACB8" },
-              { "text": ");\n}" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
+          "shape": { "geometry": "rect", "fill": "codeBackground", "cornerRadius": 12.8 }
         },
         {
           "id": "uniform-float2-iresolution-h",
-          "frame": { "x": 115, "y": 260.09, "w": 1165.04, "h": 328.4 },
-          "text": {
-            "value": [
-              { "text": "uniform float2 ", "color": "#CF8E6D" },
-              { "text": "iResolution;\n\n" },
-              { "text": "half4 ", "color": "#CF8E6D" },
-              { "text": "main(" },
-              { "text": "float2 ", "color": "#CF8E6D" },
-              { "text": "fragCoord) {\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "uv = fragCoord.xy / iResolution.xy;\n    " },
-              { "text": "vec2 ", "color": "#CF8E6D" },
-              { "text": "center = " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ");\n\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d1 = distance(uv, center) - " },
-              { "text": ".5", "color": "#2AACB8" },
-              { "text": ";\n    " },
-              { "text": "float ", "color": "#CF8E6D" },
-              { "text": "d2 = distance(uv, " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ")) - " },
-              { "text": ".25", "color": "#2AACB8" },
-              { "text": ";" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 40
-          }
-        },
-        {
-          "id": "min-max-d1-d2-d3-d1-d2-d3",
-          "frame": { "x": 115, "y": 620.4, "w": 1279.72, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "              min(max(d1, -d2), d3); " },
-              { "text": "// == (d1 - d2) + d3", "color": "#7A7E85" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
+          "frame": { "x": 115, "y": 260.09, "w": 1080, "h": 576 },
+          "code": {
+            "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    vec2 uv = fragCoord.xy / iResolution.xy;\n    vec2 center = vec2(.5);\n\n    float d1 = distance(uv, center) - .5;\n    float d2 = distance(uv, vec2(.625, .625)) - .25;\n    float d3 = distance(uv, vec2(.625, .625)) - .15;\n    float d = min(max(d1, -d2), d3); // == (d1 - d2) + d3\n\n    vec3 color = vec3(step(d, 0.));\n    return vec4(color, 1.);\n}",
+            "language": "agsl",
+            "surface": { "padding": 0 }
           },
           "builds": [
             {
               "kind": "enter",
               "beat": 0,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 43.1 },
-              "delayMs": 100,
-              "durationMs": 500,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
-            }
-          ]
-        },
-        {
-          "id": "float-d3-distance-uv-vec2-62",
-          "frame": { "x": 115, "y": 580.4, "w": 1165.04, "h": 48 },
-          "text": {
-            "value": [
-              { "text": "    float ", "color": "#CF8E6D" },
-              { "text": "d3 = distance(uv, " },
-              { "text": "vec2", "color": "#CF8E6D" },
-              { "text": "(" },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ", " },
-              { "text": ".625", "color": "#2AACB8" },
-              { "text": ")) - " },
-              { "text": ".15", "color": "#2AACB8" },
-              { "text": ";" }
-            ],
-            "font": "JetBrains Mono",
-            "size": 30,
-            "color": "#BCBEC4",
-            "lineHeight": 39.6
-          },
-          "builds": [
-            {
-              "kind": "enter",
-              "beat": 0,
-              "effect": "fadeMove",
-              "direction": "left",
-              "args": { "distance": 43.1 },
-              "durationMs": 500,
-              "curve": {
-                "bezier": [0.311, 0.208, 0.201, 1]
-              }
+              "effect": "dissolve",
+              "durationMs": 400,
+              "curve": "easeInOut"
             }
           ]
         }

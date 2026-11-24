@@ -11,13 +11,16 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.sebastiano.ciacola.document.CodePayload
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.SlideSpec
+import dev.sebastiano.ciacola.document.TextStyleOverride
 import dev.sebastiano.ciacola.document.toCodeSchemeSpec
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.theme.SyntaxColor
@@ -240,5 +243,44 @@ class CodeSchemeResolutionAndWarpStyleTest {
         val commentStyle = commentLayouts.single().layoutInput.style
         assertEquals(Color(0xFF778899), commentStyle.color)
         assertEquals(FontStyle.Italic, commentStyle.fontStyle)
+    }
+
+    @Test
+    fun resolveDocumentCodeTextStyleHonorsThemeTypographyRolesAndStageDensity() {
+        val doc = DeckDocument(
+            id = "code-typo",
+            defaultTheme = "dark",
+            themes = mapOf(
+                "dark" to DeckThemeSpec(
+                    preset = "stageDark",
+                    typography = mapOf(
+                        "code" to TextStyleOverride(
+                            font = "JetBrains Mono",
+                            size = 30.0,
+                            weight = 500,
+                            lineHeight = 40.0,
+                        ),
+                        "codeCompact" to TextStyleOverride(
+                            font = "JetBrains Mono",
+                            size = 24.0,
+                            lineHeight = 1.5,
+                        ),
+                    ),
+                ),
+            ),
+            slides = listOf(SlideSpec(id = "s1")),
+        )
+        val theme = resolveDeckTheme(doc, "dark")
+        val resolver = DocumentColorResolver(doc.themes["dark"], theme)
+        val density = Density(density = 2f, fontScale = 1f)
+
+        val codeStyle = resolveDocumentCodeTextStyle(theme, resolver, fit = null, density = density)
+        assertEquals(15.sp, codeStyle.fontSize)
+        assertEquals(20.sp, codeStyle.lineHeight)
+        assertEquals(FontWeight(500), codeStyle.fontWeight)
+
+        val compactStyle = resolveDocumentCodeTextStyle(theme, resolver, fit = "compact", density = density)
+        assertEquals(12.sp, compactStyle.fontSize)
+        assertEquals(18.sp, compactStyle.lineHeight)
     }
 }
