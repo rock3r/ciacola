@@ -105,12 +105,10 @@ class CodeSchemeInspectorTest {
         val tempDir = Files.createTempDirectory("ciacola-scheme-security")
         try {
             val themesDir = tempDir.resolve("themes").also { Files.createDirectory(it) }
-            val outsideSecret = tempDir.resolve("secret.json").apply {
-                Files.writeString(
-                    this,
-                    """{"name":"Secret","type":"dark","colors":{"editor.background":"#111111","editor.foreground":"#EEEEEE"}}""",
-                )
-            }
+            Files.writeString(
+                tempDir.resolve("secret.json"),
+                """{"name":"Secret","type":"dark","colors":{"editor.background":"#111111","editor.foreground":"#EEEEEE"}}""",
+            )
 
             // 1. Relative VS Code "include" resolution + .jsonc import
             val baseFile = themesDir.resolve("base-palette.jsonc")
@@ -306,15 +304,52 @@ class CodeSchemeInspectorTest {
         assertEquals(Color(0xFFFFAA11), mapFnCall["code.function"])
 
         for (ordered in listOf(
-            linkedMapOf("code.function" to "#111111", "code.functionCall" to "#222222", "code.background" to "#333333", "codeBackground" to "#444444"),
-            linkedMapOf("code.functionCall" to "#222222", "code.function" to "#111111", "codeBackground" to "#444444", "code.background" to "#333333"),
+            linkedMapOf(
+                "code.function" to "#111111",
+                "code.functionCall" to "#222222",
+                "code.background" to "#333333",
+                "codeBackground" to "#444444",
+                "code.foreground" to "#555555",
+                "codeForeground" to "#666666",
+            ),
+            linkedMapOf(
+                "code.functionCall" to "#222222",
+                "code.function" to "#111111",
+                "codeBackground" to "#444444",
+                "code.background" to "#333333",
+                "codeForeground" to "#666666",
+                "code.foreground" to "#555555",
+            ),
         )) {
             val resolvedMap = DocumentThemeResolver.resolveThemeColorMap(DeckThemeSpec(preset = "stageDark", colors = ordered))
             assertEquals(Color(0xFF222222), resolvedMap["code.functionCall"])
             assertEquals(Color(0xFF222222), resolvedMap["code.function"])
             assertEquals(Color(0xFF444444), resolvedMap["codeBackground"])
             assertEquals(Color(0xFF444444), resolvedMap["code.background"])
+            assertEquals(Color(0xFF666666), resolvedMap["codeForeground"])
+            assertEquals(Color(0xFF666666), resolvedMap["code.foreground"])
         }
+
+        // Invalid primary falls back to valid alias cleanly
+        val fallbackMap = DocumentThemeResolver.resolveThemeColorMap(
+            DeckThemeSpec(
+                preset = "stageDark",
+                colors = mapOf(
+                    "codeBackground" to "not-a-color",
+                    "code.background" to "#333333",
+                    "codeForeground" to "not-a-color",
+                    "code.foreground" to "#555555",
+                    "code.functionCall" to "not-a-color",
+                    "code.function" to "#111111",
+                ),
+            ),
+        )
+        assertEquals(Color(0xFF333333), fallbackMap["codeBackground"])
+        assertEquals(Color(0xFF333333), fallbackMap["code.background"])
+        assertEquals(Color(0xFF555555), fallbackMap["codeForeground"])
+        assertEquals(Color(0xFF555555), fallbackMap["code.foreground"])
+        assertEquals(Color(0xFF111111), fallbackMap["code.functionCall"])
+        assertEquals(Color(0xFF111111), fallbackMap["code.function"])
     }
 
     @Test

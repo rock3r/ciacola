@@ -163,10 +163,13 @@ object DocumentThemeResolver {
             "codeForeground" to "code.foreground",
             "code.functionCall" to "code.function",
         )) {
-            val primaryRaw = themeSpec.colors[primary] ?: continue
-            val parsed = parseHexColorOrNull(primaryRaw) ?: out[primaryRaw] ?: continue
-            out[primary] = parsed
-            out[alias] = parsed
+            val primaryColor = themeSpec.colors[primary]?.let { parseHexColorOrNull(it) ?: out[it] }
+            val aliasColor = themeSpec.colors[alias]?.let { parseHexColorOrNull(it) ?: out[it] }
+            val effective = primaryColor ?: aliasColor
+            if (effective != null) {
+                out[primary] = effective
+                out[alias] = effective
+            }
         }
         return out
     }

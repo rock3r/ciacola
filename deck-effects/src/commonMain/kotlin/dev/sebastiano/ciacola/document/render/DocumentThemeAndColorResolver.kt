@@ -195,23 +195,22 @@ data class DocumentColorResolver(
         }
 
         // 2. Document theme color map override
-        val themeRaw: String? = themeSpec?.colors?.get(key) ?: when (key) {
-            "background" -> themeSpec?.colors?.get("canvas")
-            "canvas" -> themeSpec?.colors?.get("background")
-            "foreground" -> themeSpec?.colors?.get("ink")
-            "ink" -> themeSpec?.colors?.get("foreground")
-            "muted" -> themeSpec?.colors?.get("mutedInk")
-            "mutedInk" -> themeSpec?.colors?.get("muted")
-            "codeBackground" -> themeSpec?.colors?.get("code.background")
-            "code.background" -> themeSpec?.colors?.get("codeBackground")
-            "codeForeground" -> themeSpec?.colors?.get("code.foreground")
-            "code.foreground" -> themeSpec?.colors?.get("codeForeground")
-            "code.functionCall" -> themeSpec?.colors?.get("code.function")
-            "code.function" -> themeSpec?.colors?.get("code.functionCall")
-            else -> null
+        val themeCandidates: List<String> = when (key) {
+            "codeBackground", "code.background" -> listOf("codeBackground", "code.background")
+            "codeForeground", "code.foreground" -> listOf("codeForeground", "code.foreground")
+            "code.functionCall", "code.function" -> listOf("code.functionCall", "code.function")
+            "background" -> listOf("background", "canvas")
+            "canvas" -> listOf("canvas", "background")
+            "foreground" -> listOf("foreground", "ink")
+            "ink" -> listOf("ink", "foreground")
+            "muted" -> listOf("muted", "mutedInk")
+            "mutedInk" -> listOf("mutedInk", "muted")
+            else -> listOf(key)
         }
-        if (themeRaw != null) {
-            return parseLiteralColor(themeRaw) ?: resolveToken(themeRaw, depth + 1)
+        for (candidateKey in themeCandidates) {
+            val themeRaw = themeSpec?.colors?.get(candidateKey) ?: continue
+            val resolved = parseLiteralColor(themeRaw) ?: resolveToken(themeRaw, depth + 1)
+            if (resolved != null) return resolved
         }
 
         // 3. Base Kotlin theme preset

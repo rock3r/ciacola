@@ -84,16 +84,62 @@ class CodeSchemeResolutionAndWarpStyleTest {
         assertEquals(Color(0xFFFF0000), resolveDeckTheme(fnAliasDoc, "dark").colors.code.functionCall)
 
         for (colors in listOf(
-            linkedMapOf("code.function" to "#111111", "code.functionCall" to "#222222", "code.background" to "#333333", "codeBackground" to "#444444"),
-            linkedMapOf("code.functionCall" to "#222222", "code.function" to "#111111", "codeBackground" to "#444444", "code.background" to "#333333"),
+            linkedMapOf(
+                "code.function" to "#111111",
+                "code.functionCall" to "#222222",
+                "code.background" to "#333333",
+                "codeBackground" to "#444444",
+                "code.foreground" to "#555555",
+                "codeForeground" to "#666666",
+            ),
+            linkedMapOf(
+                "code.functionCall" to "#222222",
+                "code.function" to "#111111",
+                "codeBackground" to "#444444",
+                "code.background" to "#333333",
+                "codeForeground" to "#666666",
+                "code.foreground" to "#555555",
+            ),
         )) {
-            val precedenceDoc = baseDoc.copy(
-                themes = mapOf("dark" to DeckThemeSpec(preset = "stageDark", colors = colors)),
-            )
+            val spec = DeckThemeSpec(preset = "stageDark", colors = colors)
+            val precedenceDoc = baseDoc.copy(themes = mapOf("dark" to spec))
             val resolved = resolveDeckTheme(precedenceDoc, "dark")
             assertEquals(Color(0xFF222222), resolved.colors.code.functionCall)
             assertEquals(Color(0xFF444444), resolved.colors.code.background)
+            assertEquals(Color(0xFF666666), resolved.colors.code.foreground)
+
+            val tokenResolver = DocumentColorResolver(spec, resolved)
+            assertEquals(Color(0xFF444444), tokenResolver.resolveToken("codeBackground"))
+            assertEquals(Color(0xFF444444), tokenResolver.resolveToken("code.background"))
+            assertEquals(Color(0xFF666666), tokenResolver.resolveToken("codeForeground"))
+            assertEquals(Color(0xFF666666), tokenResolver.resolveToken("code.foreground"))
+            assertEquals(Color(0xFF222222), tokenResolver.resolveToken("code.functionCall"))
+            assertEquals(Color(0xFF222222), tokenResolver.resolveToken("code.function"))
         }
+
+        // Invalid primary falls back to valid alias in both resolveDeckTheme and resolveToken
+        val invalidPrimarySpec = DeckThemeSpec(
+            preset = "stageDark",
+            colors = mapOf(
+                "codeBackground" to "not-a-color",
+                "code.background" to "#333333",
+                "codeForeground" to "not-a-color",
+                "code.foreground" to "#555555",
+                "code.functionCall" to "not-a-color",
+                "code.function" to "#111111",
+            ),
+        )
+        val invalidPrimaryTheme = resolveDeckTheme(baseDoc.copy(themes = mapOf("dark" to invalidPrimarySpec)), "dark")
+        assertEquals(Color(0xFF333333), invalidPrimaryTheme.colors.code.background)
+        assertEquals(Color(0xFF555555), invalidPrimaryTheme.colors.code.foreground)
+        assertEquals(Color(0xFF111111), invalidPrimaryTheme.colors.code.functionCall)
+        val invalidPrimaryResolver = DocumentColorResolver(invalidPrimarySpec, invalidPrimaryTheme)
+        assertEquals(Color(0xFF333333), invalidPrimaryResolver.resolveToken("codeBackground"))
+        assertEquals(Color(0xFF333333), invalidPrimaryResolver.resolveToken("code.background"))
+        assertEquals(Color(0xFF555555), invalidPrimaryResolver.resolveToken("codeForeground"))
+        assertEquals(Color(0xFF555555), invalidPrimaryResolver.resolveToken("code.foreground"))
+        assertEquals(Color(0xFF111111), invalidPrimaryResolver.resolveToken("code.functionCall"))
+        assertEquals(Color(0xFF111111), invalidPrimaryResolver.resolveToken("code.function"))
 
         // Custom imported scheme overrides bundled codeScheme id
         val custom = SyntaxColorScheme(
