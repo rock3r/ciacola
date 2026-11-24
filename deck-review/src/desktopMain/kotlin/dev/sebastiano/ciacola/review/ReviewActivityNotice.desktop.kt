@@ -83,27 +83,39 @@ private fun plural(numbers: List<Int>, one: String, many: String) =
 internal fun queuedNotice(numbers: List<Int>, agentConfigured: Boolean): Pair<String, String> {
     val subject = formatCommentNumbers(numbers)
     val title = "Queued ${plural(numbers, "comment", "comments")} $subject"
-    val push = if (agentConfigured) " Or press Send in the top right to push it now." else ""
-    return title to "An agent waiting on :deck:reviewWait picks it up within seconds.$push"
+    val push = if (agentConfigured) " Or press Send in the top right to push now." else ""
+    return title to
+        "An agent waiting on :deck:reviewWait picks ${itThem(numbers)} up within seconds.$push"
 }
 
 internal fun sendingNotice(numbers: List<Int>): Pair<String, String> =
     "Sending ${formatCommentNumbers(numbers)} to the agent…" to
         "Pushing to the configured conversation."
 
+private fun isAre(numbers: List<Int>) = if (numbers.size == 1) "is" else "are"
+
+private fun itThem(numbers: List<Int>) = if (numbers.size == 1) "it" else "them"
+
 internal fun alreadyWithAnAgentNotice(numbers: List<Int>): Pair<String, String> =
-    "${formatCommentNumbers(numbers)} is already with an agent" to
-        "An agent collected it from the queue and has not reported back yet. Pushing it again " +
-        "would put two of them on the same slide."
+    "${formatCommentNumbers(numbers)} ${isAre(numbers)} already with an agent" to
+        "An agent collected ${itThem(numbers)} from the queue and has not reported back yet. " +
+        "Pushing again would put two of them on the same slide. Release the claim from the pin " +
+        "if that agent is gone."
+
+internal fun queueBusyNotice(file: java.nio.file.Path): Pair<String, String> =
+    "The review queue is busy" to
+        "Another process is holding ${file.toAbsolutePath()} and did not let go. Nothing was " +
+        "changed; try again once it has finished."
 
 internal fun deliveredNotice(numbers: List<Int>): Pair<String, String> =
     "The agent has ${formatCommentNumbers(numbers)}" to
-        "The pin turns green once the agent reports it applied."
+        "The ${if (numbers.size == 1) "pin turns" else "pins turn"} green once the agent " +
+        "reports ${itThem(numbers)} applied."
 
 internal fun nothingToPushToNotice(numbers: List<Int>): Pair<String, String> =
-    "${formatCommentNumbers(numbers)} is still queued" to
+    "${formatCommentNumbers(numbers)} ${isAre(numbers)} still queued" to
         "No push command is installed, so nothing was pushed. An agent waiting on " +
-        ":deck:reviewWait picks it up from the queue instead."
+        ":deck:reviewWait picks ${itThem(numbers)} up from the queue instead."
 
 internal fun deliveryFailedNotice(numbers: List<Int>, reason: String): Pair<String, String> =
     "Could not send ${formatCommentNumbers(numbers)}" to
@@ -208,26 +220,53 @@ internal fun BoxScope.ReviewActivityNoticeBar(
  * that is what the push itself does — it sets `ProcessBuilder.directory(workspaceRoot)`. Checking
  * the two against different roots hides Send for a `./tools/agentapi` that would have run, or
  * offers it for one that would not.
+ *
+ * Windows is not an afterthought here: the deck ships an MSI, and this runs while the store is
+ * being constructed, so a `PATH` this cannot parse would stop the deck opening. Hence both
+ * separators, quoted entries, `PATHEXT`, and no path parse that can escape as an exception.
  */
 internal fun isExecutableAvailable(
     bin: String,
     path: String?,
     baseDir: java.nio.file.Path? = null,
+    pathExt: String? = System.getenv("PATHEXT"),
+    // Injectable so Windows behaviour can be tested from a POSIX host, where this is ":" and
+    // every quoted "C:\..." entry would otherwise split down the middle.
+    pathSeparator: Char = java.io.File.pathSeparatorChar,
     isExecutable: (java.nio.file.Path) -> Boolean = {
         java.nio.file.Files.isExecutable(it) && !java.nio.file.Files.isDirectory(it)
     },
 ): Boolean {
-    val trimmed = bin.trim()
+    val trimmed = bin.trim().removeSurrounding("\"")
     if (trimmed.isEmpty()) return false
-    if (trimmed.contains('/')) {
-        val candidate = java.nio.file.Path.of(trimmed)
-        val resolved = if (candidate.isAbsolute || baseDir == null) candidate else baseDir.resolve(candidate)
-        return isExecutable(resolved.normalize())
+
+    // On Windows a bare name resolves through PATHEXT, so "agentapi" has to find agentapi.exe.
+    // An empty extension first keeps the POSIX case unchanged.
+    val suffixes = listOf("") + pathExt.orEmpty()
+        .split(pathSeparator)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+
+    fun candidate(parent: String?, name: String): java.nio.file.Path? = runCatching {
+        val raw = if (parent == null) {
+            java.nio.file.Path.of(name)
+        } else {
+            java.nio.file.Path.of(parent.trim().removeSurrounding("\""), name)
+        }
+        if (raw.isAbsolute || baseDir == null) raw.normalize() else baseDir.resolve(raw).normalize()
+    }.getOrNull()
+
+    if (trimmed.contains('/') || trimmed.contains('\\')) {
+        return suffixes.any { suffix ->
+            candidate(null, trimmed + suffix)?.let(isExecutable) == true
+        }
     }
     return path.orEmpty()
-        .split(java.io.File.pathSeparatorChar)
+        .split(pathSeparator)
         .filter { it.isNotBlank() }
-        .any { isExecutable(java.nio.file.Path.of(it, trimmed)) }
+        .any { entry ->
+            suffixes.any { suffix -> candidate(entry, trimmed + suffix)?.let(isExecutable) == true }
+        }
 }
 
 /**
@@ -241,4 +280,4 @@ internal fun commandExistsAnywhere(
     bin: String,
     path: String?,
     baseDir: java.nio.file.Path? = null,
-): Boolean = isExecutableAvailable(bin, path, baseDir) { java.nio.file.Files.exists(it) }
+): Boolean = isExecutableAvailable(bin, path, baseDir, isExecutable = { java.nio.file.Files.exists(it) })

@@ -134,6 +134,8 @@ internal fun AnchoredCommentComposerPopup(
     }
 
     val pushAvailable = store.agentPushAvailable()
+    // Everything about a target conversation is push furniture; with nothing to push to it is a
+    // field that cannot change any outcome.
     val convIdState = rememberTextFieldState(initialText = store.effectiveConversationId())
     var submitting by remember(pending) { mutableStateOf(false) }
     var validationError by remember(pending) { mutableStateOf<String?>(null) }
@@ -522,6 +524,8 @@ internal fun AnchoredSelectedPinPopup(
     agentConfigured: Boolean = true,
     pushAvailable: Boolean = true,
     delivering: Boolean = false,
+    claimed: Boolean = false,
+    onReleaseClaim: () -> Unit = {},
     onClose: (fromEscapeKey: Boolean) -> Unit,
     onDelete: () -> Unit,
     onMarkApplied: () -> Unit = {},
@@ -624,11 +628,11 @@ internal fun AnchoredSelectedPinPopup(
                     ) {
                         Icon(
                             key = comment.status.iconKey(),
-                            contentDescription = comment.status.labelText(delivering),
+                            contentDescription = comment.status.labelText(delivering, claimed),
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = "#$displayNumber · ${comment.status.labelText(delivering)}",
+                            text = "#$displayNumber · ${comment.status.labelText(delivering, claimed)}",
                             style = JewelTheme.typography.medium.copy(fontWeight = FontWeight.SemiBold),
                             color = statusPalette.colorFor(comment.status),
                         )
@@ -755,7 +759,22 @@ internal fun AnchoredSelectedPinPopup(
                                         Text("Mark Applied")
                                     }
                                 }
-                                if (!pushAvailable) {
+                                if (claimed) {
+                                    // A claim has no expiry, so this is the author's only way
+                                    // back if the agent that took the note is gone.
+                                    Tooltip(
+                                        tooltip = {
+                                            Text("Hand this comment back to the queue for another agent")
+                                        },
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = onReleaseClaim,
+                                            modifier = Modifier.testTag("ciacola-review-pin-release-claim"),
+                                        ) {
+                                            Text("Release")
+                                        }
+                                    }
+                                } else if (!pushAvailable) {
                                     // Nothing to push to: the queue is the path, and an agent on
                                     // :deck:reviewWait is already watching it.
                                 } else if (agentConfigured) {

@@ -1,5 +1,6 @@
 package dev.sebastiano.ciacola.decks
 
+import dev.sebastiano.ciacola.review.ReviewClaims
 import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.review.ReviewQueueFile
 import dev.sebastiano.ciacola.review.ReviewTargetHit
@@ -203,11 +204,66 @@ class DeckReviewCliTest {
     }
 
     @Test
+    fun anAgentThatCouldNotActKeepsTheClaimSoTheWaitDoesNotLoop() {
+        val dir = Files.createTempDirectory("review-cli")
+        val commentsFile = writeComments(dir, comment("rc-1"))
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        var now = 0L
+
+        DeckReviewCli.runWait(commentsFile, takenFile, 1_000L, 10L, {}, { false }, { now }, { now += it })
+        DeckReviewCli.runResolve(
+            commentsFile = commentsFile,
+            commentId = "rc-1",
+            resolution = "could not work out what was meant",
+            status = ReviewCommentStatus.Failed,
+            takenFile = takenFile,
+            out = {},
+        )
+
+        // Releasing on `failed` would have the next wait hand the agent back the very comment it
+        // just said it could not do, for ever. Only an explicit requeue releases.
+        assertEquals(setOf("rc-1"), DeckReviewCli.readTaken(takenFile))
+        val second = mutableListOf<String>()
+        assertEquals(
+            DeckReviewCli.EXIT_TIMEOUT,
+            DeckReviewCli.runWait(commentsFile, takenFile, 50L, 10L, second::add, { false }, { now }, { now += it }),
+        )
+        assertTrue(second.isEmpty())
+    }
+
+    @Test
+    fun claimsCarryTheTimeTheyWereTakenAndOlderFilesStillLoad() {
+        val dir = Files.createTempDirectory("review-cli")
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+        DeckReviewCli.claim(takenFile, listOf("rc-1"), java.time.Instant.parse("2026-11-24T10:00:00Z"))
+        assertEquals("2026-11-24T10:00:00Z", ReviewClaims.read(takenFile) {}.single().claimedAt)
+
+        // The shape written before claims carried a time still reads, so an existing sidecar does
+        // not silently un-claim everything on upgrade.
+        Files.writeString(takenFile, """{"takenIds":["rc-9"]}""")
+        assertEquals(setOf("rc-9"), DeckReviewCli.readTaken(takenFile))
+    }
+
+    @Test
+    fun exportOnAnUnknownDeckLeavesNothingBehind() {
+        val dir = Files.createTempDirectory("review-cli").resolve("decks").resolve("typo")
+        val commentsFile = dir.resolve(DeckReviewCli.COMMENTS_FILE_NAME)
+        val printed = mutableListOf<String>()
+
+        assertEquals(
+            DeckReviewCli.EXIT_OK,
+            DeckReviewCli.runExport(commentsFile, dir.resolve(DeckReviewCli.TAKEN_FILE_NAME), false, true, printed::add),
+        )
+        // A read-only command should not create a directory and a lock file to report emptiness.
+        assertFalse(Files.exists(dir), "export created $dir")
+    }
+
+    @Test
     fun aQueueHandedBackBeforeItsStatusIsNeverQueuedAndClaimedAtOnce() {
         val dir = Files.createTempDirectory("review-cli")
         val commentsFile = writeComments(dir, comment("rc-1"))
         val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
-        DeckReviewCli.writeTaken(takenFile, setOf("rc-1"))
+        DeckReviewCli.claim(takenFile, listOf("rc-1"))
 
         DeckReviewCli.runResolve(
             commentsFile = commentsFile,
@@ -252,9 +308,19 @@ class DeckReviewCliTest {
     fun aDeckPathPicksTheSameQueueTheAppWritesTo() {
         // The usage text allows --deck=<id|path>; storyboardDirForDeck sanitizes whatever it gets
         // into one directory name, so a path would otherwise select a queue nothing writes to.
-        assertEquals("as-ide-talk", reviewDeckIdFor("/Talks/as-ide-talk/as-ide-talk.deck.json"))
-        assertEquals("as-ide-talk", reviewDeckIdFor("as-ide-talk.deck.json"))
         assertEquals("as-ide-talk", reviewDeckIdFor("as-ide-talk"))
+        // A path that does not exist falls back to the file's stem.
+        assertEquals("as-ide-talk", reviewDeckIdFor("/Talks/as-ide-talk/as-ide-talk.deck.json"))
+
+        // A real deck file declares its own id, and that is the one the app writes its queue
+        // under, so the stem would have picked a directory nothing writes to.
+        val dir = Files.createTempDirectory("review-deck-id")
+        val deckFile = dir.resolve("conference-keynote.deck.json")
+        Files.writeString(
+            deckFile,
+            """{"format":1,"id":"conf-2026","title":"Keynote 2026","slides":[{"id":"s1"}]}""",
+        )
+        assertEquals("conf-2026", reviewDeckIdFor(deckFile.toString()))
     }
 
     @Test
@@ -381,7 +447,7 @@ class DeckReviewCliTest {
         val dir = Files.createTempDirectory("review-cli")
         val commentsFile = writeComments(dir, comment("rc-1"), comment("rc-2"))
         val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
-        DeckReviewCli.writeTaken(takenFile, setOf("rc-1"))
+        DeckReviewCli.claim(takenFile, listOf("rc-1"))
 
         val pending = mutableListOf<String>()
         DeckReviewCli.runExport(commentsFile, takenFile, includeTaken = false, jsonOutput = false, out = pending::add)

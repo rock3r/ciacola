@@ -117,15 +117,20 @@ fun ReviewCommentStatus.iconKey(): IconKey = when (this) {
  * @param delivering `true` while a push of this comment is in flight. `Applying` is persisted both
  *   for the seconds a push takes and for however long the agent then holds the comment, and those
  *   are different answers to "what is happening right now?".
+ * @param claimed `true` when an agent has taken this comment from the queue. The status stays
+ *   `Queued` until that agent reports back, so without this the UI calls a comment somebody is
+ *   working on "waiting for an agent".
  */
-fun ReviewCommentStatus.labelText(delivering: Boolean = false): String = when (this) {
-    // "Queued" read as something the author still had to do; the comment is in fact already
-    // waiting where an agent reads it, which is the whole point when nothing is being pushed to.
-    ReviewCommentStatus.Queued -> "Waiting for an agent"
-    ReviewCommentStatus.Applying -> if (delivering) "Sending to the agent…" else "With the agent"
-    ReviewCommentStatus.Applied -> "Applied"
-    ReviewCommentStatus.Failed -> "Delivery failed"
-}
+fun ReviewCommentStatus.labelText(delivering: Boolean = false, claimed: Boolean = false): String =
+    when (this) {
+        // "Queued" read as something the author still had to do; the comment is in fact already
+        // waiting where an agent reads it, which is the whole point when nothing is pushing.
+        // Once an agent has claimed it, saying it is waiting is simply false.
+        ReviewCommentStatus.Queued -> if (claimed) "With an agent" else "Waiting for an agent"
+        ReviewCommentStatus.Applying -> if (delivering) "Sending to the agent…" else "With the agent"
+        ReviewCommentStatus.Applied -> "Applied"
+        ReviewCommentStatus.Failed -> if (claimed) "With an agent" else "Delivery failed"
+    }
 
 /**
  * Resolves a focus ring color derived from Jewel's focused outline token that guarantees at least

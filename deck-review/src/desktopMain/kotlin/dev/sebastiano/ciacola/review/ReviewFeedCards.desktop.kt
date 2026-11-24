@@ -271,7 +271,11 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                 modifier = Modifier.testTag("ciacola-review-comment-hint"),
             )
 
-            if (effectiveConvId.isBlank() && (queuedCount > 0 || windowController.highlightAgentConfigBanner)) {
+            // A missing Conversation ID only matters if something could be pushed with it.
+            if (store.agentPushAvailable() &&
+                effectiveConvId.isBlank() &&
+                (queuedCount > 0 || windowController.highlightAgentConfigBanner)
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -425,6 +429,8 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
                                 agentConfigured = effectiveConvId.isNotBlank(),
                                 pushAvailable = store.agentPushAvailable(),
                                 delivering = item.id in store.deliveringIds,
+                                claimed = item.id in store.claimedIds,
+                                onReleaseClaim = { store.releaseClaim(item.id) },
                                 onJumpToSlide = {
                                     scope.launch {
                                         val target = Storyboard.Index(item.sceneIndex, item.frameIndex)
@@ -469,6 +475,8 @@ private fun ReviewCommentRowCard(
     agentConfigured: Boolean,
     pushAvailable: Boolean,
     delivering: Boolean,
+    claimed: Boolean,
+    onReleaseClaim: () -> Unit,
     onJumpToSlide: () -> Unit,
     onMarkApplied: () -> Unit,
     onRetry: () -> Unit,
@@ -513,11 +521,11 @@ private fun ReviewCommentRowCard(
             ) {
                 Icon(
                     key = item.status.iconKey(),
-                    contentDescription = item.status.labelText(delivering),
+                    contentDescription = item.status.labelText(delivering, claimed),
                     modifier = Modifier.size(13.dp),
                 )
                 Text(
-                    text = item.status.labelText(delivering),
+                    text = item.status.labelText(delivering, claimed),
                     style = JewelTheme.typography.small,
                     color = statusColor,
                 )
@@ -618,7 +626,16 @@ private fun ReviewCommentRowCard(
                             Text("Mark Applied", style = JewelTheme.typography.small)
                         }
                     }
-                    if (!pushAvailable) {
+                    if (claimed) {
+                        Tooltip(tooltip = { Text("Hand this comment back to the queue for another agent") }) {
+                            OutlinedButton(
+                                onClick = onReleaseClaim,
+                                modifier = Modifier.testTag("ciacola-review-release-${item.id}"),
+                            ) {
+                                Text("Release", style = JewelTheme.typography.small)
+                            }
+                        }
+                    } else if (!pushAvailable) {
                         // See AnchoredSelectedPinPopup: no push command, so no Send to offer.
                     } else if (agentConfigured) {
                         val isQueued = item.status == ReviewCommentStatus.Queued

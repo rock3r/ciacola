@@ -85,14 +85,48 @@ class RelativePushCommandTest {
 
         // The push sets ProcessBuilder.directory(workspaceRoot), so the check must use it too:
         // against the process's own directory this command looks absent and Send disappears.
-        assertTrue(isExecutableAvailable("./tools/agentapi", null, workspace, isExecutable))
-        assertTrue(!isExecutableAvailable("./tools/agentapi", null, java.nio.file.Path.of("/elsewhere"), isExecutable))
+        assertTrue(isExecutableAvailable("./tools/agentapi", null, workspace, isExecutable = isExecutable))
+        assertTrue(!isExecutableAvailable("./tools/agentapi", null, java.nio.file.Path.of("/elsewhere"), isExecutable = isExecutable))
+    }
+
+    @Test
+    fun aWindowsPathAndPathExtAreUnderstood() {
+        val present = setOf("c:/tools/agentapi.exe", "c:/program files/bin/agentapi.cmd")
+        // This test runs on POSIX, where Path joins with "/" and names are case-sensitive, so the
+        // predicate stands in for a Windows filesystem. What is under test is which candidates
+        // get tried — the separator and the extension — not how the JDK spells them.
+        val isExecutable: (java.nio.file.Path) -> Boolean = {
+            it.toString().replace('\\', '/').lowercase() in present
+        }
+
+        // A backslash path is a path, not a bare name to hunt for on PATH.
+        assertTrue(
+            isExecutableAvailable("C:\\tools\\agentapi.exe", null, null, ".EXE;.CMD", ';', isExecutable),
+        )
+        // A bare name has to pick up the extension, or Windows never finds anything and every
+        // Send disappears with no explanation.
+        assertTrue(
+            isExecutableAvailable("agentapi", "C:\\tools", null, ".EXE;.CMD", ';', isExecutable),
+        )
+        // A quoted PATH entry is ordinary on Windows and must not throw during store init.
+        assertTrue(
+            isExecutableAvailable("agentapi", "\"C:\\Program Files\\bin\"", null, ".EXE;.CMD", ';', isExecutable),
+        )
+    }
+
+    @Test
+    fun anUnparseablePathEntryIsSkippedRatherThanThrowing() {
+        // Path.of on a malformed entry throws InvalidPathException, and this runs while the store
+        // is being constructed: letting it escape would stop the deck opening at all.
+        assertTrue(
+            !isExecutableAvailable("agentapi", "\u0000bad", null, null) { true },
+        )
     }
 
     @Test
     fun anAbsoluteCommandIgnoresTheWorkspaceRoot() {
         val present = setOf("/usr/local/bin/agentapi")
         val isExecutable: (java.nio.file.Path) -> Boolean = { it.toString() in present }
-        assertTrue(isExecutableAvailable("/usr/local/bin/agentapi", null, java.nio.file.Path.of("/repo"), isExecutable))
+        assertTrue(isExecutableAvailable("/usr/local/bin/agentapi", null, java.nio.file.Path.of("/repo"), isExecutable = isExecutable))
     }
 }

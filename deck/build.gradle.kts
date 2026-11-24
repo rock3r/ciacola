@@ -265,7 +265,7 @@ tasks.register<JavaExec>("reviewWait") {
 tasks.register<JavaExec>("reviewExport") {
     description =
         "Prints the review comments the author has queued, without blocking " +
-            "(use -Pciacola.deck=<id> -Pciacola.json=true)."
+            "(use -Pciacola.deck=<id> -Pciacola.json=true -Pciacola.includeTaken=true)."
     group = "verification"
     javaLauncher.set(jbr25)
     mainClass.set("dev.sebastiano.ciacola.decks.DeckAgentCli")
@@ -274,6 +274,7 @@ tasks.register<JavaExec>("reviewExport") {
     systemProperty("apple.awt.UIElement", "true")
     outputs.upToDateWhen { false }
     args("--review-export")
+    if (requestedIncludeTakenProp.orNull?.toBoolean() == true) args("--include-taken")
     requestedDeckProp.orNull?.let { args("--deck=$it") }
     requestedStoryboardDirProp.orNull?.let { args("--storyboard-dir=$it") }
     if (requestedJsonProp.orNull.equals("true", ignoreCase = true)) {
@@ -283,6 +284,7 @@ tasks.register<JavaExec>("reviewExport") {
 
 val requestedCommentProp = ciacolaArgProp("ciacola.comment")
 val requestedResolutionProp = ciacolaArgProp("ciacola.resolution")
+val requestedIncludeTakenProp = ciacolaArgProp("ciacola.includeTaken")
 val requestedReviewStatusProp = ciacolaArgProp("ciacola.reviewStatus")
 
 tasks.register<JavaExec>("reviewResolve") {
@@ -296,7 +298,9 @@ tasks.register<JavaExec>("reviewResolve") {
     jvmArgs("-Dapple.awt.UIElement=true")
     systemProperty("apple.awt.UIElement", "true")
     outputs.upToDateWhen { false }
-    requestedCommentProp.orNull?.let { args("--review-resolve=$it") }
+    // Without a comment id there is no mode flag at all, and the CLI's complaint would be about
+    // modes rather than about the property the caller actually forgot.
+    args("--review-resolve=" + (requestedCommentProp.orNull ?: ""))
     requestedDeckProp.orNull?.let { args("--deck=$it") }
     requestedResolutionProp.orNull?.let { args("--resolution=$it") }
     requestedReviewStatusProp.orNull?.let { args("--review-status=$it") }

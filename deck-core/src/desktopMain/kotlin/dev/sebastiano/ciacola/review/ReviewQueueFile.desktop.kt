@@ -7,7 +7,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 
 /**
@@ -47,14 +49,24 @@ object ReviewQueueFile {
      */
     private val inProcessLocks = ConcurrentHashMap<String, ReentrantLock>()
 
+    /** The queue is held by someone else and did not come free in time. */
+    class Busy(val file: Path, waited: Duration) : IOException(
+        "Review queue at ${file.toAbsolutePath()} was still locked after ${waited.toSeconds()}s",
+    )
+
     /**
      * Runs [block] while holding the queue lock for [dir], against every other thread in this JVM
      * and every other process on this machine.
      *
-     * Both locks block rather than fail: these transactions are a few milliseconds of JSON, and an
-     * author who has to wait that long has not noticed.
+     * [timeout] bounds the wait. The other holder is a separate process, so an unbounded wait
+     * means a stuck agent can freeze whatever is waiting — including the deck's UI thread — for
+     * as long as it likes; past the deadline this throws [Busy] instead. A null timeout waits for
+     * ever, which is what a command-line tool with nothing else to do should do.
+     *
+     * The transactions themselves are a few milliseconds of JSON, so a wait that reaches the
+     * deadline means something is wrong rather than busy.
      */
-    fun <T> withLock(dir: Path, block: () -> T): T {
+    fun <T> withLock(dir: Path, timeout: Duration? = null, block: () -> T): T {
         Files.createDirectories(dir)
         val lockFile = dir.resolve(LOCK_FILE_NAME)
         val key = lockFile.toAbsolutePath().normalize().toString()
@@ -65,7 +77,7 @@ object ReviewQueueFile {
         // fail at the inner call rather than waiting, which is the opposite of what a reentrant
         // lock should do.
         val alreadyHeld = inProcess.isHeldByCurrentThread
-        inProcess.lock()
+        if (!acquire(inProcess, timeout)) throw Busy(lockFile, timeout ?: Duration.ZERO)
         try {
             if (alreadyHeld) return block()
             FileChannel.open(
@@ -75,7 +87,7 @@ object ReviewQueueFile {
             ).use { channel ->
                 var lock: FileLock? = null
                 try {
-                    lock = channel.lock()
+                    lock = acquireFileLock(channel, timeout) ?: throw Busy(lockFile, timeout!!)
                     return block()
                 } finally {
                     runCatching { lock?.release() }
@@ -103,6 +115,30 @@ object ReviewQueueFile {
             throw Unreadable(file, e)
         }
         return text
+    }
+
+    private fun acquire(lock: ReentrantLock, timeout: Duration?): Boolean {
+        if (timeout == null) {
+            lock.lock()
+            return true
+        }
+        return lock.tryLock(timeout.toMillis(), TimeUnit.MILLISECONDS)
+    }
+
+    /**
+     * [FileChannel.lock] has no timeout, so a bounded wait polls [FileChannel.tryLock] instead.
+     * The poll is coarse on purpose: these transactions are milliseconds, so anything that has to
+     * wait at all is already an anomaly worth a few extra of them.
+     */
+    private fun acquireFileLock(channel: FileChannel, timeout: Duration?): FileLock? {
+        if (timeout == null) return channel.lock()
+        val deadline = System.nanoTime() + timeout.toNanos()
+        while (true) {
+            val attempt = runCatching { channel.tryLock() }.getOrNull()
+            if (attempt != null) return attempt
+            if (System.nanoTime() >= deadline) return null
+            Thread.sleep(25)
+        }
     }
 
     /** Replaces [file] through a temporary file in the same directory and an atomic move. */

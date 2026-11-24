@@ -21,7 +21,6 @@ import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import java.nio.file.Files
-import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -39,7 +38,8 @@ class ReviewUnconfiguredConversationTest {
         // nothing to push to (which hides Send altogether).
         val fakeAgentApi = tempRoot.resolve("fake-agentapi.sh").apply {
             writeText("#!/bin/sh\nexit 0\n")
-            Files.setPosixFilePermissions(this, PosixFilePermissions.fromString("rwxr-xr-x"))
+            // setPosixFilePermissions throws on Windows; toFile().setExecutable is portable.
+            toFile().setExecutable(true)
         }
         val store = ReviewCommentStore(
             storyboardDir = storyboardDir,

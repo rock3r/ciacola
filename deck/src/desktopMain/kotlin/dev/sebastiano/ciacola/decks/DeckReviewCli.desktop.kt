@@ -5,6 +5,7 @@ import dev.sebastiano.ciacola.review.ReviewCommentStatus
 import dev.sebastiano.ciacola.review.ReviewQueueFile
 import dev.sebastiano.ciacola.review.SlideReviewComment
 import java.nio.file.Path
+import java.time.Instant
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
@@ -21,8 +22,9 @@ import kotlinx.serialization.json.Json
  * without anyone clicking anything. Writes still go through a temporary file and an atomic move, so
  * that poll can never observe a half-written queue.
  *
- * What an agent has *taken* is a different question from what the author has *resolved*, and only
- * the first is the agent's own bookkeeping, so it lives in a sidecar the deck does not read.
+ * What an agent has *taken* is a different question from what the author has *resolved*. Taking
+ * lives in a sidecar beside the queue, which both halves read: the deck shows a taken comment as
+ * being with an agent and will not push it again, so neither half dispatches what the other holds.
  */
 internal object DeckReviewCli {
 
@@ -72,9 +74,18 @@ internal object DeckReviewCli {
      * claim only prevents double delivery if both of them understand it.
      */
     fun readTaken(takenFile: Path, warn: (String) -> Unit = System.err::println): Set<String> =
-        ReviewClaims.read(takenFile, warn)
+        ReviewClaims.readIds(takenFile, warn)
 
-    fun writeTaken(takenFile: Path, ids: Set<String>) = ReviewClaims.write(takenFile, ids)
+    /** Records [ids] as claimed, stamped now, keeping any claims already held. */
+    fun claim(takenFile: Path, ids: Collection<String>, now: Instant = Instant.now()) {
+        val existing = ReviewClaims.read(takenFile) {}
+        ReviewClaims.write(takenFile, ReviewClaims.claiming(existing, ids, now))
+    }
+
+    fun release(takenFile: Path, ids: Collection<String>) {
+        val existing = ReviewClaims.read(takenFile) {}
+        ReviewClaims.write(takenFile, ReviewClaims.releasing(existing, ids))
+    }
 
     /**
      * Comments the author is still waiting on that this agent has not taken yet, in file order.
@@ -114,6 +125,7 @@ internal object DeckReviewCli {
         return buildString {
             append(comment.id)
             append(" | slide=").append(slide)
+            append(" beat=").append(comment.frameIndex + 1)
             if (node != null) append(" node=").append(node)
             if (target != null) append(" | target=").append(singleLine(target.take(80)))
             append(" | note=").append(singleLine(comment.note))
@@ -166,7 +178,7 @@ internal object DeckReviewCli {
                         if (pending.isEmpty()) {
                             null
                         } else {
-                            writeTaken(takenFile, taken + pending.map { it.id })
+                            claim(takenFile, pending.map { it.id })
                             pending
                         }
                     }
@@ -181,7 +193,7 @@ internal object DeckReviewCli {
                         // The consumer never got the batch, so the claim is a lie. Hand it back,
                         // or these comments are skipped by every later wait and nobody is told.
                         ReviewQueueFile.withLock(dir) {
-                            writeTaken(takenFile, readTaken(takenFile) - claimed.map { it.id }.toSet())
+                            release(takenFile, claimed.map { it.id })
                         }
                         return EXIT_IO
                     }
@@ -239,9 +251,12 @@ internal object DeckReviewCli {
                 // Hand the claim back before the status, not after. Killed between the two
                 // writes, this order leaves a resolved comment unclaimed, so an agent sees it
                 // again; the other order leaves it queued and claimed, which is stranded for ever.
-                if (takenFile != null && isPendingStatus(status)) {
-                    val taken = readTaken(takenFile)
-                    if (commentId in taken) writeTaken(takenFile, taken - commentId)
+                //
+                // Only an explicit requeue releases it. `--review-status=failed` says the agent
+                // tried and could not, and handing that straight back would have the next wait
+                // deliver the same comment to the same agent for ever.
+                if (takenFile != null && status == ReviewCommentStatus.Queued) {
+                    release(takenFile, listOf(commentId))
                 }
                 ReviewQueueFile.writeAtomically(commentsFile, encodeComments(updated) + "\n")
                 true
@@ -267,6 +282,12 @@ internal object DeckReviewCli {
         jsonOutput: Boolean,
         out: (String) -> Unit = ::println,
     ): Int {
+        // Nothing to read, so nothing to lock: a read-only command on a mistyped deck id should
+        // not leave a directory and a lock file behind to prove it was mistyped.
+        if (!java.nio.file.Files.exists(commentsFile)) {
+            out(if (jsonOutput) encodeComments(emptyList()) else "")
+            return EXIT_OK
+        }
         val dir = commentsFile.toAbsolutePath().parent
         val selected = ReviewQueueFile.withLock(dir) {
             val comments = readComments(commentsFile)

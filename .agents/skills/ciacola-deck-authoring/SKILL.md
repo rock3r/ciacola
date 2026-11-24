@@ -59,7 +59,11 @@ When a user sends or copies a `Ctrl+Click` review prompt from Ciacola:
 2. Inspect the annotated PNG via `read_file` to see the exact pin location and highlighted element.
 3. Edit the target node/build/slide directly in `<deckId>.deck.json` (remembering `beats[0]` is base state and `beats[k]` changes use `builds` with `"kind": "change"`, `"enter"`, `"exit"`, or `"emphasis"`).
 4. Run `./gradlew :deck:lintDeck -Pciacola.deck=<deckId>` and `./gradlew :deck:renderSlides -Pciacola.deck=<deckId> -Pciacola.slides=<N>` to verify the fix visually.
-5. Update the matching comment ID(s) in `.storyboard/.../review-comments.json` to `"status": "applied"` with a concise `"resolution"` note.
+5. Close each comment with `./gradlew :deck:reviewResolve -Pciacola.deck=<deckId> -Pciacola.comment=<commentId> -Pciacola.resolution="<what you changed>"`. This takes the queue lock and turns the live viewer's pin green. Never edit `.storyboard/.../review-comments.json` by hand: the deck writes that file too, and an unlocked write can erase a comment queued at the same moment. Pass `-Pciacola.reviewStatus=queued` instead to hand a comment back if you cannot act on it.
+
+### Waiting for comments instead of being pushed to
+
+`./gradlew :deck:reviewWait -Pciacola.deck=<deckId> -Pciacola.timeout=30m` blocks until the author queues a comment, prints it and records it taken, so the notes land in the conversation that called it. It exits non-zero on timeout — run it again to keep waiting. `./gradlew :deck:reviewExport -Pciacola.deck=<deckId> -Pciacola.json=true` prints what is queued without taking it (add `-Pciacola.includeTaken=true` to see what other agents hold).
 
 ## Minimal Starter Template
 

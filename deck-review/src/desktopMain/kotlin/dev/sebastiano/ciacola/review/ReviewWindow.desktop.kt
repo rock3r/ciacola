@@ -97,7 +97,8 @@ class SlideReviewWindow(
     override fun MenuScope.Menu() {
         val scope = rememberCoroutineScope()
         val queuedCount = store.comments.count {
-            it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+            (it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed) &&
+                it.id !in store.claimedIds
         }
         val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
 
@@ -284,6 +285,7 @@ private fun ReviewOuterWindowOverlay(
         while (true) {
             delay(250)
             store.reloadFromDisk()
+            store.reloadClaims()
         }
     }
 
@@ -375,10 +377,16 @@ private fun ReviewOuterWindowOverlay(
         CiacolaJewelTheme(isDark = isDark) {
             Box(Modifier.fillMaxSize()) {
                 if (showHud) {
+                    // A claimed comment is with an agent, not waiting for one: counting it as
+                    // waiting is how the HUD offered to send work that was already under way.
                     val queuedCount = store.comments.count {
-                        it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+                        (it.status == ReviewCommentStatus.Queued ||
+                            it.status == ReviewCommentStatus.Failed) &&
+                            it.id !in store.claimedIds
                     }
-                    val applyingCount = store.comments.count { it.status == ReviewCommentStatus.Applying }
+                    val applyingCount = store.comments.count {
+                        it.status == ReviewCommentStatus.Applying || it.id in store.claimedIds
+                    }
                     val appliedCount = store.comments.count { it.status == ReviewCommentStatus.Applied }
 
                     ReviewHudToolbar(
@@ -397,7 +405,7 @@ private fun ReviewOuterWindowOverlay(
                         },
                         onToggleTimeline = windowController.onToggleTimeline,
                         onOpenReviewPanel = {
-                            if (agentConfigured) {
+                            if (agentConfigured || !pushAvailable) {
                                 windowController.visible = true
                             } else {
                                 windowController.openForAgentConfiguration()
@@ -420,7 +428,10 @@ private fun ReviewOuterWindowOverlay(
                         onDismiss = { store.dismissNotice(notice.id) },
                         onOpenReviewPanel = {
                             store.dismissNotice(notice.id)
-                            if (agentConfigured) {
+                            // Only chase a Conversation ID when one would change anything. With
+                            // no push command the panel's red "not configured" banner is an
+                            // error about a feature that is not on offer.
+                            if (agentConfigured || !pushAvailable) {
                                 windowController.visible = true
                             } else {
                                 windowController.openForAgentConfiguration()
@@ -482,6 +493,11 @@ private fun ReviewOuterWindowOverlay(
                         agentConfigured = agentConfigured,
                         pushAvailable = pushAvailable,
                         delivering = activePinComment.id in store.deliveringIds,
+                        claimed = activePinComment.id in store.claimedIds,
+                        onReleaseClaim = {
+                            store.releaseClaim(activePinComment.id)
+                            coordinator.dismissActivePopups(fromEscapeKey = false)
+                        },
                         onClose = { fromEsc ->
                             coordinator.dismissActivePopups(fromEscapeKey = fromEsc)
                         },

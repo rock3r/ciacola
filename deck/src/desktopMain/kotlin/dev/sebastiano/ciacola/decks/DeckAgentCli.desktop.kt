@@ -125,11 +125,16 @@ object DeckAgentCli {
         else -> runReviewResolveMode(
             o.storyboardDirArg,
             o.deckArg,
-            o.resolveCommentId ?: error("Missing --review-resolve=<commentId>"),
+            o.resolveCommentId?.takeIf { it.isNotEmpty() }
+                ?: error("Missing --review-resolve=<commentId> (or -Pciacola.comment=<commentId>)"),
             o.resolution,
             o.reviewStatus,
         )
     }
+
+    private const val MISSING_MODE_MESSAGE =
+        "Specify one mode: --lint, --render-slides, --export-video, --review-wait, " +
+            "--review-export or --review-resolve=<commentId>"
 
     private enum class CliMode {
         Lint,
@@ -236,18 +241,12 @@ object DeckAgentCli {
             }
         }
 
-        val resolvedMode = mode
-            ?: error(
-                "Specify one mode: --lint, --render-slides, --export-video, --review-wait or --review-export",
-            )
-        // The review modes read the deck's review queue, not the deck document, so they only need
-        // an ID to pick the right .storyboard/decks/<id>/ folder.
+        val resolvedMode = mode ?: error(MISSING_MODE_MESSAGE)
+        // Every mode needs to be told which deck, the review ones included: they pick a
+        // .storyboard/decks/<id>/ folder, and quietly defaulting to one means an agent that
+        // forgot the flag waits half an hour on a queue nobody is writing to.
         val resolvedDeck = deckArg?.takeIf { it.isNotEmpty() }
-            ?: if (resolvedMode.isReviewMode) {
-                DeckCatalog.FOUNDATION_ID
-            } else {
-                error("Missing --deck=<id|path> (or -Pciacola.deck=<id|path>)")
-            }
+            ?: error("Missing --deck=<id|path> (or -Pciacola.deck=<id|path>)")
 
         return CliOptions(
             mode = resolvedMode,
