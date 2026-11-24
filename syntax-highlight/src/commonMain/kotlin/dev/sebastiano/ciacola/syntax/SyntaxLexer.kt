@@ -5,19 +5,24 @@ import dev.sebastiano.ciacola.syntax.lexer.CSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CSharpSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CppSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.CssSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.DartSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GlslSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.GoSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.GroovySyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.HtmlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JavaScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JavaSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.JsonSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.KotlinSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.PhpSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.PowerShellSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.PythonSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.RubySyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.RustSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.ShellSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.SkslSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.SqlSyntaxLexer
+import dev.sebastiano.ciacola.syntax.lexer.SwiftSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.TomlSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.TypeScriptSyntaxLexer
 import dev.sebastiano.ciacola.syntax.lexer.XmlSyntaxLexer
@@ -62,6 +67,11 @@ public object SyntaxHighlighter {
         SyntaxLanguage.Shell to ShellSyntaxLexer,
         SyntaxLanguage.CSharp to CSharpSyntaxLexer,
         SyntaxLanguage.Php to PhpSyntaxLexer,
+        SyntaxLanguage.Swift to SwiftSyntaxLexer,
+        SyntaxLanguage.Ruby to RubySyntaxLexer,
+        SyntaxLanguage.Dart to DartSyntaxLexer,
+        SyntaxLanguage.Groovy to GroovySyntaxLexer,
+        SyntaxLanguage.PowerShell to PowerShellSyntaxLexer,
     )
 
     /** Languages that currently have a registered [SyntaxLexer]. */

@@ -12,7 +12,7 @@ class SyntaxHighlighterTest {
     @Test
     fun resolvesAllLanguagesByIdAndAliases() {
         assertEquals(SyntaxLanguage.entries.size, SyntaxLanguage.entries.toSet().size)
-        assertEquals(22, SyntaxLanguage.entries.size)
+        assertEquals(27, SyntaxLanguage.entries.size)
 
         for (lang in SyntaxLanguage.entries) {
             assertEquals(lang, SyntaxLanguage.fromNameOrAlias(lang.id))
@@ -31,6 +31,9 @@ class SyntaxHighlighterTest {
         assertEquals(SyntaxLanguage.Shell, SyntaxLanguage.fromNameOrAlias("zsh"))
         assertEquals(SyntaxLanguage.CSharp, SyntaxLanguage.fromNameOrAlias("c#"))
         assertEquals(SyntaxLanguage.Php, SyntaxLanguage.fromNameOrAlias("phtml"))
+        assertEquals(SyntaxLanguage.Ruby, SyntaxLanguage.fromNameOrAlias("gemspec"))
+        assertEquals(SyntaxLanguage.Groovy, SyntaxLanguage.fromNameOrAlias("gradle"))
+        assertEquals(SyntaxLanguage.PowerShell, SyntaxLanguage.fromNameOrAlias("pwsh"))
         assertNull(SyntaxLanguage.fromNameOrAlias(""))
         assertNull(SyntaxLanguage.fromNameOrAlias("   "))
         assertNull(SyntaxLanguage.fromNameOrAlias("brainfuck"))
@@ -73,8 +76,13 @@ class SyntaxHighlighterTest {
             "zsh" to "echo \"hello ${'$'}USER\"",
             "cs" to "record Point(int X, int Y);",
             "phtml" to "<?php echo 1; ?>",
+            "swift" to "let x = /\\d+/",
+            "rb" to "puts 'hi'",
+            "dart" to "sealed class Result {}",
+            "gradle" to "plugins { id 'java' }",
+            "pwsh" to "Get-ChildItem -Path .",
         )
-        assertEquals(22, aliasSamples.size)
+        assertEquals(27, aliasSamples.size)
         assertEquals(SyntaxLanguage.entries.size, aliasSamples.size)
         for ((alias, snippet) in aliasSamples) {
             val aliasTokens = SyntaxHighlighter.lex(snippet, alias)
@@ -252,6 +260,36 @@ class SyntaxHighlighterTest {
                 function greet(string ${'$'}name): string {
                     return "Hello, ${'$'}name!";
                 }
+            """.trimIndent(),
+            SyntaxLanguage.Swift to """
+                @MainActor
+                struct Counter {
+                    var count = 0
+                    let re = /\d+/
+                }
+            """.trimIndent(),
+            SyntaxLanguage.Ruby to """
+                #!/usr/bin/env ruby
+                class Greeter
+                  def greet(name) = "Hello, #{name}!"
+                end
+            """.trimIndent(),
+            SyntaxLanguage.Dart to """
+                sealed class Outcome {}
+                void run() async {
+                  final items = [1, 2, 3];
+                }
+            """.trimIndent(),
+            SyntaxLanguage.Groovy to """
+                @CompileStatic
+                def greet(String name) {
+                    return "Hello, ${'$'}name!"
+                }
+            """.trimIndent(),
+            SyntaxLanguage.PowerShell to """
+                [CmdletBinding()]
+                param([string]${'$'}Name = 'World')
+                Write-Output "Hello, ${'$'}Name!"
             """.trimIndent(),
         )
         assertEquals(SyntaxLanguage.entries.toSet(), validSnippets.keys)
@@ -434,6 +472,51 @@ class SyntaxHighlighterTest {
                     "<?php \"world\" ?>" to null,
                 ) to listOf("<?php /* b */ ?>", "<div>hi</div>", "<?= 1 ?>")
                 ),
+            SyntaxLanguage.Swift to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "/* a /* nested */ b */" to SyntaxTokenKind.Comment,
+                    "#\"raw\"#" to null,
+                    "#/re/#" to SyntaxTokenKind.String,
+                ) to listOf(" /* b */", "x/* b */", " #\"c\"#", "*/", " let x = 1")
+                ),
+            SyntaxLanguage.Ruby to (
+                listOf(
+                    "=begin\ndoc\n=end\n" to null,
+                    "'single'" to SyntaxTokenKind.String,
+                    "%w[a b]" to null,
+                    "\"double\"" to null,
+                ) to listOf(" # tail\n", "; 'next'", "; %q(more)")
+                ),
+            SyntaxLanguage.Dart to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "/* a /* nested */ b */" to SyntaxTokenKind.Comment,
+                    "r'raw'" to SyntaxTokenKind.String,
+                    "r'''multi'''" to SyntaxTokenKind.String,
+                ) to listOf(" /* b */", "x/* b */", " r'c'", "*/", " var x = 1;")
+                ),
+            SyntaxLanguage.Groovy to (
+                listOf(
+                    "/* a */" to SyntaxTokenKind.Comment,
+                    "/** doc */" to SyntaxTokenKind.Comment,
+                    "'''raw'''" to SyntaxTokenKind.String,
+                    "'single'" to SyntaxTokenKind.String,
+                    "\"double\"" to null,
+                    "/slashy/" to null,
+                    "${'$'}/dslashy/${'$'}" to null,
+                ) to listOf("/* b */", " \"c\"", " 'd'", "*/", " def x = 1")
+                ),
+            SyntaxLanguage.PowerShell to (
+                listOf(
+                    "<# a #>" to SyntaxTokenKind.Comment,
+                    "# line\n" to null,
+                    "'single'" to SyntaxTokenKind.String,
+                    "\"double\"" to null,
+                    "@'\nlit\n'@" to null,
+                    "@\"\nexp\n\"@" to null,
+                ) to listOf("<# b #>", " 'next'", " \"other\"", " #>", " ${'$'}x = 1")
+                ),
         )
         assertEquals(SyntaxLanguage.entries.toSet(), cases.keys)
         for ((language, pair) in cases) {
@@ -484,6 +567,9 @@ class SyntaxHighlighterTest {
             SyntaxLanguage.Sksl,
             SyntaxLanguage.Agsl,
             SyntaxLanguage.CSharp,
+            SyntaxLanguage.Swift,
+            SyntaxLanguage.Dart,
+            SyntaxLanguage.Groovy,
         )) {
             val tokens = assertValidSnippetHasNoInvalidTokens(
                 SyntaxHighlighter.lexer(language),
@@ -500,6 +586,8 @@ class SyntaxHighlighterTest {
             SyntaxLanguage.Toml,
             SyntaxLanguage.Yaml,
             SyntaxLanguage.Shell,
+            SyntaxLanguage.Ruby,
+            SyntaxLanguage.PowerShell,
         )) {
             val tokens = assertValidSnippetHasNoInvalidTokens(
                 SyntaxHighlighter.lexer(language),

@@ -1,0 +1,401 @@
+package dev.sebastiano.ciacola.syntax.antlr.groovy
+
+import org.antlr.v4.kotlinruntime.CharStream
+import org.antlr.v4.kotlinruntime.IntStream
+import org.antlr.v4.kotlinruntime.Lexer
+import org.antlr.v4.kotlinruntime.Token
+
+/**
+ * Pure Kotlin Multiplatform base lexer for [GroovyLexer].
+ *
+ * Handles start-of-input shebang detection, iterative nested GString `${...}` brace tracking,
+ * and O(1)-per-token slashy-string (`/pattern/`) vs. division (`/`) disambiguation.
+ */
+internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
+
+    private class InterpFrame(
+        val modeStackSize: Int,
+        var braceDepth: Int = 0,
+    )
+
+    private val interpStack = ArrayList<InterpFrame>()
+    private var lastNonHiddenType: Int = Token.INVALID_TYPE
+    private var lastNonHiddenText: String? = null
+    private var lastParenWasCondition: Boolean = false
+    private var lastBraceAllowedSlashy: Boolean = true
+    private var lastColonWasTernary: Boolean = false
+    private var ternaryDepth: Int = 0
+    private var parenDepth: Int = 0
+    private var brackDepth: Int = 0
+    private var sawNewlineSinceLastToken: Boolean = false
+    private val parenConditionStack = ArrayList<Boolean>()
+    private val braceAllowsSlashyStack = ArrayList<Boolean>()
+    private val savedBraceTernaryDepthStack = ArrayList<Int>()
+    private val savedParenTernaryDepthStack = ArrayList<Int>()
+    private val savedBrackTernaryDepthStack = ArrayList<Int>()
+    private val savedInterpTernaryDepthStack = ArrayList<Int>()
+
+    protected fun isAtStartOfInput(): Boolean = _tokenStartCharIndex == 0
+
+    protected fun enterInterpExpr() {
+        pushMode(DEFAULT_MODE)
+        interpStack.add(InterpFrame(modeStackSize = _modeStack.size()))
+    }
+
+    protected fun onDefaultLBrace() {
+        val top = interpStack.lastOrNull()
+        if (top != null && _modeStack.size() == top.modeStackSize) {
+            top.braceDepth++
+        }
+    }
+
+    protected fun onDefaultRBrace(interpCloseType: Int) {
+        val top = interpStack.lastOrNull()
+        if (top != null && _modeStack.size() == top.modeStackSize) {
+            if (top.braceDepth > 0) {
+                top.braceDepth--
+            } else {
+                interpStack.removeAt(interpStack.lastIndex)
+                if (!_modeStack.isEmpty) {
+                    popMode()
+                }
+                type = interpCloseType
+            }
+        }
+    }
+
+    protected fun isSlashyStart(): Boolean {
+        val next = _input.LA(1)
+        // '//' and '/*' are always line or block comments in Groovy, never slashy strings.
+        if (next == '/'.code || next == '*'.code) return false
+        if (sawNewlineSinceLastToken && parenDepth == 0 && brackDepth == 0) {
+            return true
+        }
+        return allowsSlashyAfterToken(
+            type = lastNonHiddenType,
+            text = lastNonHiddenText,
+            lastParenWasCond = lastParenWasCondition,
+            lastBraceAllowedSlashy = lastBraceAllowedSlashy,
+        )
+    }
+
+    override fun reset() {
+        super.reset()
+        interpStack.clear()
+        lastNonHiddenType = Token.INVALID_TYPE
+        lastNonHiddenText = null
+        lastParenWasCondition = false
+        lastBraceAllowedSlashy = true
+        lastColonWasTernary = false
+        ternaryDepth = 0
+        parenDepth = 0
+        brackDepth = 0
+        sawNewlineSinceLastToken = false
+        parenConditionStack.clear()
+        braceAllowsSlashyStack.clear()
+        savedBraceTernaryDepthStack.clear()
+        savedParenTernaryDepthStack.clear()
+        savedBrackTernaryDepthStack.clear()
+        savedInterpTernaryDepthStack.clear()
+    }
+
+    override fun nextToken(): Token {
+        val tok = super.nextToken()
+        val tokType = tok.type
+        if (tokType == Token.EOF) return tok
+
+        if (isHiddenTokenType(tokType)) {
+            if (tokType == GroovyLexer.Tokens.GDQ_UNTERM_NL) {
+                sawNewlineSinceLastToken = true
+            } else if (tokType == GroovyLexer.Tokens.WS) {
+                val txt = tok.text
+                if (txt != null && (txt.indexOf('\n') >= 0 || txt.indexOf('\r') >= 0)) {
+                    sawNewlineSinceLastToken = true
+                }
+            }
+            return tok
+        }
+
+        sawNewlineSinceLastToken = false
+        val identText = if (tokType == GroovyLexer.Tokens.IDENTIFIER) tok.text else null
+
+        when (tokType) {
+            GroovyLexer.Tokens.LPAREN -> {
+                parenDepth++
+                parenConditionStack.add(isConditionKeyword(lastNonHiddenType))
+                savedParenTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.RPAREN -> {
+                if (parenDepth > 0) parenDepth--
+                lastParenWasCondition = if (parenConditionStack.isNotEmpty()) {
+                    parenConditionStack.removeAt(parenConditionStack.lastIndex)
+                } else {
+                    false
+                }
+                ternaryDepth = if (savedParenTernaryDepthStack.isNotEmpty()) {
+                    savedParenTernaryDepthStack.removeAt(savedParenTernaryDepthStack.lastIndex)
+                } else {
+                    0
+                }
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.LBRACK -> {
+                brackDepth++
+                savedBrackTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.RBRACK -> {
+                if (brackDepth > 0) brackDepth--
+                ternaryDepth = if (savedBrackTernaryDepthStack.isNotEmpty()) {
+                    savedBrackTernaryDepthStack.removeAt(savedBrackTernaryDepthStack.lastIndex)
+                } else {
+                    0
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.LBRACE -> {
+                val enclosingAllows = braceAllowsSlashyStack.lastOrNull() ?: true
+                val opensBlock = opensBlockBraceAfterToken(
+                    type = lastNonHiddenType,
+                    text = lastNonHiddenText,
+                    enclosingAllows = enclosingAllows,
+                    lastColonWasTernary = lastColonWasTernary,
+                )
+                braceAllowsSlashyStack.add(opensBlock)
+                savedBraceTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.RBRACE -> {
+                lastBraceAllowedSlashy = if (braceAllowsSlashyStack.isNotEmpty()) {
+                    braceAllowsSlashyStack.removeAt(braceAllowsSlashyStack.lastIndex)
+                } else {
+                    true
+                }
+                ternaryDepth = if (savedBraceTernaryDepthStack.isNotEmpty()) {
+                    savedBraceTernaryDepthStack.removeAt(savedBraceTernaryDepthStack.lastIndex)
+                } else {
+                    0
+                }
+                lastParenWasCondition = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.GDQ_INTERP_START,
+            GroovyLexer.Tokens.GTDQ_INTERP_START,
+            GroovyLexer.Tokens.SL_INTERP_START,
+            GroovyLexer.Tokens.DSL_INTERP_START,
+            -> {
+                savedInterpTernaryDepthStack.add(ternaryDepth)
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.GSTRING_INTERP_CLOSE -> {
+                ternaryDepth = if (savedInterpTernaryDepthStack.isNotEmpty()) {
+                    savedInterpTernaryDepthStack.removeAt(savedInterpTernaryDepthStack.lastIndex)
+                } else {
+                    0
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.QUESTION -> {
+                ternaryDepth++
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            GroovyLexer.Tokens.COLON -> {
+                if (ternaryDepth > 0) {
+                    ternaryDepth--
+                    lastColonWasTernary = true
+                } else {
+                    lastColonWasTernary = false
+                }
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+            }
+
+            GroovyLexer.Tokens.SEMI -> {
+                ternaryDepth = 0
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+
+            else -> {
+                lastParenWasCondition = false
+                lastBraceAllowedSlashy = false
+                lastColonWasTernary = false
+            }
+        }
+
+        lastNonHiddenType = tokType
+        lastNonHiddenText = identText
+        return tok
+    }
+
+    private fun isHiddenTokenType(type: Int): Boolean = when (type) {
+        GroovyLexer.Tokens.WS,
+        GroovyLexer.Tokens.GDQ_UNTERM_NL,
+        GroovyLexer.Tokens.LINE_COMMENT,
+        GroovyLexer.Tokens.BLOCK_COMMENT,
+        GroovyLexer.Tokens.UNTERMINATED_BLOCK_COMMENT,
+        -> true
+        else -> false
+    }
+
+    private fun isConditionKeyword(type: Int): Boolean = when (type) {
+        GroovyLexer.Tokens.IF,
+        GroovyLexer.Tokens.WHILE,
+        GroovyLexer.Tokens.FOR,
+        GroovyLexer.Tokens.SWITCH,
+        GroovyLexer.Tokens.SYNCHRONIZED,
+        GroovyLexer.Tokens.CATCH,
+        -> true
+        else -> false
+    }
+
+    private fun opensBlockBraceAfterToken(
+        type: Int,
+        text: String?,
+        enclosingAllows: Boolean,
+        lastColonWasTernary: Boolean,
+    ): Boolean = when (type) {
+        GroovyLexer.Tokens.ASSIGN,
+        GroovyLexer.Tokens.ELVIS_ASSIGN,
+        GroovyLexer.Tokens.ADD_ASSIGN,
+        GroovyLexer.Tokens.SUB_ASSIGN,
+        GroovyLexer.Tokens.MUL_ASSIGN,
+        GroovyLexer.Tokens.DIV_ASSIGN,
+        GroovyLexer.Tokens.MOD_ASSIGN,
+        GroovyLexer.Tokens.STAR_STAR_ASSIGN,
+        GroovyLexer.Tokens.AND_ASSIGN,
+        GroovyLexer.Tokens.OR_ASSIGN,
+        GroovyLexer.Tokens.XOR_ASSIGN,
+        GroovyLexer.Tokens.LSHIFT_ASSIGN,
+        GroovyLexer.Tokens.RSHIFT_ASSIGN,
+        GroovyLexer.Tokens.URSHIFT_ASSIGN,
+        GroovyLexer.Tokens.LPAREN,
+        GroovyLexer.Tokens.LBRACK,
+        GroovyLexer.Tokens.COMMA,
+        GroovyLexer.Tokens.QUESTION,
+        GroovyLexer.Tokens.ELVIS,
+        GroovyLexer.Tokens.RETURN,
+        GroovyLexer.Tokens.THROW,
+        GroovyLexer.Tokens.ASSERT,
+        -> false
+
+        GroovyLexer.Tokens.LBRACE -> enclosingAllows
+        GroovyLexer.Tokens.COLON -> enclosingAllows && !lastColonWasTernary
+        GroovyLexer.Tokens.IDENTIFIER -> text != "yield"
+        else -> true
+    }
+
+    private fun allowsSlashyAfterToken(
+        type: Int,
+        text: String?,
+        lastParenWasCond: Boolean,
+        lastBraceAllowedSlashy: Boolean,
+    ): Boolean {
+        if (type == GroovyLexer.Tokens.RPAREN) return lastParenWasCond
+        if (type == GroovyLexer.Tokens.RBRACE) return lastBraceAllowedSlashy
+        return when (type) {
+            Token.INVALID_TYPE,
+            GroovyLexer.Tokens.LPAREN,
+            GroovyLexer.Tokens.LBRACK,
+            GroovyLexer.Tokens.LBRACE,
+            GroovyLexer.Tokens.COMMA,
+            GroovyLexer.Tokens.SEMI,
+            GroovyLexer.Tokens.COLON,
+            GroovyLexer.Tokens.QUESTION,
+            GroovyLexer.Tokens.ARROW,
+            GroovyLexer.Tokens.ELLIPSIS,
+            GroovyLexer.Tokens.ASSIGN,
+            GroovyLexer.Tokens.ELVIS_ASSIGN,
+            GroovyLexer.Tokens.ELVIS,
+            GroovyLexer.Tokens.ADD_ASSIGN,
+            GroovyLexer.Tokens.SUB_ASSIGN,
+            GroovyLexer.Tokens.MUL_ASSIGN,
+            GroovyLexer.Tokens.DIV_ASSIGN,
+            GroovyLexer.Tokens.MOD_ASSIGN,
+            GroovyLexer.Tokens.STAR_STAR_ASSIGN,
+            GroovyLexer.Tokens.AND_ASSIGN,
+            GroovyLexer.Tokens.OR_ASSIGN,
+            GroovyLexer.Tokens.XOR_ASSIGN,
+            GroovyLexer.Tokens.LSHIFT_ASSIGN,
+            GroovyLexer.Tokens.RSHIFT_ASSIGN,
+            GroovyLexer.Tokens.URSHIFT_ASSIGN,
+            GroovyLexer.Tokens.PLUS,
+            GroovyLexer.Tokens.MINUS,
+            GroovyLexer.Tokens.STAR,
+            GroovyLexer.Tokens.SLASH,
+            GroovyLexer.Tokens.MOD,
+            GroovyLexer.Tokens.STAR_STAR,
+            GroovyLexer.Tokens.BANG,
+            GroovyLexer.Tokens.TILDE,
+            GroovyLexer.Tokens.BITAND,
+            GroovyLexer.Tokens.BITOR,
+            GroovyLexer.Tokens.CARET,
+            GroovyLexer.Tokens.AND,
+            GroovyLexer.Tokens.OR,
+            GroovyLexer.Tokens.LT,
+            GroovyLexer.Tokens.GT,
+            GroovyLexer.Tokens.LE,
+            GroovyLexer.Tokens.GE,
+            GroovyLexer.Tokens.EQ,
+            GroovyLexer.Tokens.NE,
+            GroovyLexer.Tokens.IDENTICAL,
+            GroovyLexer.Tokens.NOT_IDENTICAL,
+            GroovyLexer.Tokens.SPACESHIP,
+            GroovyLexer.Tokens.REGEX_FIND,
+            GroovyLexer.Tokens.REGEX_MATCH,
+            GroovyLexer.Tokens.LSHIFT,
+            GroovyLexer.Tokens.RSHIFT,
+            GroovyLexer.Tokens.URSHIFT,
+            GroovyLexer.Tokens.RANGE,
+            GroovyLexer.Tokens.HALF_RANGE_RIGHT,
+            GroovyLexer.Tokens.HALF_RANGE_LEFT,
+            GroovyLexer.Tokens.HALF_RANGE_BOTH,
+            GroovyLexer.Tokens.RETURN,
+            GroovyLexer.Tokens.THROW,
+            GroovyLexer.Tokens.CASE,
+            GroovyLexer.Tokens.ASSERT,
+            GroovyLexer.Tokens.IN,
+            GroovyLexer.Tokens.INSTANCEOF,
+            GroovyLexer.Tokens.ELSE,
+            GroovyLexer.Tokens.DO,
+            GroovyLexer.Tokens.GDQ_INTERP_START,
+            GroovyLexer.Tokens.GTDQ_INTERP_START,
+            GroovyLexer.Tokens.SL_INTERP_START,
+            GroovyLexer.Tokens.DSL_INTERP_START,
+            -> true
+
+            GroovyLexer.Tokens.IDENTIFIER -> text == "yield"
+            else -> false
+        }
+    }
+}

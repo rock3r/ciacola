@@ -158,6 +158,41 @@ object Php : Language {
     }
 }
 
+/** The Swift programming language. */
+object Swift : Language {
+    override fun scopeName(): String {
+        return "source.swift"
+    }
+}
+
+/** The Ruby programming language. */
+object Ruby : Language {
+    override fun scopeName(): String {
+        return "source.ruby"
+    }
+}
+
+/** The Dart programming language. */
+object Dart : Language {
+    override fun scopeName(): String {
+        return "source.dart"
+    }
+}
+
+/** The Apache Groovy programming language and Gradle Groovy DSL. */
+object Groovy : Language {
+    override fun scopeName(): String {
+        return "source.groovy"
+    }
+}
+
+/** PowerShell scripts and modules. */
+object PowerShell : Language {
+    override fun scopeName(): String {
+        return "source.powershell"
+    }
+}
+
 /** A custom language that is [Parser] aware */
 class Custom(val parser: Parser) : Language {
     override fun scopeName(): String {

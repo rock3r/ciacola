@@ -72,6 +72,11 @@ class LanguageHighlightTest {
             SyntaxLanguage.Shell to "if [[ -n \"${'$'}USER\" ]]; then echo 1; fi",
             SyntaxLanguage.CSharp to "public record Point(int X, int Y);",
             SyntaxLanguage.Php to "<?php function greet(string ${'$'}s): int { return 1; }",
+            SyntaxLanguage.Swift to "@MainActor struct Point { let x = 42 }",
+            SyntaxLanguage.Ruby to "def greet(name) = \"Hello, #{name}!\"",
+            SyntaxLanguage.Dart to "sealed class Result { final int code = 1; }",
+            SyntaxLanguage.Groovy to "def greet(String s) { return \"hi ${'$'}s\" }",
+            SyntaxLanguage.PowerShell to "function Get-Count { return 42 }",
         )
         assertEquals(SyntaxLanguage.entries.toSet(), samples.keys)
         for ((language, snippet) in samples) {

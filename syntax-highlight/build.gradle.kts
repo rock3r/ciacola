@@ -129,6 +129,11 @@ registerAntlrLexer("sql")
 registerAntlrLexer("shell")
 registerAntlrLexer("csharp")
 registerAntlrLexer("php")
+registerAntlrLexer("swift")
+registerAntlrLexer("ruby")
+registerAntlrLexer("dart")
+registerAntlrLexer("groovy")
+registerAntlrLexer("powershell")
 
 tasks.withType(KotlinCompilationTask::class.java).configureEach {
     dependsOn(generateAntlrGrammars)
