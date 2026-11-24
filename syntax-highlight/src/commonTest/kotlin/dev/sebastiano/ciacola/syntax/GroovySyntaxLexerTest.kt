@@ -330,6 +330,7 @@ class GroovySyntaxLexerTest {
                 "repeated-slash-lines-5k" to "/a\n".repeat(5_000),
                 "nested-unclosed-slashy-interp-2k" to ("/\${".repeat(2_000) + "a".repeat(2_000)),
                 "offset-unclosed-slashy-interp-5k" to "x = /a\${\n".repeat(5_000),
+                "nested-closed-slashy-interp-5k" to ("/ \${ ".repeat(5_000) + " }".repeat(5_000)),
                 "unclosed-dollar-slashy-10k" to ("def d = $/" + "a".repeat(12_000)),
                 "unclosed-block-comment-10k" to ("/* " + "*".repeat(12_000)),
                 "chained-division-2k" to ("10" + " / 2".repeat(2_500)),
@@ -391,6 +392,20 @@ class GroovySyntaxLexerTest {
         assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "OpenTrait" }.kind)
         assertEquals(SyntaxTokenKind.Keyword, tokens.first { it.slice(code) == "record" }.kind)
         assertEquals(SyntaxTokenKind.Type, tokens.first { it.slice(code) == "Pt" }.kind)
+    }
+
+    @Test
+    fun preservesNestedSlashyStringInsideUnclosedNestedSlashyInterpolations() {
+        val code = "x = / \${ y = / \${ z = /b/ } }"
+        val tokens = assertValidSnippetHasNoInvalidTokens(GroovySyntaxLexer, code, "groovy-nested-slashy-interp")
+
+        val bToken = tokens.first { it.slice(code) == "b" }
+        assertEquals(SyntaxTokenKind.String, bToken.kind)
+        val bIndex = tokens.indexOf(bToken)
+        assertEquals(SyntaxTokenKind.String, tokens[bIndex - 1].kind)
+        assertEquals("/", tokens[bIndex - 1].slice(code))
+        assertEquals(SyntaxTokenKind.String, tokens[bIndex + 1].kind)
+        assertEquals("/", tokens[bIndex + 1].slice(code))
     }
 
     @Test
