@@ -62,16 +62,25 @@ internal object DeckReviewCli {
     }
 
     /**
-     * Comments the author has queued that this agent has not taken yet, in file order.
+     * Comments the author is still waiting on that this agent has not taken yet, in file order.
      *
-     * Only [ReviewCommentStatus.Queued] counts: `applying` means another agent already picked it
-     * up, and `applied` / `failed` are finished.
+     * [ReviewCommentStatus.Failed] counts as pending: it means a live push could not be delivered,
+     * not that the author changed their mind, and the note is still open in the UI with a Retry
+     * Send button. Leaving those out strands a comment whenever Send is pressed without a backend
+     * that can reach anyone — which is the normal case for an agent that only polls.
+     *
+     * [ReviewCommentStatus.Applying] is excluded because another agent already has it, and
+     * [ReviewCommentStatus.Applied] is done. Taken IDs are recorded, so a failed comment is handed
+     * over once rather than on every call.
      */
     fun pendingComments(
         comments: List<SlideReviewComment>,
         taken: Set<String>,
     ): List<SlideReviewComment> =
-        comments.filter { it.status == ReviewCommentStatus.Queued && it.id !in taken }
+        comments.filter {
+            (it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed) &&
+                it.id !in taken
+        }
 
     /** One line per comment, enough for an agent to act without opening the file. */
     fun formatComment(comment: SlideReviewComment): String {
@@ -137,7 +146,9 @@ internal object DeckReviewCli {
     ): Int {
         val comments = readComments(commentsFile)
         val selected = if (includeTaken) {
-            comments.filter { it.status == ReviewCommentStatus.Queued }
+            comments.filter {
+                it.status == ReviewCommentStatus.Queued || it.status == ReviewCommentStatus.Failed
+            }
         } else {
             pendingComments(comments, readTaken(takenFile))
         }

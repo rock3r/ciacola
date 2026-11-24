@@ -47,7 +47,7 @@ class DeckReviewCliTest {
     }
 
     @Test
-    fun onlyQueuedCommentsThatHaveNotBeenTakenCountAsPending() {
+    fun queuedAndFailedCommentsAreStillWaitingOnAnAgentButAppliedAndApplyingAreNot() {
         val all = listOf(
             comment("a"),
             comment("b", status = ReviewCommentStatus.Applying),
@@ -56,9 +56,37 @@ class DeckReviewCliTest {
             comment("e"),
         )
 
-        assertEquals(listOf("a", "e"), DeckReviewCli.pendingComments(all, emptySet()).map { it.id })
-        assertEquals(listOf("e"), DeckReviewCli.pendingComments(all, setOf("a")).map { it.id })
-        assertTrue(DeckReviewCli.pendingComments(all, setOf("a", "e")).isEmpty())
+        // 'd' failed to deliver: the author still wants it done, and the UI still shows it open.
+        assertEquals(listOf("a", "d", "e"), DeckReviewCli.pendingComments(all, emptySet()).map { it.id })
+        assertEquals(listOf("d", "e"), DeckReviewCli.pendingComments(all, setOf("a")).map { it.id })
+        assertTrue(DeckReviewCli.pendingComments(all, setOf("a", "d", "e")).isEmpty())
+    }
+
+    @Test
+    fun aCommentWhoseLivePushFailedIsHandedOverOnceNotOnEveryCall() {
+        val dir = Files.createTempDirectory("review-cli")
+        // Exactly the shape Send leaves behind with no backend installed.
+        val commentsFile = writeComments(
+            dir,
+            comment("rc-failed", note = "delete this", status = ReviewCommentStatus.Failed),
+        )
+        val takenFile = dir.resolve(DeckReviewCli.TAKEN_FILE_NAME)
+
+        val first = mutableListOf<String>()
+        var now = 0L
+        assertEquals(
+            DeckReviewCli.EXIT_OK,
+            DeckReviewCli.runWait(commentsFile, takenFile, 5_000L, 1_000L, first::add, { now }, { now += it }),
+        )
+        assertTrue(first.single().contains("delete this"))
+
+        val second = mutableListOf<String>()
+        now = 0L
+        assertEquals(
+            DeckReviewCli.EXIT_TIMEOUT,
+            DeckReviewCli.runWait(commentsFile, takenFile, 5_000L, 1_000L, second::add, { now }, { now += it }),
+        )
+        assertTrue(second.isEmpty())
     }
 
     @Test
