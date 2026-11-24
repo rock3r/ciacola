@@ -322,6 +322,7 @@ internal object IntelliJSchemeMapper {
                 primaryName,
                 bg,
                 listOf("DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT"),
+                requireFg = true,
                 defaultToDefault = defaultToDefault,
             )?.foreground
             ?: fg
@@ -360,9 +361,15 @@ internal object IntelliJSchemeMapper {
             listOf(
                 "DEFAULT_FUNCTION_DECLARATION",
                 "DEFAULT_INSTANCE_METHOD",
-                "DEFAULT_STATIC_METHOD",
                 "DEFAULT_FUNCTION_CALL",
             ),
+            defaultToDefault = defaultToDefault,
+        ) ?: pickStyle(
+            schemes,
+            primaryName,
+            bg,
+            listOf("DEFAULT_STATIC_METHOD"),
+            requireFg = true,
             defaultToDefault = defaultToDefault,
         ) ?: fallbackParent?.styles?.get(SyntaxTokenKind.Function)
             ?: plainStyle
@@ -454,6 +461,7 @@ internal object IntelliJSchemeMapper {
                 "CONSOLE_ERROR_OUTPUT",
                 "LOG_ERROR_OUTPUT",
             ),
+            requireFg = true,
             defaultToDefault = defaultToDefault,
         ) ?: pickStyle(
             schemes,
@@ -622,7 +630,7 @@ internal object IntelliJSchemeMapper {
         candidates: List<String>,
         minContrast: Double? = null,
         diffFrom: SyntaxColor? = null,
-        requireFg: Boolean = true,
+        requireFg: Boolean = false,
         fgOnly: Boolean = false,
         defaultToDefault: Boolean = true,
     ): SyntaxTokenStyle? {
@@ -630,7 +638,7 @@ internal object IntelliJSchemeMapper {
             val opts = resolveAttr(schemes, schemeName, attrName, defaultToDefault = defaultToDefault) ?: continue
             val fg = opts["FOREGROUND"]?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             if (requireFg && fg == null) continue
-            if (diffFrom != null && fg == diffFrom) continue
+            if (diffFrom != null && (fg == null || fg == diffFrom)) continue
             if (minContrast != null && fg != null) {
                 val effectiveFg = if (fg.alpha < 0xFF) fg.compositeOver(canvasBg) else fg
                 if (effectiveFg.contrastRatio(canvasBg) < minContrast) continue
@@ -646,13 +654,18 @@ internal object IntelliJSchemeMapper {
             val effectType = parseUnsignedIntOrZero(opts["EFFECT_TYPE"])
             val effectColor = opts["EFFECT_COLOR"]?.let { SyntaxColor.parseIntelliJHexOrNull(it) }
             val hasEffect = effectColor != null
+            val bold = (fontType and 1) != 0
+            val italic = (fontType and 2) != 0
+            val underline = hasEffect && effectType in intArrayOf(1, 2, 4, 5)
+            val strikethrough = hasEffect && effectType == 3
+            if (fg == null && bg == null && !bold && !italic && !underline && !strikethrough) continue
             return SyntaxTokenStyle(
                 foreground = fg,
                 background = bg,
-                bold = (fontType and 1) != 0,
-                italic = (fontType and 2) != 0,
-                underline = hasEffect && effectType in intArrayOf(1, 2, 4, 5),
-                strikethrough = hasEffect && effectType == 3,
+                bold = bold,
+                italic = italic,
+                underline = underline,
+                strikethrough = strikethrough,
             )
         }
         return null

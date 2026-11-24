@@ -208,12 +208,13 @@ class SyntaxSchemeImportersTest {
         assertEquals("#ED864A", importedHcChild.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
         assertEquals("#00FFCC", importedHcChild.foregroundFor(SyntaxTokenKind.Number).toHexRgb())
 
-        // Bare <scheme> without parent_scheme defaults to IntelliJ Default scheme
+        // Bare <scheme> without parent_scheme defaults to IntelliJ Default scheme (without making all Functions italic via DEFAULT_STATIC_METHOD)
         val bareScheme = """<scheme name="Bare"><attributes/></scheme>"""
         val importedBare = SyntaxSchemeImporters.importIntelliJXml(bareScheme)
         val bareKeyword = importedBare.styleFor(SyntaxTokenKind.Keyword)
         assertEquals("#000080", bareKeyword.foreground?.toHexRgb())
         assertTrue(bareKeyword.bold)
+        assertFalse(importedBare.styleFor(SyntaxTokenKind.Function).italic)
 
         // Signed FONT_TYPE values ("+1", "-1") are ignored like non-digit strings
         val signedFontType = """
@@ -232,6 +233,59 @@ class SyntaxSchemeImportersTest {
         assertFalse(importedSigned.styleFor(SyntaxTokenKind.Keyword).bold)
         assertFalse(importedSigned.styleFor(SyntaxTokenKind.String).bold)
         assertFalse(importedSigned.styleFor(SyntaxTokenKind.String).italic)
+
+        // Font-only, background-only, and effect-only IntelliJ overrides (omitting FOREGROUND) are preserved,
+        // while Invalid still filters out foreground-less BAD_CHARACTER in favor of WRONG_REFERENCES_ATTRIBUTES.
+        val fgLessIjXml = """
+            <scheme name="FgLess IJ" parent_scheme="Darcula">
+              <attributes>
+                <option name="TEXT">
+                  <value>
+                    <option name="FOREGROUND" value="d8dee9" />
+                    <option name="BACKGROUND" value="2e3440" />
+                  </value>
+                </option>
+                <option name="DEFAULT_KEYWORD">
+                  <value><option name="FONT_TYPE" value="1" /></value>
+                </option>
+                <option name="DEFAULT_STRING">
+                  <value><option name="BACKGROUND" value="3b4252" /></value>
+                </option>
+                <option name="DEFAULT_LINE_COMMENT">
+                  <value>
+                    <option name="EFFECT_COLOR" value="88c0d0" />
+                    <option name="EFFECT_TYPE" value="1" />
+                  </value>
+                </option>
+                <option name="DEFAULT_FUNCTION_DECLARATION">
+                  <value><option name="FONT_TYPE" value="3" /></value>
+                </option>
+              </attributes>
+            </scheme>
+        """.trimIndent()
+        val importedFgLess = SyntaxSchemeImporters.importIntelliJXml(fgLessIjXml)
+        val fgLessKw = importedFgLess.styleFor(SyntaxTokenKind.Keyword)
+        assertNull(fgLessKw.foreground)
+        assertTrue(fgLessKw.bold)
+        assertEquals("#D8DEE9", importedFgLess.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+
+        val fgLessStr = importedFgLess.styleFor(SyntaxTokenKind.String)
+        assertNull(fgLessStr.foreground)
+        assertEquals("#3B4252", fgLessStr.background?.toHexRgb())
+        assertEquals("#D8DEE9", importedFgLess.foregroundFor(SyntaxTokenKind.String).toHexRgb())
+
+        val fgLessComment = importedFgLess.styleFor(SyntaxTokenKind.Comment)
+        assertNull(fgLessComment.foreground)
+        assertTrue(fgLessComment.underline)
+
+        val fgLessFnDecl = importedFgLess.functionDeclaration
+        assertNotNull(fgLessFnDecl)
+        assertNull(fgLessFnDecl.foreground)
+        assertTrue(fgLessFnDecl.bold)
+        assertTrue(fgLessFnDecl.italic)
+
+        // Invalid still skips Darcula's foreground-less BAD_CHARACTER (effect-only underline) and picks WRONG_REFERENCES_ATTRIBUTES
+        assertEquals("#BC3F3C", importedFgLess.foregroundFor(SyntaxTokenKind.Invalid).toHexRgb())
 
         // _@user_* user-modified IntelliJ export carrying metaInfo/originalScheme
         val userModifiedLight = """

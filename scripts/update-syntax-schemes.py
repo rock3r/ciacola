@@ -439,7 +439,7 @@ def _pick_ij_style(
     *,
     min_contrast: float | None = None,
     diff_from: str | None = None,
-    require_fg: bool = True,
+    require_fg: bool = False,
     fg_only: bool = False,
 ) -> StyleEntry | None:
     for attr_name in candidates:
@@ -449,7 +449,7 @@ def _pick_ij_style(
         fg = normalize_ij_hex(opts.get("FOREGROUND"))
         if require_fg and fg is None:
             continue
-        if diff_from is not None and fg == diff_from:
+        if diff_from is not None and (fg is None or fg == diff_from):
             continue
         if min_contrast is not None and fg is not None:
             effective_fg = composite_over(fg, bg)
@@ -462,13 +462,19 @@ def _pick_ij_style(
         effect_type = _parse_uint32_or_zero(opts.get("EFFECT_TYPE"))
         effect_color = normalize_ij_hex(opts.get("EFFECT_COLOR"))
         has_effect = effect_color is not None
+        bold = bool(font_type & 1)
+        italic = bool(font_type & 2)
+        underline = has_effect and effect_type in (1, 2, 4, 5)
+        strikethrough = has_effect and effect_type == 3
+        if fg is None and bg_color is None and not bold and not italic and not underline and not strikethrough:
+            continue
         return StyleEntry(
             fg=fg,
             bg=bg_color,
-            bold=bool(font_type & 1),
-            italic=bool(font_type & 2),
-            underline=has_effect and effect_type in (1, 2, 4, 5),
-            strikethrough=has_effect and effect_type == 3,
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            strikethrough=strikethrough,
         )
     return None
 
@@ -494,7 +500,13 @@ def convert_ij_scheme(
     plain_style = StyleEntry(fg=fg)
     whitespace_fg = resolve_ij_color(schemes, xml_scheme_name, "WHITESPACES")
     if whitespace_fg is None:
-        comment_style = _pick_ij_style(schemes, xml_scheme_name, bg, ["DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT"])
+        comment_style = _pick_ij_style(
+            schemes,
+            xml_scheme_name,
+            bg,
+            ["DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT"],
+            require_fg=True,
+        )
         whitespace_fg = comment_style.fg if comment_style and comment_style.fg else fg
 
     keyword_style = _pick_ij_style(schemes, xml_scheme_name, bg, ["DEFAULT_KEYWORD"]) or plain_style
@@ -521,9 +533,15 @@ def convert_ij_scheme(
             [
                 "DEFAULT_FUNCTION_DECLARATION",
                 "DEFAULT_INSTANCE_METHOD",
-                "DEFAULT_STATIC_METHOD",
                 "DEFAULT_FUNCTION_CALL",
             ],
+        )
+        or _pick_ij_style(
+            schemes,
+            xml_scheme_name,
+            bg,
+            ["DEFAULT_STATIC_METHOD"],
+            require_fg=True,
         )
         or plain_style
     )
@@ -602,6 +620,7 @@ def convert_ij_scheme(
             xml_scheme_name,
             bg,
             ["BAD_CHARACTER", "WRONG_REFERENCES_ATTRIBUTES", "CONSOLE_ERROR_OUTPUT", "LOG_ERROR_OUTPUT"],
+            require_fg=True,
         )
         or _pick_ij_style(schemes, xml_scheme_name, bg, ["ERRORS_ATTRIBUTES"], require_fg=False)
         or plain_style
