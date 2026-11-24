@@ -39,6 +39,10 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
     private val slashyCloseCache = HashMap<Int, Boolean>()
     private val interpCloseCache = HashMap<Int, Int>()
     private val outsideSlashyCloseCache = HashMap<Int, Boolean>()
+    private val inBraceCloseCache = HashMap<Int, Int>()
+    private val blockCommentBodyEndCache = HashMap<Int, Int>()
+    private val lineCommentBodyEndCache = HashMap<Int, Int>()
+    private val quoteBodyEndCaches = Array(4) { HashMap<Int, Int>() }
 
     protected fun isAtStartOfInput(): Boolean = _tokenStartCharIndex == 0
 
@@ -114,9 +118,10 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
     }
 
     /**
-     * Checks in amortized O(N) time (via [slashyCloseCache], [interpCloseCache], and
-     * [outsideSlashyCloseCache]) whether a `/` at [_tokenStartCharIndex] has a matching unescaped
-     * closing `/` before EOF.
+     * Checks in strictly O(N) amortized time (via exact finite-state memoization across
+     * [slashyCloseCache], [outsideSlashyCloseCache], [interpCloseCache], [inBraceCloseCache],
+     * [blockCommentBodyEndCache], [lineCommentBodyEndCache], and [quoteBodyEndCaches]) whether
+     * a `/` at [_tokenStartCharIndex] has a matching unescaped closing `/` before EOF.
      */
     private fun hasClosingSlashyDelimiter(): Boolean {
         val entryPos = _tokenStartCharIndex
@@ -127,6 +132,8 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         // Explicit iterative stack of open `${` ($ position) and `{` ({ position) offsets.
         // Empty means currently in slashy body (outside `${...}` interpolation).
         val braceStack = ArrayList<Int>()
+        val braceVisitedStarts = ArrayList<Int>()
+        val braceVisited = ArrayList<Int>()
         val visitedOutside = ArrayList<Int>()
 
         while (true) {
@@ -137,12 +144,24 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
             if (braceStack.isEmpty()) {
                 val cachedOutside = outsideSlashyCloseCache[absPos]
                 if (cachedOutside != null) {
-                    return finishSlashyLookahead(entryPos, cachedOutside, braceStack, visitedOutside)
+                    return finishSlashyLookahead(
+                        entryPos = entryPos,
+                        result = cachedOutside,
+                        braceStack = braceStack,
+                        visitedOutside = visitedOutside,
+                        braceVisited = braceVisited,
+                    )
                 }
                 visitedOutside.add(absPos)
                 when (ch) {
                     '/'.code -> {
-                        return finishSlashyLookahead(entryPos, true, braceStack, visitedOutside)
+                        return finishSlashyLookahead(
+                            entryPos = entryPos,
+                            result = true,
+                            braceStack = braceStack,
+                            visitedOutside = visitedOutside,
+                            braceVisited = braceVisited,
+                        )
                     }
                     '\\'.code -> {
                         offset += if (_input.LA(offset + 1) == '/'.code) 2 else 1
@@ -152,11 +171,18 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                             val cachedClose = interpCloseCache[absPos]
                             if (cachedClose != null) {
                                 if (cachedClose < 0) {
-                                    return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
+                                    return finishSlashyLookahead(
+                                        entryPos = entryPos,
+                                        result = false,
+                                        braceStack = braceStack,
+                                        visitedOutside = visitedOutside,
+                                        braceVisited = braceVisited,
+                                    )
                                 }
                                 offset = cachedClose - baseIndex + 2
                             } else {
                                 braceStack.add(absPos)
+                                braceVisitedStarts.add(braceVisited.size)
                                 offset += 2
                             }
                         } else {
@@ -166,52 +192,65 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                     else -> offset++
                 }
             } else {
+                val isBraceBoundary =
+                    ch == '{'.code ||
+                        ch == '}'.code ||
+                        (ch == '$'.code && _input.LA(offset + 1) == '{'.code)
+                if (!isBraceBoundary) {
+                    val cachedFrameClose = inBraceCloseCache[absPos]
+                    if (cachedFrameClose != null) {
+                        if (cachedFrameClose < 0) {
+                            return finishSlashyLookahead(
+                                entryPos = entryPos,
+                                result = false,
+                                braceStack = braceStack,
+                                visitedOutside = visitedOutside,
+                                braceVisited = braceVisited,
+                            )
+                        }
+                        popBraceFrame(braceStack, braceVisitedStarts, braceVisited, cachedFrameClose)
+                        offset = cachedFrameClose - baseIndex + 2
+                        continue
+                    }
+                    braceVisited.add(absPos)
+                }
+
                 when (ch) {
                     '{'.code -> {
                         val cachedClose = interpCloseCache[absPos]
                         if (cachedClose != null) {
                             if (cachedClose < 0) {
-                                return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
+                                return finishSlashyLookahead(
+                                    entryPos = entryPos,
+                                    result = false,
+                                    braceStack = braceStack,
+                                    visitedOutside = visitedOutside,
+                                    braceVisited = braceVisited,
+                                )
                             }
                             offset = cachedClose - baseIndex + 2
                         } else {
                             braceStack.add(absPos)
+                            braceVisitedStarts.add(braceVisited.size)
                             offset++
                         }
                     }
                     '}'.code -> {
-                        val openPos = braceStack.removeAt(braceStack.lastIndex)
-                        interpCloseCache[openPos] = absPos
+                        popBraceFrame(braceStack, braceVisitedStarts, braceVisited, absPos)
                         offset++
                     }
                     '"'.code -> {
-                        offset = skipQuotedInLookahead(offset, '"'.code)
+                        offset = skipQuotedInLookahead(offset, '"'.code, baseIndex)
                     }
                     '\''.code -> {
-                        offset = skipQuotedInLookahead(offset, '\''.code)
+                        offset = skipQuotedInLookahead(offset, '\''.code, baseIndex)
                     }
                     '/'.code -> {
                         val next = _input.LA(offset + 1)
-                        if (next == '/'.code) {
-                            offset += 2
-                            while (true) {
-                                val c = _input.LA(offset)
-                                if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) break
-                                offset++
-                            }
-                        } else if (next == '*'.code) {
-                            offset += 2
-                            while (true) {
-                                val c = _input.LA(offset)
-                                if (c == IntStream.EOF) break
-                                if (c == '*'.code && _input.LA(offset + 1) == '/'.code) {
-                                    offset += 2
-                                    break
-                                }
-                                offset++
-                            }
-                        } else {
-                            offset++
+                        offset = when (next) {
+                            '/'.code -> skipLineCommentInLookahead(offset, baseIndex)
+                            '*'.code -> skipBlockCommentInLookahead(offset, baseIndex)
+                            else -> offset + 1
                         }
                     }
                     '$'.code -> {
@@ -219,11 +258,18 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
                             val cachedClose = interpCloseCache[absPos]
                             if (cachedClose != null) {
                                 if (cachedClose < 0) {
-                                    return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
+                                    return finishSlashyLookahead(
+                                        entryPos = entryPos,
+                                        result = false,
+                                        braceStack = braceStack,
+                                        visitedOutside = visitedOutside,
+                                        braceVisited = braceVisited,
+                                    )
                                 }
                                 offset = cachedClose - baseIndex + 2
                             } else {
                                 braceStack.add(absPos)
+                                braceVisitedStarts.add(braceVisited.size)
                                 offset += 2
                             }
                         } else {
@@ -235,7 +281,27 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
             }
         }
 
-        return finishSlashyLookahead(entryPos, false, braceStack, visitedOutside)
+        return finishSlashyLookahead(
+            entryPos = entryPos,
+            result = false,
+            braceStack = braceStack,
+            visitedOutside = visitedOutside,
+            braceVisited = braceVisited,
+        )
+    }
+
+    private fun popBraceFrame(
+        braceStack: ArrayList<Int>,
+        braceVisitedStarts: ArrayList<Int>,
+        braceVisited: ArrayList<Int>,
+        closePos: Int,
+    ) {
+        val openPos = braceStack.removeAt(braceStack.lastIndex)
+        val frameStart = braceVisitedStarts.removeAt(braceVisitedStarts.lastIndex)
+        interpCloseCache[openPos] = closePos
+        while (braceVisited.size > frameStart) {
+            inBraceCloseCache[braceVisited.removeAt(braceVisited.lastIndex)] = closePos
+        }
     }
 
     private fun finishSlashyLookahead(
@@ -243,6 +309,7 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         result: Boolean,
         braceStack: List<Int>,
         visitedOutside: List<Int>,
+        braceVisited: List<Int>,
     ): Boolean {
         slashyCloseCache[entryPos] = result
         for (pos in visitedOutside) {
@@ -252,33 +319,113 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
             for (openPos in braceStack) {
                 interpCloseCache[openPos] = -1
             }
+            for (pos in braceVisited) {
+                inBraceCloseCache[pos] = -1
+            }
         }
         return result
     }
 
-    private fun skipQuotedInLookahead(startOffset: Int, quoteCode: Int): Int {
-        var offset = startOffset + 1
-        val isTriple = _input.LA(offset) == quoteCode && _input.LA(offset + 1) == quoteCode
-        if (isTriple) {
-            offset += 2
-            while (true) {
-                val c = _input.LA(offset)
-                if (c == IntStream.EOF) return offset
-                if (c == '\\'.code) {
-                    offset += if (_input.LA(offset + 1) == IntStream.EOF) 1 else 2
-                } else if (c == quoteCode && _input.LA(offset + 1) == quoteCode && _input.LA(offset + 2) == quoteCode) {
-                    return offset + 3
-                } else {
-                    offset++
-                }
-            }
-        }
+    private fun skipLineCommentInLookahead(startOffset: Int, baseIndex: Int): Int {
+        var offset = startOffset + 2
+        val visited = ArrayList<Int>()
         while (true) {
             val c = _input.LA(offset)
-            if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) return offset
+            val curAbsPos = baseIndex + offset - 1
+            if (c == IntStream.EOF || c == '\r'.code || c == '\n'.code) {
+                for (pos in visited) {
+                    lineCommentBodyEndCache[pos] = curAbsPos
+                }
+                return offset
+            }
+            lineCommentBodyEndCache[curAbsPos]?.let { endAbsPos ->
+                for (pos in visited) {
+                    lineCommentBodyEndCache[pos] = endAbsPos
+                }
+                return endAbsPos - baseIndex + 1
+            }
+            visited.add(curAbsPos)
+            offset++
+        }
+    }
+
+    private fun skipBlockCommentInLookahead(startOffset: Int, baseIndex: Int): Int {
+        var offset = startOffset + 2
+        val visited = ArrayList<Int>()
+        while (true) {
+            val c = _input.LA(offset)
+            val curAbsPos = baseIndex + offset - 1
+            if (c == IntStream.EOF) {
+                for (pos in visited) {
+                    blockCommentBodyEndCache[pos] = curAbsPos
+                }
+                return offset
+            }
+            blockCommentBodyEndCache[curAbsPos]?.let { endAbsPos ->
+                for (pos in visited) {
+                    blockCommentBodyEndCache[pos] = endAbsPos
+                }
+                return endAbsPos - baseIndex + 1
+            }
+            visited.add(curAbsPos)
+            if (c == '*'.code && _input.LA(offset + 1) == '/'.code) {
+                val endAbsPos = curAbsPos + 2
+                for (pos in visited) {
+                    blockCommentBodyEndCache[pos] = endAbsPos
+                }
+                return offset + 2
+            }
+            offset++
+        }
+    }
+
+    private fun skipQuotedInLookahead(startOffset: Int, quoteCode: Int, baseIndex: Int): Int {
+        var offset = startOffset + 1
+        val isTriple = _input.LA(offset) == quoteCode && _input.LA(offset + 1) == quoteCode
+        val cacheIdx = (if (quoteCode == '"'.code) 1 else 0) + (if (isTriple) 2 else 0)
+        val cache = quoteBodyEndCaches[cacheIdx]
+        if (isTriple) {
+            offset += 2
+        }
+        val visited = ArrayList<Int>()
+
+        while (true) {
+            val c = _input.LA(offset)
+            val curAbsPos = baseIndex + offset - 1
+            val atEnd = if (isTriple) {
+                c == IntStream.EOF
+            } else {
+                c == IntStream.EOF || c == '\r'.code || c == '\n'.code
+            }
+            if (atEnd) {
+                for (pos in visited) {
+                    cache[pos] = curAbsPos
+                }
+                return offset
+            }
+            cache[curAbsPos]?.let { endAbsPos ->
+                for (pos in visited) {
+                    cache[pos] = endAbsPos
+                }
+                return endAbsPos - baseIndex + 1
+            }
+            visited.add(curAbsPos)
             if (c == '\\'.code) {
                 offset += if (_input.LA(offset + 1) == IntStream.EOF) 1 else 2
+            } else if (isTriple) {
+                if (c == quoteCode && _input.LA(offset + 1) == quoteCode && _input.LA(offset + 2) == quoteCode) {
+                    val endAbsPos = curAbsPos + 3
+                    for (pos in visited) {
+                        cache[pos] = endAbsPos
+                    }
+                    return offset + 3
+                }
+                offset++
             } else if (c == quoteCode) {
+                val endAbsPos = curAbsPos + 1
+                for (pos in visited) {
+                    cache[pos] = endAbsPos
+                }
                 return offset + 1
             } else {
                 offset++
@@ -309,6 +456,12 @@ internal abstract class GroovyLexerBase(input: CharStream) : Lexer(input) {
         slashyCloseCache.clear()
         interpCloseCache.clear()
         outsideSlashyCloseCache.clear()
+        inBraceCloseCache.clear()
+        blockCommentBodyEndCache.clear()
+        lineCommentBodyEndCache.clear()
+        for (cache in quoteBodyEndCaches) {
+            cache.clear()
+        }
     }
 
     override fun nextToken(): Token {
