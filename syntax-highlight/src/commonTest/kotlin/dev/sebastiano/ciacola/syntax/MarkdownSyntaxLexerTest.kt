@@ -825,18 +825,19 @@ class MarkdownSyntaxLexerTest {
 
     @Test
     fun handlesListMarkerTabAndMultiSpaceFencesBlockquoteHtmlTerminationAndSetextParity() {
-        // N2: List-marker fences with tab and 5 spaces stay in sync with backtick index
+        // N2 & P2-5: List-marker fences with tab stay Kotlin fences, while 5 spaces after '-' is indented code per CommonMark §5.2
         val tabListFence = "-${'\t'}```kotlin\nval x = 1\n```\nAfter `inline`.\n"
         val tabTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, tabListFence, "md-tab-list-fence")
         assertTrue(tabTokens.any { it.slice(tabListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
         assertTrue(tabTokens.any { it.slice(tabListFence) == "After" && it.kind == SyntaxTokenKind.Plain })
         assertTrue(tabTokens.any { it.slice(tabListFence) == "`inline`" && it.kind == SyntaxTokenKind.String })
 
-        val fiveSpaceListFence = "-     ```kotlin\nval x = 1\n```\nAfter `inline`.\n"
-        val fiveSpaceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, fiveSpaceListFence, "md-5space-list-fence")
-        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListFence) == "val" && it.kind == SyntaxTokenKind.Keyword })
-        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListFence) == "After" && it.kind == SyntaxTokenKind.Plain })
-        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListFence) == "`inline`" && it.kind == SyntaxTokenKind.String })
+        val fiveSpaceListIndented = "-     ```kotlin\n\nAfter `inline`.\n"
+        val fiveSpaceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, fiveSpaceListIndented, "md-5space-list-indented")
+        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListIndented) == "```kotlin" && it.kind == SyntaxTokenKind.String })
+        assertFalse(fiveSpaceTokens.any { it.kind == SyntaxTokenKind.Type })
+        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListIndented) == "After" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(fiveSpaceTokens.any { it.slice(fiveSpaceListIndented) == "`inline`" && it.kind == SyntaxTokenKind.String })
 
         // N3: Line-start <!-- and Type 4 <!DOCTYPE inside blockquote terminate when blockquote exits
         val bqType2Comment = "> <!-- note\n\nOutside `code`\n"
@@ -914,5 +915,49 @@ class MarkdownSyntaxLexerTest {
             pathologicalInputs = listOf("repeated-https-underscore" to repeatedHttps),
             maxMillisPerInput = 300L,
         )
+    }
+
+    @Test
+    fun handlesHttpsBarrierInlineHtmlBlockInterruptorsListSetextGuardAndTabBlockquotes() {
+        // P2-1: Second https:// URL after '_' still autolinks cleanly
+        val chainedHttp = "https://a_https://example.com\n"
+        val chainedHttpTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, chainedHttp, "md-http-barrier")
+        assertTrue(chainedHttpTokens.any { it.slice(chainedHttp) == "https://example.com" && it.kind == SyntaxTokenKind.Attribute })
+
+        // P2-2: Multi-line inline HTML comments and inline HTML tags stop at block-interrupting lines (such as fences)
+        val inlineCommentBeforeFence = "a <!--\n```\ncode -->\n```\ntail\n"
+        val commentFenceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, inlineCommentBeforeFence, "md-inline-comment-fence")
+        assertFalse(commentFenceTokens.any { it.kind == SyntaxTokenKind.Comment })
+        assertTrue(commentFenceTokens.any { it.slice(inlineCommentBeforeFence) == "tail" && it.kind == SyntaxTokenKind.Plain })
+
+        val inlineTagBeforeFence = "a <div x\n```\ncode>\n```\ntail\n"
+        val tagFenceTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, inlineTagBeforeFence, "md-inline-tag-fence")
+        assertFalse(tagFenceTokens.any { it.kind == SyntaxTokenKind.Tag })
+        assertTrue(tagFenceTokens.any { it.slice(inlineTagBeforeFence) == "tail" && it.kind == SyntaxTokenKind.Plain })
+
+        // P2-3: Setext underlines must NOT trigger after a list marker
+        val listEquals = "Foo\n- ===\n    bar\n"
+        val listEqualsTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, listEquals, "md-list-equals-no-setext")
+        assertFalse(listEqualsTokens.any { it.slice(listEquals) == "===" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(listEqualsTokens.any { it.slice(listEquals) == "bar" && it.kind == SyntaxTokenKind.Plain })
+
+        val listDashes = "Foo\n* --\n    bar\n"
+        val listDashTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, listDashes, "md-list-dash-no-setext")
+        assertFalse(listDashTokens.any { it.slice(listDashes) == "--" && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(listDashTokens.any { it.slice(listDashes) == "bar" && it.kind == SyntaxTokenKind.Plain })
+
+        val nestedDashSetext = "Foo\n- -\n    bar\n"
+        val nestedDashTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, nestedDashSetext, "md-nested-dash-no-setext")
+        assertTrue(nestedDashTokens.any { it.slice(nestedDashSetext) == "Foo" && it.kind == SyntaxTokenKind.Plain })
+        assertTrue(nestedDashTokens.any { it.slice(nestedDashSetext) == "bar" && it.kind == SyntaxTokenKind.Plain })
+
+        // P2-4: Tab-separated blockquote markers match between backtick index and lexer
+        val mismatchedTabBq = "> `a\n>${'\t'}> b`\n"
+        val mismatchedTabTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, mismatchedTabBq, "md-tab-bq-mismatch")
+        assertFalse(mismatchedTabTokens.any { it.kind == SyntaxTokenKind.String })
+
+        val matchingTabBq = ">${'\t'}> `a\n> > b`\n"
+        val matchingTabTokens = assertValidSnippetHasNoInvalidTokens(MarkdownSyntaxLexer, matchingTabBq, "md-tab-bq-match")
+        assertTrue(matchingTabTokens.any { it.slice(matchingTabBq) == "`a\n> > b`" && it.kind == SyntaxTokenKind.String })
     }
 }

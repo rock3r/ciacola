@@ -264,9 +264,10 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     protected fun onLineStartWs() {
         val start = _tokenStartCharIndex
         val end = _input.index()
+        val afterMarker = afterListMarker
         var streamCol = if (justSawBlockquoteMarker) 1 else lineStreamCol
         var col = 0
-        var first = justSawBlockquoteMarker
+        var first = justSawBlockquoteMarker || afterMarker
         for (cp in start until end) {
             val ch = codePointAtIndex(cp)
             if (ch == '\t'.code) {
@@ -286,14 +287,29 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         lineStreamCol = streamCol
         justSawBlockquoteMarker = false
 
-        if (afterListMarker) {
+        val next = _input.LA(1)
+        if (afterMarker) {
+            if (next == '\r'.code || next == '\n'.code || next == IntStream.EOF) {
+                return
+            }
+            if (col >= 4) {
+                currentLineIsBlank = false
+                currentLineIsParagraph = false
+                currentLineIsIndentedCode = true
+                currentLineAllowsNextIndentedCode = true
+                currentLineHasOnlyBqAndWs = false
+                afterListMarker = false
+                canMatchTaskCheckbox = false
+                atDocStart = false
+                mode(indentedCodeModeId())
+                return
+            }
             canMatchTaskCheckbox = true
-            leadingIndent += col
-            // Stay in DEFAULT_MODE so list items can nest headings, blockquotes, lists, or checkboxes.
+            leadingIndent = col
+            // Stay in DEFAULT_MODE so list items with 0..3 extra indent cols can nest blocks or checkboxes.
             return
         }
 
-        val next = _input.LA(1)
         if (next == '\r'.code || next == '\n'.code || next == IntStream.EOF) {
             // Blank line: stay in DEFAULT_MODE and leave currentLineIsBlank = true.
             return
@@ -407,8 +423,13 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             return
         }
 
-        // 2. Setext H2 underline directly under a non-empty paragraph line
-        if (prevLineWasParagraph && !afterBlankLine && blockquoteDepth == prevLineBlockquoteDepth && isOnlyWsBeforeEolOrEof()) {
+        // 2. Setext H2 underline directly under a non-empty paragraph line (never after a list marker)
+        if (!currentLineHasListMarker &&
+            prevLineWasParagraph &&
+            !afterBlankLine &&
+            blockquoteDepth == prevLineBlockquoteDepth &&
+            isOnlyWsBeforeEolOrEof()
+        ) {
             atDocStart = false
             currentLineIsBlank = false
             currentLineIsParagraph = false
@@ -520,7 +541,12 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     }
 
     protected fun handleLineStartEquals() {
-        if (prevLineWasParagraph && !afterBlankLine && blockquoteDepth == prevLineBlockquoteDepth && isOnlyWsBeforeEolOrEof()) {
+        if (!currentLineHasListMarker &&
+            prevLineWasParagraph &&
+            !afterBlankLine &&
+            blockquoteDepth == prevLineBlockquoteDepth &&
+            isOnlyWsBeforeEolOrEof()
+        ) {
             atDocStart = false
             currentLineIsBlank = false
             currentLineIsParagraph = false
@@ -998,15 +1024,30 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
     private fun hasBlockquotePrefixAhead(lineStart: Int, requiredDepth: Int): Boolean {
         val size = _input.size()
         var idx = lineStart
+        var streamCol = 0
+        var firstAfterBq = false
         for (d in 0 until requiredDepth) {
             var spaces = 0
-            while (idx < size && spaces < 4 && codePointAtIndex(idx) == ' '.code) {
-                spaces++
-                idx++
+            while (idx < size && spaces < 4) {
+                val ch = codePointAtIndex(idx)
+                if (ch == ' '.code) {
+                    streamCol++
+                    if (firstAfterBq) firstAfterBq = false else spaces++
+                    idx++
+                } else if (ch == '\t'.code) {
+                    val step = 4 - (streamCol % 4)
+                    streamCol += step
+                    spaces += if (firstAfterBq) step - 1 else step
+                    firstAfterBq = false
+                    idx++
+                } else {
+                    break
+                }
             }
             if (spaces > 3 || idx >= size || codePointAtIndex(idx) != '>'.code) return false
             idx++
-            if (idx < size && codePointAtIndex(idx) == ' '.code) idx++
+            streamCol++
+            firstAfterBq = true
         }
         return true
     }
@@ -1093,49 +1134,42 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
         var prevLineAllowsIndent = true
 
         while (i < size) {
-            // 1. Parse blockquote prefix ('>' markers with <= 3 spaces before each and optional 1 space)
+            // 1. Parse blockquote prefix ('>' markers with <= 3 columns of spaces/tabs before each)
             var bqDepth = 0
-            var consumedSpaceAfterLastBq = false
             var pos = i
+            var streamCol = 0
+            var col = 0
+            var firstAfterBq = false
             while (pos < size) {
                 var spaces = 0
+                var sc = streamCol
+                var first = firstAfterBq
                 var p = pos
-                while (p < size && spaces < 4 && codePointAtIndex(p) == ' '.code) {
-                    spaces++
-                    p++
+                while (p < size) {
+                    val ch = codePointAtIndex(p)
+                    if (ch == ' '.code) {
+                        sc++
+                        if (first) first = false else spaces++
+                        p++
+                    } else if (ch == '\t'.code) {
+                        val step = 4 - (sc % 4)
+                        sc += step
+                        spaces += if (first) step - 1 else step
+                        first = false
+                        p++
+                    } else {
+                        break
+                    }
                 }
                 if (spaces <= 3 && p < size && codePointAtIndex(p) == '>'.code) {
                     bqDepth++
-                    p++
-                    if (p < size && codePointAtIndex(p) == ' '.code) {
-                        p++
-                        consumedSpaceAfterLastBq = true
-                    } else {
-                        consumedSpaceAfterLastBq = false
-                    }
+                    pos = p + 1
+                    streamCol = sc + 1
+                    firstAfterBq = true
+                } else {
                     pos = p
-                } else {
-                    break
-                }
-            }
-
-            // 2. Count leading indentation after blockquote prefix
-            var col = 0
-            var streamCol = if (consumedSpaceAfterLastBq) 2 else if (bqDepth > 0) 1 else 0
-            var firstAfterBq = bqDepth > 0 && !consumedSpaceAfterLastBq
-            while (pos < size) {
-                val ch = codePointAtIndex(pos)
-                if (ch == ' '.code) {
-                    streamCol++
-                    if (firstAfterBq) firstAfterBq = false else col++
-                    pos++
-                } else if (ch == '\t'.code) {
-                    val step = 4 - (streamCol % 4)
-                    streamCol += step
-                    col += if (firstAfterBq) step - 1 else step
-                    firstAfterBq = false
-                    pos++
-                } else {
+                    col = spaces
+                    streamCol = sc
                     break
                 }
             }
@@ -1168,13 +1202,14 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 continue
             }
 
-            // 5. Block-level starters at indent <= 3 (or after a list marker, matching DEFAULT_MODE)
+            // 5. Block-level starters at indent <= 3 (matching DEFAULT_MODE)
             var tbFailDash = -1
             var tbFailStar = -1
             var tbFailUnder = -1
             var sawListMarker = false
+            var listIndentedCode = false
             val canSetextBeforeList = prevLineWasPara && !prevLineWasBlank && bqDepth == prevBqDepth
-            while ((col <= 3 || sawListMarker) && pos < size) {
+            while (col <= 3 && pos < size) {
                 val fch = codePointAtIndex(pos)
                 if (!sawListMarker && canSetextBeforeList &&
                     (fch == '-'.code || fch == '='.code) &&
@@ -1227,16 +1262,18 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 streamCol += (markerEnd - pos)
                 pos = markerEnd
                 var postCol = 0
+                var firstAfterMarker = true
                 while (pos < size) {
                     val wch = codePointAtIndex(pos)
                     if (wch == ' '.code) {
-                        postCol++
                         streamCol++
+                        if (firstAfterMarker) firstAfterMarker = false else postCol++
                         pos++
                     } else if (wch == '\t'.code) {
                         val step = 4 - (streamCol % 4)
-                        postCol += step
                         streamCol += step
+                        postCol += if (firstAfterMarker) step - 1 else step
+                        firstAfterMarker = false
                         pos++
                     } else {
                         break
@@ -1246,6 +1283,21 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                 if (pos >= size || codePointAtIndex(pos) == '\r'.code || codePointAtIndex(pos) == '\n'.code) {
                     break
                 }
+                if (col >= 4) {
+                    listIndentedCode = true
+                    break
+                }
+            }
+
+            if (listIndentedCode) {
+                paraId++
+                i = advancePastLine(pos, size)
+                paraId++
+                prevBqDepth = bqDepth
+                prevLineWasBlank = false
+                prevLineWasPara = false
+                prevLineAllowsIndent = true
+                continue
             }
 
             if (pos >= size || codePointAtIndex(pos) == '\r'.code || codePointAtIndex(pos) == '\n'.code) {
@@ -1259,7 +1311,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             }
 
             val firstCh = codePointAtIndex(pos)
-            if (col <= 3 || sawListMarker) {
+            if (col <= 3) {
                 // Fenced code block opener (``` or ~~~)
                 if (firstCh == '`'.code || firstCh == '~'.code) {
                     val fenceCount = countSameChar(pos, size, firstCh)
@@ -1628,7 +1680,13 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             }
             if (ch == '\r'.code || ch == '\n'.code) {
                 val afterNl = skipNewlineAt(idx, size)
-                if (isBlankLineAt(afterNl, size)) {
+                val stopHere = if (_mode == htmlBlockModeId()) {
+                    isBlankLineAt(afterNl, size) ||
+                        (htmlBlockBqDepth > 0 && (!hasBlockquotePrefixAhead(afterNl, htmlBlockBqDepth) || isBlankBqLineAt(afterNl, htmlBlockBqDepth, size)))
+                } else {
+                    isBlockInterruptingLineAt(afterNl, size, blockquoteDepth)
+                }
+                if (stopHere) {
                     htmlCommentFailEnd = afterNl
                     type = fallbackType
                     return
@@ -2024,9 +2082,8 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     '"'.code -> quoteState = 1
                     '\''.code -> quoteState = 2
                     '\r'.code, '\n'.code -> {
-                        // Stop at blank line
                         val afterNl = skipNewlineAt(idx, size)
-                        if (isBlankLineAt(afterNl, size)) {
+                        if (isHtmlTagContinuationBlocked(afterNl, size)) {
                             recordFailedHtmlStates(visited)
                             return false
                         }
@@ -2038,7 +2095,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     '"'.code -> quoteState = 0
                     '\r'.code, '\n'.code -> {
                         val afterNl = skipNewlineAt(idx, size)
-                        if (isBlankLineAt(afterNl, size)) {
+                        if (isHtmlTagContinuationBlocked(afterNl, size)) {
                             recordFailedHtmlStates(visited)
                             return false
                         }
@@ -2050,7 +2107,7 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
                     '\''.code -> quoteState = 0
                     '\r'.code, '\n'.code -> {
                         val afterNl = skipNewlineAt(idx, size)
-                        if (isBlankLineAt(afterNl, size)) {
+                        if (isHtmlTagContinuationBlocked(afterNl, size)) {
                             recordFailedHtmlStates(visited)
                             return false
                         }
@@ -2062,6 +2119,125 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
             idx++
         }
         recordFailedHtmlStates(visited)
+        return false
+    }
+
+    private fun isHtmlTagContinuationBlocked(afterNl: Int, size: Int): Boolean =
+        if (_mode == htmlBlockModeId() || _mode == htmlBlockRawModeId()) {
+            isBlankLineAt(afterNl, size) ||
+                (htmlBlockBqDepth > 0 && (!hasBlockquotePrefixAhead(afterNl, htmlBlockBqDepth) || isBlankBqLineAt(afterNl, htmlBlockBqDepth, size)))
+        } else {
+            isBlockInterruptingLineAt(afterNl, size, blockquoteDepth)
+        }
+
+    private fun isBlockInterruptingLineAt(lineStart: Int, size: Int, requiredBqDepth: Int): Boolean {
+        if (lineStart >= size) return true
+        var pos = lineStart
+        var streamCol = 0
+        var firstAfterBq = false
+        if (requiredBqDepth > 0) {
+            for (d in 0 until requiredBqDepth) {
+                var spaces = 0
+                while (pos < size && spaces < 4) {
+                    val ch = codePointAtIndex(pos)
+                    if (ch == ' '.code) {
+                        streamCol++
+                        if (firstAfterBq) firstAfterBq = false else spaces++
+                        pos++
+                    } else if (ch == '\t'.code) {
+                        val step = 4 - (streamCol % 4)
+                        streamCol += step
+                        spaces += if (firstAfterBq) step - 1 else step
+                        firstAfterBq = false
+                        pos++
+                    } else {
+                        break
+                    }
+                }
+                if (spaces > 3 || pos >= size || codePointAtIndex(pos) != '>'.code) return true
+                pos++
+                streamCol++
+                firstAfterBq = true
+            }
+        }
+        var col = 0
+        while (pos < size) {
+            val ch = codePointAtIndex(pos)
+            if (ch == ' '.code) {
+                streamCol++
+                if (firstAfterBq) firstAfterBq = false else col++
+                pos++
+            } else if (ch == '\t'.code) {
+                val step = 4 - (streamCol % 4)
+                streamCol += step
+                col += if (firstAfterBq) step - 1 else step
+                firstAfterBq = false
+                pos++
+            } else {
+                break
+            }
+        }
+        if (pos >= size || codePointAtIndex(pos) == '\r'.code || codePointAtIndex(pos) == '\n'.code) {
+            return true
+        }
+        if (col > 3) return false
+
+        val firstCh = codePointAtIndex(pos)
+        // Nested '>' blockquote marker increases depth and interrupts the paragraph
+        if (firstCh == '>'.code) return true
+
+        // Fenced code block opener
+        if (firstCh == '`'.code || firstCh == '~'.code) {
+            val fenceCount = countSameChar(pos, size, firstCh)
+            if (fenceCount >= 3 && (firstCh == '~'.code || hasNoBacktickUntilEol(pos + fenceCount, size))) {
+                return true
+            }
+        }
+        // ATX heading
+        if (firstCh == '#'.code) {
+            val hashes = countSameChar(pos, size, '#'.code)
+            val after = if (pos + hashes < size) codePointAtIndex(pos + hashes) else IntStream.EOF
+            if (hashes in 1..6 && isSpaceTabEolOrEof(after)) return true
+        }
+        // Thematic break
+        if ((firstCh == '-'.code || firstCh == '*'.code || firstCh == '_'.code) &&
+            isThematicOrSetextLine(pos, size, firstCh)
+        ) {
+            return true
+        }
+        // List marker
+        if ((firstCh == '-'.code || firstCh == '*'.code || firstCh == '+'.code) &&
+            isSpaceTabEolOrEof(if (pos + 1 < size) codePointAtIndex(pos + 1) else IntStream.EOF)
+        ) {
+            return true
+        }
+        if (firstCh in '0'.code..'9'.code) {
+            var digits = 0
+            var dp = pos
+            while (dp < size && digits < 10 && codePointAtIndex(dp) in '0'.code..'9'.code) {
+                digits++
+                dp++
+            }
+            if (digits in 1..9 && dp < size) {
+                val sep = codePointAtIndex(dp)
+                val afterSep = if (dp + 1 < size) codePointAtIndex(dp + 1) else IntStream.EOF
+                if ((sep == '.'.code || sep == ')'.code) && isSpaceTabEolOrEof(afterSep)) {
+                    return true
+                }
+            }
+        }
+        // HTML block types 1-6 (type 7 cannot interrupt a paragraph)
+        if (firstCh == '<'.code) {
+            if (matchesLiteralCaseSensitive(pos, "<!--", size) ||
+                matchHtmlBlockType1TagName(pos, size) != null ||
+                (pos + 1 < size && codePointAtIndex(pos + 1) == '?'.code) ||
+                matchesLiteralCaseSensitive(pos, "<![CDATA[", size) ||
+                (pos + 2 < size && codePointAtIndex(pos + 1) == '!'.code && isAsciiLetter(codePointAtIndex(pos + 2))) ||
+                matchHtmlBlockType6(pos, size)
+            ) {
+                return true
+            }
+        }
         return false
     }
 
@@ -2379,16 +2555,32 @@ internal abstract class MarkdownLexerBase(input: CharStream) : Lexer(input) {
 
     private fun skipBlockquotePrefix(lineStart: Int, requiredDepth: Int, size: Int): Int {
         var idx = lineStart
+        var streamCol = 0
+        var firstAfterBq = false
         for (d in 0 until requiredDepth) {
             var spaces = 0
-            while (idx < size && spaces < 4 && codePointAtIndex(idx) == ' '.code) {
-                spaces++
-                idx++
+            while (idx < size && spaces < 4) {
+                val ch = codePointAtIndex(idx)
+                if (ch == ' '.code) {
+                    streamCol++
+                    if (firstAfterBq) firstAfterBq = false else spaces++
+                    idx++
+                } else if (ch == '\t'.code) {
+                    val step = 4 - (streamCol % 4)
+                    streamCol += step
+                    spaces += if (firstAfterBq) step - 1 else step
+                    firstAfterBq = false
+                    idx++
+                } else {
+                    break
+                }
             }
             if (spaces > 3 || idx >= size || codePointAtIndex(idx) != '>'.code) return idx
             idx++
-            if (idx < size && codePointAtIndex(idx) == ' '.code) idx++
+            streamCol++
+            firstAfterBq = true
         }
+        if (idx < size && codePointAtIndex(idx) == ' '.code) idx++
         return idx
     }
 

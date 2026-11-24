@@ -1619,9 +1619,14 @@ private fun resolveGfmExtendedAutolinks(
             val urlAllowedBefore = pos == segStart || isGfmUrlBoundaryBefore(source[pos - 1])
             if (urlAllowedBefore) {
                 val isWww = source.regionMatches(pos, "www.", 0, 4, ignoreCase = false)
-                val isHttp = !isWww && (startsWithIgnoreCase(source, pos, segEnd, "https://") ||
-                    startsWithIgnoreCase(source, pos, segEnd, "http://"))
-                val canTryUrl = (isWww && pos >= wwwScanBarrier) || (isHttp && pos >= httpScanBarrier)
+                val schemeLen = when {
+                    isWww -> 4
+                    startsWithIgnoreCase(source, pos, segEnd, "https://") -> 8
+                    startsWithIgnoreCase(source, pos, segEnd, "http://") -> 7
+                    else -> 0
+                }
+                val isHttp = !isWww && schemeLen > 0
+                val canTryUrl = (isWww && pos >= wwwScanBarrier) || (isHttp && pos + schemeLen >= httpScanBarrier)
                 if (canTryUrl) {
                     val (urlEnd, failStop) = matchGfmUrlEnd(source, pos, segEnd)
                     if (urlEnd > pos) {
