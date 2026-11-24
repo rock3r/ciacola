@@ -478,6 +478,172 @@ class DockerfileSyntaxLexerTest {
     }
 
     @Test
+    fun preservesJsonStringEscapesUnderBacktickEscapeDirective() {
+        val code =
+            "# escape=`\n" +
+                "RUN [\"echo\", \"a\\\"b\", \"c`\", \"d\\\\\"]\n" +
+                "RUN --mount=type=cache,target=/cache `\n" +
+                "    [ `\n" +
+                "        # array-level comment\n" +
+                "\n" +
+                "        \"echo\", `\n" +
+                "        \"hello `\n" +
+                "        # cont comment\n" +
+                "        x\\\"y\" `\n" +
+                "    ]\n" +
+                "RUN [\"echo\", \"odd-bs\\`\n" +
+                "n-continued\"]\n" +
+                "CMD [\"a\\`\n" +
+                "\\\", \"\$HOME\"]\n" +
+                "CMD [\"q\\`\n" +
+                "\"b\", \"\$HOME\"]\n" +
+                "COPY --from=builder [\"\${SRC}/a\\\"b\", \"dst/\"]\n" +
+                "ADD [\"\$SRC/file\", \"/dst/\"]\n" +
+                "VOLUME [\"\$DATA\", \"/var/log\"]\n" +
+                "ENTRYPOINT [\"/bin/app\", \"a\\\"b\", \"\$1\"]\n" +
+                "SHELL [\"powershell\", \"-Command\", \"Write-Host \\\"hi\\\"\"]\n" +
+                "HEALTHCHECK --interval=30s --timeout=5s CMD [\"curl\", \"a\\\"b\"]\n" +
+                "ONBUILD CMD [\"sh\", \"-c\", \"echo \${FOO:-\\\"bar\\\"} \$HOME \$1\"]\n" +
+                "CMD [\"C:\\app\\run.exe\", \"\$PORT\"]\n" +
+                "RUN [ \"\$TARGETARCH\" = \"amd64\" ] && echo ok\n" +
+                "RUN [ \"C:\\dir\\\" = \"x\" ]\n" +
+                "CMD [\"a\" \"b\"]\n" +
+                "RUN echo \"C:\\Windows\\\" \"line1`\"quoted\"\n" +
+                "RUN [ -f \"C:\\temp\\\" ]\n" +
+                "RUN [\"echo\", \"unclosed\n" +
+                "FROM alpine\n"
+
+        val tokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            code,
+            "dockerfile-json-escapes-backtick-directive",
+        )
+
+        fun tokensOnLine(line: String, fromIndex: Int = 0): List<SyntaxToken> {
+            val s = code.indexOf(line, fromIndex)
+            assertTrue(s >= fromIndex, "Line not found: $line")
+            return tokens.filter { it.startIndex >= s && it.endIndex <= s + line.length }
+        }
+
+        // 1. Exact exec-form `RUN ["echo", "a\"b", "c`", "d\\"]`: `\"` and `\\` escape; `` ` `` stays literal String; `]` is Punctuation
+        val runJsonLine = "RUN [\"echo\", \"a\\\"b\", \"c`\", \"d\\\\\"]"
+        val runJsonTokens = tokensOnLine(runJsonLine)
+        assertTrue(runJsonTokens.any { it.slice(code) == "\\\"" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(runJsonTokens.any { it.slice(code) == "b" && it.kind == SyntaxTokenKind.String })
+        assertTrue(runJsonTokens.any { it.slice(code) == "`" && it.kind == SyntaxTokenKind.String })
+        assertTrue(runJsonTokens.any { it.slice(code) == "\\\\" && it.kind == SyntaxTokenKind.Constant })
+        assertEquals("]", runJsonTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, runJsonTokens.last().kind)
+
+        // 2. Multiline JSON array (with array-level comment & blank line) + JSON string continuation + `\"`
+        assertTrue(tokensOnLine("        # array-level comment").any { it.kind == SyntaxTokenKind.Comment })
+        val contLine = "        x\\\"y\" `"
+        val contTokens = tokensOnLine(contLine)
+        assertTrue(contTokens.any { it.slice(code) == "\\\"" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(contTokens.any { it.slice(code) == "y" && it.kind == SyntaxTokenKind.String })
+        assertTrue(tokensOnLine("        # cont comment").any { it.kind == SyntaxTokenKind.Comment })
+        val closeBracketTokens = tokensOnLine("    ]", code.indexOf(contLine))
+        assertEquals("]", closeBracketTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, closeBracketTokens.last().kind)
+
+        // 3. Split JSON escapes (`\n`, `\\`, `\"`) across backtick line continuations stay in sync with JSON boundaries
+        val oddBsLine = "n-continued\"]"
+        val oddBsTokens = tokensOnLine(oddBsLine)
+        assertTrue(oddBsTokens.any { it.slice(code) == "n" && it.kind == SyntaxTokenKind.Constant })
+        assertTrue(oddBsTokens.any { it.slice(code) == "-continued" && it.kind == SyntaxTokenKind.String })
+        assertEquals("]", oddBsTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, oddBsTokens.last().kind)
+
+        val splitDoubleBsLine = "\\\", \"\$HOME\"]"
+        val splitDoubleBsTokens = tokensOnLine(splitDoubleBsLine)
+        assertEquals("\\", splitDoubleBsTokens.first().slice(code))
+        assertEquals(SyntaxTokenKind.Constant, splitDoubleBsTokens.first().kind)
+        assertTrue(splitDoubleBsTokens.any { it.slice(code) == "," && it.kind == SyntaxTokenKind.Punctuation })
+        assertTrue(splitDoubleBsTokens.none { it.kind == SyntaxTokenKind.Property })
+        assertEquals("]", splitDoubleBsTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, splitDoubleBsTokens.last().kind)
+
+        val splitQuoteLine = "\"b\", \"\$HOME\"]"
+        val splitQuoteTokens = tokensOnLine(splitQuoteLine)
+        assertEquals("\"", splitQuoteTokens.first().slice(code))
+        assertEquals(SyntaxTokenKind.Constant, splitQuoteTokens.first().kind)
+        assertTrue(splitQuoteTokens.any { it.slice(code) == "b" && it.kind == SyntaxTokenKind.String })
+        assertTrue(splitQuoteTokens.none { it.kind == SyntaxTokenKind.Property })
+        assertEquals("]", splitQuoteTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, splitQuoteTokens.last().kind)
+
+        // 4. COPY/ADD/VOLUME preserve BOTH JSON `\"` escapes AND variable expansion highlighting (`Property`)
+        val copyLine = "COPY --from=builder [\"\${SRC}/a\\\"b\", \"dst/\"]"
+        val copyTokens = tokensOnLine(copyLine)
+        assertTrue(copyTokens.any { it.slice(code) == "SRC" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(copyTokens.any { it.slice(code) == "\\\"" && it.kind == SyntaxTokenKind.Constant })
+        assertEquals("]", copyTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, copyTokens.last().kind)
+
+        assertTrue(tokensOnLine("ADD [\"\$SRC/file\", \"/dst/\"]").any { it.slice(code) == "\$SRC" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(tokensOnLine("VOLUME [\"\$DATA\", \"/var/log\"]").any { it.slice(code) == "\$DATA" && it.kind == SyntaxTokenKind.Property })
+
+        // 5. ENTRYPOINT, SHELL, HEALTHCHECK (multiple flags) CMD, ONBUILD CMD keep JSON escapes & suppress `$` / `$1` expansion
+        for (line in listOf(
+            "ENTRYPOINT [\"/bin/app\", \"a\\\"b\", \"\$1\"]",
+            "SHELL [\"powershell\", \"-Command\", \"Write-Host \\\"hi\\\"\"]",
+            "HEALTHCHECK --interval=30s --timeout=5s CMD [\"curl\", \"a\\\"b\"]",
+            "ONBUILD CMD [\"sh\", \"-c\", \"echo \${FOO:-\\\"bar\\\"} \$HOME \$1\"]",
+        )) {
+            val lt = tokensOnLine(line)
+            assertTrue(lt.any { it.slice(code) == "\\\"" && it.kind == SyntaxTokenKind.Constant }, "Missing \\\" escape in: $line")
+            assertEquals("]", lt.last().slice(code), "Expected closing ] Punctuation in: $line")
+            assertEquals(SyntaxTokenKind.Punctuation, lt.last().kind, "Expected closing ] Punctuation in: $line")
+            assertTrue(lt.none { it.kind == SyntaxTokenKind.Property }, "Unexpected variable expansion in exec form: $line")
+            assertTrue(lt.none { it.slice(code) == "\$1" && it.kind == SyntaxTokenKind.Constant }, "Unexpected \$1 expansion in: $line")
+        }
+
+        // 6. Invalid JSON escape (`\a` in Windows path) falls back to shell form: `\` stays String and `$PORT` expands as Property
+        val invalidJsonEscTokens = tokensOnLine("CMD [\"C:\\app\\run.exe\", \"\$PORT\"]")
+        assertTrue(invalidJsonEscTokens.any { it.slice(code) == "\\" && it.kind == SyntaxTokenKind.String })
+        assertTrue(invalidJsonEscTokens.any { it.slice(code) == "\$PORT" && it.kind == SyntaxTokenKind.Property })
+
+        // 7. Default backslash escape mode also falls back to shell form on invalid JSON escapes
+        val defaultEscInvalidJson = "CMD [\"C:\\app\\run.exe\", \"\$PORT\"]\n"
+        val defaultEscTokens = assertValidSnippetHasNoInvalidTokens(
+            DockerfileSyntaxLexer,
+            defaultEscInvalidJson,
+            "dockerfile-default-esc-invalid-json-fallback",
+        )
+        assertTrue(defaultEscTokens.any { it.slice(defaultEscInvalidJson) == "\$PORT" && it.kind == SyntaxTokenKind.Property })
+
+        // 8. POSIX `[ "$TARGETARCH" = "amd64" ]`, `[ "C:\dir\" = "x" ]`, and invalid `CMD ["a" "b"]` stay in shell form
+        val posixVarTokens = tokensOnLine("RUN [ \"\$TARGETARCH\" = \"amd64\" ] && echo ok")
+        assertTrue(posixVarTokens.any { it.slice(code) == "\$TARGETARCH" && it.kind == SyntaxTokenKind.Property })
+        assertTrue(posixVarTokens.any { it.slice(code) == "=" && it.kind == SyntaxTokenKind.Operator })
+
+        val posixWinTokens = tokensOnLine("RUN [ \"C:\\dir\\\" = \"x\" ]")
+        assertTrue(posixWinTokens.any { it.slice(code) == "=" && it.kind == SyntaxTokenKind.Operator })
+        assertTrue(posixWinTokens.any { it.slice(code) == "x" && it.kind == SyntaxTokenKind.String })
+        assertEquals("]", posixWinTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, posixWinTokens.last().kind)
+
+        val missingCommaTokens = tokensOnLine("CMD [\"a\" \"b\"]")
+        assertEquals("]", missingCommaTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, missingCommaTokens.last().kind)
+
+        // 9. Non-JSON shell form & shell `[ -f ... ]` still respect `# escape=\``
+        val shellTokens = tokensOnLine("RUN echo \"C:\\Windows\\\" \"line1`\"quoted\"")
+        assertTrue(shellTokens.any { it.slice(code) == "\\" && it.kind == SyntaxTokenKind.String })
+        assertTrue(shellTokens.any { it.slice(code) == "`\"" && it.kind == SyntaxTokenKind.Constant })
+
+        val testBracketTokens = tokensOnLine("RUN [ -f \"C:\\temp\\\" ]")
+        assertTrue(testBracketTokens.any { it.slice(code) == "\\" && it.kind == SyntaxTokenKind.String })
+        assertEquals("]", testBracketTokens.last().slice(code))
+        assertEquals(SyntaxTokenKind.Punctuation, testBracketTokens.last().kind)
+
+        // 10. Unclosed JSON string unwinds cleanly on newline
+        val fromTokens = tokensOnLine("FROM alpine")
+        assertEquals("FROM", fromTokens.first().slice(code))
+        assertEquals(SyntaxTokenKind.Keyword, fromTokens.first().kind)
+    }
+
+    @Test
     fun satisfiesPrefixTruncationAndFuzzSafety() {
         val sample = DockerfileOracleFixtures.multistageFlagsAndHeredoc.code
         assertPrefixTruncationSafety(DockerfileSyntaxLexer, sample, maxStep = 4)

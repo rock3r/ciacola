@@ -63,16 +63,16 @@ DOLLAR
     ;
 
 FLAG
-    : '--' [a-zA-Z0-9][a-zA-Z0-9_-]* { onDelimiterToken(keepsWordBoundary = false); }
+    : '--' [a-zA-Z0-9][a-zA-Z0-9_-]* { onFlag(); }
     ;
 
-LBRACK : '[' { onDelimiterToken(keepsWordBoundary = true); } ;
-RBRACK : ']' { onDelimiterToken(keepsWordBoundary = false); } ;
+LBRACK : '[' { onLBrack(); } ;
+RBRACK : ']' { onRBrack(); } ;
 LPAREN : '(' { onDelimiterToken(keepsWordBoundary = true); } ;
 RPAREN : ')' { onDelimiterToken(keepsWordBoundary = false); } ;
 LBRACE : '{' { onDelimiterToken(keepsWordBoundary = true); } ;
 RBRACE : '}' { onDelimiterToken(keepsWordBoundary = false); } ;
-COMMA  : ',' { onDelimiterToken(keepsWordBoundary = true); } ;
+COMMA  : ',' { onComma(); } ;
 SEMI   : ';' { onDelimiterToken(keepsWordBoundary = true); } ;
 
 OP_MULTI
@@ -146,23 +146,27 @@ DQ_CONT_BT
     ;
 
 DQ_ESC_BS
-    : '\\' { isEscapeBackslash() }? ~[\r\n]? { onDQuoteNonComment(); }
+    : '\\' { isEscapeBackslash() || (isInJsonString() && !isBacktickContAfterJsonBs()) }? ~[\r\n]? { onDQuoteNonComment(); }
+    ;
+
+DQ_JSON_BS_BEFORE_BT_CONT
+    : '\\' { isInJsonString() && isBacktickContAfterJsonBs() }? { onDQuoteNonComment(); pushMode(Modes.JSON_CONT_ESC); } -> type(DQ_ESC_BS)
     ;
 
 DQ_ESC_BT
-    : '`' { isEscapeBacktick() }? ~[\r\n]? { onDQuoteNonComment(); }
+    : '`' { isEscapeBacktick() && !isInJsonString() }? ~[\r\n]? { onDQuoteNonComment(); }
     ;
 
 DQ_PARAM_EXP_OPEN
-    : '${' { onDQuoteNonComment(); pushParamExp(Modes.PARAM_EXP); }
+    : '${' { !isInJsonNoExpandString() }? { onDQuoteNonComment(); pushParamExp(Modes.PARAM_EXP); }
     ;
 
 DQ_SIMPLE_VAR
-    : '$' [a-zA-Z_][a-zA-Z0-9_]* { onDQuoteNonComment(); }
+    : '$' { !isInJsonNoExpandString() }? [a-zA-Z_][a-zA-Z0-9_]* { onDQuoteNonComment(); }
     ;
 
 DQ_SPECIAL_VAR
-    : '$' [0-9@#?$!*-] { onDQuoteNonComment(); }
+    : '$' { !isInJsonNoExpandString() }? [0-9@#?$!*-] { onDQuoteNonComment(); }
     ;
 
 DQ_DOLLAR
@@ -183,6 +187,34 @@ DQ_HASH
 
 DQ_TEXT
     : ~["\\`$\r\n#]+ { onDQuoteNonComment(); }
+    ;
+
+// ---------------- Pending JSON Escape Across Backtick Continuation ----------------
+
+mode JSON_CONT_ESC;
+
+JCE_CONT_BT
+    : '`' [ \t]* ( '\r'? '\n' | '\r' ) { onDQuoteLineCont(); } -> type(DQ_CONT_BT)
+    ;
+
+JCE_AFTER_COMMENT_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { isDqAfterComment() }? { onDQuoteAfterCommentNewline(); } -> type(DQ_AFTER_COMMENT_NEWLINE)
+    ;
+
+JCE_CONT_BLANK_LINE
+    : [ \t]* ( '\r'? '\n' | '\r' ) { isDqAtLineStart() }? { onDQuoteContinuationBlankLine(); } -> type(DQ_CONT_BLANK_LINE)
+    ;
+
+JCE_COMMENT
+    : [ \t]* '#' { isDqCommentStart() }? ~[\r\n]* { onDQuoteComment(); } -> type(DQ_COMMENT)
+    ;
+
+JCE_NEWLINE
+    : ( '\r'? '\n' | '\r' ) { onDQuoteNewline(Modes.HEREDOC_LITERAL, Modes.HEREDOC_EXPAND); } -> type(DQ_NEWLINE)
+    ;
+
+JCE_ESCAPED
+    : ~[\r\n] { onDQuoteNonComment(); popMode(); } -> type(DQ_ESC_BS)
     ;
 
 // ---------------- Parameter Expansion (${...}) ----------------
