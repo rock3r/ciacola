@@ -201,15 +201,18 @@ internal fun PresenterTopControlBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    val showTooltips = !controller.jumpDialogOpen && !displayPopupOpen
                     PresenterToolbarButton(
-                        label = if (wideBar) "Jump (⌘G)" else "Jump",
-                        tooltip = "Jump to slide 1..${controller.slideCount} (⌘G)",
+                        label = if (wideBar) "Jump (⌘K)" else "Jump",
+                        tooltip = "Jump to slide by number or title (⌘K / ⌘G)",
+                        showTooltip = showTooltips,
                         testTag = "ciacola-presenter-jump-button",
                         onClick = { controller.openJumpDialog(JumpDialogHost.Presenter) },
                     )
                     PresenterToolbarButton(
                         label = if (wideBar) "Blackout (B)" else "Black",
                         tooltip = "Blackout audience stage (B)",
+                        showTooltip = showTooltips,
                         testTag = "ciacola-presenter-blackout-button",
                         active = controller.curtain == StageCurtain.Blackout,
                         palette = palette,
@@ -218,6 +221,7 @@ internal fun PresenterTopControlBar(
                     PresenterToolbarButton(
                         label = if (wideBar) "Whiteout (W)" else "White",
                         tooltip = "Whiteout audience stage (W)",
+                        showTooltip = showTooltips,
                         testTag = "ciacola-presenter-whiteout-button",
                         active = controller.curtain == StageCurtain.Whiteout,
                         palette = palette,
@@ -229,6 +233,7 @@ internal fun PresenterTopControlBar(
                             PresenterToolbarButton(
                                 label = "Displays ▾",
                                 tooltip = "Route audience stage to a display or swap screens",
+                                showTooltip = showTooltips,
                                 testTag = "ciacola-presenter-displays-button",
                                 active = displayPopupOpen,
                                 onClick = { onDisplayPopupOpenChange(!displayPopupOpen) },
@@ -271,7 +276,7 @@ internal fun PresenterTopControlBar(
                             fontFeatureSettings = "tnum",
                             fontWeight = FontWeight.Medium,
                         ),
-                        color = globalColors.text.info,
+                        color = presenterSecondaryTextColor(JewelTheme.isDark),
                         modifier = Modifier.testTag("ciacola-presenter-wall-clock"),
                     )
                 }
@@ -314,7 +319,7 @@ internal fun PresenterTopControlBar(
                 Text(
                     text = "Target",
                     style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
+                    color = presenterSecondaryTextColor(JewelTheme.isDark),
                 )
 
                 PresenterToolbarButton(
@@ -427,6 +432,9 @@ private fun PaceStatusPill(
 private const val DECK_TITLE_MAX_WIDTH_FRACTION = 0.34f
 
 /** Small caption label stacked beside a numeric readout (`Clock 14:30`, `Elapsed 12:03`). */
+private fun presenterSecondaryTextColor(isDark: Boolean): Color =
+    if (isDark) Color(0xFFB4BCC8) else Color(0xFF475061)
+
 @Composable
 private fun LabeledReadout(
     label: String,
@@ -440,7 +448,7 @@ private fun LabeledReadout(
         Text(
             text = label,
             style = JewelTheme.typography.small,
-            color = JewelTheme.globalColors.text.info,
+            color = presenterSecondaryTextColor(JewelTheme.isDark),
             modifier = Modifier.testTag(labelTestTag),
         )
         readout()
@@ -459,6 +467,7 @@ internal fun PresenterToolbarButton(
     testTag: String,
     active: Boolean = false,
     enabled: Boolean = true,
+    showTooltip: Boolean = true,
     palette: PresenterStatusPalette? = null,
     onClick: () -> Unit,
 ) {
@@ -476,7 +485,7 @@ internal fun PresenterToolbarButton(
         else -> globalColors.text.normal
     }
 
-    Tooltip(tooltip = { Text(tooltip) }) {
+    val buttonContent: @Composable () -> Unit = {
         Box(
             modifier = Modifier
                 .height(26.dp)
@@ -503,6 +512,7 @@ internal fun PresenterToolbarButton(
             )
         }
     }
+    Tooltip(tooltip = { Text(tooltip) }, enabled = showTooltip) { buttonContent() }
 }
 
 @Composable

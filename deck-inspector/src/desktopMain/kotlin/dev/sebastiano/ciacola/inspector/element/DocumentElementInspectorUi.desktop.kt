@@ -41,6 +41,7 @@ import dev.sebastiano.ciacola.inspector.design.InspectorTokens
 import dev.sebastiano.ciacola.inspector.design.InspectorTooltip
 import dev.sebastiano.ciacola.inspector.design.inspectorBodyStyle
 import dev.sebastiano.ciacola.inspector.design.inspectorCaptionStyle
+import dev.sebastiano.ciacola.inspector.design.inspectorSecondaryTextColor
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import kotlinx.coroutines.delay
@@ -106,7 +107,7 @@ fun DocumentElementInspectorUi(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(scroll)
-                    .padding(bottom = 24.dp, end = 8.dp),
+                    .padding(bottom = 32.dp, end = 8.dp),
             ) {
                 RemapNoticeBanner(controller)
                 DocumentLayersTree(controller)
@@ -115,7 +116,7 @@ fun DocumentElementInspectorUi(
                     resolvedNode == null -> Text(
                         text = "Select an element on the stage or in Layers. Shift-click or drag a marquee to select several.",
                         style = inspectorBodyStyle(),
-                        color = colors.text.info,
+                        color = inspectorSecondaryTextColor(),
                         modifier = Modifier.padding(horizontal = InspectorTokens.SectionHorizontalPadding, vertical = 12.dp),
                     )
 
@@ -149,6 +150,16 @@ fun DocumentElementInspectorUi(
                         .height(16.dp)
                         .background(Brush.verticalGradient(listOf(colors.panelBackground, colors.panelBackground.copy(alpha = 0f))))
                         .testTag("ciacola-doc-inspector-scroll-fade"),
+                )
+            }
+            if (scroll.canScrollForward) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(20.dp)
+                        .background(Brush.verticalGradient(listOf(colors.panelBackground.copy(alpha = 0f), colors.panelBackground)))
+                        .testTag("ciacola-doc-inspector-bottom-fade"),
                 )
             }
             VerticalScrollbar(
@@ -339,7 +350,7 @@ internal fun RawIdCopyRow(reference: String, onCopyText: (String) -> Boolean) {
             Text(
                 text = reference,
                 style = inspectorCaptionStyle().copy(fontFamily = FontFamily.Monospace),
-                color = colors.text.info,
+                color = inspectorSecondaryTextColor(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).testTag("ciacola-doc-raw-id-text"),

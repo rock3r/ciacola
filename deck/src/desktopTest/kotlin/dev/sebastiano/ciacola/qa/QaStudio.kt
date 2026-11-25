@@ -1066,6 +1066,8 @@ fun launchStudio(
                             )
                             StageShortcutToastOverlay(
                                 toast = studioWorkspace.lastShortcutToast,
+                                enabled = studioWorkspace.mode != StudioMode.Present,
+                                onDismissed = studioWorkspace::clearShortcutToast,
                                 modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter),
                             )
                         }
@@ -1323,8 +1325,17 @@ fun launchStudio(
                 previewStoryboardProvider = { presenterCurrentStoryboard },
                 nextPreviewStoryboardProvider = { presenterNextStoryboard },
                 currentPresetProvider = { activePreset },
-                isStudioOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
+                isStudioOpenProvider = { studioWorkspace.hasExpandedAuthoringTools },
+                isStageAuthoringChromeOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
                 isInspectOpenProvider = { reviewStageCoordinator.inspectModeEnabled },
+                openAuthoringToolsProvider = {
+                    buildList {
+                        if (studioWorkspace.isTimelineTracksOpen) add("Timeline (F5)")
+                        if (studioWorkspace.isDesignEditorVisible) add("Deck Theme (F7)")
+                        if (studioWorkspace.isLinterVisible) add("Issues (F8)")
+                        if (reviewStageCoordinator.inspectModeEnabled) add("Review Inspect (F3)")
+                    }
+                },
                 onEnterCleanShowMode = {
                     closeAuthoringChrome()
                     studioWorkspace.markPresentMode()

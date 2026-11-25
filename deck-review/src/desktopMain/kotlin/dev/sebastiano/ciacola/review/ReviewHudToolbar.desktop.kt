@@ -37,6 +37,12 @@ import org.jetbrains.jewel.ui.typography
  */
 val LocalReviewHudOwnedByAppBar = compositionLocalOf { false }
 
+/**
+ * `true` while the Story window is in audience-facing Present mode (windowed or fullscreen).
+ * Suppresses stage review pins, agent dispatch HUD, and queued-comment toast banners.
+ */
+val LocalAudiencePresenting = compositionLocalOf { false }
+
 private val isMacOs: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
 
 /** Platform-correct modifier name for click-to-comment (`⌃` on macOS, `Ctrl` elsewhere). */

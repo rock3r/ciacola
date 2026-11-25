@@ -507,7 +507,17 @@ class DocumentDeckLintEngine(
         for (beat in 0 until beatCount) {
             currentCoroutineContext().ensureActive()
             val laidOut = DocumentDeckLintLayout.layoutSlideAtBeat(slide, beat, document, themeSpec)
-            val textEntries = laidOut.filter { it.node.text != null }
+            val textEntries = laidOut.filter { entry ->
+                val text = entry.node.text
+                if (text == null || text.value.plainText.isBlank() || entry.effectiveOpacity <= 0.05) {
+                    false
+                } else {
+                    val palette = slide.palette?.let { document.palettes[it] }
+                    val roleColor = DocumentThemeResolver.resolveTypographyRole(text.style, themeSpec).color
+                    val fg = DocumentThemeResolver.resolveColor(text.color ?: roleColor, palette, themeSpec)
+                    fg == null || fg.alpha > 0.05f
+                }
+            }
             val pendingPixelEntries = mutableListOf<Pair<LaidOutNode, StaticContrastDecision.RequiresPixelRender>>()
 
             // Check layout rules for every present node.

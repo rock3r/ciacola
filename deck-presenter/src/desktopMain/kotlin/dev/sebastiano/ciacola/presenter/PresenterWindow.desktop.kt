@@ -209,6 +209,7 @@ fun rememberPresenterWindow(
     },
     currentPresetProvider: () -> DeckThemePreset = { DeckThemePreset.StageDark },
     isStudioOpenProvider: () -> Boolean = { false },
+    isStageAuthoringChromeOpenProvider: (() -> Boolean)? = null,
     isInspectOpenProvider: () -> Boolean = { false },
     openAuthoringToolsProvider: () -> List<String> = { emptyList() },
     onEnterCleanShowMode: () -> Unit = {},
@@ -227,6 +228,7 @@ fun rememberPresenterWindow(
             initialAnimatic = animatic,
             speakerNotesProvider = speakerNotesProvider,
             isStudioOpenProvider = isStudioOpenProvider,
+            isStageAuthoringChromeOpenProvider = isStageAuthoringChromeOpenProvider,
             isInspectOpenProvider = isInspectOpenProvider,
             openAuthoringToolsProvider = openAuthoringToolsProvider,
             onEnterCleanShowModeAction = onEnterCleanShowMode,
@@ -243,6 +245,7 @@ fun rememberPresenterWindow(
         it.animatic = animatic
         it.speakerNotesProvider = speakerNotesProvider
         it.isStudioOpenProvider = isStudioOpenProvider
+        it.isStageAuthoringChromeOpenProvider = isStageAuthoringChromeOpenProvider
         it.isInspectOpenProvider = isInspectOpenProvider
         it.openAuthoringToolsProvider = openAuthoringToolsProvider
         it.onEnterCleanShowModeAction = onEnterCleanShowMode

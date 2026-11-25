@@ -44,6 +44,8 @@ import dev.bnorm.storyboard.easel.LocalOverviewOpen
 import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.bnorm.storyboard.easel.LocalStageViewportHairline
 import dev.bnorm.storyboard.easel.overview.OverviewChromeStyle
+import dev.sebastiano.ciacola.inspector.lint.LintAuditScope
+import dev.sebastiano.ciacola.review.LocalAudiencePresenting
 import dev.sebastiano.ciacola.review.LocalReviewHudOwnedByAppBar
 import kotlinx.coroutines.delay
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -173,7 +175,10 @@ internal fun StudioShell(
         }
     }
 
-    CompositionLocalProvider(LocalReviewHudOwnedByAppBar provides (chromeVisible || (presenting && !fullscreen))) {
+    CompositionLocalProvider(
+        LocalReviewHudOwnedByAppBar provides (chromeVisible || (presenting && !fullscreen)),
+        LocalAudiencePresenting provides (presenting || fullscreen),
+    ) {
         val chromeBackground = studioChromeBackground()
         BoxWithConstraints(
             modifier = Modifier
@@ -188,14 +193,10 @@ internal fun StudioShell(
                         return@onPreviewKeyEvent true
                     }
                     if (ev.type == KeyEventType.KeyDown &&
-                        workspace.mode == StudioMode.Present &&
-                        !overviewOpen &&
-                        // Fullscreen presenting owns Esc (it opens the Easel Overview); never flip
-                        // the workspace back to Edit behind the fullscreen stage.
-                        !fullscreen &&
+                        workspace.themeSheetOpen &&
                         !workspace.isTextInputActiveProvider()
                     ) {
-                        workspace.switchMode(StudioMode.Edit)
+                        workspace.themeSheetOpen = false
                         swallowEscapeKeyUp = true
                         return@onPreviewKeyEvent true
                     }
@@ -272,6 +273,13 @@ fun StudioAppBarHost(
     breadcrumb: String,
     presenterOpen: Boolean,
     onTogglePresenter: () -> Unit,
+    reducedMotion: Boolean = false,
+    ambientLoopsPaused: Boolean = false,
+    isExporting: Boolean = false,
+    onExportPdf: (() -> Unit)? = null,
+    onExportVideo: (() -> Unit)? = null,
+    onToggleReducedMotion: (() -> Unit)? = null,
+    onToggleAmbientLoopsPaused: (() -> Unit)? = null,
     deckSwitcher: @Composable () -> Unit,
 ) {
     val store = workspace.store
@@ -291,8 +299,20 @@ fun StudioAppBarHost(
         presenterOpen = presenterOpen,
         errorCount = workspace.lintController.errorCount,
         warningCount = workspace.lintController.warningCount,
+        inspectorVisible = workspace.isInspectorVisible,
+        reducedMotion = reducedMotion,
+        ambientLoopsPaused = ambientLoopsPaused,
+        isExporting = isExporting,
+        issuesAudited = workspace.lintController.auditScope != LintAuditScope.None,
     )
-    val actions = remember(workspace, onTogglePresenter) {
+    val actions = remember(
+        workspace,
+        onTogglePresenter,
+        onExportPdf,
+        onExportVideo,
+        onToggleReducedMotion,
+        onToggleAmbientLoopsPaused,
+    ) {
         StudioAppBarActions(
             onSelectMode = { workspace.switchMode(it) },
             onUndo = { workspace.undo() },
@@ -302,6 +322,11 @@ fun StudioAppBarHost(
             onToggleTimeline = { workspace.toggleStudioTimeline() },
             onTogglePresenter = onTogglePresenter,
             onRestoreStageFocus = { workspace.onRestoreStageFocus?.invoke() },
+            onToggleInspector = { workspace.toggleInspector() },
+            onExportPdf = onExportPdf,
+            onExportVideo = onExportVideo,
+            onToggleReducedMotion = onToggleReducedMotion,
+            onToggleAmbientLoopsPaused = onToggleAmbientLoopsPaused,
         )
     }
     StudioAppBar(model = model, actions = actions, deckSwitcher = deckSwitcher)

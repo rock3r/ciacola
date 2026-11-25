@@ -84,6 +84,7 @@ fun StudioThemeSheet(
             .padding(top = 6.dp, bottom = 6.dp)
             .shadow(elevation = 14.dp, shape = shape)
             .background(globalColors.panelBackground, shape)
+            .border(1.dp, globalColors.borders.normal, shape)
             .testTag("ciacola-theme-sheet"),
     ) {
         PanelHeader(

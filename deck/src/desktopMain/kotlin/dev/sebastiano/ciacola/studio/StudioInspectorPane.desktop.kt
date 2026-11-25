@@ -73,7 +73,7 @@ fun StudioUnifiedInspectorPane(
     onPickDeckFileToCopyThemes: (() -> Path?)? = null,
     modifier: Modifier = Modifier,
 ) {
-    if (workspace.overviewOpen) return
+    if (workspace.overviewOpen || !workspace.isInspectorVisible) return
 
     StudioInspectorSplitter(workspace)
 

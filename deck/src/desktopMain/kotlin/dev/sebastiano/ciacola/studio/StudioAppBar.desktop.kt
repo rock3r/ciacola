@@ -25,6 +25,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -56,14 +57,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Icon
+import org.jetbrains.jewel.ui.component.PopupMenu
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
+import org.jetbrains.jewel.ui.component.separator
 import org.jetbrains.jewel.ui.icon.IconKey
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.theme.colorPalette
@@ -74,6 +78,12 @@ val StudioAppBarHeight: Dp = 36.dp
 
 /** Below this bar width the right-hand buttons collapse to icon-only. */
 private val CompactAppBarWidth: Dp = 1200.dp
+
+/** Below this bar width secondary controls move into the overflow (`⋯`) menu so core actions never clip. */
+private val NarrowAppBarWidth: Dp = 840.dp
+
+/** Minimum bar width that keeps the breadcrumb beside the deck switcher. */
+private val BreadcrumbMinWidth: Dp = 760.dp
 
 /** Immutable snapshot of everything the App Bar displays. */
 @Immutable
@@ -89,6 +99,11 @@ data class StudioAppBarModel(
     val presenterOpen: Boolean,
     val errorCount: Int,
     val warningCount: Int,
+    val inspectorVisible: Boolean = true,
+    val reducedMotion: Boolean = false,
+    val ambientLoopsPaused: Boolean = false,
+    val isExporting: Boolean = false,
+    val issuesAudited: Boolean = true,
 )
 
 /** Callbacks invoked by the App Bar controls. */
@@ -106,6 +121,11 @@ class StudioAppBarActions(
      * activation (Tab → Space/Enter) keeps focus on the button.
      */
     val onRestoreStageFocus: () -> Unit = {},
+    val onToggleInspector: () -> Unit = {},
+    val onExportPdf: (() -> Unit)? = null,
+    val onExportVideo: (() -> Unit)? = null,
+    val onToggleReducedMotion: (() -> Unit)? = null,
+    val onToggleAmbientLoopsPaused: (() -> Unit)? = null,
 )
 
 /**
@@ -167,6 +187,8 @@ fun StudioAppBar(
             .testTag("ciacola-studio-app-bar"),
     ) {
         val compact = maxWidth < CompactAppBarWidth
+        val narrow = maxWidth < NarrowAppBarWidth
+        val showBreadcrumb = maxWidth >= BreadcrumbMinWidth
         Row(
             modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -176,22 +198,27 @@ fun StudioAppBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                deckSwitcher()
-                Divider(Orientation.Vertical, Modifier.height(16.dp))
-                Text(
-                    text = model.breadcrumb,
-                    style = JewelTheme.typography.regular,
-                    color = globalColors.text.info,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).testTag("ciacola-app-bar-breadcrumb"),
-                )
+                Box(modifier = Modifier.widthIn(max = if (narrow) 180.dp else 240.dp)) {
+                    deckSwitcher()
+                }
+                if (showBreadcrumb) {
+                    Divider(Orientation.Vertical, Modifier.height(16.dp))
+                    Text(
+                        text = model.breadcrumb,
+                        style = JewelTheme.typography.regular,
+                        color = globalColors.text.info,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false).testTag("ciacola-app-bar-breadcrumb"),
+                    )
+                }
             }
 
             StudioModeSegmentedControl(
                 mode = model.mode,
                 onSelectMode = actions.onSelectMode,
-                modifier = Modifier.padding(horizontal = 12.dp),
+                segmentWidth = if (narrow) 58.dp else 64.dp,
+                modifier = Modifier.padding(horizontal = if (narrow) 6.dp else 12.dp),
             )
 
             Row(
@@ -199,39 +226,43 @@ fun StudioAppBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
             ) {
-                // Save state sits left of Undo/Redo so its width changes never shift the buttons.
-                SaveStateIndicator(model.saveState)
-                AppBarButton(
-                    icon = AllIconsKeys.Actions.Undo,
-                    label = null,
-                    tooltip = "Undo (⌘Z)",
-                    enabled = model.canUndo,
-                    testTag = "ciacola-app-bar-undo",
-                    onRestoreStageFocus = actions.onRestoreStageFocus,
-                    onClick = actions.onUndo,
-                )
-                AppBarButton(
-                    icon = AllIconsKeys.Actions.Redo,
-                    label = null,
-                    tooltip = "Redo (⇧⌘Z)",
-                    enabled = model.canRedo,
-                    testTag = "ciacola-app-bar-redo",
-                    onRestoreStageFocus = actions.onRestoreStageFocus,
-                    onClick = actions.onRedo,
-                )
-                AppBarDivider()
-                AppBarButton(
-                    icon = AllIconsKeys.Actions.Colors,
-                    label = if (compact) null else "Theme",
-                    tooltip = "Deck theme (F7)",
-                    toggled = model.themeOpen,
-                    testTag = "ciacola-app-bar-theme",
-                    onRestoreStageFocus = actions.onRestoreStageFocus,
-                    onClick = actions.onToggleTheme,
-                )
+                if (!narrow) {
+                    // Save state sits left of Undo/Redo so its width changes never shift the buttons.
+                    SaveStateIndicator(model.saveState)
+                    AppBarButton(
+                        icon = AllIconsKeys.Actions.Undo,
+                        label = null,
+                        tooltip = "Undo (⌘Z)",
+                        enabled = model.canUndo,
+                        testTag = "ciacola-app-bar-undo",
+                        onRestoreStageFocus = actions.onRestoreStageFocus,
+                        onClick = actions.onUndo,
+                    )
+                    AppBarButton(
+                        icon = AllIconsKeys.Actions.Redo,
+                        label = null,
+                        tooltip = "Redo (⇧⌘Z)",
+                        enabled = model.canRedo,
+                        testTag = "ciacola-app-bar-redo",
+                        onRestoreStageFocus = actions.onRestoreStageFocus,
+                        onClick = actions.onRedo,
+                    )
+                    AppBarDivider()
+                    AppBarButton(
+                        icon = AllIconsKeys.Actions.Colors,
+                        label = if (compact) null else "Theme",
+                        tooltip = "Deck theme (F7)",
+                        toggled = model.themeOpen,
+                        showTooltip = !model.themeOpen,
+                        testTag = "ciacola-app-bar-theme",
+                        onRestoreStageFocus = actions.onRestoreStageFocus,
+                        onClick = actions.onToggleTheme,
+                    )
+                }
                 IssuesBadgeButton(
                     errorCount = model.errorCount,
                     warningCount = model.warningCount,
+                    audited = model.issuesAudited,
                     toggled = model.issuesOpen,
                     onRestoreStageFocus = actions.onRestoreStageFocus,
                     onClick = actions.onToggleIssues,
@@ -256,6 +287,11 @@ fun StudioAppBar(
                     restoreFocusBeforeClick = !model.presenterOpen,
                     onClick = actions.onTogglePresenter,
                 )
+                AppBarOverflowMenuButton(
+                    model = model,
+                    actions = actions,
+                    narrow = narrow,
+                )
             }
         }
         Divider(
@@ -265,12 +301,167 @@ fun StudioAppBar(
     }
 }
 
+@Composable
+private fun AppBarOverflowMenuButton(
+    model: StudioAppBarModel,
+    actions: StudioAppBarActions,
+    narrow: Boolean,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val globalColors = JewelTheme.globalColors
+    Box {
+        AppBarButton(
+            icon = AllIconsKeys.General.Ellipsis,
+            label = null,
+            tooltip = "More actions, export & motion",
+            toggled = expanded,
+            showTooltip = !expanded,
+            testTag = "ciacola-app-bar-overflow",
+            onRestoreStageFocus = actions.onRestoreStageFocus,
+            restoreFocusBeforeClick = true,
+            onClick = { expanded = !expanded },
+        )
+        if (expanded) {
+            PopupMenu(
+                onDismissRequest = {
+                    expanded = false
+                    true
+                },
+                horizontalAlignment = Alignment.End,
+                popupProperties = PopupProperties(focusable = true),
+                modifier = Modifier
+                    .widthIn(min = 210.dp, max = 280.dp)
+                    .testTag("ciacola-app-bar-overflow-menu"),
+            ) {
+                if (narrow) {
+                    selectableItem(
+                        selected = false,
+                        enabled = false,
+                        onClick = {},
+                    ) {
+                        Text(
+                            text = "Status: ${model.saveState.label}",
+                            style = JewelTheme.typography.small,
+                            color = globalColors.text.info,
+                        )
+                    }
+                    selectableItem(
+                        selected = false,
+                        enabled = model.canUndo,
+                        keybinding = setOf("⌘", "Z"),
+                        onClick = {
+                            expanded = false
+                            actions.onUndo()
+                        },
+                    ) { Text("Undo", style = JewelTheme.typography.regular) }
+                    selectableItem(
+                        selected = false,
+                        enabled = model.canRedo,
+                        keybinding = setOf("⇧", "⌘", "Z"),
+                        onClick = {
+                            expanded = false
+                            actions.onRedo()
+                        },
+                    ) { Text("Redo", style = JewelTheme.typography.regular) }
+                    selectableItem(
+                        selected = model.themeOpen,
+                        keybinding = setOf("F7"),
+                        onClick = {
+                            expanded = false
+                            actions.onToggleTheme()
+                        },
+                    ) {
+                        Text(
+                            text = "Deck Theme…",
+                            style = JewelTheme.typography.regular,
+                            modifier = Modifier.testTag("ciacola-overflow-theme"),
+                        )
+                    }
+                    separator()
+                }
+                selectableItem(
+                    selected = model.inspectorVisible,
+                    onClick = {
+                        expanded = false
+                        actions.onToggleInspector()
+                    },
+                ) {
+                    Text(
+                        text = if (model.inspectorVisible) "Hide Inspector" else "Show Inspector",
+                        style = JewelTheme.typography.regular,
+                        modifier = Modifier.testTag("ciacola-overflow-toggle-inspector"),
+                    )
+                }
+                separator()
+                selectableItem(
+                    selected = false,
+                    enabled = !model.isExporting && actions.onExportPdf != null,
+                    onClick = {
+                        expanded = false
+                        actions.onExportPdf?.invoke()
+                    },
+                ) {
+                    Text(
+                        text = "Export PDF…",
+                        style = JewelTheme.typography.regular,
+                        modifier = Modifier.testTag("ciacola-overflow-export-pdf"),
+                    )
+                }
+                selectableItem(
+                    selected = false,
+                    enabled = !model.isExporting && actions.onExportVideo != null,
+                    onClick = {
+                        expanded = false
+                        actions.onExportVideo?.invoke()
+                    },
+                ) {
+                    Text(
+                        text = "Export Video (MP4)…",
+                        style = JewelTheme.typography.regular,
+                        modifier = Modifier.testTag("ciacola-overflow-export-video"),
+                    )
+                }
+                separator()
+                selectableItem(
+                    selected = model.reducedMotion,
+                    enabled = actions.onToggleReducedMotion != null,
+                    onClick = {
+                        expanded = false
+                        actions.onToggleReducedMotion?.invoke()
+                    },
+                ) {
+                    Text(
+                        text = "Reduced Motion",
+                        style = JewelTheme.typography.regular,
+                        modifier = Modifier.testTag("ciacola-overflow-reduced-motion"),
+                    )
+                }
+                selectableItem(
+                    selected = model.ambientLoopsPaused,
+                    enabled = actions.onToggleAmbientLoopsPaused != null,
+                    onClick = {
+                        expanded = false
+                        actions.onToggleAmbientLoopsPaused?.invoke()
+                    },
+                ) {
+                    Text(
+                        text = "Pause Ambient Loops",
+                        style = JewelTheme.typography.regular,
+                        modifier = Modifier.testTag("ciacola-overflow-pause-loops"),
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** `Edit | Review | Present` segmented control. Selection is a tint plus an accent border. */
 @Composable
 fun StudioModeSegmentedControl(
     mode: StudioMode,
     onSelectMode: (StudioMode) -> Unit,
     modifier: Modifier = Modifier,
+    segmentWidth: Dp = 64.dp,
 ) {
     val globalColors = JewelTheme.globalColors
     val shape = RoundedCornerShape(6.dp)
@@ -289,6 +480,7 @@ fun StudioModeSegmentedControl(
             ModeSegment(
                 mode = entry,
                 selected = entry == mode,
+                segmentWidth = segmentWidth,
                 onClick = { onSelectMode(entry) },
             )
         }
@@ -300,6 +492,7 @@ fun StudioModeSegmentedControl(
 private fun ModeSegment(
     mode: StudioMode,
     selected: Boolean,
+    segmentWidth: Dp,
     onClick: () -> Unit,
 ) {
     val globalColors = JewelTheme.globalColors
@@ -316,7 +509,7 @@ private fun ModeSegment(
     Tooltip(tooltip = { Text(mode.tooltip) }) {
         Box(
             modifier = Modifier
-                .width(64.dp)
+                .width(segmentWidth)
                 .fillMaxHeight()
                 .clip(shape)
                 .background(bg, shape)
@@ -353,6 +546,7 @@ internal fun AppBarButton(
     testTag: String,
     enabled: Boolean = true,
     toggled: Boolean = false,
+    showTooltip: Boolean = true,
     onRestoreStageFocus: () -> Unit = {},
     restoreFocusBeforeClick: Boolean = false,
     onClick: () -> Unit,
@@ -369,7 +563,7 @@ internal fun AppBarButton(
         hovered && enabled -> globalColors.borders.normal.copy(alpha = 0.35f)
         else -> Color.Transparent
     }
-    Tooltip(tooltip = { Text(tooltip) }) {
+    val content: @Composable () -> Unit = {
         Row(
             modifier = Modifier
                 .height(26.dp)
@@ -412,6 +606,7 @@ internal fun AppBarButton(
             }
         }
     }
+    Tooltip(tooltip = { Text(tooltip) }, enabled = showTooltip) { content() }
 }
 
 @Composable
@@ -461,6 +656,7 @@ private fun SaveStateIndicator(state: StudioSaveState) {
 private fun IssuesBadgeButton(
     errorCount: Int,
     warningCount: Int,
+    audited: Boolean,
     toggled: Boolean,
     onRestoreStageFocus: () -> Unit,
     onClick: () -> Unit,
@@ -477,8 +673,13 @@ private fun IssuesBadgeButton(
         hovered -> globalColors.borders.normal.copy(alpha = 0.35f)
         else -> Color.Transparent
     }
-    val description = "$errorCount errors, $warningCount warnings (F8)"
-    Tooltip(tooltip = { Text("Issues: $description") }) {
+    val description = if (audited) {
+        "$errorCount errors, $warningCount warnings (F8)"
+    } else {
+        "Not yet checked — open Issues and click Check deck (F8)"
+    }
+    val tooltipText = if (audited) "Issues: $description" else "Issues: $description"
+    Tooltip(tooltip = { Text(tooltipText) }) {
         Row(
             modifier = Modifier
                 .height(26.dp)
@@ -502,21 +703,31 @@ private fun IssuesBadgeButton(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Icon(key = AllIconsKeys.General.Error, contentDescription = null, modifier = Modifier.size(14.dp))
-            Text(
-                text = errorCount.toString(),
-                style = JewelTheme.typography.regular.copy(fontFeatureSettings = "tnum"),
-                color = globalColors.text.normal,
-                modifier = Modifier.testTag("ciacola-app-bar-issues-errors"),
-            )
-            Text(text = "·", style = JewelTheme.typography.regular, color = globalColors.text.info)
-            Icon(key = AllIconsKeys.General.Warning, contentDescription = null, modifier = Modifier.size(14.dp))
-            Text(
-                text = warningCount.toString(),
-                style = JewelTheme.typography.regular.copy(fontFeatureSettings = "tnum"),
-                color = globalColors.text.normal,
-                modifier = Modifier.testTag("ciacola-app-bar-issues-warnings"),
-            )
+            if (audited) {
+                Icon(key = AllIconsKeys.General.Error, contentDescription = null, modifier = Modifier.size(14.dp))
+                Text(
+                    text = errorCount.toString(),
+                    style = JewelTheme.typography.regular.copy(fontFeatureSettings = "tnum"),
+                    color = globalColors.text.normal,
+                    modifier = Modifier.testTag("ciacola-app-bar-issues-errors"),
+                )
+                Text(text = "·", style = JewelTheme.typography.regular, color = globalColors.text.info)
+                Icon(key = AllIconsKeys.General.Warning, contentDescription = null, modifier = Modifier.size(14.dp))
+                Text(
+                    text = warningCount.toString(),
+                    style = JewelTheme.typography.regular.copy(fontFeatureSettings = "tnum"),
+                    color = globalColors.text.normal,
+                    modifier = Modifier.testTag("ciacola-app-bar-issues-warnings"),
+                )
+            } else {
+                Icon(key = AllIconsKeys.General.InspectionsEye, contentDescription = null, modifier = Modifier.size(14.dp))
+                Text(
+                    text = "Check",
+                    style = JewelTheme.typography.regular,
+                    color = globalColors.text.normal,
+                    modifier = Modifier.testTag("ciacola-app-bar-issues-unchecked"),
+                )
+            }
         }
     }
 }

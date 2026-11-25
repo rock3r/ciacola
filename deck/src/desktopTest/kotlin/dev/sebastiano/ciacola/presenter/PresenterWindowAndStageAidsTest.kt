@@ -164,6 +164,7 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-pace-pill").assertTextContains("On pace", substring = true)
         onNodeWithTag("ciacola-presenter-current-preview").assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-next-preview").assertIsDisplayed()
+        onNodeWithTag("ciacola-presenter-next-build-badge", useUnmergedTree = true).assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-notes-content").assertIsDisplayed()
 
         // Readiness banner is visible with Enter Clean Show Mode and disappears once Studio/Inspect are closed.
@@ -368,6 +369,23 @@ class PresenterWindowAndStageAidsTest {
         waitForIdle()
         onNodeWithTag("ciacola-presenter-jump-dialog").assertDoesNotExist()
         assertEquals(Storyboard.Index(3, 0), animatic.currentIndex)
+
+        // Re-open with Cmd+K, try title search jump ("Typographic" or "Beats"), and check Next Build badge!
+        onRoot().performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.K)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-dialog").assertIsDisplayed()
+        onNodeWithTag("ciacola-presenter-jump-input").performTextReplacement("Beats")
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        mainClock.advanceTimeBy(200)
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-dialog").assertDoesNotExist()
+        assertEquals(Storyboard.Index(0, 0), animatic.currentIndex, "Cmd+K title jump must land on matching slide")
 
         // Clicking an active curtain resumes the stage without leaking clicks underneath.
         onRoot().performKeyInput { pressKey(Key.B) }

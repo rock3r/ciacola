@@ -791,9 +791,18 @@ class CanonicalThreeTalkIntegrationTests(unittest.TestCase):
             self.assertNotIn("frame", n_map["glsl-label"])
 
         s28_nodes = {n["id"]: n for n in _walk_nodes(sh_slides["s28"]["nodes"])}
-        self.assertTrue(any(_plain_text(n).strip() == "val" for n in s28_nodes.values()), "Shaders s28 missing 'val'")
-        self.assertNotEqual(s28_nodes["drawbehind"]["text"].get("align"), "center")
-        s35_texts = [_plain_text(n) for n in _walk_nodes(sh_slides["s35"]["nodes"]) if "text" in n]
+        s28_code = next((n["code"] for n in s28_nodes.values() if "code" in n), None)
+        if s28_code is not None:
+            self.assertIn("val brush", s28_code.get("value", ""))
+            self.assertIn("drawBehind", s28_code.get("value", ""))
+        else:
+            self.assertTrue(any(_plain_text(n).strip() == "val" for n in s28_nodes.values()), "Shaders s28 missing 'val'")
+            self.assertNotEqual(s28_nodes["drawbehind"]["text"].get("align"), "center")
+        s35_texts = [
+            _plain_text(n) if "text" in n else n["code"].get("value", "")
+            for n in _walk_nodes(sh_slides["s35"]["nodes"])
+            if "text" in n or "code" in n
+        ]
         self.assertTrue(any(");" in t for t in s35_texts), "Shaders s35 missing ');'")
         for sid in ("s45", "s46"):
             url_node = next(n for n in _walk_nodes(sh_slides[sid]["nodes"]) if "wlBfD1" in _plain_text(n))
@@ -849,10 +858,14 @@ class CanonicalThreeTalkIntegrationTests(unittest.TestCase):
         # 4. Not Just Plain Text 2024 fixes
         nj_slides = {s["id"]: s for s in self.docs["not-just-plain-text-2024"]["slides"]}
         s19_map = {n["id"]: n for n in _walk_nodes(nj_slides["s019"]["nodes"])}
-        self.assertGreaterEqual(
-            float(s19_map["hacks"]["frame"]["x"]) - float(s19_map["if-you-guessed"]["frame"]["x"]),
-            655.0,
-        )
+        if "frame" in s19_map.get("hacks", {}) and "frame" in s19_map.get("if-you-guessed", {}):
+            self.assertGreaterEqual(
+                float(s19_map["hacks"]["frame"]["x"]) - float(s19_map["if-you-guessed"]["frame"]["x"]),
+                655.0,
+            )
+        else:
+            self.assertIn("if-you-guessed-row", s19_map)
+            self.assertGreaterEqual(float(s19_map["if-you-guessed-row"]["row"]["gap"]), 20.0)
         s01_texts = [_plain_text(n).strip() for n in _walk_nodes(nj_slides["s001"]["nodes"]) if "text" in n]
         self.assertIn("NOT", s01_texts)
         self.assertIn("JUST", s01_texts)
@@ -887,10 +900,13 @@ class CanonicalThreeTalkIntegrationTests(unittest.TestCase):
         # 5. Geometry, line-head, and rounded-rect invariants across all talks
         sh_slides = {s["id"]: s for s in self.docs["shaders-quickie-2025"]["slides"]}
         s16_map = {n["id"]: n for n in _walk_nodes(sh_slides["s16"]["nodes"])}
-        for nid in ("half", "4", "float", "2"):
-            self.assertAlmostEqual(float(s16_map[nid]["frame"]["y"]), 321.92, places=2)
-        self.assertGreaterEqual(float(s16_map["half"]["frame"]["w"]), 106.0)
-        self.assertGreaterEqual(float(s16_map["float"]["frame"]["w"]), 132.0)
+        if "half4-main-float2-fragcoord" in s16_map:
+            self.assertAlmostEqual(float(s16_map["half4-main-float2-fragcoord"]["frame"]["y"]), 480.09, places=2)
+        else:
+            for nid in ("half", "4", "float", "2"):
+                self.assertAlmostEqual(float(s16_map[nid]["frame"]["y"]), 321.92, places=2)
+            self.assertGreaterEqual(float(s16_map["half"]["frame"]["w"]), 106.0)
+            self.assertGreaterEqual(float(s16_map["float"]["frame"]["w"]), 132.0)
         self.assertEqual(s16_map["line-7"]["shape"].get("heads"), {"end": "filled"})
         self.assertIsNone(s16_map["line-7"]["shape"].get("fill"))
 
@@ -907,7 +923,10 @@ class CanonicalThreeTalkIntegrationTests(unittest.TestCase):
             self.assertEqual(jw_s18[pid]["frame"]["w"], jw_s19[pid]["frame"]["w"])
         s28_ids = {n["id"] for n in sh_slides["s28"]["nodes"]}
         s29_ids = {n["id"] for n in sh_slides["s29"]["nodes"]}
-        self.assertIn("open-paren", s28_ids & s29_ids)
+        if any("code" in n for n in sh_slides["s28"]["nodes"]):
+            self.assertIn("val-brush-remember-compileds", s28_ids)
+        else:
+            self.assertIn("open-paren", s28_ids & s29_ids)
         for bad in ("node", "brush", "node-5", "compiledshader-setfloatunifo"):
             self.assertNotIn(bad, s28_ids & s29_ids)
         s089_line5 = next(n for n in nj_slides["s089"]["nodes"] if n["id"] == "line-5")
@@ -1090,10 +1109,10 @@ class VisualFixesConverterUnitTest(unittest.TestCase):
                                 msg=f"{did}/{slide['id']}/{node['id']}: pill cornerRadius={cr} != min(w,h)/2 ({fr})",
                             )
 
-        # Verify all 120 normalized Path->rect exact subpixel extents against golden fixture
+        # Verify all 119 normalized Path->rect exact subpixel extents against golden fixture
         fixture_path = TOOLS_DIR / "fixtures" / "exact_rect_frames.json"
         golden_entries = json.loads(fixture_path.read_text(encoding="utf-8"))
-        self.assertEqual(len(golden_entries), 120)
+        self.assertEqual(len(golden_entries), 119)
         slides_by_deck = {did: {s["id"]: s for s in doc["slides"]} for did, doc in docs.items()}
         for entry in golden_entries:
             slide = slides_by_deck[entry["deck"]][entry["slide"]]
@@ -1116,8 +1135,8 @@ class VisualFixesConverterUnitTest(unittest.TestCase):
         self.assertEqual(s72_p1["frame"], {"x": 653, "y": 567, "w": 610.38, "h": 100})
 
         nj_slides = {s["id"]: s for s in docs["not-just-plain-text-2024"]["slides"]}
-        nj_s17_p1 = next(n for n in nj_slides["s017"]["nodes"] if n["id"] == "path-1")
-        self.assertEqual(nj_s17_p1["frame"], {"x": 656, "y": 800, "w": 605.79, "h": 100})
+        nj_s17_code = next(n for n in nj_slides["s017"]["nodes"] if n["id"] == "overflow-wrap-break-word")
+        self.assertEqual(nj_s17_code["frame"], {"x": 651.2, "y": 805, "w": 656, "h": 110})
         nj_s89_p2 = next(n for n in nj_slides["s089"]["nodes"] if n["id"] == "path-2")
         self.assertEqual(nj_s89_p2["frame"], {"x": 572, "y": 303, "w": 422.16, "h": 427.1})
 

@@ -128,12 +128,13 @@ fun ColorTokenRow(
                         Text(if (expanded) "Collapse $label color picker" else "Edit $label color ($hexText)")
                     },
                 ) {
+                    val swatchShape = RoundedCornerShape(4.dp)
+                    val swatchBorderColor = if (JewelTheme.isDark) Color(0x4DFFFFFF) else Color(0x3D000000)
                     Box(
                         modifier = Modifier
                             .size(22.dp)
                             .designActivatableFocus(focusRingColor, cornerRadius = 4.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .border(1.dp, globalColors.borders.normal, RoundedCornerShape(4.dp))
+                            .clip(swatchShape)
                             .clickable(onClick = onToggleExpand)
                             .testTag("design-color-$tokenId-swatch")
                             .semantics {
@@ -146,6 +147,7 @@ fun ColorTokenRow(
                             CheckerboardBackground(Modifier.fillMaxSize())
                         }
                         Box(Modifier.fillMaxSize().background(color))
+                        Box(Modifier.fillMaxSize().border(1.dp, swatchBorderColor, swatchShape))
                     }
                 }
 

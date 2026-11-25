@@ -369,20 +369,43 @@ private fun PresenterPreviewColumn(
                 }
             }
 
+            val nextIdx = controller.nextPreviewIndex
+            val isNextBuild = nextIdx != null && nextIdx.sceneIndex == controller.currentSceneIndex
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 PreviewHeader(width = nextWidth) {
-                    Text(
-                        text = controller.nextStepLabel(),
-                        style = JewelTheme.typography.h4TextStyle,
-                        color = globalColors.text.info,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("ciacola-presenter-next-header"),
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (isNextBuild) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(globalColors.outlines.focused.copy(alpha = 0.16f))
+                                    .border(1.dp, globalColors.outlines.focused.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp)
+                                    .testTag("ciacola-presenter-next-build-badge"),
+                            ) {
+                                Text(
+                                    text = "NEXT BUILD",
+                                    style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold, fontSize = 10.sp),
+                                    color = globalColors.text.normal,
+                                )
+                            }
+                        }
+                        Text(
+                            text = controller.nextStepLabel(),
+                            style = JewelTheme.typography.h4TextStyle,
+                            color = globalColors.text.info,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("ciacola-presenter-next-header"),
+                        )
+                    }
                 }
-                val nextIdx = controller.nextPreviewIndex
                 if (nextIdx != null) {
-                    Tooltip(tooltip = { Text("Advance to ${controller.nextStepLabel()} (→ / Space)") }) {
+                    val cardContent: @Composable () -> Unit = {
                         Box(
                             modifier = Modifier
                                 .size(nextWidth, nextHeight)
@@ -404,6 +427,12 @@ private fun PresenterPreviewColumn(
                                     .clickable { controller.step(scope, AdvanceDirection.Forward) },
                             )
                         }
+                    }
+                    Tooltip(
+                        tooltip = { Text("Advance to ${controller.nextStepLabel()} (→ / Space)") },
+                        enabled = !controller.jumpDialogOpen,
+                    ) {
+                        cardContent()
                     }
                 } else {
                     Box(

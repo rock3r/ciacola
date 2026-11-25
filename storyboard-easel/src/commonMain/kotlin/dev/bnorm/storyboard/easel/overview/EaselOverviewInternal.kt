@@ -345,6 +345,7 @@ internal fun EaselOverviewInternal(
                         storyboard = animatic.storyboard,
                         overviewState = overviewState,
                         highlightedColumnIndex = highlightedColumnIndex,
+                        quickJumpOpen = quickJumpOpen,
                         quickJumpQuery = quickJumpQuery,
                         columns = filteredColumns,
                         gridColumnCount = gridColumnCount,

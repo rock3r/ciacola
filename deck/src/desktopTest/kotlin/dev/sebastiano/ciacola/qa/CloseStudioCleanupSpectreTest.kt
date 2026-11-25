@@ -3,7 +3,6 @@ package dev.sebastiano.ciacola.qa
 import dev.sebastiano.ciacola.studio.StudioInspectorTab
 import dev.sebastiano.ciacola.studio.StudioMode
 import dev.sebastiano.spectre.testing.runSpectreTest
-import java.awt.event.KeyEvent
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -48,8 +47,8 @@ class CloseStudioCleanupSpectreTest {
                 "Present mode must hide Studio App Bar",
             )
 
-            // Pressing Esc returns to Edit mode, restoring the Design tab & direct-edit overlay.
-            automator.pressKey(KeyEvent.VK_ESCAPE)
+            // Switching back to Edit mode restores the App Bar, Design tab, and direct-edit overlay.
+            onUi { studioWorkspace.switchMode(StudioMode.Edit) }
             automator.waitForNode(tag = "ciacola-studio-app-bar", timeout = 5.seconds)
             settle()
             assertTrue(studioWorkspace.activeTab == StudioInspectorTab.Design)

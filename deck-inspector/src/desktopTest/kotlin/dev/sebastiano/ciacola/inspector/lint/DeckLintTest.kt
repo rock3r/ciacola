@@ -1,5 +1,7 @@
 package dev.sebastiano.ciacola.inspector.lint
 
+import dev.sebastiano.ciacola.document.BeatSpec
+import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.Fill
@@ -9,8 +11,11 @@ import dev.sebastiano.ciacola.document.RichTextValue
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.document.TextPayload
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class DeckLintTest {
 
@@ -105,6 +110,54 @@ class DeckLintTest {
             assertTrue(report.issues.any { it.slideIndex == 1 && it.code.contains("BOUNDS", ignoreCase = true) }, "Expected out-of-bounds on slide 1, got: ${report.issues}")
             assertTrue(report.issues.any { it.slideIndex == 1 && it.code.contains("TINY", ignoreCase = true) }, "Expected tiny text on slide 1, got: ${report.issues}")
             assertTrue(report.issues.any { it.slideIndex == 2 && it.code.contains("OVERLAP", ignoreCase = true) }, "Expected overlap on slide 2, got: $codes")
+        }
+    }
+
+    @Test
+    fun textOverlapIsScopedToCoVisibleBeatsAndIgnoresFadedOutNodes() = runBlocking {
+        val doc = DeckDocument(
+            id = "beat-scoped-overlap",
+            title = "Beat Scoped Overlap",
+            defaultTheme = "light",
+            themes = mapOf(
+                "light" to DeckThemeSpec(
+                    colors = mapOf(
+                        "background" to "#EBEBEB",
+                        "foreground" to "#242124",
+                    ),
+                ),
+            ),
+            slides = listOf(
+                SlideSpec(
+                    id = "s0",
+                    background = Fill.Solid("#EBEBEB"),
+                    beats = listOf(BeatSpec(), BeatSpec()),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "s0:fading-out",
+                            frame = FrameSpec(x = 120.0, y = 120.0, w = 640.0, h = 70.0),
+                            text = TextPayload(value = RichTextValue.Plain("Beat 0 copy"), color = "#242124", size = 36.0),
+                            builds = listOf(
+                                Build.Change(beat = 1, set = buildJsonObject { put("opacity", 0.0) }),
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "s0:entering-beat-1",
+                            frame = FrameSpec(x = 120.0, y = 120.0, w = 640.0, h = 70.0),
+                            text = TextPayload(value = RichTextValue.Plain("Beat 1 replacement"), color = "#242124", size = 36.0),
+                            builds = listOf(Build.Enter(beat = 1, effect = "appear")),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        DocumentDeckLintEngine().use { engine ->
+            val report = engine.lintFullDeck(doc)
+            assertFalse(
+                report.issues.any { it.code == "TEXT_OVERLAP" },
+                "Sequential cross-beat text replacements must not trigger TEXT_OVERLAP, got: ${report.issues}",
+            )
         }
     }
 }

@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -166,7 +167,7 @@ fun DocumentThemeInspectorUi(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     if (visibility.showSelector) {
-                        Text("Theme", style = inspectorBodyStyle(), color = colors.text.info)
+                        Text("Theme", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor())
                         Dropdown(
                             modifier = Modifier.weight(1f).height(InspectorTokens.RowHeight).testTag("ciacola-doc-theme-selector"),
                             menuContent = {
@@ -198,7 +199,7 @@ fun DocumentThemeInspectorUi(
 
             if (visibility.showBasePreset) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Base", style = inspectorBodyStyle(), color = colors.text.info)
+                    Text("Base", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor())
                     InspectorSegmented(
                         options = listOf("stageDark", "keynoteLight"),
                         selected = listOf("stageDark", "keynoteLight").firstOrNull { themeSpec.preset.equals(it, ignoreCase = true) },
@@ -240,7 +241,7 @@ fun DocumentThemeInspectorUi(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(scroll)
-                    .padding(bottom = 24.dp, end = 8.dp),
+                    .padding(bottom = 32.dp, end = 8.dp),
             ) {
                 when (activeTab) {
                     ThemeInspectorSectionTab.Colors -> {
@@ -251,6 +252,25 @@ fun DocumentThemeInspectorUi(
                     ThemeInspectorSectionTab.Motion -> ThemeMotionEditorSection(controller)
                     ThemeInspectorSectionTab.Palettes -> ThemePalettesEditorSection(controller, doc.palettes.keys.toList())
                 }
+            }
+            if (scroll.value > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(14.dp)
+                        .background(Brush.verticalGradient(listOf(colors.panelBackground, colors.panelBackground.copy(alpha = 0f)))),
+                )
+            }
+            if (scroll.canScrollForward) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(20.dp)
+                        .background(Brush.verticalGradient(listOf(colors.panelBackground.copy(alpha = 0f), colors.panelBackground)))
+                        .testTag("ciacola-doc-theme-bottom-fade"),
+                )
             }
             VerticalScrollbar(
                 scrollState = scroll,
@@ -511,7 +531,7 @@ private fun ThemeTypographyEditorSection(controller: DocumentThemeInspectorContr
         },
     ) {
         Row(Modifier.fillMaxWidth().height(InspectorTokens.RowHeight), verticalAlignment = Alignment.CenterVertically) {
-            Text("Role", style = inspectorBodyStyle(), color = colors.text.info, modifier = Modifier.width(81.dp))
+            Text("Role", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(81.dp))
             Dropdown(
                 modifier = Modifier.weight(1f).height(InspectorTokens.RowHeight).testTag("ciacola-doc-theme-typo-role-dropdown"),
                 menuContent = {
@@ -544,7 +564,7 @@ private fun ThemeTypographyEditorSection(controller: DocumentThemeInspectorContr
         )
         val weights = remember { listOf(300, 400, 500, 600, 700, 800, 900) }
         Row(Modifier.fillMaxWidth().height(InspectorTokens.RowHeight), verticalAlignment = Alignment.CenterVertically) {
-            Text("Weight", style = inspectorBodyStyle(), color = colors.text.info, modifier = Modifier.width(81.dp))
+            Text("Weight", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(81.dp))
             Dropdown(
                 modifier = Modifier.weight(1f).height(InspectorTokens.RowHeight).testTag("ciacola-doc-theme-typo-weight"),
                 menuContent = {
@@ -597,7 +617,7 @@ private fun ThemeMotionEditorSection(controller: DocumentThemeInspectorControlle
             labelWidth = 72.dp,
         )
         Row(Modifier.fillMaxWidth().height(InspectorTokens.RowHeight), verticalAlignment = Alignment.CenterVertically) {
-            Text("Curve", style = inspectorBodyStyle(), color = colors.text.info, modifier = Modifier.width(81.dp))
+            Text("Curve", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(81.dp))
             Dropdown(
                 modifier = Modifier.weight(1f).height(InspectorTokens.RowHeight).testTag("ciacola-doc-theme-motion-curve"),
                 menuContent = {
@@ -623,7 +643,7 @@ private fun ThemeMotionEditorSection(controller: DocumentThemeInspectorControlle
         }
         val currentTransType = motion?.transition?.type ?: TransitionType.Dissolve
         Row(Modifier.fillMaxWidth().height(InspectorTokens.RowHeight), verticalAlignment = Alignment.CenterVertically) {
-            Text("Transition", style = inspectorBodyStyle(), color = colors.text.info, modifier = Modifier.width(81.dp))
+            Text("Transition", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(81.dp))
             Dropdown(
                 modifier = Modifier.weight(1f).height(InspectorTokens.RowHeight).testTag("ciacola-doc-theme-motion-transition"),
                 menuContent = {

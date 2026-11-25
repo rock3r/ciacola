@@ -26,6 +26,7 @@ import dev.sebastiano.ciacola.inspector.design.InspectorSegmented
 import dev.sebastiano.ciacola.inspector.design.InspectorTokens
 import dev.sebastiano.ciacola.inspector.design.InspectorTooltip
 import dev.sebastiano.ciacola.inspector.design.inspectorBodyStyle
+import dev.sebastiano.ciacola.inspector.design.inspectorSecondaryTextColor
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import dev.sebastiano.ciacola.inspector.document.snapHalfUnit
 import kotlin.math.roundToInt
@@ -346,7 +347,7 @@ private fun OriginAndScaleRow(
         verticalAlignment = Alignment.Top,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Origin", style = inspectorBodyStyle(), color = colors.text.info)
+            Text("Origin", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor())
             AnchorGrid(
                 originX = origin?.x ?: 0.5,
                 originY = origin?.y ?: 0.5,
@@ -455,7 +456,7 @@ internal fun AlignDistributeToolbar(controller: DocumentElementInspectorControll
         }
         Spacer(Modifier.weight(1f))
         if (positionedCount > 1) {
-            Text("$positionedCount selected", style = inspectorBodyStyle(), color = colors.text.info)
+            Text("$positionedCount selected", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor())
         }
     }
 }

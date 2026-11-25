@@ -59,6 +59,7 @@ import androidx.compose.ui.window.PopupProperties
 import dev.sebastiano.ciacola.inspector.design.CheckerboardBackground
 import dev.sebastiano.ciacola.inspector.design.HsvChannelPickers
 import dev.sebastiano.ciacola.inspector.design.InspectorTokens
+import dev.sebastiano.ciacola.inspector.design.inspectorSecondaryTextColor
 import dev.sebastiano.ciacola.inspector.design.humanizeTokenKey
 import dev.sebastiano.ciacola.inspector.design.inspectorAccent
 import dev.sebastiano.ciacola.inspector.design.inspectorBodyStyle
@@ -91,11 +92,11 @@ internal fun colorValueDisplayName(value: String?): String = when {
 internal fun ColorSwatch(color: Color?, size: androidx.compose.ui.unit.Dp, tag: String? = null) {
     val colors = JewelTheme.globalColors
     val shape = RoundedCornerShape(InspectorTokens.Corner)
+    val swatchBorder = if (JewelTheme.isDark) Color(0x4DFFFFFF) else Color(0x3D000000)
     Box(
         modifier = Modifier
             .size(size)
             .clip(shape)
-            .border(1.dp, colors.borders.normal, shape)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier),
     ) {
         if (color == null) {
@@ -104,12 +105,10 @@ internal fun ColorSwatch(color: Color?, size: androidx.compose.ui.unit.Dp, tag: 
                 drawLine(slash, Offset(this.size.width * 0.15f, this.size.height * 0.85f), Offset(this.size.width * 0.85f, this.size.height * 0.15f), strokeWidth = 1.5.dp.toPx())
             }
         } else {
-            // Inset by half a border and clipped to the same rounded shape so the fill never bleeds
-            // past the 1dp border's anti-aliased corners.
-            val inner = Modifier.fillMaxSize().padding(0.5.dp).clip(shape)
-            if (color.alpha < 0.999f) CheckerboardBackground(inner)
-            Box(inner.background(color, shape))
+            if (color.alpha < 0.999f) CheckerboardBackground(Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(color, shape))
         }
+        Box(Modifier.fillMaxSize().border(1.dp, swatchBorder, shape))
     }
 }
 
@@ -266,7 +265,7 @@ private fun ColorPopoverContent(
                 ) { Text("Clear", style = inspectorBodyStyle()) }
             }
         }
-        Text("Theme colors", style = inspectorCaptionStyle(), color = colors.text.info)
+        Text("Theme colors", style = inspectorCaptionStyle(), color = inspectorSecondaryTextColor())
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(max = 216.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -301,7 +300,7 @@ private fun ColorPopoverContent(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Hex", style = inspectorBodyStyle(), color = colors.text.info, modifier = Modifier.width(28.dp))
+            Text("Hex", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(28.dp))
             TextField(
                 state = hexState,
                 placeholder = { Text("#RRGGBB") },

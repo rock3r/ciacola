@@ -67,6 +67,7 @@ import dev.sebastiano.ciacola.inspector.design.InspectorTokens
 import dev.sebastiano.ciacola.inspector.design.InspectorTooltip
 import dev.sebastiano.ciacola.inspector.design.inspectorAccent
 import dev.sebastiano.ciacola.inspector.design.inspectorBodyStyle
+import dev.sebastiano.ciacola.inspector.design.inspectorSecondaryTextColor
 import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import java.awt.Cursor
 import java.util.Locale
@@ -209,7 +210,7 @@ internal fun NumericPropertyField(
             Text(
                 text = label,
                 style = inspectorBodyStyle(),
-                color = colors.text.info,
+                color = inspectorSecondaryTextColor(),
                 maxLines = 1,
                 overflow = TextOverflow.Clip,
                 modifier = Modifier
@@ -277,7 +278,7 @@ internal fun NumericPropertyField(
                 Text(
                     text = MIXED_VALUE_PLACEHOLDER,
                     style = inspectorBodyStyle(),
-                    color = colors.text.info,
+                    color = inspectorSecondaryTextColor(),
                     maxLines = 1,
                     modifier = Modifier.testTag("$tag-mixed"),
                 )
@@ -369,7 +370,7 @@ internal fun CompactSliderRow(
         Text(
             text = label,
             style = inspectorBodyStyle(),
-            color = colors.text.info,
+            color = inspectorSecondaryTextColor(),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.width(labelWidth),

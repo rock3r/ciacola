@@ -37,6 +37,9 @@ const val MAX_STUDIO_INSPECTOR_WIDTH_DP = 520f
 const val NARROW_WINDOW_THRESHOLD_DP = 1200f
 const val NARROW_WINDOW_INSPECTOR_WIDTH_DP = 320f
 
+/** Below this window width the right inspector auto-collapses so the stage keeps breathing room. */
+const val COLLAPSE_INSPECTOR_THRESHOLD_DP = 900f
+
 /**
  * The two selection-scoped tabs of the right-hand Studio inspector.
  *
@@ -125,6 +128,9 @@ class StudioWorkspaceController(
     /** Studio shell width measured by the App Bar shell (`NaN` until first layout). */
     var shellWidthDp: Float by mutableFloatStateOf(Float.NaN)
 
+    /** Explicit user override for showing/hiding the right inspector (`null` = auto at `< 900dp`). */
+    var inspectorCollapsedOverride: Boolean? by mutableStateOf(null)
+
     /** `true` while the Esc Overview grid is open (hides the App Bar and all Studio chrome). */
     var overviewOpen: Boolean by mutableStateOf(false)
 
@@ -174,6 +180,12 @@ class StudioWorkspaceController(
     fun showShortcutToast(message: String) {
         shortcutToastSeq += 1L
         lastShortcutToast = shortcutToastSeq to message
+    }
+
+    fun clearShortcutToast(seq: Long) {
+        if (lastShortcutToast?.first == seq) {
+            lastShortcutToast = null
+        }
     }
 
     fun updateBindings(
@@ -254,9 +266,26 @@ class StudioWorkspaceController(
         get() = isStudioOpen || themeSheetOpen || issuesDockOpen ||
             designSidecarVisibleProvider() || lintSidecarVisibleProvider()
 
+    /**
+     * Expanded or floating authoring panels (excludes the collapsed docked Timeline strip so
+     * Presenter View's pre-show warning doesn't fire when only the minimal Edit header is present).
+     */
+    val hasExpandedAuthoringTools: Boolean
+        get() = isTimelineTracksOpen || isDesignEditorVisible || isLinterVisible
+
     /** Inspector width after the narrow-window clamp (`< 1200dp` → at most `320dp`). */
     val effectiveInspectorWidthDp: Float
         get() = effectiveInspectorWidthFor(inspectorWidthDp, shellWidthDp)
+
+    /** Whether the right-hand inspector pane is currently shown (`auto-collapsed` below 900dp unless toggled open). */
+    val isInspectorVisible: Boolean
+        get() = !isInspectorCollapsedForWidth(shellWidthDp, inspectorCollapsedOverride)
+
+    fun toggleInspector() {
+        val nextVisible = !isInspectorVisible
+        val autoVisible = shellWidthDp.isNaN() || shellWidthDp >= COLLAPSE_INSPECTOR_THRESHOLD_DP
+        inspectorCollapsedOverride = if (nextVisible == autoVisible) null else !nextVisible
+    }
 
     val saveState: StudioSaveState
         get() = studioSaveStateFor(store)
@@ -627,6 +656,12 @@ fun effectiveInspectorWidthFor(requestedWidthDp: Float, shellWidthDp: Float): Fl
     } else {
         requested
     }
+}
+
+/** Whether the right inspector auto-collapses for [shellWidthDp] (`< 900dp`) unless overridden. */
+fun isInspectorCollapsedForWidth(shellWidthDp: Float, overrideCollapsed: Boolean?): Boolean {
+    if (overrideCollapsed != null) return overrideCollapsed
+    return !shellWidthDp.isNaN() && shellWidthDp < COLLAPSE_INSPECTOR_THRESHOLD_DP
 }
 
 /**

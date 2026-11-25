@@ -3,8 +3,8 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -62,6 +63,7 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
 import org.jetbrains.jewel.ui.component.Divider
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.VerticalScrollbar
 
 internal val DOC_TRACK_ROW_HEIGHT_DP = 30.dp
 internal val DOC_SUB_ROW_HEIGHT_DP = 24.dp
@@ -275,14 +277,19 @@ fun DocumentTimelineStudioPanel(
                             .fillMaxHeight()
                             .clipToBounds()
                             .pointerInput(surface) {
-                                detectTapGestures { offset ->
-                                    controller.seekToMs(controller.viewport.timeForX(offset.x, surface).roundToInt())
-                                }
-                            }
-                            .pointerInput(surface) {
-                                detectHorizontalDragGestures { change, _ ->
-                                    change.consume()
-                                    controller.seekToMs(controller.viewport.timeForX(change.position.x, surface).roundToInt())
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    down.consume()
+                                    controller.seekToMs(controller.viewport.timeForX(down.position.x, surface).roundToInt())
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: event.changes.firstOrNull()
+                                            ?: break
+                                        if (!change.pressed) break
+                                        change.consume()
+                                        controller.seekToMs(controller.viewport.timeForX(change.position.x, surface).roundToInt())
+                                    }
                                 }
                             }
                             .testTag("ciacola-doc-timeline-ruler"),
@@ -567,13 +574,31 @@ fun DocumentTimelineMotionInspector(
 ) {
     controller.store.revision
     controller.store.document
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .testTag("ciacola-doc-timeline-inspector"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        DocumentTimelineRightInspector(controller = controller)
+    val scroll = rememberScrollState()
+    val panelBg = JewelTheme.globalColors.panelBackground
+    Box(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 32.dp)
+                .testTag("ciacola-doc-timeline-inspector"),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            DocumentTimelineRightInspector(controller = controller)
+        }
+        if (scroll.canScrollForward) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .background(Brush.verticalGradient(listOf(panelBg.copy(alpha = 0f), panelBg))),
+            )
+        }
+        VerticalScrollbar(
+            scrollState = scroll,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(vertical = 4.dp, horizontal = 2.dp),
+        )
     }
 }

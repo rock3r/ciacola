@@ -269,13 +269,25 @@ class StudioAppBarAndShellTest {
         assertTrue(onAllNodesWithTag("fake-app-bar").fetchSemanticsNodes().isEmpty(), "App Bar hides in Present")
         onNodeWithTag("ciacola-present-reveal-zone").assertExists()
 
-        // Esc returns to Edit and re-docks the timeline.
+        // Windowed Present leaves Esc unconsumed so EaselOverview opens identically to fullscreen;
+        // switching back to Edit restores the App Bar and re-docks the timeline.
         runOnIdle { stageFocus.requestFocus() }
         onNodeWithTag("fake-stage").performKeyInput { pressKey(Key.Escape) }
+        waitForIdle()
+        assertEquals(StudioMode.Present, h.workspace.mode)
+        runOnIdle { h.workspace.switchMode(StudioMode.Edit) }
         waitForIdle()
         assertEquals(StudioMode.Edit, h.workspace.mode)
         assertTrue(h.timelineWindow.dockedInStoryWindow)
         onNodeWithTag("fake-app-bar").assertExists()
+
+        // Esc closes the Deck Theme sheet even when focus sits on the App Bar / stage.
+        runOnIdle { h.workspace.toggleDesignSystemEditor() }
+        waitForIdle()
+        assertTrue(h.workspace.themeSheetOpen)
+        onNodeWithTag("fake-stage").performKeyInput { pressKey(Key.Escape) }
+        waitForIdle()
+        assertFalse(h.workspace.themeSheetOpen)
 
         // Overview and fullscreen presenting hide the App Bar too.
         runOnIdle { overviewOpen = true }
@@ -380,5 +392,101 @@ class StudioAppBarAndShellTest {
         assertEquals(180L, timing.totalMs)
         assertEquals("deck-switch foundation -> shaders-quickie-2025: preOpen=40ms firstFrame=180ms", timing.formatLine())
         assertEquals(null, timer.markFirstFrameDrawn(), "A timing is only reported once per request")
+    }
+
+    @Test
+    fun inspectorAutoCollapsesBelow900dpUnlessToggled() {
+        assertFalse(isInspectorCollapsedForWidth(1200f, null))
+        assertFalse(isInspectorCollapsedForWidth(900f, null))
+        assertTrue(isInspectorCollapsedForWidth(899f, null))
+        assertTrue(isInspectorCollapsedForWidth(640f, null))
+        assertFalse(isInspectorCollapsedForWidth(640f, false))
+        assertTrue(isInspectorCollapsedForWidth(1440f, true))
+    }
+
+    @Test
+    fun appBar640dpNeverClipsCoreControlsAndOverflowMenuInvokesActions() = runComposeUiTest {
+        var inspectorVisible by mutableStateOf(false)
+        var pdfExports = 0
+        var videoExports = 0
+        var reducedMotion by mutableStateOf(false)
+        var pausedLoops by mutableStateOf(false)
+        var audited by mutableStateOf(false)
+
+        val actions = StudioAppBarActions(
+            onSelectMode = {},
+            onUndo = {},
+            onRedo = {},
+            onToggleTheme = {},
+            onToggleIssues = {},
+            onToggleTimeline = {},
+            onTogglePresenter = {},
+            onToggleInspector = { inspectorVisible = !inspectorVisible },
+            onExportPdf = { pdfExports++ },
+            onExportVideo = { videoExports++ },
+            onToggleReducedMotion = { reducedMotion = !reducedMotion },
+            onToggleAmbientLoopsPaused = { pausedLoops = !pausedLoops },
+        )
+
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(640.dp, 60.dp)) {
+                    StudioAppBar(
+                        model = model().copy(
+                            inspectorVisible = inspectorVisible,
+                            reducedMotion = reducedMotion,
+                            ambientLoopsPaused = pausedLoops,
+                            issuesAudited = audited,
+                        ),
+                        actions = actions,
+                        deckSwitcher = { Text("Shaders Quickie", Modifier.testTag("fake-deck-switcher")) },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        val bar = onNodeWithTag("ciacola-studio-app-bar").getBoundsInRoot()
+        val mode = onNodeWithTag("ciacola-app-bar-mode").getBoundsInRoot()
+        val issues = onNodeWithTag("ciacola-app-bar-issues").getBoundsInRoot()
+        val timeline = onNodeWithTag("ciacola-app-bar-timeline").getBoundsInRoot()
+        val presenter = onNodeWithTag("ciacola-app-bar-presenter").getBoundsInRoot()
+        val overflow = onNodeWithTag("ciacola-app-bar-overflow").getBoundsInRoot()
+
+        onNodeWithTag("ciacola-app-bar-issues-unchecked", useUnmergedTree = true).assertTextEquals("Check")
+        assertTrue(overflow.right <= bar.right, "Overflow button must not clip at 640dp ($overflow vs $bar)")
+        assertTrue(issues.left >= mode.right, "Right controls must not overlap mode segmented control ($issues vs $mode)")
+        assertTrue(timeline.left >= issues.right)
+        assertTrue(presenter.left >= timeline.right)
+        assertTrue(overflow.left >= presenter.right)
+
+        runOnIdle { audited = true }
+        waitForIdle()
+        onNodeWithTag("ciacola-app-bar-issues-errors", useUnmergedTree = true).assertTextEquals("52")
+
+        onNodeWithTag("ciacola-app-bar-overflow").performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-overflow-toggle-inspector", useUnmergedTree = true).performClick()
+        assertTrue(inspectorVisible, "Overflow menu must toggle inspector")
+
+        onNodeWithTag("ciacola-app-bar-overflow").performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-overflow-export-pdf", useUnmergedTree = true).performClick()
+        assertEquals(1, pdfExports)
+
+        onNodeWithTag("ciacola-app-bar-overflow").performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-overflow-export-video", useUnmergedTree = true).performClick()
+        assertEquals(1, videoExports)
+
+        onNodeWithTag("ciacola-app-bar-overflow").performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-overflow-reduced-motion", useUnmergedTree = true).performClick()
+        assertTrue(reducedMotion)
+
+        onNodeWithTag("ciacola-app-bar-overflow").performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-overflow-pause-loops", useUnmergedTree = true).performClick()
+        assertTrue(pausedLoops)
     }
 }

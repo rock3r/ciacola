@@ -684,8 +684,9 @@ private fun ReviewStageHighlightsAndPins(
         }
     }
 
-    // Pins stay off the audience-facing fullscreen stage unless the presenter is reviewing.
-    val hidePinsForAudience = LocalPresentingFullscreen.current && !coordinator.inspectModeEnabled &&
+    // Pins stay off the audience-facing stage (windowed or fullscreen Present) unless reviewing.
+    val isAudience = LocalPresentingFullscreen.current || LocalAudiencePresenting.current
+    val hidePinsForAudience = isAudience && !coordinator.inspectModeEnabled &&
         coordinator.selectedPinCommentId == null
     val pinsVisible = coordinator.showStageBadges && !hidePinsForAudience
     coordinator.stagePinsVisible = pinsVisible
