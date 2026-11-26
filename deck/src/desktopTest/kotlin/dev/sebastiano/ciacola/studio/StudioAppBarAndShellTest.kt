@@ -10,19 +10,29 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performKeyPress
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.LocalOverviewOpen
@@ -32,6 +42,7 @@ import dev.sebastiano.ciacola.decks.AllDocumentDecks
 import dev.sebastiano.ciacola.document.DeckDocumentStore
 import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
 import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
+import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorUi
 import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
 import dev.sebastiano.ciacola.timeline.DocumentTimelineController
 import dev.sebastiano.ciacola.timeline.DocumentTimelineSelection
@@ -488,5 +499,482 @@ class StudioAppBarAndShellTest {
         waitForIdle()
         onNodeWithTag("ciacola-overflow-pause-loops", useUnmergedTree = true).performClick()
         assertTrue(pausedLoops)
+    }
+
+    @Test
+    fun modeSegmentsExposeVoiceOverSemanticsAndReviewKeyboardShortcutsPinTarget() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val specimens = AllDocumentDecks.foundation.specimens
+        var capturedTargetNodeId: String? = null
+        var pinCount = 0
+        lateinit var workspace: StudioWorkspaceController
+        lateinit var elementController: DocumentElementInspectorController
+        val stageFocus = FocusRequester()
+
+        setContent {
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    timelineController = timelineController,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply {
+                    onCaptureReviewTargetNodeId = { capturedTargetNodeId = it }
+                    onPinReviewComment = { pinCount++; true }
+                }
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(1000.dp, 600.dp).onPreviewKeyEvent { workspace.handleStudioPreviewKey(it) }) {
+                    StudioShell(
+                        workspace = workspace,
+                        themeSheet = {},
+                        appBar = {
+                            StudioAppBar(
+                                model = model().copy(
+                                    mode = workspace.mode,
+                                    issuesOpen = false,
+                                    issuesAudited = false,
+                                ),
+                                actions = StudioAppBarActions(
+                                    onSelectMode = { workspace.switchMode(it) },
+                                    onUndo = {},
+                                    onRedo = {},
+                                    onToggleIssues = {},
+                                    onToggleTimeline = {},
+                                    onToggleInspector = {},
+                                    onToggleTheme = {},
+                                    onTogglePresenter = {},
+                                    onExportPdf = {},
+                                    onExportVideo = {},
+                                    onToggleReducedMotion = {},
+                                    onToggleAmbientLoopsPaused = {},
+                                ),
+                                deckSwitcher = { Text("Deck") },
+                            )
+                        },
+                    ) {
+                        Box(Modifier.fillMaxSize().focusRequester(stageFocus).focusable().testTag("review-stage"))
+                    }
+                }
+            }
+        }
+        waitForIdle()
+
+        val editNode = onNodeWithTag("ciacola-app-bar-mode-edit", useUnmergedTree = true).fetchSemanticsNode()
+        val reviewNode = onNodeWithTag("ciacola-app-bar-mode-review", useUnmergedTree = true).fetchSemanticsNode()
+        val issuesNode = onNodeWithTag("ciacola-app-bar-issues", useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals(true, editNode.config.getOrNull(SemanticsProperties.Selected))
+        assertEquals(null, editNode.config.getOrNull(SemanticsProperties.StateDescription))
+        assertEquals(false, reviewNode.config.getOrNull(SemanticsProperties.Selected))
+        assertEquals(null, reviewNode.config.getOrNull(SemanticsProperties.StateDescription))
+        assertEquals("Closed", issuesNode.config.getOrNull(SemanticsProperties.StateDescription))
+
+        val firstNodeId = store.document.slides.first().nodes.first().id
+        runOnIdle {
+            elementController.selectNode(firstNodeId)
+            workspace.switchMode(StudioMode.Review)
+        }
+        waitForIdle()
+        assertEquals(firstNodeId, capturedTargetNodeId)
+        runOnIdle { stageFocus.requestFocus() }
+        waitForIdle()
+        onNodeWithTag("review-stage").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+        assertEquals(1, pinCount)
+
+        onNodeWithTag("review-stage").performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.M)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        assertEquals(2, pinCount)
+
+        runOnIdle { workspace.switchMode(StudioMode.Present) }
+        waitForIdle()
+        assertEquals(null, capturedTargetNodeId)
+    }
+
+    @OptIn(ExperimentalTestApi::class, InternalComposeUiApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun heldEnterRepeatThroughStudioPreviewKeyDoesNotCycleEditor() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val specimens = AllDocumentDecks.foundation.specimens
+        lateinit var elementController: DocumentElementInspectorController
+        lateinit var workspace: StudioWorkspaceController
+        val hostFocus = FocusRequester()
+
+        setContent {
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            val timelineWindow = rememberDocumentTimelineWindow(controller = timelineController, initialDocked = true)
+            elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    timelineController = timelineController,
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply {
+                    isStageFocusedProvider = { true }
+                    this.timelineWindow = timelineWindow
+                }
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(
+                    Modifier
+                        .size(900.dp, 600.dp)
+                        .onPreviewKeyEvent {
+                            workspace.handleStudioPreviewKey(it, allowStageAuthoringShortcuts = true)
+                        },
+                ) {
+                    Box(Modifier.fillMaxSize().focusRequester(hostFocus).focusable().testTag("inspector-host"))
+                }
+            }
+        }
+        waitForIdle()
+        val editableTextNode = store.document.slides.first().nodes.first { it.text != null }
+        runOnIdle { elementController.selectNode(editableTextNode.id) }
+        waitForIdle()
+        onNodeWithTag("inspector-host").requestFocus()
+        waitForIdle()
+
+        // Held Enter opens inline edit once; repeat KeyDown while armed does not re-open/cycle until KeyUp.
+        onRoot().performKeyPress(KeyEvent(Key.Enter, KeyEventType.KeyDown))
+        waitForIdle()
+        assertEquals(editableTextNode.id, elementController.inlineEditingNodeId)
+        assertTrue(elementController.swallowNextEnterKeyUp)
+
+        onRoot().performKeyPress(KeyEvent(Key.Enter, KeyEventType.KeyUp))
+        waitForIdle()
+        assertFalse(elementController.swallowNextEnterKeyUp)
+
+        // Simulating commit via Enter arms the guard on StudioWorkspace.handleStudioPreviewKey as well.
+        runOnIdle { elementController.commitInlineTextEdit("Edited", fromEnterKey = true) }
+        waitForIdle()
+        assertEquals(null, elementController.inlineEditingNodeId)
+        assertTrue(elementController.swallowNextEnterKeyUp)
+
+        mainClock.advanceTimeBy(1_800)
+        waitForIdle()
+        repeat(4) {
+            onRoot().performKeyPress(KeyEvent(Key.Enter, KeyEventType.KeyDown))
+            waitForIdle()
+            assertEquals(null, elementController.inlineEditingNodeId, "Held repeat after commit must not reopen editor")
+            assertTrue(elementController.swallowNextEnterKeyUp)
+            mainClock.advanceTimeBy(1_800)
+            waitForIdle()
+        }
+
+        onRoot().performKeyPress(KeyEvent(Key.Enter, KeyEventType.KeyUp))
+        waitForIdle()
+        assertFalse(elementController.swallowNextEnterKeyUp)
+
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(editableTextNode.id, elementController.inlineEditingNodeId)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun f3ReviewInspectBlocksEnterToEditWhilePreservingF3Toggle() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val specimens = AllDocumentDecks.foundation.specimens
+        lateinit var elementController: DocumentElementInspectorController
+        lateinit var workspace: StudioWorkspaceController
+        var inspectModeEnabled by mutableStateOf(false)
+        var f3Toggles = 0
+        val hostFocus = FocusRequester()
+
+        setContent {
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            val timelineWindow = rememberDocumentTimelineWindow(controller = timelineController, initialDocked = true)
+            elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    timelineController = timelineController,
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply {
+                    this.timelineWindow = timelineWindow
+                    isStageFocusedProvider = { true }
+                    inlineEditBlockedProvider = { themeSheetOpen || inspectModeEnabled }
+                    onToggleReviewInspect = {
+                        inspectModeEnabled = !inspectModeEnabled
+                        f3Toggles++
+                    }
+                }
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(
+                    Modifier
+                        .size(900.dp, 600.dp)
+                        .onPreviewKeyEvent { workspace.handleStudioPreviewKey(it) },
+                ) {
+                    Box(Modifier.fillMaxSize().focusRequester(hostFocus).focusable().testTag("inspector-host"))
+                }
+            }
+        }
+        waitForIdle()
+        val editableTextNode = store.document.slides.first().nodes.first { it.text != null }
+        runOnIdle { elementController.selectNode(editableTextNode.id) }
+        waitForIdle()
+        onNodeWithTag("inspector-host").requestFocus()
+        waitForIdle()
+
+        // F3 turns Review Inspect on while staying in Edit mode with the element selected.
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.F3) }
+        waitForIdle()
+        assertTrue(inspectModeEnabled)
+        assertEquals(1, f3Toggles)
+
+        // Pressing Enter must NOT start an invisible inline edit session while Review Inspect owns stage clicks.
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(null, elementController.inlineEditingNodeId)
+
+        // F3 must remain responsive and turn Review Inspect back off cleanly.
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.F3) }
+        waitForIdle()
+        assertFalse(inspectModeEnabled)
+        assertEquals(2, f3Toggles)
+
+        // Once Review Inspect is off, Enter opens inline edit normally.
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(editableTextNode.id, elementController.inlineEditingNodeId)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun enterDoesNotOpenInlineEditWhenStageDoesNotOwnFocus() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val specimens = AllDocumentDecks.foundation.specimens
+        lateinit var elementController: DocumentElementInspectorController
+        lateinit var workspace: StudioWorkspaceController
+        var stageFocused by mutableStateOf(false)
+        var allowStageAuthoring by mutableStateOf(true)
+        val hostFocus = FocusRequester()
+
+        setContent {
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            val timelineWindow = rememberDocumentTimelineWindow(controller = timelineController, initialDocked = true)
+            elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    timelineController = timelineController,
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply {
+                    this.timelineWindow = timelineWindow
+                    isStageFocusedProvider = { stageFocused }
+                }
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(
+                    Modifier
+                        .size(900.dp, 600.dp)
+                        .onPreviewKeyEvent {
+                            workspace.handleStudioPreviewKey(it, allowStageAuthoringShortcuts = allowStageAuthoring)
+                        },
+                ) {
+                    Box(Modifier.fillMaxSize().focusRequester(hostFocus).focusable().testTag("inspector-host"))
+                }
+            }
+        }
+        waitForIdle()
+
+        val firstSlide = store.document.slides.first()
+        val editableTextNode = firstSlide.nodes.first { it.text != null }
+        runOnIdle {
+            elementController.selectLocation(firstSlide.id, 0)
+            elementController.selectNode(editableTextNode.id)
+            hostFocus.requestFocus()
+        }
+        waitForIdle()
+
+        // Pressing Enter when Inspector/Timeline owns focus must NOT hijack into stage inline edit.
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(null, elementController.inlineEditingNodeId)
+
+        // When PresenterWindow / non-stage host passes allowStageAuthoringShortcuts = false, Enter is ignored even if stageFocused is true.
+        stageFocused = true
+        allowStageAuthoring = false
+        waitForIdle()
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(null, elementController.inlineEditingNodeId)
+
+        // When Deck Theme sheet is open over Studio, Enter does not open inline edit even if stageFocused is true.
+        allowStageAuthoring = true
+        runOnIdle { workspace.themeSheetOpen = true }
+        waitForIdle()
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(null, elementController.inlineEditingNodeId)
+        runOnIdle { workspace.themeSheetOpen = false }
+
+        // When Studio stage actually holds focus and stage shortcuts are allowed, Enter starts inline edit.
+        allowStageAuthoring = true
+        waitForIdle()
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(editableTextNode.id, elementController.inlineEditingNodeId)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun singleArrowsOnFocusedLayersRowAndChevronDoNotNudgeThroughStudioPreviewRouter() = runComposeUiTest {
+        val groupNode = dev.sebastiano.ciacola.document.NodeSpec(
+            id = "grp-router",
+            frame = dev.sebastiano.ciacola.document.FrameSpec(x = 120.0, y = 200.0, w = 400.0, h = 140.0),
+            stack = dev.sebastiano.ciacola.document.ContainerPayload(
+                children = listOf(
+                    dev.sebastiano.ciacola.document.NodeSpec(
+                        id = "child-router",
+                        frame = dev.sebastiano.ciacola.document.FrameSpec(x = 20.0, y = 40.0, w = 200.0, h = 60.0),
+                        text = dev.sebastiano.ciacola.document.TextPayload(
+                            value = dev.sebastiano.ciacola.document.RichTextValue.Plain("Nested"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val doc = dev.sebastiano.ciacola.document.DeckDocument(
+            id = "layers-router-test",
+            slides = listOf(
+                dev.sebastiano.ciacola.document.SlideSpec(
+                    id = "s1",
+                    beats = listOf(dev.sebastiano.ciacola.document.BeatSpec()),
+                    nodes = listOf(groupNode),
+                ),
+            ),
+        )
+        val store = createLoadedTestDeckStore(doc)
+        val specimens = AllDocumentDecks.foundation.specimens
+        lateinit var elementController: DocumentElementInspectorController
+
+        setContent {
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            val timelineWindow = rememberDocumentTimelineWindow(controller = timelineController, initialDocked = true)
+            elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            val workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    timelineController = timelineController,
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply { this.timelineWindow = timelineWindow }
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(420.dp, 720.dp).onPreviewKeyEvent { workspace.handleStudioPreviewKey(it) }) {
+                    DocumentElementInspectorUi(controller = elementController)
+                }
+            }
+        }
+        waitForIdle()
+
+        runOnIdle {
+            elementController.selectLocation("s1", 0)
+            elementController.selectNode("child-router")
+        }
+        waitForIdle()
+
+        onNodeWithTag("ciacola-doc-node-item-child-router", useUnmergedTree = true).requestFocus()
+        waitForIdle()
+        for (arrowKey in listOf(Key.DirectionDown, Key.DirectionUp, Key.DirectionLeft, Key.DirectionRight)) {
+            val before = elementController.selectedResolvedNode()?.frame
+            onNodeWithTag("ciacola-doc-node-item-child-router", useUnmergedTree = true).performKeyInput {
+                pressKey(arrowKey)
+            }
+            waitForIdle()
+            val after = elementController.selectedResolvedNode()?.frame
+            assertEquals(before?.x, after?.x, "Layers row $arrowKey leaked through Studio preview router to X nudge")
+            assertEquals(before?.y, after?.y, "Layers row $arrowKey leaked through Studio preview router to Y nudge")
+        }
+
+        // Also press all 4 arrows on the parent chevron toggle: none may leak into stage nudging.
+        runOnIdle { elementController.selectNode("grp-router") }
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-node-toggle-grp-router", useUnmergedTree = true).requestFocus()
+        waitForIdle()
+        for (arrowKey in listOf(Key.DirectionDown, Key.DirectionUp, Key.DirectionLeft, Key.DirectionRight)) {
+            val before = elementController.selectedResolvedNode()?.frame
+            onNodeWithTag("ciacola-doc-node-toggle-grp-router", useUnmergedTree = true).performKeyInput {
+                pressKey(arrowKey)
+            }
+            waitForIdle()
+            val after = elementController.selectedResolvedNode()?.frame
+            assertEquals(before?.x, after?.x, "Chevron $arrowKey leaked through Studio preview router to X nudge")
+            assertEquals(before?.y, after?.y, "Chevron $arrowKey leaked through Studio preview router to Y nudge")
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun handleStudioPreviewKeySkipsReviewPinningWhileAudiencePresenting() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val specimens = AllDocumentDecks.foundation.specimens
+        lateinit var coordinator: dev.sebastiano.ciacola.review.ReviewStageCoordinator
+        var audiencePresenting by mutableStateOf(true)
+        val stageFocus = FocusRequester()
+        lateinit var workspace: StudioWorkspaceController
+
+        setContent {
+            coordinator = dev.sebastiano.ciacola.review.rememberReviewStageCoordinator().apply {
+                inspectModeEnabled = true
+            }
+            val pinScope = androidx.compose.runtime.rememberCoroutineScope()
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            val elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    timelineController = timelineController,
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply {
+                    coordinator.isAudiencePresentingProvider = { audiencePresenting }
+                    onPinReviewComment = {
+                        coordinator.pinCommentAtCurrentTarget(pinScope)
+                    }
+                    switchMode(StudioMode.Review)
+                }
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(
+                    Modifier
+                        .size(800.dp, 600.dp)
+                        .onPreviewKeyEvent { workspace.handleStudioPreviewKey(it) },
+                ) {
+                    Box(Modifier.fillMaxSize().focusRequester(stageFocus).focusable().testTag("preview-stage-host"))
+                }
+            }
+        }
+        waitForIdle()
+        runOnIdle { stageFocus.requestFocus() }
+        waitForIdle()
+
+        // While audiencePresenting is true (e.g., Presenter View open), window-level C must not open composer.
+        onNodeWithTag("preview-stage-host").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+        assertEquals(null, coordinator.pendingSelection)
+
+        // Control: once audiencePresenting is false, C pins cleanly through handleStudioPreviewKey.
+        audiencePresenting = false
+        waitForIdle()
+        onNodeWithTag("preview-stage-host").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+        assertTrue(coordinator.pendingSelection != null, "Expected C to pin when not audience presenting")
     }
 }

@@ -31,6 +31,7 @@ import dev.bnorm.storyboard.easel.DesktopEasel
 import dev.bnorm.storyboard.easel.DesktopExportActions
 import dev.bnorm.storyboard.easel.overview.LocalOverviewChromeStyle
 import dev.bnorm.storyboard.easel.overview.LocalOverviewSlideTitleProvider
+import dev.bnorm.storyboard.easel.overview.LocalOverviewThumbnailFrameProvider
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.easel.resolveStoryboardWorkspaceRoot
 import dev.bnorm.storyboard.plus
@@ -92,11 +93,13 @@ import dev.sebastiano.ciacola.studio.awaitNextDrawnFrame
 import dev.sebastiano.ciacola.studio.buildDualPassVideoStoryboard
 import dev.sebastiano.ciacola.studio.buildPerThumbnailOverviewStoryboard
 import dev.sebastiano.ciacola.studio.clearDesktopQuitHandler
+import dev.sebastiano.ciacola.studio.createDebouncedNotesFontSizeSaver
 import dev.sebastiano.ciacola.studio.externalDeckEntryFor
 import dev.sebastiano.ciacola.studio.flushOutgoingBeforeSwap
 import dev.sebastiano.ciacola.studio.formatStudioBreadcrumb
 import dev.sebastiano.ciacola.studio.installDesktopQuitHandler
 import dev.sebastiano.ciacola.studio.loadPersistedInspectorWidthDp
+import dev.sebastiano.ciacola.studio.loadPersistedPresenterNotesFontSizeSp
 import dev.sebastiano.ciacola.studio.openInitialDeckSession
 import dev.sebastiano.ciacola.studio.openRecoveryCopyIntoStore
 import dev.sebastiano.ciacola.studio.persistActiveDeckId
@@ -109,6 +112,7 @@ import dev.sebastiano.ciacola.studio.preOpenDeckSession
 import dev.sebastiano.ciacola.studio.prepareToLeaveDeck
 import dev.sebastiano.ciacola.studio.rememberDeckMenuWindow
 import dev.sebastiano.ciacola.studio.rememberDocumentSyncGateWindow
+import dev.sebastiano.ciacola.studio.rememberOverviewSlideProviders
 import dev.sebastiano.ciacola.studio.rememberStudioOverviewChromeStyle
 import dev.sebastiano.ciacola.studio.rememberStudioShellWindow
 import dev.sebastiano.ciacola.studio.resolveDeckAssetsRootDir
@@ -117,6 +121,7 @@ import dev.sebastiano.ciacola.studio.resolveInitialDeckId
 import dev.sebastiano.ciacola.studio.resolveSelectedThemeForDeck
 import dev.sebastiano.ciacola.studio.saveSpeakerNote
 import dev.sebastiano.ciacola.studio.storyboardDirForDeck
+import dev.sebastiano.ciacola.studio.wireReviewAndWorkspaceCallbacks
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
 import dev.sebastiano.ciacola.theme.ReducedMotionMode
@@ -438,6 +443,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
             committedOverviewDoc = currentDoc
         }
     }
+    val committedOverviewSlides = remember(committedOverviewDoc) { committedOverviewDoc.slides.filterNot { it.skipped } }
+    val overviewProviders = rememberOverviewSlideProviders(committedOverviewSlides)
     // Isolated RenderSession #6 holder: Video Export (Video @ 60 fps).
     val videoExportSessionHolder = remember(activeDeck.id) { VideoExportSessionHolder() }
 
@@ -457,6 +464,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
                 controller = elementController,
                 enabled = studioWorkspace.isElementPickingEnabled && !reviewOwnsClick,
                 keyboardCapturedProvider = { keyboardController.isCaptured },
+                inlineEditBlockedProvider = { studioWorkspace.inlineEditBlockedProvider() },
+                onRestoreStageFocus = { studioWorkspace.onRestoreStageFocus?.invoke() },
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     content()
@@ -619,6 +628,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
                 elementController.selectNode(null)
                 timelineController.clearSelection()
                 keyboardController.exitInteractive()
+                reviewStageCoordinator.preferredTargetNodeId = null
                 reviewStageCoordinator.dismissActivePopups()
                 presenterWindowHolder?.controller?.cancelEditingNotes()
                 persistActiveDeckId(rootStoryboardDir, target.id)
@@ -718,6 +728,11 @@ private fun ApplicationScope.CiacolaStudioApplication(
             presenterWindowHolder?.controller?.isEditingNotes == true
     }
     studioWorkspace.isTextInputActiveProvider = isAnyTextInputActive
+    studioWorkspace.isStageFocusedProvider = { reviewStageCoordinator.stageHasFocus }
+    studioWorkspace.inlineEditBlockedProvider = {
+        studioWorkspace.themeSheetOpen || reviewStageCoordinator.inspectModeEnabled ||
+            reviewStageCoordinator.pendingSelection != null || reviewStageCoordinator.selectedPinCommentId != null
+    }
     studioWorkspace.onTogglePresenter = {
         presenterWindowHolder?.let { it.visible = !it.visible }
     }
@@ -747,17 +762,6 @@ private fun ApplicationScope.CiacolaStudioApplication(
         activeBeatIndex = activeBeatIndex,
         animatic = animatic,
     )
-    reviewStageCoordinator.fallbackNodeIdResolver = { stagePoint, dragRect ->
-        stageInspectionRegistry.nodes.values
-            .filter { snap ->
-                snap.effectiveAlpha > 0.01f &&
-                    snap.stageBounds.width > 0f &&
-                    snap.stageBounds.height > 0f &&
-                    if (dragRect != null) snap.stageBounds.overlaps(dragRect) else snap.stageBounds.contains(stagePoint)
-            }
-            .minByOrNull { it.stageBounds.width * it.stageBounds.height }
-            ?.elementId
-    }
 
     val themeWindow = rememberDocumentThemeInspectorWindow(
         controller = themeController,
@@ -802,7 +806,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         },
         isLinterShownProvider = { studioWorkspace.isLinterVisible },
         onToggleLinter = { studioWorkspace.toggleDeckLinter() },
-        onPreviewKeyHandler = { ev -> studioWorkspace.handleStudioPreviewKey(ev) },
+        onPreviewKeyHandler = { ev -> studioWorkspace.handleStudioPreviewKey(ev, allowStageAuthoringShortcuts = false) },
     ).also {
         if (lintWindowHolder != null && lintWindowHolder !== it) {
             it.visible = prevLintVisible
@@ -856,7 +860,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         // The deck switcher lives in the App Bar now, never in the timeline transport bar.
         leadingToolbarContent = null,
         extraPreviewKeyHandler = { ev, _ ->
-            studioWorkspace.handleStudioPreviewKey(ev)
+            studioWorkspace.handleStudioPreviewKey(ev, allowStageAuthoringShortcuts = false)
         },
         // Studio opens in Edit mode: timeline docked under the stage, collapsed to the header band.
         initialDocked = true,
@@ -896,6 +900,10 @@ private fun ApplicationScope.CiacolaStudioApplication(
         speakerNotesProvider = { speakerNotesMemo.notesFor(store.document) },
         documentProvider = { store.document },
         onSaveSpeakerNote = if (store.isReadOnly) null else { id, beat, note -> saveSpeakerNote(store, id, beat, note) },
+        initialNotesFontSizeSp = remember(rootStoryboardDir) { loadPersistedPresenterNotesFontSizeSp(rootStoryboardDir) },
+        onNotesFontSizeChanged = remember(appScope, rootStoryboardDir) {
+            createDebouncedNotesFontSizeSaver(appScope, rootStoryboardDir)
+        },
         notesEditingBlockedProvider = { // No new note edits mid switch/quit (drafts commit first).
             switchingToDeckId != null || closingDeckTransition ||
                 (syncController != null && syncController.closeGuard !is CloseGuardState.Idle)
@@ -930,7 +938,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
             runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
         },
         extraPreviewKeyHandler = { ev, _ ->
-            studioWorkspace.handleStudioPreviewKey(ev)
+            studioWorkspace.handleStudioPreviewKey(ev, allowStageAuthoringShortcuts = false)
         },
     ).also { presenterWindowHolder = it }
 
@@ -956,18 +964,21 @@ private fun ApplicationScope.CiacolaStudioApplication(
     val restoreStageFocus: () -> Unit = {
         runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
     }
-    studioWorkspace.setReviewInspectMode = { enabled ->
-        reviewStageCoordinator.inspectModeEnabled = enabled
-        if (enabled) reviewStageCoordinator.showStageBadges = true else reviewStageCoordinator.dismissActivePopups()
-    }
-    studioWorkspace.onToggleReviewInspect = {
-        val next = !reviewStageCoordinator.inspectModeEnabled
-        reviewStageCoordinator.inspectModeEnabled = next
-        if (next) reviewStageCoordinator.showStageBadges = true
-    }
-    studioWorkspace.onOpenReviewPanel = { reviewWindowHolder?.visible = true }
-    studioWorkspace.onEnterCleanShowMode = ::closeAuthoringChrome
-    studioWorkspace.onRestoreStageFocus = restoreStageFocus
+    wireReviewAndWorkspaceCallbacks(
+        reviewStageCoordinator = reviewStageCoordinator,
+        stageInspectionRegistry = stageInspectionRegistry,
+        studioWorkspace = studioWorkspace,
+        reviewWindowHolderProvider = { reviewWindowHolder },
+        appScope = appScope,
+        isAnyTextInputActive = isAnyTextInputActive,
+        isAudiencePresentingProvider = {
+            studioWorkspace.mode == StudioMode.Present ||
+                studioWorkspace.isFullscreenPresenting ||
+                presenterWindowHolder?.visible == true
+        },
+        closeAuthoringChrome = ::closeAuthoringChrome,
+        restoreStageFocus = restoreStageFocus,
+    )
 
     val activeSlide = activeNonSkipped.getOrNull(activeSceneIndex)
     val breadcrumb = formatStudioBreadcrumb(
@@ -1041,6 +1052,9 @@ private fun ApplicationScope.CiacolaStudioApplication(
             pendingCloseAction = null
             action()
         },
+        isAudiencePresentingProvider = {
+            studioWorkspace.mode == StudioMode.Present || presenterWindowHolder?.visible == true
+        },
     )
 
     // Outermost first: the shell sits directly outside the timeline so the App Bar spans the stage
@@ -1057,9 +1071,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
         LocalStageDragPreview provides stageDragPreview,
         LocalStageInspectionRegistry provides stageInspectionRegistry,
         LocalStageInteractiveRegistry provides stageInteractiveRegistry,
-        LocalOverviewSlideTitleProvider provides { sceneIdx ->
-            activeNonSkipped.getOrNull(sceneIdx)?.title?.takeIf { it.isNotBlank() }
-        },
+        LocalOverviewSlideTitleProvider provides overviewProviders.titleProvider,
+        LocalOverviewThumbnailFrameProvider provides overviewProviders.thumbnailFrameProvider,
     ) {
         CiacolaJewelTheme(isDark = isDarkTheme) {
             CompositionLocalProvider(LocalOverviewChromeStyle provides rememberStudioOverviewChromeStyle()) {

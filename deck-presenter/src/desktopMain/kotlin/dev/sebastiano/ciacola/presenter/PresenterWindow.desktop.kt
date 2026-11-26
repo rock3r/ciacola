@@ -220,6 +220,8 @@ fun rememberPresenterWindow(
     documentProvider: (() -> DeckDocument?)? = null,
     onSaveSpeakerNote: ((slideId: String, beatIndex: Int, note: String?) -> Unit)? = null,
     notesEditingBlockedProvider: () -> Boolean = { false },
+    initialNotesFontSizeSp: Float = PresenterController.DEFAULT_NOTES_FONT_SP,
+    onNotesFontSizeChanged: ((Float) -> Unit)? = null,
     displayRouter: DisplayRoutingAdapter = remember { AwtDisplayRouter() },
     extraPreviewKeyHandler: ((KeyEvent, CoroutineScope) -> Boolean)? = null,
 ): PresenterWindow {
@@ -239,6 +241,8 @@ fun rememberPresenterWindow(
             documentProvider = documentProvider,
             onSaveSpeakerNote = onSaveSpeakerNote,
             notesEditingBlockedProvider = notesEditingBlockedProvider,
+            initialNotesFontSizeSp = initialNotesFontSizeSp,
+            onNotesFontSizeChanged = onNotesFontSizeChanged,
             displayRouter = displayRouter,
         )
     }.also {
@@ -256,6 +260,7 @@ fun rememberPresenterWindow(
         it.documentProvider = documentProvider
         it.onSaveSpeakerNote = onSaveSpeakerNote
         it.notesEditingBlockedProvider = notesEditingBlockedProvider
+        it.onNotesFontSizeChanged = onNotesFontSizeChanged
     }
 
     return remember(controller) {

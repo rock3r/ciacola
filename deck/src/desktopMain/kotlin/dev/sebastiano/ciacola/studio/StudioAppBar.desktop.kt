@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -472,6 +473,7 @@ fun StudioModeSegmentedControl(
             .border(1.dp, globalColors.borders.normal, shape)
             .padding(2.dp)
             .selectableGroup()
+            .focusGroup()
             .testTag("ciacola-app-bar-mode"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -521,7 +523,10 @@ private fun ModeSegment(
                 .accessibleFocusRing(focused, focusRingColor, cornerRadius = 4.dp)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .clickable(interactionSource = interaction, indication = null, role = Role.Tab, onClick = onClick)
-                .semantics { this.selected = selected }
+                .semantics {
+                    this.selected = selected
+                    contentDescription = "${mode.label} mode — ${mode.tooltip}"
+                }
                 .testTag("ciacola-app-bar-mode-${mode.name.lowercase()}"),
             contentAlignment = Alignment.Center,
         ) {
@@ -696,7 +701,7 @@ private fun IssuesBadgeButton(
                 )
                 .semantics {
                     contentDescription = "Issues: $description"
-                    if (toggled) stateDescription = "Open"
+                    stateDescription = if (toggled) "Open" else "Closed"
                 }
                 .padding(horizontal = 7.dp)
                 .testTag("ciacola-app-bar-issues"),

@@ -36,6 +36,7 @@ import dev.bnorm.storyboard.easel.overlay.OverlayNavigation
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.overview.LocalOverviewChromeStyle
 import dev.bnorm.storyboard.easel.overview.LocalOverviewSlideTitleProvider
+import dev.bnorm.storyboard.easel.overview.LocalOverviewThumbnailFrameProvider
 import dev.bnorm.storyboard.easel.overview.rememberOverviewVisibility
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.bnorm.storyboard.plus
@@ -98,6 +99,7 @@ import dev.sebastiano.ciacola.studio.loadPersistedInspectorWidthDp
 import dev.sebastiano.ciacola.studio.persistActiveDeckId
 import dev.sebastiano.ciacola.studio.persistInspectorWidthDp
 import dev.sebastiano.ciacola.studio.rememberDeckMenuWindow
+import dev.sebastiano.ciacola.studio.rememberOverviewSlideProviders
 import dev.sebastiano.ciacola.studio.rememberStudioOverviewChromeStyle
 import dev.sebastiano.ciacola.studio.rememberStudioShellWindow
 import dev.sebastiano.ciacola.studio.resolveInitialDeckId
@@ -495,6 +497,7 @@ class QaStudio internal constructor(
     }
 
     suspend fun closePresenterWindow() {
+        detachWindowSwingListenersOnEdt(presenterComposeWindowRef.get())
         onUi { presenterWindow.visible = false }
         automator.waitUntil(description = "presenter window closed", timeout = 5.seconds) {
             presenterComposeWindowRef.get() == null
@@ -737,19 +740,8 @@ class QaStudio internal constructor(
         val reviewWin = reviewPanelWindowRef.getAndSet(null)
         val presenterWin = presenterComposeWindowRef.getAndSet(null)
         val story = storyWindowRef.getAndSet(null)
-        val disposeAll = {
-            runCatching { exitApp?.invoke() }
-            runCatching { detached?.isVisible = false; detached?.dispose() }
-            runCatching { reviewWin?.isVisible = false; reviewWin?.dispose() }
-            runCatching { presenterWin?.isVisible = false; presenterWin?.dispose() }
-            runCatching { story?.isVisible = false; story?.dispose() }
-        }
-        if (EventQueue.isDispatchThread()) {
-            disposeAll()
-        } else {
-            runCatching { EventQueue.invokeAndWait { disposeAll() } }
-        }
-        appThread.join(3_000)
+        val windows = listOfNotNull(detached, reviewWin, presenterWin, story)
+        closeQaWindowsSafely(windows = windows, exitApp = exitApp, appThread = appThread)
         runCatching { workspaceRoot.toFile().deleteRecursively() }
     }
 }
@@ -1049,6 +1041,8 @@ fun launchStudio(
                     DocumentStageDirectEditOverlay(
                         controller = elementController,
                         enabled = studioWorkspace.isElementPickingEnabled && !overviewOpen && !reviewOwnsClick,
+                        inlineEditBlockedProvider = { studioWorkspace.inlineEditBlockedProvider() },
+                        onRestoreStageFocus = { studioWorkspace.onRestoreStageFocus?.invoke() },
                     ) {
                         Box(Modifier.fillMaxSize()) {
                             inner()
@@ -1257,6 +1251,11 @@ fun launchStudio(
             studioWorkspace.onSelectDeckByIndex = { idx ->
                 DeckCatalog.discoverEntries(decksDir).getOrNull(idx)?.let(::switchToDeck)
             }
+            studioWorkspace.isStageFocusedProvider = { reviewStageCoordinator.stageHasFocus }
+            studioWorkspace.inlineEditBlockedProvider = {
+                studioWorkspace.themeSheetOpen || reviewStageCoordinator.inspectModeEnabled ||
+                    reviewStageCoordinator.pendingSelection != null || reviewStageCoordinator.selectedPinCommentId != null
+            }
 
             val activeNonSkipped = remember(store.document) {
                 store.document.slides.filterNot { it.skipped }
@@ -1351,7 +1350,7 @@ fun launchStudio(
                     runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }.isSuccess
                 },
                 extraPreviewKeyHandler = { ev, _ ->
-                    studioWorkspace.handleStudioPreviewKey(ev)
+                    studioWorkspace.handleStudioPreviewKey(ev, allowStageAuthoringShortcuts = false)
                 },
             ).also {
                 presenterWinHolder = it
@@ -1400,7 +1399,7 @@ fun launchStudio(
                 trailingPane = hoistedTrailingPane,
                 leadingToolbarContent = null,
                 extraPreviewKeyHandler = { ev, _ ->
-                    studioWorkspace.handleStudioPreviewKey(ev)
+                    studioWorkspace.handleStudioPreviewKey(ev, allowStageAuthoringShortcuts = false)
                 },
                 initialDocked = timelineDocked,
                 initialExpanded = timelineExpanded,
@@ -1541,24 +1540,22 @@ fun launchStudio(
                                     readyLatch.countDown()
                                 }
                                 val overviewVisibility = rememberOverviewVisibility()
-                                val nonSkippedSlidesForTitles = remember(store.document) {
-                                    store.document.slides.filterNot { it.skipped }
+                                val committedOverviewSlides = remember(committedOverviewDoc) {
+                                    committedOverviewDoc.slides.filterNot { it.skipped }
                                 }
+                                val overviewProviders = rememberOverviewSlideProviders(committedOverviewSlides)
                                 CompositionLocalProvider(
                                     LocalOverviewOpen provides overviewVisibility.isVisible,
                                     LocalOverviewChromeStyle provides rememberStudioOverviewChromeStyle(),
-                                    LocalOverviewSlideTitleProvider provides { idx ->
-                                        nonSkippedSlidesForTitles.getOrNull(idx)?.title?.takeIf { it.isNotBlank() }
-                                    },
+                                    LocalOverviewSlideTitleProvider provides overviewProviders.titleProvider,
+                                    LocalOverviewThumbnailFrameProvider provides overviewProviders.thumbnailFrameProvider,
                                 ) {
                                     Box(Modifier.fillMaxSize()) {
                                         fullDecorator.decorate {
                                             EaselOverview(
                                                 animatic = animatic,
                                                 visibility = overviewVisibility,
-                                                slideTitle = { idx ->
-                                                    nonSkippedSlidesForTitles.getOrNull(idx)?.title
-                                                },
+                                                slideTitle = overviewProviders.titleProvider,
                                                 previewStoryboard = overviewStoryboard,
                                             ) {
                                                 if (includeOverlayNavigation) {

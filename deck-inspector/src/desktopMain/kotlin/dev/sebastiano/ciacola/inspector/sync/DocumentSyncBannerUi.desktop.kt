@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.bnorm.storyboard.easel.LocalPresentingFullscreen
 import dev.sebastiano.ciacola.document.CloseFlushResult
 import dev.sebastiano.ciacola.document.ConflictKind
 import dev.sebastiano.ciacola.document.DeckDocumentStore
@@ -37,6 +38,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
+import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.DefaultButton
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
@@ -48,6 +50,9 @@ object SyncUiTestTags {
     const val STICKY_BANNER = "sync-sticky-banner"
     const val BTN_KEEP_MINE = "sync-keep-mine"
     const val BTN_TAKE_THEIRS = "sync-take-theirs"
+    const val EXTERNAL_RELOAD_BANNER = "sync-external-reload-banner"
+    const val BTN_EXTERNAL_RELOAD_KEEP_STUDIO = "sync-external-reload-keep-studio"
+    const val BTN_EXTERNAL_RELOAD_DISMISS = "sync-external-reload-dismiss"
     const val BTN_OVERWRITE_INVALID = "sync-overwrite-invalid"
     const val BTN_RETRY_WRITE = "sync-retry-write"
     const val BTN_OPEN_RECOVERY = "sync-open-recovery"
@@ -67,26 +72,79 @@ object SyncUiTestTags {
 fun DocumentSyncStatusBanner(
     controller: DocumentSyncController,
     modifier: Modifier = Modifier,
+    isAudiencePresenting: Boolean = false,
     onCopyText: (String) -> Boolean = ::copyTextToSystemClipboard,
 ) {
     val sync = controller.syncState
     val scope = rememberCoroutineScope()
     val statusMsg = controller.statusMessage
+    val hideForAudience = isAudiencePresenting || LocalPresentingFullscreen.current
+    val isDark = JewelTheme.isDark
 
     if (!controller.shouldShowStickyBanner) {
-        if (statusMsg != null) {
+        if (hideForAudience) return
+        val reloadNotice = controller.externalReloadNotice
+        if (reloadNotice != null) {
+            val bg = if (isDark) Color(0xFF1F2A38) else Color(0xFFEFF6FF)
+            val borderColor = if (isDark) Color(0xFF3B82F6) else Color(0xFF2563EB)
+            val titleColor = if (isDark) Color(0xFFF3F4F6) else Color(0xFF1E3A8A)
+            val subtitleColor = if (isDark) Color(0xFFD1D5DB) else Color(0xFF1D4ED8)
             Row(
                 modifier = modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF17251E))
-                    .border(1.dp, Color(0xFF2D6A4F))
+                    .background(bg)
+                    .border(1.dp, borderColor)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag(SyncUiTestTags.EXTERNAL_RELOAD_BANNER),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(
+                        text = "Deck updated on disk — reloaded",
+                        color = titleColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "External changes were reloaded while Studio held local undo history.",
+                        color = subtitleColor,
+                        fontSize = 11.sp,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { scope.launch { controller.keepStudioVersionAfterExternalReload() } },
+                    enabled = !controller.isBusy,
+                    modifier = Modifier.testTag(SyncUiTestTags.BTN_EXTERNAL_RELOAD_KEEP_STUDIO),
+                ) {
+                    Text("Keep Studio Version", fontSize = 11.sp)
+                }
+                OutlinedButton(
+                    onClick = { controller.dismissExternalReloadNotice() },
+                    enabled = !controller.isBusy,
+                    modifier = Modifier.testTag(SyncUiTestTags.BTN_EXTERNAL_RELOAD_DISMISS),
+                ) {
+                    Text("Dismiss", fontSize = 11.sp)
+                }
+            }
+            return
+        }
+        if (statusMsg != null) {
+            val statusBg = if (isDark) Color(0xFF17251E) else Color(0xFFECFDF5)
+            val statusBorder = if (isDark) Color(0xFF2D6A4F) else Color(0xFF059669)
+            val statusTextColor = if (isDark) Color(0xFFD8F3DC) else Color(0xFF065F46)
+            Row(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .background(statusBg)
+                    .border(1.dp, statusBorder)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     text = statusMsg,
-                    color = Color(0xFFD8F3DC),
+                    color = statusTextColor,
                     fontSize = 11.sp,
                     modifier = Modifier.weight(1f),
                 )
@@ -215,14 +273,17 @@ fun DocumentSyncStatusBanner(
                             enabled = !controller.isBusy,
                             modifier = Modifier.testTag(SyncUiTestTags.BTN_KEEP_MINE),
                         ) {
-                            Text("Keep mine", fontSize = 11.sp)
+                            Text("Keep Studio Version", fontSize = 11.sp)
                         }
                         OutlinedButton(
                             onClick = { scope.launch { controller.takeTheirs() } },
                             enabled = !controller.isBusy,
                             modifier = Modifier.testTag(SyncUiTestTags.BTN_TAKE_THEIRS),
                         ) {
-                            Text("Take theirs", fontSize = 11.sp)
+                            Text(
+                                if (sync.info.kind == ConflictKind.Unwritten) "Reload from Disk" else "Load Displaced",
+                                fontSize = 11.sp,
+                            )
                         }
                     }
 
@@ -492,6 +553,7 @@ fun DocumentLoadStateGate(
     onAllowClose: () -> Unit,
     onRetryLoad: () -> Unit = {},
     modifier: Modifier = Modifier,
+    isAudiencePresentingProvider: () -> Boolean = { false },
     loadedContent: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -553,7 +615,10 @@ fun DocumentLoadStateGate(
 
             DeckLoadState.Loaded -> {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    DocumentSyncStatusBanner(controller = controller)
+                    DocumentSyncStatusBanner(
+                        controller = controller,
+                        isAudiencePresenting = isAudiencePresentingProvider(),
+                    )
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         loadedContent()
                     }

@@ -78,7 +78,7 @@ enum class StudioInspectorTab(
  */
 enum class StudioMode(val label: String, val tooltip: String) {
     Edit(label = "Edit", tooltip = "Edit slides with the timeline and inspector"),
-    Review(label = "Review", tooltip = "Click the stage to leave review comments"),
+    Review(label = "Review", tooltip = "Click the stage or press C / ⌘M to leave review comments"),
     Present(label = "Present", tooltip = "Clean show mode for live presenting (Esc returns to Edit)"),
 }
 
@@ -164,6 +164,12 @@ class StudioWorkspaceController(
     /** Toggles review click-to-comment inspect mode (`F3`) regardless of which Studio pane holds focus. */
     var onToggleReviewInspect: (() -> Unit)? = null
 
+    /** Pins a review comment to the active target when `C` or `⌘M` is pressed in Review mode. */
+    var onPinReviewComment: (() -> Boolean)? = null
+
+    /** Captures the currently selected element ID before entering Review mode (cleared on Edit/Present). */
+    var onCaptureReviewTargetNodeId: ((String?) -> Unit)? = null
+
     /** Opens the review panel when entering [StudioMode.Review]. */
     var onOpenReviewPanel: (() -> Unit)? = null
 
@@ -172,6 +178,19 @@ class StudioWorkspaceController(
 
     /** Restores keyboard focus to the stage after a mode switch. */
     var onRestoreStageFocus: (() -> Unit)? = null
+
+    /** Synced from [LocalPresentingFullscreen]; hides window chrome and blocks authoring shortcuts. */
+    var isFullscreenPresenting: Boolean by mutableStateOf(false)
+        internal set
+
+    /** Reports whether the Story stage currently owns keyboard focus (guards stage-local Enter-to-edit). */
+    var isStageFocusedProvider: () -> Boolean = { false }
+
+    /** Reports whether stage chrome or Review inspect/pin state blocks Enter-to-edit. */
+    var inlineEditBlockedProvider: () -> Boolean = { false }
+
+    /** Notifies listeners (e.g., review target tracking) when the active slide changes. */
+    var onActiveSlideChanged: ((String?) -> Unit)? = null
 
     init {
         bindControllerHooks()
@@ -306,6 +325,7 @@ class StudioWorkspaceController(
     fun switchMode(target: StudioMode) {
         when (target) {
             StudioMode.Edit -> {
+                onCaptureReviewTargetNodeId?.invoke(null)
                 setReviewInspectMode(false)
                 timelineWindow?.let { tw ->
                     if (!tw.authoringActive) tw.dockedInStoryWindow = true
@@ -313,9 +333,11 @@ class StudioWorkspaceController(
             }
 
             StudioMode.Review -> {
+                val capturedNodeId = elementController.selectedNodeId
                 cancelAnyActiveGesture()
                 elementController.cancelInlineTextEdit()
                 elementController.selectNode(null)
+                onCaptureReviewTargetNodeId?.invoke(capturedNodeId)
                 themeSheetOpen = false
                 // Reviewing is stage-first: fold the editing chrome so pins and comments get the room.
                 timelineWindow?.dockedInStoryWindow = false
@@ -324,6 +346,7 @@ class StudioWorkspaceController(
             }
 
             StudioMode.Present -> {
+                onCaptureReviewTargetNodeId?.invoke(null)
                 cancelAnyActiveGesture()
                 elementController.cancelInlineTextEdit()
                 elementController.selectNode(null)
@@ -499,9 +522,25 @@ class StudioWorkspaceController(
      * - Unified `⌘Z` / `⇧⌘Z` (`Ctrl+Z` / `Ctrl+Y`) routed to `store.undo()` / `store.redo()`,
      *   strictly yielding whenever a text input holds focus.
      */
-    fun handleStudioPreviewKey(event: KeyEvent): Boolean {
-        if (event.key == Key.Escape && event.type == KeyEventType.KeyUp && swallowNextEscapeKeyUp) {
-            swallowNextEscapeKeyUp = false
+    fun handleStudioPreviewKey(
+        event: KeyEvent,
+        allowStageAuthoringShortcuts: Boolean = true,
+    ): Boolean {
+        if (event.key == Key.Escape && event.type == KeyEventType.KeyUp) {
+            if (swallowNextEscapeKeyUp) {
+                swallowNextEscapeKeyUp = false
+                return true
+            }
+            if (elementController.swallowNextEscapeKeyUp) {
+                elementController.swallowNextEscapeKeyUp = false
+                return true
+            }
+        }
+        if ((event.key == Key.Enter || event.key == Key.NumPadEnter) &&
+            event.type == KeyEventType.KeyUp &&
+            elementController.swallowNextEnterKeyUp
+        ) {
+            elementController.swallowNextEnterKeyUp = false
             return true
         }
         if (isTextInputActiveProvider() ||
@@ -548,7 +587,7 @@ class StudioWorkspaceController(
 
         if (handleDeckSwitchChord(event)) return true
 
-        if (isElementPickingEnabled) {
+        if (allowStageAuthoringShortcuts && isElementPickingEnabled) {
             if (event.type == KeyEventType.KeyDown &&
                 event.key == Key.Escape &&
                 elementController.selectedNodeIds.isNotEmpty()
@@ -557,7 +596,46 @@ class StudioWorkspaceController(
                 swallowNextEscapeKeyUp = true
                 return true
             }
-            if (activeTab == StudioInspectorTab.Design && elementController.handleKeyEvent(event)) {
+            if (!overviewOpen &&
+                !themeSheetOpen &&
+                !inlineEditBlockedProvider() &&
+                !chromeHasFocus &&
+                isStageFocusedProvider() &&
+                event.type == KeyEventType.KeyDown &&
+                !event.isCtrlPressed &&
+                !event.isMetaPressed &&
+                !event.isAltPressed &&
+                !event.isShiftPressed &&
+                (event.key == Key.Enter || event.key == Key.NumPadEnter)
+            ) {
+                if (elementController.swallowNextEnterKeyUp) return true
+                if (elementController.startInlineEditForSelection()) {
+                    elementController.swallowNextEnterKeyUp = true
+                    return true
+                }
+            }
+            if (activeTab == StudioInspectorTab.Design &&
+                !elementController.layersTreeHasFocus &&
+                elementController.handleKeyEvent(event)
+            ) {
+                return true
+            }
+        }
+
+        if (allowStageAuthoringShortcuts &&
+            mode == StudioMode.Review &&
+            !isFullscreenPresenting &&
+            !overviewOpen &&
+            !themeSheetOpen &&
+            !chromeHasFocus &&
+            !isTextInputActiveProvider() &&
+            event.type == KeyEventType.KeyDown
+        ) {
+            val unmodifiedC = event.key == Key.C &&
+                !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed
+            val primaryModM = event.key == Key.M &&
+                (event.isMetaPressed || event.isCtrlPressed) && !event.isAltPressed && !event.isShiftPressed
+            if ((unmodifiedC || primaryModM) && onPinReviewComment?.invoke() == true) {
                 return true
             }
         }
@@ -676,6 +754,10 @@ fun StudioWorkspaceSyncEffects(
     animatic: Animatic? = null,
 ) {
     val studioOpen = workspace.isStudioOpen
+
+    LaunchedEffect(activeSlideId) {
+        workspace.onActiveSlideChanged?.invoke(activeSlideId)
+    }
 
     LaunchedEffect(activeSlideId, activeBeatIndex) {
         if (activeSlideId != null) {

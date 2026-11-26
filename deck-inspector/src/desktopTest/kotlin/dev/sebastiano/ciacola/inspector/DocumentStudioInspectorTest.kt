@@ -1,16 +1,25 @@
 package dev.sebastiano.ciacola.inspector
 
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.sebastiano.ciacola.document.BeatSpec
 import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.CanonicalJson
 import dev.sebastiano.ciacola.document.CloseFlushResult
 import dev.sebastiano.ciacola.document.ConflictKind
+import dev.sebastiano.ciacola.document.ContainerPayload
 import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckDocumentStore
@@ -340,6 +349,8 @@ class DocumentStudioInspectorTest {
             onNodeWithTag(SyncUiTestTags.BTN_KEEP_MINE).assertExists()
             onNodeWithTag(SyncUiTestTags.BTN_TAKE_THEIRS).assertExists()
             onNodeWithTag(SyncUiTestTags.BTN_OPEN_RECOVERY).assertExists()
+            onNodeWithText("Keep Studio Version", useUnmergedTree = true).assertExists()
+            onNodeWithText("Reload from Disk", useUnmergedTree = true).assertExists()
 
             // Trigger close-hold dialog and verify Cancel + Save a recovery copy and close buttons render.
             runBlocking { controller.requestClose(onAllowClose = { closeAllowed = true }) }
@@ -571,5 +582,187 @@ class DocumentStudioInspectorTest {
         // Single undo removes copied themes cleanly!
         store.undo()
         assertNull(store.document.themes["editorial"])
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun externalReloadBannerSurfacesOverLocalUndoHistoryAndSupportsKeepOrDismiss() = runComposeUiTest {
+        val tempDir = Files.createTempDirectory("ciacola-ext-reload-ui-")
+        val deckFile = tempDir.resolve("reload.deck.json")
+        val recoveryDir = tempDir.resolve("app-recovery")
+        writeDeckToFile(deckFile, sampleDeck("Initial"))
+
+        val store = DeckDocumentStore()
+        val sync = DeckFileSync(deckFile, recoveryDir, store, specimenRegistry = testSpecimens())
+        runBlocking {
+            sync.open()
+            store.edit("Rename") { it.copy(title = "Studio Saved") }
+            sync.flushNow()
+            writeDeckToFile(deckFile, sampleDeck("External Edit").copy(title = "External Edit"))
+            sync.pollExternalChangesNow()
+        }
+        val controller = DocumentSyncController(store, sync)
+
+        try {
+            setContent {
+                IntUiTheme {
+                    DocumentLoadStateGate(store = store, controller = controller, onAllowClose = {}) {
+                        org.jetbrains.jewel.ui.component.Text("Stage Canvas")
+                    }
+                }
+            }
+            waitForIdle()
+
+            onNodeWithTag(SyncUiTestTags.EXTERNAL_RELOAD_BANNER).assertExists()
+            onNodeWithTag(SyncUiTestTags.BTN_EXTERNAL_RELOAD_KEEP_STUDIO).assertExists()
+            onNodeWithTag(SyncUiTestTags.BTN_EXTERNAL_RELOAD_DISMISS).assertExists()
+            assertEquals("External Edit", store.document.title)
+
+            onNodeWithTag(SyncUiTestTags.BTN_EXTERNAL_RELOAD_DISMISS).performClick()
+            waitForIdle()
+            onNodeWithTag(SyncUiTestTags.EXTERNAL_RELOAD_BANNER).assertDoesNotExist()
+            assertEquals("External Edit", store.document.title)
+        } finally {
+            sync.close()
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun externalReloadNoticeExpiresAfterNewEditAndIsSuppressedWhileAudiencePresenting() = runComposeUiTest {
+        val tempDir = Files.createTempDirectory("ciacola-ext-reload-gate-")
+        val deckFile = tempDir.resolve("reload-gate.deck.json")
+        val recoveryDir = tempDir.resolve("app-recovery")
+        writeDeckToFile(deckFile, sampleDeck("Initial"))
+
+        val store = DeckDocumentStore()
+        val sync = DeckFileSync(deckFile, recoveryDir, store, specimenRegistry = testSpecimens())
+        runBlocking {
+            sync.open()
+            store.edit("Rename") { it.copy(title = "Studio Saved") }
+            sync.flushNow()
+            writeDeckToFile(deckFile, sampleDeck("External Edit").copy(title = "External Edit"))
+            sync.pollExternalChangesNow()
+        }
+        val controller = DocumentSyncController(store, sync)
+        val audiencePresenting = androidx.compose.runtime.mutableStateOf(true)
+
+        try {
+            setContent {
+                IntUiTheme {
+                    DocumentLoadStateGate(
+                        store = store,
+                        controller = controller,
+                        onAllowClose = {},
+                        isAudiencePresentingProvider = { audiencePresenting.value },
+                    ) {
+                        org.jetbrains.jewel.ui.component.Text("Stage Canvas")
+                    }
+                }
+            }
+            waitForIdle()
+
+            // Hidden when Audience/Present view is active.
+            onNodeWithTag(SyncUiTestTags.EXTERNAL_RELOAD_BANNER).assertDoesNotExist()
+
+            // Shown once Audience/Present mode closes.
+            audiencePresenting.value = false
+            waitForIdle()
+            onNodeWithTag(SyncUiTestTags.EXTERNAL_RELOAD_BANNER).assertExists()
+
+            // Any subsequent Studio edit expires the notice immediately.
+            runOnIdle { store.edit("Followup") { it.copy(title = "Studio Newer") } }
+            waitForIdle()
+            onNodeWithTag(SyncUiTestTags.EXTERNAL_RELOAD_BANNER).assertDoesNotExist()
+        } finally {
+            sync.close()
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun layersRowConsumesArrowsWithoutNudgingAndSeparatesToggleRoleFromRowButton() = runComposeUiTest {
+        val groupNode = NodeSpec(
+            id = "grp-1",
+            frame = FrameSpec(x = 100.0, y = 200.0, w = 400.0, h = 120.0),
+            stack = ContainerPayload(
+                children = listOf(
+                    NodeSpec(
+                        id = "child-text",
+                        frame = FrameSpec(x = 10.0, y = 10.0, w = 200.0, h = 40.0),
+                        text = TextPayload(value = RichTextValue.Plain("Nested Headline")),
+                    ),
+                ),
+            ),
+        )
+        val doc = DeckDocument(
+            id = "layers-test",
+            slides = listOf(
+                SlideSpec(
+                    id = "s1",
+                    beats = listOf(BeatSpec()),
+                    nodes = listOf(groupNode),
+                ),
+            ),
+        )
+        val store = DeckDocumentStore(doc, initialLoad = DeckLoadState.Loaded)
+        val elementController = DocumentElementInspectorController(store = store, specimens = testSpecimens())
+        elementController.selectLocation("s1", 0)
+        elementController.selectNode("child-text")
+
+        val showInspector = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            IntUiTheme {
+                if (showInspector.value) {
+                    dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorUi(controller = elementController)
+                }
+            }
+        }
+        waitForIdle()
+
+        // Toggle chevron Role.Button is a sibling, NOT nested inside the Layers row Role.Button.
+        val toggleNode = onNodeWithTag("ciacola-doc-node-toggle-grp-1", useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals(Role.Button, toggleNode.config.getOrNull(SemanticsProperties.Role))
+        onNode(hasTestTag("ciacola-doc-node-toggle-grp-1") and hasAnyAncestor(hasTestTag("ciacola-doc-node-item-grp-1")), useUnmergedTree = true)
+            .assertDoesNotExist()
+
+        // Focus child-text Layers row: single presses of all 4 unmodified arrows + Enter must not nudge or open editor.
+        onNodeWithTag("ciacola-doc-node-item-child-text", useUnmergedTree = true).requestFocus()
+        waitForIdle()
+        for (arrowKey in listOf(Key.DirectionDown, Key.DirectionUp, Key.DirectionLeft, Key.DirectionRight)) {
+            val beforeFrame = elementController.selectedResolvedNode()?.frame
+            onNodeWithTag("ciacola-doc-node-item-child-text", useUnmergedTree = true).performKeyInput {
+                pressKey(arrowKey)
+            }
+            waitForIdle()
+            assertEquals(beforeFrame?.x, elementController.selectedResolvedNode()?.frame?.x, "Row $arrowKey leaked X nudge")
+            assertEquals(beforeFrame?.y, elementController.selectedResolvedNode()?.frame?.y, "Row $arrowKey leaked Y nudge")
+        }
+        onNodeWithTag("ciacola-doc-node-item-child-text", useUnmergedTree = true).performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(null, elementController.inlineEditingNodeId)
+
+        // Chevron toggle on parent node must also consume all 4 arrows without nudging its frame.
+        runOnIdle { elementController.selectNode("grp-1") }
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-node-toggle-grp-1", useUnmergedTree = true).requestFocus()
+        waitForIdle()
+        for (arrowKey in listOf(Key.DirectionDown, Key.DirectionUp, Key.DirectionLeft, Key.DirectionRight)) {
+            val beforeFrame = elementController.selectedResolvedNode()?.frame
+            onNodeWithTag("ciacola-doc-node-toggle-grp-1", useUnmergedTree = true).performKeyInput {
+                pressKey(arrowKey)
+            }
+            waitForIdle()
+            assertEquals(beforeFrame?.x, elementController.selectedResolvedNode()?.frame?.x, "Toggle $arrowKey leaked X nudge")
+            assertEquals(beforeFrame?.y, elementController.selectedResolvedNode()?.frame?.y, "Toggle $arrowKey leaked Y nudge")
+        }
+
+        // Removing inspector/Layers tree from composition resets layersTreeHasFocus to false.
+        assertTrue(elementController.layersTreeHasFocus)
+        showInspector.value = false
+        waitForIdle()
+        assertFalse(elementController.layersTreeHasFocus)
     }
 }

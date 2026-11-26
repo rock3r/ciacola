@@ -5,16 +5,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.Storyboard
+import dev.bnorm.storyboard.easel.Animatic
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import dev.sebastiano.ciacola.document.DeckStructureEdits
 import dev.sebastiano.ciacola.loadFoundationTestDocument
+import dev.sebastiano.ciacola.studio.loadPersistedPresenterNotesFontSizeSp
+import dev.sebastiano.ciacola.studio.persistPresenterNotesFontSizeSp
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import java.awt.Rectangle
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -212,5 +221,67 @@ class PresenterNotesAndControllerTest {
         assertEquals("d2", presentedOn?.id)
         assertTrue(controller.swapAudienceAndPresenterDisplays())
         assertTrue(swapped)
+    }
+
+    @Test
+    fun notesFontSizePersistsAcrossSessions() {
+        val dir = Files.createTempDirectory("presenter-notes-zoom-")
+        try {
+            assertEquals(PresenterController.DEFAULT_NOTES_FONT_SP, loadPersistedPresenterNotesFontSizeSp(dir))
+            persistPresenterNotesFontSizeSp(dir, 26f)
+            assertEquals(26f, loadPersistedPresenterNotesFontSizeSp(dir))
+
+            // Out-of-range values clamp cleanly when persisted and reloaded.
+            persistPresenterNotesFontSizeSp(dir, 99f)
+            assertEquals(PresenterController.MAX_NOTES_FONT_SP, loadPersistedPresenterNotesFontSizeSp(dir))
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun nKeyStartsEditingNotesAndEscapeRestoresPresenterShortcuts() = runComposeUiTest {
+        val doc = loadFoundationTestDocument()
+        val deck = buildFoundationTestStoryboard()
+        lateinit var animatic: Animatic
+        lateinit var controller: PresenterController
+        val savedNotes = mutableListOf<String?>()
+
+        setContent {
+            animatic = rememberAnimatic(storyboard = { deck })
+            controller = androidx.compose.runtime.remember(animatic) {
+                PresenterController(
+                    initialAnimatic = animatic,
+                    documentProvider = { doc },
+                    onSaveSpeakerNote = { _, _, note -> savedNotes += note },
+                    initialNotesFontSizeSp = 24f,
+                    onNotesFontSizeChanged = { },
+                    wallClockProvider = { "14:30" },
+                )
+            }
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(900.dp, 600.dp)) {
+                    PresenterDashboard(controller = controller)
+                }
+            }
+        }
+        waitForIdle()
+
+        assertEquals(24f, controller.notesFontSizeSp)
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput { pressKey(Key.N) }
+        waitForIdle()
+        assertTrue(controller.isEditingNotes, "Expected N shortcut to enter speaker notes editing")
+        onNodeWithTag("ciacola-presenter-notes-editor").assertIsDisplayed()
+
+        onNodeWithTag("ciacola-presenter-notes-editor").performKeyInput { pressKey(Key.Escape) }
+        waitForIdle()
+        assertFalse(controller.isEditingNotes, "Expected Escape to exit notes editing")
+
+        // Presenter shortcuts work again immediately after Escape closes notes editing.
+        val initialIdx = animatic.currentIndex
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput { pressKey(Key.Spacebar) }
+        waitForIdle()
+        assertTrue(animatic.targetIndex != initialIdx, "Spacebar must advance after exiting notes editor")
     }
 }

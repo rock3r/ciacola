@@ -199,6 +199,8 @@ class PresenterController(
     internal var onSaveSpeakerNote: ((slideId: String, beatIndex: Int, note: String?) -> Unit)? = null,
     /** `true` while notes editing is temporarily unavailable (e.g. a deck switch/quit is in flight). */
     internal var notesEditingBlockedProvider: () -> Boolean = { false },
+    initialNotesFontSizeSp: Float = DEFAULT_NOTES_FONT_SP,
+    internal var onNotesFontSizeChanged: ((Float) -> Unit)? = null,
     private val displayRouter: DisplayRoutingAdapter = AwtDisplayRouter(),
     timerClockMillis: () -> Long = System::currentTimeMillis,
     private val wallClockProvider: () -> String = { LocalTime.now().format(WALL_CLOCK_FORMATTER) },
@@ -211,7 +213,9 @@ class PresenterController(
     var curtain: StageCurtain by mutableStateOf(StageCurtain.None)
         internal set
 
-    var notesFontSizeSp: Float by mutableFloatStateOf(DEFAULT_NOTES_FONT_SP)
+    var notesFontSizeSp: Float by mutableFloatStateOf(
+        initialNotesFontSizeSp.coerceIn(MIN_NOTES_FONT_SP, MAX_NOTES_FONT_SP),
+    )
         internal set
 
     var jumpDialogHost: JumpDialogHost? by mutableStateOf(null)
@@ -569,11 +573,19 @@ class PresenterController(
     }
 
     fun increaseNotesFontSize() {
-        notesFontSizeSp = (notesFontSizeSp + NOTES_FONT_STEP_SP).coerceIn(MIN_NOTES_FONT_SP, MAX_NOTES_FONT_SP)
+        val next = (notesFontSizeSp + NOTES_FONT_STEP_SP).coerceIn(MIN_NOTES_FONT_SP, MAX_NOTES_FONT_SP)
+        if (next != notesFontSizeSp) {
+            notesFontSizeSp = next
+            onNotesFontSizeChanged?.invoke(next)
+        }
     }
 
     fun decreaseNotesFontSize() {
-        notesFontSizeSp = (notesFontSizeSp - NOTES_FONT_STEP_SP).coerceIn(MIN_NOTES_FONT_SP, MAX_NOTES_FONT_SP)
+        val next = (notesFontSizeSp - NOTES_FONT_STEP_SP).coerceIn(MIN_NOTES_FONT_SP, MAX_NOTES_FONT_SP)
+        if (next != notesFontSizeSp) {
+            notesFontSizeSp = next
+            onNotesFontSizeChanged?.invoke(next)
+        }
     }
 
     /**
@@ -719,6 +731,15 @@ class PresenterController(
             Key.R -> {
                 timer.reset()
                 true
+            }
+
+            Key.N -> {
+                if (canEditNotes && !isExternalTextInputActive) {
+                    beginEditingNotes()
+                    true
+                } else {
+                    false
+                }
             }
 
             Key.B -> {

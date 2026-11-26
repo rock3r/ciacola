@@ -1,5 +1,9 @@
 package dev.sebastiano.ciacola.document
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -76,6 +80,15 @@ class DeckFileSync(
     @Volatile
     var externalEditLintWarnings: List<DocumentIssue> = emptyList()
         private set
+
+    var externalReloadNotice: ExternalReloadNotice? by mutableStateOf(null)
+        private set
+
+    private fun publishExternalReloadNotice(value: ExternalReloadNotice?) {
+        Snapshot.withMutableSnapshot {
+            externalReloadNotice = value
+        }
+    }
 
     val savedRevision: Long
         get() = store.savedRevision
@@ -299,6 +312,7 @@ class DeckFileSync(
             } else {
                 store.reconcileSyncState()
             }
+            publishExternalReloadNotice(null)
             store.sync
         }
     }
@@ -349,8 +363,32 @@ class DeckFileSync(
                     store.reconcileSyncState(clearConflict = true)
                 }
             }
+            publishExternalReloadNotice(null)
             store.sync
         }
+    }
+
+    /** Restores Studio's pre-reload document when an external disk edit auto-reloaded over local undo history. */
+    suspend fun keepStudioVersionAfterExternalReload(): SyncState = withContext(ioDispatcher) {
+        ioMutex.withLock {
+            val notice = externalReloadNotice ?: return@withLock store.sync
+            val restored = store.applyExternalChangeIfClean(
+                newDocument = notice.previousDocument,
+                conflictOnDirty = null,
+                label = "Keep Studio Version",
+                expectedRevision = notice.reloadedAtRevision,
+                markAsSaved = false,
+            )
+            publishExternalReloadNotice(null)
+            if (restored != null) {
+                writeIfDirtyInternal(forceWrite = true)
+            }
+            store.sync
+        }
+    }
+
+    fun clearExternalReloadNotice() {
+        publishExternalReloadNotice(null)
     }
 
     /**
@@ -400,6 +438,7 @@ class DeckFileSync(
                     diskHash = SyncFilesHelper.sha256Hex(targetBytes)
                     recordStatSnapshot()
                     store.setSyncState(SyncState.Saved)
+                    publishExternalReloadNotice(null)
                     Result.success(recoveryCopy)
                 }
 
@@ -495,45 +534,21 @@ class DeckFileSync(
         decoded: DeckDecodeResult.Success,
         currentHash: String,
     ): DeckLoadState {
-        val lockAcquired = try {
-            ensureSyncDirectoriesAndLock()
-        } catch (e: IOException) {
+        val writable = SyncFilesHelper.acquireLockAndProbeAtomicExchange(
+            dirLock = dirLock,
+            syncDir = syncDir,
+            targetFile = targetFile,
+            dismissedFile = dismissedFile,
+            resolvedConflictsFile = resolvedConflictsFile,
+            dismissedNames = dismissedNames,
+            resolvedConflictNames = resolvedConflictNames,
+            fileOps = fileOps,
+            decoded = decoded,
+            store = store,
+        )
+        if (!writable) {
             diskHash = currentHash
-            store.loadInitial(
-                doc = decoded.document,
-                readOnlyReason = "Cannot initialize sync directory: ${e.message}",
-                issues = decoded.lintIssues,
-            )
             return store.load
-        }
-        if (!lockAcquired) {
-            diskHash = currentHash
-            store.loadInitial(
-                doc = decoded.document,
-                readOnlyReason = "Another Studio instance holds lock on ${targetFile.fileName}.",
-                issues = decoded.lintIssues,
-            )
-            return store.load
-        }
-
-        SyncFilesHelper.loadDismissedSet(dismissedFile, dismissedNames)
-        SyncFilesHelper.loadDismissedSet(resolvedConflictsFile, resolvedConflictNames)
-
-        when (val probe = fileOps.probeExchangeSupport(syncDir)) {
-            is AtomicExchangeResult.Success -> Unit
-            is AtomicExchangeResult.Unsupported -> {
-                releaseLock()
-                diskHash = currentHash
-                store.loadInitial(decoded.document, readOnlyReason = probe.reason, issues = decoded.lintIssues)
-                return store.load
-            }
-
-            is AtomicExchangeResult.Failed -> {
-                releaseLock()
-                diskHash = currentHash
-                store.loadInitial(decoded.document, readOnlyReason = probe.message, issues = decoded.lintIssues)
-                return store.load
-            }
         }
 
         store.loadInitial(decoded.document, readOnlyReason = null, issues = decoded.lintIssues)
@@ -779,6 +794,7 @@ class DeckFileSync(
         inFlightRevision = null
         diskHash = newHash
         store.markSaved(capturedRev)
+        publishExternalReloadNotice(null)
         recordStatSnapshot()
 
         stepHook(SyncStep.WriteAfterDeleteJournal)
@@ -845,44 +861,10 @@ class DeckFileSync(
             rebuildStatusForTxid(journalTxid, meta, targetHash)
         }
 
-        for (tmpPath in SyncFilesHelper.listStrayTmpFiles(syncDir)) {
-            val txid = tmpPath.fileName.toString().removeSuffix(".tmp")
-            val qName = "$txid-${clock.wallTimeMillis()}.${QuarantineKind.Unknown.suffix}"
-            val qPath = quarantineDir.resolve(qName)
-            fileOps.atomicMove(tmpPath, qPath)
-            fileOps.fsyncDirectory(syncDir)
-            fileOps.fsyncDirectory(quarantineDir)
-            firstObservedMonoMs[qName] = clock.monotonicTimeMillis()
-            addNotice(
-                RecoveryNotice(
-                    kind = "unknown",
-                    message = "Recovered temp file without journal to quarantine: $qName",
-                    quarantinePath = qPath,
-                ),
-            )
-        }
-
-        // Remove torn/unreadable journal after stray .tmp files are safely quarantined.
-        if (journalExists && journalTxid == null) {
-            fileOps.deleteIfExists(journalFile)
-            fileOps.fsyncDirectory(syncDir)
-            addNotice(
-                RecoveryNotice(
-                    kind = "torn_journal",
-                    message = "Cleared unreadable sync journal after moving any temporary files to quarantine.",
-                ),
-            )
-        }
-
-        // Rebuild status from Q on open even when journal was already deleted (step 2->3 crash or restart).
-        if (isOnOpen && journalTxid == null) {
-            val entries = SyncFilesHelper.scanQuarantineEntries(quarantineDir, dismissedNames).filterNot { it.dismissed }
-            for ((txid, txEntries) in entries.groupBy { it.txid }) {
-                if (txEntries.any { it.kind == QuarantineKind.Theirs || it.kind == QuarantineKind.Mine }) {
-                    rebuildStatusForTxid(txid, SyncFilesHelper.readMetaOrNull(quarantineDir, txid), targetHash)
-                }
-            }
-        }
+        SyncFilesHelper.recoverStrayAndTornJournalFiles(
+            syncDir, quarantineDir, journalFile, targetFile, targetHash, journalExists, journalTxid, isOnOpen,
+            dismissedNames, resolvedConflictNames, firstObservedMonoMs, clock, fileOps, store, ::addNotice,
+        )
 
         if (isOnOpen) {
             diskHash = targetHash
@@ -1031,6 +1013,7 @@ class DeckFileSync(
                     return
                 }
                 stepHook(SyncStep.PollBeforeApplyExternal)
+                val hadLocalHistory = store.canUndo || store.canRedo
                 val previousDoc = store.applyExternalChangeIfClean(
                     newDocument = decoded.document,
                     conflictOnDirty = ConflictInfo(
@@ -1046,6 +1029,14 @@ class DeckFileSync(
                 if (previousDoc != null) {
                     externalEditLintWarnings = FragmentProvenance.lintExternalDocumentEdit(previousDoc, decoded.document)
                     diskHash = currentHash
+                    if (hadLocalHistory) {
+                        publishExternalReloadNotice(
+                            ExternalReloadNotice(
+                                previousDocument = previousDoc,
+                                reloadedAtRevision = store.revision,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -1061,6 +1052,7 @@ class DeckFileSync(
 
     private fun clearNotices() {
         synchronized(noticesLock) { notices.clear() }
+        publishExternalReloadNotice(null)
     }
 
     private fun recordStatSnapshot() {

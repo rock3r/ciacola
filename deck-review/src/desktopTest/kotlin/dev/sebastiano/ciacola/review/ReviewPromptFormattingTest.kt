@@ -9,7 +9,7 @@ class ReviewPromptFormattingTest {
 
     @Test
     fun commentHintMatchesTheModifierFreeReviewMode() {
-        assertEquals("Click any element to comment.", reviewCommentHint(reviewModeActive = true))
+        assertEquals("Click any element or press C / ⌘M to comment.", reviewCommentHint(reviewModeActive = true))
         val outside = reviewCommentHint(reviewModeActive = false)
         assertFalse(outside.contains("Ctrl"), "No legacy modifier instructions: $outside")
         assertFalse(outside.contains("Story window"), "No legacy window names: $outside")

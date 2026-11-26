@@ -4,6 +4,8 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Density
@@ -16,12 +18,72 @@ import dev.bnorm.storyboard.SceneFormat
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.LocalExportEmittedFrameIndex
 import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.document.JsonMergePatch
+import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.RenderSession
+import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.document.render.DocumentRenderConfig
 import dev.sebastiano.ciacola.document.render.buildDocumentStoryboard
 import dev.sebastiano.ciacola.document.render.documentSceneZIndex
 import java.awt.Desktop
 import javax.swing.SwingUtilities
+
+/**
+ * Picks the earliest beat on [slide] that maximizes visible populated content so multi-beat
+ * slides whose hero content enters on Beat 2+ render populated thumbnails in Grid Overview
+ * instead of blank Beat-0 canvases.
+ */
+internal fun representativeOverviewBeatIndex(slide: SlideSpec): Int {
+    val beatCount = slide.beats.size
+    if (beatCount <= 1) return 0
+
+    fun countVisibleNodes(nodes: List<NodeSpec>, beat: Int): Int {
+        var count = 0
+        for (node in nodes) {
+            if (!JsonMergePatch.isNodePresentAtBeat(node, beat)) continue
+            val resolved = JsonMergePatch.resolveNodeAtBeat(node, beat)
+            if (resolved.opacity <= 0.01) continue
+            count += 1
+            if (resolved.children.isNotEmpty()) {
+                count += countVisibleNodes(resolved.children, beat)
+            }
+        }
+        return count
+    }
+
+    if (countVisibleNodes(slide.nodes, 0) > 0) return 0
+    for (beat in 1 until beatCount) {
+        if (countVisibleNodes(slide.nodes, beat) > 0) return beat
+    }
+    return 0
+}
+
+/**
+ * Precomputes one representative frame index per slide in [nonSkippedSlides] so Grid Overview
+ * thumbnail rendering reads cached beat indices without scanning merge patches per frame.
+ */
+internal fun buildRepresentativeOverviewBeatIndices(nonSkippedSlides: List<SlideSpec>): List<Int> =
+    nonSkippedSlides.map(::representativeOverviewBeatIndex)
+
+@Stable
+internal class OverviewSlideProviders(
+    val titleProvider: (Int) -> String?,
+    val thumbnailFrameProvider: (Int, Int) -> Int,
+)
+
+@Composable
+internal fun rememberOverviewSlideProviders(nonSkippedSlides: List<SlideSpec>): OverviewSlideProviders {
+    val titles = remember(nonSkippedSlides) { nonSkippedSlides.map { it.title?.takeIf { t -> t.isNotBlank() } } }
+    val repBeats = remember(nonSkippedSlides) { buildRepresentativeOverviewBeatIndices(nonSkippedSlides) }
+    return remember(titles, repBeats) {
+        OverviewSlideProviders(
+            titleProvider = { idx -> titles.getOrNull(idx) },
+            thumbnailFrameProvider = { idx, currentFrameIdx ->
+                if (currentFrameIdx > 0) currentFrameIdx else repBeats.getOrElse(idx) { currentFrameIdx }
+            },
+        )
+    }
+}
 
 /**
  * Builds an Overview [Storyboard] where every rendered slide/beat thumbnail receives its own

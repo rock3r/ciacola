@@ -30,7 +30,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /** Optional provider of human-readable slide titles for [EaselOverview] cards and `⌘K` Quick Jump. */
-val LocalOverviewSlideTitleProvider = staticCompositionLocalOf<((Int) -> String?)?> { null }
+val LocalOverviewSlideTitleProvider = compositionLocalOf<((Int) -> String?)?> { null }
+
+/**
+ * Optional provider mapping `(sceneIndex, currentFrameIndex)` to the frame index rendered as a
+ * slide's representative Grid Overview thumbnail (defaults to `currentFrameIndex`).
+ */
+val LocalOverviewThumbnailFrameProvider = compositionLocalOf<((sceneIndex: Int, currentFrameIndex: Int) -> Int)?> { null }
 
 /** Whether [EaselOverview] shows the grid; hoist it to toggle the overview from outside (e.g. a menu). */
 @Stable
@@ -53,6 +59,7 @@ fun EaselOverview(
     visibility: OverviewVisibility = rememberOverviewVisibility(),
     slideTitle: ((Int) -> String?)? = null,
     previewStoryboard: Storyboard? = null,
+    thumbnailFrameIndex: ((sceneIndex: Int, currentFrameIndex: Int) -> Int)? = null,
     content: @Composable () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -61,6 +68,7 @@ fun EaselOverview(
     val holder = rememberSaveableStateHolder()
 
     val effectiveSlideTitle = slideTitle ?: LocalOverviewSlideTitleProvider.current
+    val effectiveThumbnailFrameIndex = thumbnailFrameIndex ?: LocalOverviewThumbnailFrameProvider.current
     val storyMountKey = animatic.storyboard
     val storyboard = previewStoryboard ?: storyMountKey
     DisposableEffect(holder, storyMountKey) {
@@ -129,6 +137,8 @@ fun EaselOverview(
                             isVisible = isVisible,
                             useSharedElement = overviewVisible,
                             slideTitle = effectiveSlideTitle,
+                            thumbnailStoryboard = storyboard,
+                            thumbnailFrameIndex = effectiveThumbnailFrameIndex,
                             onExitOverview = {
                                 job?.cancel()
                                 job = coroutineScope.launch {

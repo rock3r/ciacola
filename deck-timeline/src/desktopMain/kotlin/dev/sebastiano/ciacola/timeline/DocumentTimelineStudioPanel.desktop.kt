@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -575,25 +576,38 @@ fun DocumentTimelineMotionInspector(
     controller.store.revision
     controller.store.document
     val scroll = rememberScrollState()
+    val showTopFade by remember(scroll) { derivedStateOf { scroll.value > 0 } }
+    val showBottomFade by remember(scroll) { derivedStateOf { scroll.canScrollForward } }
     val panelBg = JewelTheme.globalColors.panelBackground
-    Box(modifier = modifier) {
+    Box(modifier = modifier.background(panelBg).testTag("ciacola-doc-animate-panel-root")) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 32.dp)
+                .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 32.dp)
                 .testTag("ciacola-doc-timeline-inspector"),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             DocumentTimelineRightInspector(controller = controller)
         }
-        if (scroll.canScrollForward) {
+        if (showTopFade) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(16.dp)
+                    .background(Brush.verticalGradient(listOf(panelBg, panelBg.copy(alpha = 0f))))
+                    .testTag("ciacola-doc-animate-scroll-fade"),
+            )
+        }
+        if (showBottomFade) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(20.dp)
-                    .background(Brush.verticalGradient(listOf(panelBg.copy(alpha = 0f), panelBg))),
+                    .background(Brush.verticalGradient(listOf(panelBg.copy(alpha = 0f), panelBg)))
+                    .testTag("ciacola-doc-animate-bottom-fade"),
             )
         }
         VerticalScrollbar(

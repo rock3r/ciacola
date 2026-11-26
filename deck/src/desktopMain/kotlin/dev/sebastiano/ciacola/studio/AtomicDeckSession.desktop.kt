@@ -241,6 +241,7 @@ fun rememberDocumentSyncGateWindow(
     syncController: DocumentSyncController?,
     store: DeckDocumentStore,
     onAllowClose: () -> Unit,
+    isAudiencePresentingProvider: () -> Boolean = { false },
 ): EaselWindow = remember(syncController, store) {
     object : EaselWindow {
         override val name: String = "SyncGate"
@@ -252,6 +253,7 @@ fun rememberDocumentSyncGateWindow(
                     store = store,
                     controller = sync,
                     onAllowClose = onAllowClose,
+                    isAudiencePresentingProvider = isAudiencePresentingProvider,
                 ) {
                     content()
                 }

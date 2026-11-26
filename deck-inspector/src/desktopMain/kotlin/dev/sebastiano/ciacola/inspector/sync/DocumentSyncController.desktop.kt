@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import dev.sebastiano.ciacola.document.CloseFlushResult
 import dev.sebastiano.ciacola.document.DeckDocumentStore
 import dev.sebastiano.ciacola.document.DeckFileSync
+import dev.sebastiano.ciacola.document.ExternalReloadNotice
 import dev.sebastiano.ciacola.document.QuarantineEntry
 import dev.sebastiano.ciacola.document.QuarantineKind
 import dev.sebastiano.ciacola.document.RecoveryNotice
@@ -72,6 +73,11 @@ class DocumentSyncController(
     val syncState: SyncState
         get() = store.sync
 
+    val externalReloadNotice: ExternalReloadNotice?
+        get() = fileSync.externalReloadNotice?.takeUnless { notice ->
+            store.revision != notice.reloadedAtRevision || store.isDirty || store.hasOpenTransaction
+        }
+
     val recoveryNotices: List<RecoveryNotice>
         get() = fileSync.recoveryNotices
 
@@ -87,6 +93,26 @@ class DocumentSyncController(
 
     fun clearStatusMessage() {
         statusMessage = null
+    }
+
+    /** Restores Studio's pre-reload document when disk changed externally over local undo history. */
+    suspend fun keepStudioVersionAfterExternalReload(): SyncState {
+        isBusy = true
+        statusMessage = null
+        return try {
+            val result = fileSync.keepStudioVersionAfterExternalReload()
+            refreshRecoveryEntries()
+            result
+        } catch (t: Throwable) {
+            statusMessage = "Keep Studio Version failed: ${t.message ?: t::class.simpleName}"
+            store.sync
+        } finally {
+            isBusy = false
+        }
+    }
+
+    fun dismissExternalReloadNotice() {
+        fileSync.clearExternalReloadNotice()
     }
 
     /**

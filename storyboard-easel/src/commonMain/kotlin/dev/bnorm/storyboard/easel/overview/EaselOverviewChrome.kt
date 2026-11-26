@@ -291,6 +291,7 @@ internal fun BoxScope.OverviewGridView(
     columns: List<OverviewState.SceneColumn<*>>,
     gridColumnCount: Int,
     slideTitle: ((Int) -> String?)?,
+    thumbnailFrameIndex: ((sceneIndex: Int, currentFrameIndex: Int) -> Int)? = null,
     onSelectOrExit: (OverviewState.SceneColumn<*>) -> Unit,
 ) {
     val style = currentOverviewChromeStyle()
@@ -352,7 +353,13 @@ internal fun BoxScope.OverviewGridView(
             }
             val borderColor by animateColorAsState(targetBorder)
             val borderWidth = if (isSelected && !quickJumpOpen) 2.dp else 1.dp
-            val selectedItem = column.items[column.currentItemIndex]
+            val previewFrameIdx = if (column.items.isEmpty()) {
+                0
+            } else {
+                (thumbnailFrameIndex?.invoke(column.index, column.currentItemIndex) ?: column.currentItemIndex)
+                    .coerceIn(0, column.items.lastIndex)
+            }
+            val selectedItem = column.items[previewFrameIdx]
             val captionText = overviewCardCaption(column.index, overviewSlideLabel(column, slideTitle))
 
             Column(

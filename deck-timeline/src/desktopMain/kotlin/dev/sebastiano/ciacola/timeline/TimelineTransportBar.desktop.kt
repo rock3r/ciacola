@@ -176,9 +176,15 @@ internal fun DocumentTimelineTransportBar(
         // The optional deck toolbar only shows when there is generous room, and reserves a fixed
         // budget, so its own visibility never feeds back into the measurement above.
         val showDeckToolbar = leadingToolbarContent != null && maxWidth - leadingWidth >= TRANSPORT_DECK_TOOLBAR_MIN_WIDTH
-        val layout = transportBarLayoutFor(maxWidth - leadingWidth - if (showDeckToolbar) TRANSPORT_DECK_TOOLBAR_BUDGET else 0.dp)
+        val availableWidth = maxWidth - leadingWidth - if (showDeckToolbar) TRANSPORT_DECK_TOOLBAR_BUDGET else 0.dp
+        val layout = transportBarLayoutFor(availableWidth)
         var searchOpen by remember(surface) { mutableStateOf(false) }
         val searchActive = layout.inlineFilterField || searchOpen || controller.trackSearchQuery.isNotEmpty()
+        val narrowSearchActive = searchActive && !layout.inlineFilterField && availableWidth < 680.dp
+        val effectiveZoomMode = if (narrowSearchActive) TransportZoomMode.Menu else layout.zoomMode
+        val effectiveScopeInMenu = layout.scopeInMenu ||
+            (searchActive && !layout.inlineFilterField && effectiveZoomMode == TransportZoomMode.Menu)
+        val effectiveCompactTimecode = layout.compactTimecode || narrowSearchActive
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -235,7 +241,7 @@ internal fun DocumentTimelineTransportBar(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (layout.compactTimecode) {
+                    text = if (effectiveCompactTimecode) {
                         "${formatTransportTimecode(nowMs).drop(1)} · ${location.substringBefore(" →").substringBefore("/")}"
                     } else {
                         "${formatTransportTimecode(nowMs)} · $location"
@@ -271,7 +277,11 @@ internal fun DocumentTimelineTransportBar(
             if (searchActive) {
                 TransportSearchField(
                     controller = controller,
-                    width = if (layout.inlineFilterField) 140.dp else 112.dp,
+                    width = when {
+                        layout.inlineFilterField -> 140.dp
+                        narrowSearchActive || effectiveZoomMode == TransportZoomMode.Menu -> 84.dp
+                        else -> 112.dp
+                    },
                     autoFocus = !layout.inlineFilterField && searchOpen,
                     onBlurEmpty = { if (!layout.inlineFilterField) searchOpen = false },
                 )
@@ -286,7 +296,7 @@ internal fun DocumentTimelineTransportBar(
 
             // ── Priority 2: scope + zoom ────────────────────────────────────────────────────────
             val isSlideScope = controller.trackFilterMode == TimelineTrackFilterMode.CurrentSlide
-            if (!layout.scopeInMenu) Row(horizontalArrangement = Arrangement.spacedBy(0.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!effectiveScopeInMenu) Row(horizontalArrangement = Arrangement.spacedBy(0.dp), verticalAlignment = Alignment.CenterVertically) {
                 CompactToggleChip(
                     label = "Slide",
                     selected = isSlideScope,
@@ -301,10 +311,7 @@ internal fun DocumentTimelineTransportBar(
                     tag = "ciacola-timeline-filter-all",
                 )
             }
-            val hideZoomForSearch = searchOpen && !layout.inlineFilterField && layout.zoomMode == TransportZoomMode.Menu
-            if (!hideZoomForSearch) {
-                TransportZoomControls(controller, layout.zoomMode, canvasWidthPx, surface, nowMs, docSnapshot, layout.scopeInMenu)
-            }
+            TransportZoomControls(controller, effectiveZoomMode, canvasWidthPx, surface, nowMs, docSnapshot, effectiveScopeInMenu)
             ExpandToggle(isExpanded, onToggleExpanded)
         }
     }
@@ -428,11 +435,11 @@ private fun TransportZoomControls(
                             selectableItem(
                                 selected = isSlideScope,
                                 onClick = { open = false; controller.setTrackFilter(TimelineTrackFilterMode.CurrentSlide) },
-                            ) { Text("Show this slide's tracks", style = studioLabelStyle()) }
+                            ) { Text("Show this slide's tracks", style = studioLabelStyle(), modifier = Modifier.testTag("ciacola-timeline-filter-current")) }
                             selectableItem(
                                 selected = !isSlideScope,
                                 onClick = { open = false; controller.setTrackFilter(TimelineTrackFilterMode.AllSlides) },
-                            ) { Text("Show all tracks", style = studioLabelStyle()) }
+                            ) { Text("Show all tracks", style = studioLabelStyle(), modifier = Modifier.testTag("ciacola-timeline-filter-all")) }
                         }
                     }
                 }

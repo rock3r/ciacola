@@ -652,7 +652,21 @@ internal object DocumentElementInspectorKeys {
 
     private val arrowKeys = setOf(Key.DirectionLeft, Key.DirectionRight, Key.DirectionUp, Key.DirectionDown)
 
-    fun handleKeyEvent(controller: DocumentElementInspectorController, ev: KeyEvent): Boolean {
+    fun handleKeyEvent(
+        controller: DocumentElementInspectorController,
+        ev: KeyEvent,
+        allowInlineEnter: Boolean = false,
+    ): Boolean {
+        if (ev.type == KeyEventType.KeyUp) {
+            if (controller.swallowNextEscapeKeyUp && ev.key == Key.Escape) {
+                controller.swallowNextEscapeKeyUp = false
+                return true
+            }
+            if (controller.swallowNextEnterKeyUp && (ev.key == Key.Enter || ev.key == Key.NumPadEnter)) {
+                controller.swallowNextEnterKeyUp = false
+                return true
+            }
+        }
         if (handleNudge(controller, ev)) return true
         val isCommandDown = ev.isMetaPressed || ev.isCtrlPressed
         if (ev.type == KeyEventType.KeyDown && isCommandDown && !ev.isAltPressed && !ev.isShiftPressed && ev.key == Key.A) {
@@ -660,6 +674,17 @@ internal object DocumentElementInspectorKeys {
             return controller.selectAllOnCurrentSlide()
         }
         if (ev.type != KeyEventType.KeyDown || ev.isAltPressed) return false
+        if (allowInlineEnter &&
+            !isCommandDown &&
+            !ev.isShiftPressed &&
+            (ev.key == Key.Enter || ev.key == Key.NumPadEnter)
+        ) {
+            if (controller.swallowNextEnterKeyUp) return true
+            if (controller.startInlineEditForSelection()) {
+                controller.swallowNextEnterKeyUp = true
+                return true
+            }
+        }
         return handleShortcut(controller, ev.key, isCommandDown, ev.isShiftPressed)
     }
 
@@ -697,7 +722,7 @@ internal object DocumentElementInspectorKeys {
         if (!isCommandDown && key == Key.Escape) {
             if (controller.cancelGesture()) return true
             if (controller.inlineEditingNodeId != null) {
-                controller.cancelInlineTextEdit()
+                controller.cancelInlineTextEdit(fromEscapeKey = true)
                 return true
             }
             if (controller.dragPreviewNodeId != null) {

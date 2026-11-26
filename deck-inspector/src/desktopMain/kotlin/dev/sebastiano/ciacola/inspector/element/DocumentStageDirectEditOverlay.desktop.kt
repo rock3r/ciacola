@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,7 +35,11 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.isAltPressed
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -95,6 +100,10 @@ fun DocumentStageDirectEditOverlay(
     modifier: Modifier = Modifier,
     /** `true` while an `interactive = "keyboard"` specimen owns the keyboard (arrows, `⌘A`). */
     keyboardCapturedProvider: () -> Boolean = { false },
+    /** `true` when window chrome (such as the Theme sheet) should suppress Enter-to-edit. */
+    inlineEditBlockedProvider: () -> Boolean = { false },
+    /** Invoked after inline text editing closes (commit or cancel) to return focus to the stage. */
+    onRestoreStageFocus: (() -> Unit)? = null,
     content: @Composable () -> Unit = {},
 ) {
     if (!enabled) {
@@ -135,6 +144,33 @@ fun DocumentStageDirectEditOverlay(
     }
     val textInputTracker = LocalAuthoringTextInputTracker.current
     val latestKeyboardCaptured by rememberUpdatedState(keyboardCapturedProvider)
+    val latestRestoreStageFocus by rememberUpdatedState(onRestoreStageFocus)
+
+    var wasInlineEditing by remember(controller) { mutableStateOf(controller.inlineEditingNodeId != null) }
+    val isInlineEditing = controller.inlineEditingNodeId != null
+    LaunchedEffect(controller, isInlineEditing) {
+        if (!isInlineEditing && wasInlineEditing && textInputTracker?.hasFocusedTextInput != true && !controller.textInputHasFocus) {
+            withFrameNanos { }
+            if (controller.inlineEditingNodeId == null && textInputTracker?.hasFocusedTextInput != true && !controller.textInputHasFocus) {
+                latestRestoreStageFocus?.invoke()
+            }
+        }
+        wasInlineEditing = isInlineEditing
+    }
+    val windowFocused = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(controller, windowFocused) {
+        if (!windowFocused) {
+            controller.swallowNextEnterKeyUp = false
+            controller.swallowNextEscapeKeyUp = false
+        }
+    }
+    DisposableEffect(controller) {
+        onDispose {
+            controller.swallowNextEnterKeyUp = false
+            controller.swallowNextEscapeKeyUp = false
+        }
+    }
+
 
     val movingIds = controller.dragPreviewNodeIds
     val activeDragDx = controller.dragPreviewDeltaX
@@ -204,10 +240,21 @@ fun DocumentStageDirectEditOverlay(
             .fillMaxSize()
             .onSizeChanged { overlaySizePx = it }
             .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyUp) {
+                    if (controller.swallowNextEscapeKeyUp && ev.key == Key.Escape) {
+                        controller.swallowNextEscapeKeyUp = false
+                        return@onPreviewKeyEvent true
+                    }
+                    if (controller.swallowNextEnterKeyUp && (ev.key == Key.Enter || ev.key == Key.NumPadEnter)) {
+                        controller.swallowNextEnterKeyUp = false
+                        return@onPreviewKeyEvent true
+                    }
+                }
                 // Focused text fields and keyboard-captured specimens keep their arrows and `⌘A`.
                 controller.handleKeyEvent(
                     ev,
                     externalInputActive = textInputTracker?.hasFocusedTextInput == true || latestKeyboardCaptured(),
+                    allowInlineEnter = controller.inlineEditingNodeId == null && !inlineEditBlockedProvider(),
                 )
             }
             .pointerInput(controller, interactiveRegistry, inspectionRegistry) {
@@ -430,6 +477,7 @@ fun DocumentStageDirectEditOverlay(
                     if (sibling.id == editingNodeId || sibling.text == null) null else nodeStageRect(sibling, safeScale)?.scaled(safeScale)
                 },
                 overlaySizePx = overlaySizePx,
+                onRestoreStageFocus = { latestRestoreStageFocus?.invoke() },
             )
         }
 

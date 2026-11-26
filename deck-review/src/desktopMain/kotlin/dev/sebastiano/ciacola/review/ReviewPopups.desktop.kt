@@ -46,6 +46,8 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -854,13 +856,22 @@ internal fun CopyPromptForAgentButton(
     }
 
     Tooltip(tooltip = { Text(tooltipText) }) {
+        val a11yDescription = when {
+            copied -> "Copied agent prompt"
+            label == "Copy" -> "Copy agent prompt"
+            else -> label
+        }
         OutlinedButton(
             enabled = enabled,
             onClick = {
                 onCopy()
                 copiedNonce++
             },
-            modifier = modifier.testTag(testTag),
+            modifier = modifier
+                .semantics {
+                    contentDescription = a11yDescription
+                }
+                .testTag(testTag),
         ) {
             Text(
                 text = if (copied) "Copied" else label,

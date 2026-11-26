@@ -3,14 +3,21 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,7 +41,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -45,9 +54,11 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.document.CurveEvaluator
+import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.util.Locale
 import kotlin.math.hypot
@@ -507,17 +518,17 @@ private fun DocumentBezierCurveCanvas(
     val latestOnCancel by rememberUpdatedState(onCancelGesture)
     val latestOnChanged by rememberUpdatedState(onBezierChanged)
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .height(112.dp)
             .border(1.dp, globalColors.borders.normal, RoundedCornerShape(6.dp))
-            .padding(8.dp),
+            .padding(8.dp)
+            .focusGroup(),
     ) {
         Canvas(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(96.dp)
+                .fillMaxSize()
                 .testTag("ciacola-bezier-editor")
                 .semantics {
                     contentDescription = "Cubic Bezier curve editor, $label"
@@ -589,7 +600,82 @@ private fun DocumentBezierCurveCanvas(
             drawCircle(color = p1Color, radius = 5.5f, center = p1)
             drawCircle(color = p2Color, radius = 5.5f, center = p2)
         }
+        BezierHandleFocusTarget(
+            tag = "ciacola-bezier-handle-p1",
+            description = "Bezier control point P1, $label",
+            x = latestBezier.x1,
+            y = latestBezier.y1,
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+            accentColor = p1Color,
+            onNudge = { dx, dy ->
+                val cur = latestBezier
+                val nx = ((cur.x1 + dx).coerceIn(0.0, 1.0) * 100.0).roundToInt() / 100.0
+                val ny = ((cur.y1 + dy).coerceIn(-0.4, 1.4) * 100.0).roundToInt() / 100.0
+                latestOnBegin()
+                latestOnChanged(cur.copy(x1 = nx, y1 = ny))
+                latestOnCommit()
+            },
+        )
+        BezierHandleFocusTarget(
+            tag = "ciacola-bezier-handle-p2",
+            description = "Bezier control point P2, $label",
+            x = latestBezier.x2,
+            y = latestBezier.y2,
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+            accentColor = p2Color,
+            onNudge = { dx, dy ->
+                val cur = latestBezier
+                val nx = ((cur.x2 + dx).coerceIn(0.0, 1.0) * 100.0).roundToInt() / 100.0
+                val ny = ((cur.y2 + dy).coerceIn(-0.4, 1.4) * 100.0).roundToInt() / 100.0
+                latestOnBegin()
+                latestOnChanged(cur.copy(x2 = nx, y2 = ny))
+                latestOnCommit()
+            },
+        )
     }
+}
+
+@Composable
+private fun BezierHandleFocusTarget(
+    tag: String,
+    description: String,
+    x: Double,
+    y: Double,
+    maxWidth: Dp,
+    maxHeight: Dp,
+    accentColor: Color,
+    onNudge: (dx: Double, dy: Double) -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val half = 10.dp
+    val cx = maxWidth * x.toFloat().coerceIn(0f, 1f)
+    val cy = maxHeight * (1f - y.toFloat().coerceIn(-0.2f, 1.2f))
+    Box(
+        modifier = Modifier
+            .offset(x = cx - half, y = cy - half)
+            .size(20.dp)
+            .accessibleFocusRing(focused, accentColor, cornerRadius = 10.dp)
+            .focusable(interactionSource = interaction)
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                val step = if (event.isShiftPressed) 0.01 else 0.05
+                when (event.key) {
+                    Key.DirectionLeft -> { onNudge(-step, 0.0); true }
+                    Key.DirectionRight -> { onNudge(+step, 0.0); true }
+                    Key.DirectionUp -> { onNudge(0.0, +step); true }
+                    Key.DirectionDown -> { onNudge(0.0, -step); true }
+                    else -> false
+                }
+            }
+            .semantics {
+                contentDescription = description
+                stateDescription = "X ${"%.2f".format(Locale.US, x)}, Y ${"%.2f".format(Locale.US, y)}"
+            }
+            .testTag(tag),
+    )
 }
 
 @Composable
