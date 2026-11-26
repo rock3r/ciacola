@@ -20,6 +20,7 @@ Author presentations directly as declarative `<deckId>.deck.json` files (Format 
    - Give every slide a readable `title` and every node a stable unique `id` (e.g. `s01:title`, `s01:body`).
    - Prefer theme color tokens (`"background"`, `"foreground"`, `"accent"`, `"elevatedSurface"`, `"muted"`, `"border"`) and typography roles (`"title"`, `"heading"`, `"subheading"`, `"body"`, `"caption"`, `"code"`) over hardcoded colors.
    - Always set explicit `lineHeight` on custom text sizes (`>= size * 1.15`).
+   - Screen recordings: use an animated WebP/GIF `image` node. It autoplays when it has no `playback` builds; with them it holds `posterMs` until `{ "kind": "playback", "beat": N, "action": "play" }`. Other actions: `pause` (optional `atMs`), `seek` (`atMs`, or the trim start), `rate` (`rate`). Clip fields: `loop` (default `false`), `playbackRate`, `startMs`/`endMs`, `posterMs`, `maxPixels` (raise it when lint reports `CLIP_OVER_BUDGET`). See "Animated images" in the schema doc.
 
 2. **Format canonically (when working on tracked `decks/`):**
    ```bash
@@ -57,7 +58,7 @@ Author presentations directly as declarative `<deckId>.deck.json` files (Format 
 When a user sends or copies a `Ctrl+Click` review prompt from Ciacola:
 1. Read the `Deck file` (`.deck.json`), `slideId`, `beatIndex`, `nodeId`, and `Annotated slide PNG` path from the prompt.
 2. Inspect the annotated PNG via `read_file` to see the exact pin location and highlighted element.
-3. Edit the target node/build/slide directly in `<deckId>.deck.json` (remembering `beats[0]` is base state and `beats[k]` changes use `builds` with `"kind": "change"`, `"enter"`, `"exit"`, or `"emphasis"`).
+3. Edit the target node/build/slide directly in `<deckId>.deck.json` (remembering `beats[0]` is base state and `beats[k]` changes use `builds` with `"kind": "change"`, `"enter"`, `"exit"`, `"emphasis"`, or `"playback"` for animated images).
 4. Run `./gradlew :deck:lintDeck -Pciacola.deck=<deckId>` and `./gradlew :deck:renderSlides -Pciacola.deck=<deckId> -Pciacola.slides=<N>` to verify the fix visually.
 5. Close each comment with `./gradlew :deck:reviewResolve -Pciacola.deck=<deckId> -Pciacola.comment=<commentId> -Pciacola.resolution="<what you changed>"`. This takes the queue lock and turns the live viewer's pin green. Never edit `.storyboard/.../review-comments.json` by hand: the deck writes that file too, and an unlocked write can erase a comment queued at the same moment. Pass `-Pciacola.reviewStatus=queued` instead to hand a comment back if you cannot act on it.
 
