@@ -394,27 +394,24 @@ class DeckDocumentStore(
         }
     }
 
-    /**
-     * Atomically checks under [stateLock] that the store is clean (`!isDirty && !hasOpenTransaction`)
-     * before applying an external file change. Returns the previous committed document on reload, or
-     * `null` (preserving the live document/transaction and surfacing [conflictOnDirty]) if an edit
-     * or gesture transaction intervened.
-     */
+    /** Atomically applies [newDocument] when clean (and optionally at [expectedRevision]), or surfaces [conflictOnDirty]. */
     fun applyExternalChangeIfClean(
         newDocument: DeckDocument,
-        conflictOnDirty: ConflictInfo,
+        conflictOnDirty: ConflictInfo? = null,
         label: String = "External change",
         issues: List<DocumentIssue>? = null,
+        expectedRevision: Long? = null,
+        markAsSaved: Boolean = true,
     ): DeckDocument? {
         val resolvedIssues = issues ?: validateDocument(newDocument)
         return mutateState {
-            if (sync is SyncState.Conflict) return@mutateState null
-            if (revision > savedRevision || activeTransaction != null) {
-                if (sync !is SyncState.ReadOnly) sync = SyncState.Conflict(conflictOnDirty)
+            val expectedMismatch = expectedRevision != null && (revision != expectedRevision || sync is SyncState.ReadOnly)
+            if (sync is SyncState.Conflict || expectedMismatch || revision > savedRevision || activeTransaction != null) {
+                if (conflictOnDirty != null && sync !is SyncState.ReadOnly) sync = SyncState.Conflict(conflictOnDirty)
                 return@mutateState null
             }
             val previousDoc = committedDocumentState
-            commitExternalDocumentLocked(newDocument, label, markAsSaved = true, resolvedIssues)
+            commitExternalDocumentLocked(newDocument, label, markAsSaved, resolvedIssues)
             previousDoc
         }
     }

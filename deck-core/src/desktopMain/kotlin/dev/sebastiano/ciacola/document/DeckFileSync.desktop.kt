@@ -372,17 +372,17 @@ class DeckFileSync(
     suspend fun keepStudioVersionAfterExternalReload(): SyncState = withContext(ioDispatcher) {
         ioMutex.withLock {
             val notice = externalReloadNotice ?: return@withLock store.sync
-            if (store.revision != notice.reloadedAtRevision || store.isDirty || store.hasOpenTransaction) {
-                publishExternalReloadNotice(null)
-                return@withLock store.sync
-            }
-            store.applyExternalChange(
+            val restored = store.applyExternalChangeIfClean(
                 newDocument = notice.previousDocument,
+                conflictOnDirty = null,
                 label = "Keep Studio Version",
+                expectedRevision = notice.reloadedAtRevision,
                 markAsSaved = false,
             )
             publishExternalReloadNotice(null)
-            writeIfDirtyInternal(forceWrite = true)
+            if (restored != null) {
+                writeIfDirtyInternal(forceWrite = true)
+            }
             store.sync
         }
     }

@@ -89,6 +89,30 @@ class DeckFileSyncExternalReloadNoticeTest {
                 assertEquals("V6-NewLocalEdit", store.document.title)
                 assertEquals(SyncState.Saved, sync.flushNow())
                 assertEquals(null, sync.externalReloadNotice)
+
+                // An open gesture transaction also blocks Keep Studio atomically without invalidating the drag.
+                writeCanonicalAtomic(target, makeDoc("V7-Disk"))
+                sync.pollExternalChangesNow()
+                val noticeAtV7 = sync.externalReloadNotice
+                assertNotNull(noticeAtV7)
+                val dragTx = assertNotNull(store.begin("Live drag"))
+                dragTx.update { makeDoc("V8-DragPreview") }
+                assertEquals(
+                    null,
+                    store.applyExternalChangeIfClean(
+                        newDocument = noticeAtV7.previousDocument,
+                        conflictOnDirty = null,
+                        label = "Keep Studio Version",
+                        expectedRevision = noticeAtV7.reloadedAtRevision,
+                        markAsSaved = false,
+                    ),
+                )
+                assertEquals(SyncState.Saved, sync.keepStudioVersionAfterExternalReload())
+                assertEquals(null, sync.externalReloadNotice)
+                assertTrue(store.hasOpenTransaction)
+                assertTrue(dragTx.commit())
+                assertEquals("V8-DragPreview", store.document.title)
+                assertEquals(CanonicalJson.print(makeDoc("V7-Disk")), Files.readString(target))
             } finally {
                 sync.close()
             }
