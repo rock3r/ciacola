@@ -316,6 +316,7 @@ internal fun QuickSlideJumpOverlay(
     val focusRequester = remember { FocusRequester() }
 
     val query = inputState.text.toString().trim()
+    var previousQuery by remember { mutableStateOf(query) }
     val matches = remember(query, allEntries) { filterJumpEntries(query, allEntries) }
 
     LaunchedEffect(Unit) {
@@ -323,11 +324,14 @@ internal fun QuickSlideJumpOverlay(
     }
 
     LaunchedEffect(query) {
-        if (validationError != null) {
-            validationError = null
+        if (query != previousQuery) {
+            previousQuery = query
+            if (validationError != null) {
+                validationError = null
+            }
+            highlightedIndex = 0
+            highlightTouched = false
         }
-        highlightedIndex = 0
-        highlightTouched = false
     }
 
     LaunchedEffect(highlightedIndex, matches.size) {
@@ -346,7 +350,7 @@ internal fun QuickSlideJumpOverlay(
 
     fun submitJump() {
         val numeric = query.toIntOrNull()
-        if (numeric != null) {
+        if (numeric != null && !highlightTouched) {
             if (numeric !in 1..slideCount) {
                 validationError = "Enter a slide number from 1 to $slideCount"
                 return
@@ -518,7 +522,7 @@ internal fun filterJumpEntries(query: String, entries: List<Pair<Int, String>>):
     if (trimmed.isEmpty()) return entries
     val numeric = trimmed.toIntOrNull()
     if (numeric != null) {
-        return entries.filter { (num, _) -> num.toString().startsWith(trimmed) }
+        return entries.filter { (num, _) -> num == numeric || num.toString().startsWith(trimmed) }
     }
     val lower = trimmed.lowercase()
     val exactOrPrefix = entries.filter { (_, title) -> title.lowercase().contains(lower) }

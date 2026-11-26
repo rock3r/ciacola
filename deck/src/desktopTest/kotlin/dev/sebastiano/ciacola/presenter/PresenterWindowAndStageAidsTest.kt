@@ -580,5 +580,24 @@ class PresenterWindowAndStageAidsTest {
         mainClock.advanceTimeBy(300)
         waitForIdle()
         assertEquals(Storyboard.Index(9, 0), animatic.currentIndex, "Quick jump must scroll and submit slide #10 beyond 8 results")
+
+        // Numeric prefix query ("1" -> matches #1, #10, #11, #12) + Down + Enter must submit #10 rather than literal 1.
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.K)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performTextReplacement("1")
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput {
+            pressKey(Key.DirectionDown)
+            pressKey(Key.DirectionDown)
+            pressKey(Key.Enter)
+        }
+        waitForIdle()
+        mainClock.advanceTimeBy(300)
+        waitForIdle()
+        assertEquals(Storyboard.Index(10, 0), animatic.currentIndex, "Arrow selection on numeric query '1' must jump to highlighted slide #11")
     }
 }
