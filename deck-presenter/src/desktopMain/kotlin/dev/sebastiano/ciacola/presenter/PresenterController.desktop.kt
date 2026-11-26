@@ -19,6 +19,7 @@ import androidx.compose.ui.input.key.type
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
+import dev.sebastiano.ciacola.document.DeckClipControls
 import dev.sebastiano.ciacola.document.DeckDocument
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -590,6 +591,7 @@ class PresenterController(
 
     /**
      * Preview key handler installed at the Story window root: manages `B` / `W` blackout/whiteout,
+     * `R` clip restart on the current slide,
      * `Esc` curtain/dialog dismissal without leaking KeyUp to `EaselOverview`, and `Cmd+G` jump.
      */
     fun handleStoryKeyEvent(event: KeyEvent): Boolean {
@@ -640,6 +642,11 @@ class PresenterController(
 
             Key.W -> {
                 toggleCurtain(StageCurtain.Whiteout)
+                return true
+            }
+
+            Key.R -> {
+                DeckClipControls.requestRestart()
                 return true
             }
 

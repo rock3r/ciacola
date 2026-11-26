@@ -601,4 +601,33 @@ class PresenterWindowAndStageAidsTest {
         waitForIdle()
         assertEquals(Storyboard.Index(10, 0), animatic.currentIndex, "Arrow selection on numeric query '1' must jump to highlighted slide #11")
     }
+
+    @Test
+    fun rKeyRestartsClipsWithoutChangingBeat() = runComposeUiTest {
+        val deck = buildFoundationTestStoryboard()
+        lateinit var animatic: Animatic
+        lateinit var presenterWindow: PresenterWindow
+        setContent {
+            animatic = rememberAnimatic(storyboard = { deck })
+            val overviewVisibility = rememberOverviewVisibility(initiallyVisible = false)
+            presenterWindow = rememberPresenterWindow(animatic = animatic)
+            Box(Modifier.size(960.dp, 540.dp)) {
+                CompositionLocalProvider(LocalOverviewOpen provides overviewVisibility.isVisible) {
+                    presenterWindow.decorator.decorate {
+                        EaselOverview(animatic, visibility = overviewVisibility) {
+                            Easel(animatic)
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        val before = animatic.currentIndex
+        val epoch = dev.sebastiano.ciacola.document.DeckClipControls.restartEpoch
+        onRoot().performKeyInput { pressKey(Key.R) }
+        waitForIdle()
+        assertEquals(epoch + 1, dev.sebastiano.ciacola.document.DeckClipControls.restartEpoch)
+        assertEquals(before, animatic.currentIndex)
+        assertEquals(StageCurtain.None, presenterWindow.controller.curtain)
+    }
 }

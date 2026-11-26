@@ -44,16 +44,19 @@ import dev.bnorm.storyboard.Frame
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
 import dev.sebastiano.ciacola.effects.LocalWarpSegmentObserver
 import dev.sebastiano.ciacola.document.Affine2D
+import dev.sebastiano.ciacola.document.ClipPlayback
 import dev.sebastiano.ciacola.document.ContainerPayload
 import dev.sebastiano.ciacola.document.CrossSlideGeometry
 import dev.sebastiano.ciacola.document.DeckClock
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DecomposedTransform
 import dev.sebastiano.ciacola.document.Fill
+import dev.sebastiano.ciacola.document.ImagePayload
 import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.LoupePayload
 import dev.sebastiano.ciacola.document.NodeKind
 import dev.sebastiano.ciacola.document.NodeSpec
+import dev.sebastiano.ciacola.document.RenderPurpose
 import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.SegmentPlan
 import dev.sebastiano.ciacola.document.SlideSpec
@@ -572,6 +575,7 @@ internal fun DocumentNodeItem(
                     tint = img.tint?.let { ctx.colorResolver.resolveOrNull(it) },
                     assetsRootDir = ctx.config.assetsRootDir,
                     modifier = nodeModifier,
+                    playback = documentImagePlayback(ctx, rawNode, img),
                 )
             }
             NodeKind.Connector -> {
@@ -937,3 +941,20 @@ internal fun parseVerticalArrangement(justify: String?, gapDp: androidx.compose.
         "spaceevenly" -> Arrangement.SpaceEvenly
         else -> Arrangement.spacedBy(gapDp, Alignment.Top)
     }
+
+private fun documentImagePlayback(
+    ctx: DocumentNodeRenderContext,
+    rawNode: NodeSpec,
+    image: ImagePayload,
+): DocumentImagePlayback {
+    val live = ctx.isAnimatedMount && ctx.session.purpose == RenderPurpose.Present && !ctx.isGhostSubtree
+    return DocumentImagePlayback(
+        payload = image,
+        builds = rawNode.builds,
+        retainKey = "clip:${ctx.slide.id}/${rawNode.id}",
+        session = ctx.session,
+        beat = ClipPlayback.effectiveBeat(ctx.clock, ctx.slide.id, lastBeat = ctx.slide.beats.lastIndex),
+        live = live,
+        scrubbable = live && !ctx.config.isEditMode,
+    )
+}

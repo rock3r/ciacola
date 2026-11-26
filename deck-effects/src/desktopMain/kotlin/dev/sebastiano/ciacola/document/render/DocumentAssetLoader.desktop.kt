@@ -10,8 +10,15 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import dev.sebastiano.ciacola.animation.AnimationBudget
+import dev.sebastiano.ciacola.animation.AnimationFrame
+import dev.sebastiano.ciacola.animation.AnimationInfo
+import dev.sebastiano.ciacola.animation.AnimationTooLargeException
+import dev.sebastiano.ciacola.animation.decodeAnimatedFrames
+import dev.sebastiano.ciacola.animation.probeAnimation as probeAnimationBytes
 import java.io.File
 import java.util.Collections
+import java.util.Optional
 import org.jetbrains.skia.Data
 import org.jetbrains.skia.Image as SkiaImage
 import org.jetbrains.skia.Paint as SkiaPaint
@@ -21,7 +28,8 @@ import org.jetbrains.skia.svg.SVGLengthContext
 
 /**
  * Loads and caches raster (PNG/JPG/WebP) and vector (`.svg`) image assets for `<deckId>.assets/`
- * from an explicit [assetsRootDir], `-Dciacola.decks.dir`, or JVM classpath resources.
+ * from an explicit [assetsRootDir], `-Dciacola.decks.dir`, or JVM classpath resources, plus the
+ * decoded frames of animated GIF/WebP assets.
  */
 internal object DocumentAssetLoader {
     private const val MAX_CACHE_ENTRIES = 128
@@ -36,6 +44,22 @@ internal object DocumentAssetLoader {
     private val bitmapCache: MutableMap<String, ImageBitmap> = Collections.synchronizedMap(
         object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?): Boolean =
+                size > MAX_CACHE_ENTRIES
+        },
+    )
+
+    private const val MAX_ANIMATION_CACHE_ENTRIES = 4
+
+    private val animationCache: MutableMap<String, Optional<List<AnimationFrame>>> = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Optional<List<AnimationFrame>>>(8, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Optional<List<AnimationFrame>>>?): Boolean =
+                size > MAX_ANIMATION_CACHE_ENTRIES
+        },
+    )
+
+    private val animationInfoCache: MutableMap<String, Optional<AnimationInfo>> = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Optional<AnimationInfo>>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Optional<AnimationInfo>>?): Boolean =
                 size > MAX_CACHE_ENTRIES
         },
     )
@@ -77,6 +101,54 @@ internal object DocumentAssetLoader {
         bitmapCache[cacheKey] = bitmap
         return bitmap
     }
+
+    /**
+     * Header-only probe of an animated GIF/WebP asset (`null` for stills, other formats, and
+     * missing assets). Only `.gif` and `.webp` sources are read, so other images stay untouched.
+     */
+    fun probeAnimation(deckId: String, src: String, assetsRootDir: String? = null): AnimationInfo? {
+        val clean = src.trim().removePrefix("/")
+        if (!isAnimatableSource(clean)) return null
+        val cacheKey = "${assetsRootDir.orEmpty()}|$deckId|$clean"
+        return animationInfoCache.getOrPut(cacheKey) {
+            Optional.ofNullable(readAssetBytes(deckId, clean, assetsRootDir)?.let(::probeAnimationBytes))
+        }.orElse(null)
+    }
+
+    /**
+     * Decodes every frame of an animated asset within [maxPixels] (the library default when
+     * `null`). Returns `null` for stills, missing assets, and animations over the budget, which then
+     * render as their first frame. Synchronous: call it off the UI thread for large clips.
+     */
+    fun loadAnimation(
+        deckId: String,
+        src: String,
+        assetsRootDir: String? = null,
+        maxPixels: Long? = null,
+    ): List<AnimationFrame>? {
+        val clean = src.trim().removePrefix("/")
+        if (!isAnimatableSource(clean)) return null
+        val budget = maxPixels?.takeIf { it > 0 }?.let { AnimationBudget(maxPixels = it) } ?: AnimationBudget()
+        val cacheKey = "${assetsRootDir.orEmpty()}|$deckId|$clean|${budget.maxPixels}"
+        animationCache[cacheKey]?.let { return it.orElse(null) }
+        val bytes = readAssetBytes(deckId, clean, assetsRootDir) ?: return null
+        val frames = try {
+            decodeAnimatedFrames(bytes, budget)
+        } catch (e: InterruptedException) {
+            throw e
+        } catch (_: AnimationTooLargeException) {
+            null
+        } catch (_: java.io.IOException) {
+            null
+        } catch (_: RuntimeException) {
+            null
+        }
+        animationCache[cacheKey] = Optional.ofNullable(frames)
+        return frames
+    }
+
+    private fun isAnimatableSource(src: String): Boolean =
+        src.endsWith(".gif", ignoreCase = true) || src.endsWith(".webp", ignoreCase = true)
 
     fun parseContentScale(fit: String?): ContentScale = when (fit?.lowercase()) {
         "cover" -> ContentScale.Crop
