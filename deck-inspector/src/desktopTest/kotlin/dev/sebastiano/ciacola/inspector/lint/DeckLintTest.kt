@@ -10,6 +10,7 @@ import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.RichTextValue
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.document.TextPayload
+import dev.sebastiano.ciacola.document.TextRun
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -157,6 +158,62 @@ class DeckLintTest {
             assertFalse(
                 report.issues.any { it.code == "TEXT_OVERLAP" },
                 "Sequential cross-beat text replacements must not trigger TEXT_OVERLAP, got: ${report.issues}",
+            )
+        }
+    }
+
+    @Test
+    fun textOverlapRespectsPerRunOpaqueColorsEvenWhenBaseColorIsTransparent() = runBlocking {
+        val doc = DeckDocument(
+            id = "run-color-overlap",
+            title = "Run Color Overlap",
+            defaultTheme = "light",
+            themes = mapOf(
+                "light" to DeckThemeSpec(
+                    colors = mapOf(
+                        "background" to "#EBEBEB",
+                        "foreground" to "#242124",
+                    ),
+                ),
+            ),
+            slides = listOf(
+                SlideSpec(
+                    id = "s0",
+                    background = Fill.Solid("#EBEBEB"),
+                    nodes = listOf(
+                        NodeSpec(
+                            id = "s0:transparent-base-visible-run",
+                            frame = FrameSpec(x = 120.0, y = 120.0, w = 640.0, h = 70.0),
+                            text = TextPayload(
+                                value = RichTextValue.Runs(
+                                    listOf(
+                                        TextRun(text = "Hidden ", color = "#00000000"),
+                                        TextRun(text = "Visible run", color = "#242124"),
+                                    ),
+                                ),
+                                color = "#00000000",
+                                size = 36.0,
+                            ),
+                        ),
+                        NodeSpec(
+                            id = "s0:plain-overlapping",
+                            frame = FrameSpec(x = 120.0, y = 128.0, w = 640.0, h = 70.0),
+                            text = TextPayload(
+                                value = RichTextValue.Plain("Overlapping text"),
+                                color = "#242124",
+                                size = 36.0,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        DocumentDeckLintEngine().use { engine ->
+            val report = engine.lintFullDeck(doc)
+            assertTrue(
+                report.issues.any { it.code == "TEXT_OVERLAP" },
+                "Transparent base color with visible nonblank run must still report TEXT_OVERLAP, got: ${report.issues}",
             )
         }
     }

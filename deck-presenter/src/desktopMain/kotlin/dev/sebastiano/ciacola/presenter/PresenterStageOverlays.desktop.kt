@@ -15,11 +15,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
@@ -310,6 +311,8 @@ internal fun QuickSlideJumpOverlay(
     val inputState = rememberTextFieldState(initialText = "")
     var validationError by remember { mutableStateOf<String?>(null) }
     var highlightedIndex by remember { mutableIntStateOf(0) }
+    var highlightTouched by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
 
     val query = inputState.text.toString().trim()
@@ -324,6 +327,21 @@ internal fun QuickSlideJumpOverlay(
             validationError = null
         }
         highlightedIndex = 0
+        highlightTouched = false
+    }
+
+    LaunchedEffect(highlightedIndex, matches.size) {
+        if (highlightedIndex in matches.indices) {
+            val layoutInfo = listState.layoutInfo
+            val completelyVisible = layoutInfo.visibleItemsInfo.any { item ->
+                item.index == highlightedIndex &&
+                    item.offset >= layoutInfo.viewportStartOffset &&
+                    item.offset + item.size <= layoutInfo.viewportEndOffset
+            }
+            if (!completelyVisible) {
+                listState.scrollToItem(highlightedIndex)
+            }
+        }
     }
 
     fun submitJump() {
@@ -336,7 +354,7 @@ internal fun QuickSlideJumpOverlay(
             controller.jumpToSlide(navigationScope, numeric)
             return
         }
-        val target = if (query.isEmpty()) {
+        val target = if (query.isEmpty() && !highlightTouched) {
             controller.currentSceneIndex + 1
         } else {
             matches.getOrNull(highlightedIndex.coerceIn(0, (matches.size - 1).coerceAtLeast(0)))?.first
@@ -366,6 +384,7 @@ internal fun QuickSlideJumpOverlay(
                             Key.DirectionDown -> {
                                 if (matches.isNotEmpty()) {
                                     highlightedIndex = (highlightedIndex + 1).coerceAtMost(matches.lastIndex)
+                                    highlightTouched = true
                                 }
                                 true
                             }
@@ -373,6 +392,7 @@ internal fun QuickSlideJumpOverlay(
                             Key.DirectionUp -> {
                                 if (matches.isNotEmpty()) {
                                     highlightedIndex = (highlightedIndex - 1).coerceAtLeast(0)
+                                    highlightTouched = true
                                 }
                                 true
                             }
@@ -416,16 +436,15 @@ internal fun QuickSlideJumpOverlay(
             )
 
             if (matches.isNotEmpty()) {
-                val visibleMatches = matches.take(8)
-                Column(
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 180.dp)
-                        .verticalScroll(rememberScrollState())
                         .testTag("ciacola-presenter-jump-results"),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    visibleMatches.forEachIndexed { idx, (slideNum, title) ->
+                    itemsIndexed(matches, key = { _, (slideNum, _) -> slideNum }) { idx, (slideNum, title) ->
                         val isHighlighted = idx == highlightedIndex
                         Row(
                             modifier = Modifier
