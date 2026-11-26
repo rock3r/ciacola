@@ -4,9 +4,6 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Rect
-import dev.sebastiano.ciacola.animation.AnimationBudget
-import dev.sebastiano.ciacola.animation.probeAnimation
-import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.BuildEffectRegistry
 import dev.sebastiano.ciacola.document.CrossSlideGeometry
 import dev.sebastiano.ciacola.document.DeckDocument
@@ -15,7 +12,6 @@ import dev.sebastiano.ciacola.document.DeckSpecimenRegistry
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.DocumentIssue
 import dev.sebastiano.ciacola.document.Fill
-import dev.sebastiano.ciacola.document.ImagePayload
 import dev.sebastiano.ciacola.document.IssueSeverity
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.SegmentPlanner
@@ -194,7 +190,7 @@ class DocumentDeckLintEngine(
             }
         }
         collectTodoVideoIssues(slide, slideIndex, allIssues)
-        collectClipIssues(document.id, slide, slideIndex, deckDir, assetsDir, allIssues)
+        clipAssetReader(document.id, deckDir, assetsDir)?.let { DocumentClipLint.collect(slide, slideIndex, allIssues, it) }
         collectCrossSlideIssuesForNeighbor(document, slideIndex, allIssues)
         for (ext in externalEditWarnings) {
             if (ext.address.contains(slide.id)) {
@@ -351,7 +347,7 @@ class DocumentDeckLintEngine(
             }
 
             collectTodoVideoIssues(slide, slideIndex, allIssues)
-            collectClipIssues(document.id, slide, slideIndex, deckDir, assetsDir, allIssues)
+            clipAssetReader(document.id, deckDir, assetsDir)?.let { DocumentClipLint.collect(slide, slideIndex, allIssues, it) }
             val fingerprints = computeAssetFingerprints(deckDir, document, slideIndex, assetsDir = assetsDir)
             val seenStyleHashes = HashSet<String>()
 
@@ -1023,87 +1019,11 @@ class DocumentDeckLintEngine(
         }
     }
 
-    /**
-     * Animated image checks that need the asset bytes: playback builds or clip fields on a missing
-     * or non-animated source, and animations whose decode budget would leave only the first frame.
-     */
-    private fun collectClipIssues(
-        deckId: String,
-        slide: SlideSpec,
-        slideIndex: Int,
-        deckDir: Path?,
-        assetsDir: Path?,
-        out: MutableMap<String, DocumentLintIssue>,
-    ) {
-        if (deckDir == null && assetsDir == null) return
-        for (node in DocumentThemeResolver.flattenNodes(slide.nodes)) {
-            val image = node.image ?: continue
-            val hasPlaybackBuilds = node.builds.any { it is Build.Playback }
-            val usesClipFields = hasPlaybackBuilds || image.copy(fit = null, tint = null) != ImagePayload(image.src)
-            fun warn(code: String, title: String, detail: String) {
-                val issue = DocumentLintIssue(
-                    id = "clip:${code.lowercase(Locale.US)}:${slide.id}:${node.id}",
-                    code = code,
-                    severity = LintSeverity.Warning,
-                    source = DocumentLintSource.StaticValidation,
-                    slideIndex = slideIndex,
-                    slideId = slide.id,
-                    nodeId = node.id,
-                    title = title,
-                    detail = detail,
-                )
-                out.putIfAbsent(issue.id, issue)
-            }
-            val bytes = resolveAssetPathOnDisk(deckId, image.src, deckDir, assetsDir)
-                ?.let { runCatching { Files.readAllBytes(it) }.getOrNull() }
-                ?: readClasspathAsset(deckId, image.src)
-            if (bytes == null) {
-                if (hasPlaybackBuilds) {
-                    warn(
-                        "CLIP_SOURCE_MISSING",
-                        "Playback builds target a missing image",
-                        "Node '${node.id}' has playback builds but '${image.src}' was not found.",
-                    )
-                }
-                continue
-            }
-            val info = probeAnimation(bytes)
-            if (info == null) {
-                if (usesClipFields) {
-                    warn(
-                        "CLIP_SOURCE_NOT_ANIMATED",
-                        "Playback settings on a still image",
-                        "Node '${node.id}' sets playback builds or clip fields, but '${image.src}' is not an animated GIF/WebP.",
-                    )
-                }
-                continue
-            }
-            val budget = AnimationBudget(maxPixels = image.maxPixels?.takeIf { it > 0 } ?: AnimationBudget().maxPixels)
-            if (info.totalPixels > budget.maxPixels || info.width > budget.maxSidePx || info.height > budget.maxSidePx) {
-                warn(
-                    "CLIP_OVER_BUDGET",
-                    "Animated image exceeds its decode budget",
-                    "'${image.src}' is ${info.width}x${info.height} with ${info.frameCount} frames (${info.totalPixels} pixels, " +
-                        "budget ${budget.maxPixels}); it will show only its first frame. Set image.maxPixels to at least ${info.totalPixels}.",
-                )
-            }
+    private fun clipAssetReader(deckId: String, deckDir: Path?, assetsDir: Path?): ((String) -> ByteArray?)? =
+        if (deckDir == null && assetsDir == null) null else { src ->
+            resolveAssetPathOnDisk(deckId, src, deckDir, assetsDir)?.let { runCatching { Files.readAllBytes(it) }.getOrNull() }
+                ?: DocumentClipLint.readClasspathAsset(deckId, src)
         }
-    }
-
-    private fun readClasspathAsset(deckId: String, src: String): ByteArray? {
-        val clean = src.trim().removePrefix("/")
-        if (clean.isEmpty()) return null
-        val loaders = listOfNotNull(
-            Thread.currentThread().contextClassLoader,
-            DocumentDeckLintEngine::class.java.classLoader,
-        ).distinct()
-        for (cp in listOf("decks/$deckId.assets/$clean", "$deckId.assets/$clean", clean)) {
-            for (loader in loaders) {
-                loader.getResourceAsStream(cp)?.use { return it.readBytes() }
-            }
-        }
-        return null
-    }
 
     private fun collectCrossSlideIssuesForNeighbor(
         document: DeckDocument,

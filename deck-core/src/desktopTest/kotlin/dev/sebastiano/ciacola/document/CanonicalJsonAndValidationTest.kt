@@ -949,6 +949,7 @@ class CanonicalJsonAndValidationTest {
             "Build.Exit" to Build.Exit.serializer().descriptor,
             "Build.Emphasis" to Build.Emphasis.serializer().descriptor,
             "Build.Change" to Build.Change.serializer().descriptor,
+            "Build.Playback" to Build.Playback.serializer().descriptor,
             "TransitionSpec" to TransitionSpec.serializer().descriptor,
         )
         val actualOrder = buildString {
