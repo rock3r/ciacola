@@ -1,0 +1,70 @@
+package dev.sebastiano.ciacola.inspector.lint
+
+import dev.sebastiano.ciacola.document.BeatSpec
+import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.document.FrameSpec
+import dev.sebastiano.ciacola.document.ImagePayload
+import dev.sebastiano.ciacola.document.NodeSpec
+import dev.sebastiano.ciacola.document.PlaybackAction
+import dev.sebastiano.ciacola.document.SlideSpec
+import java.awt.image.BufferedImage
+import java.nio.file.Files
+import java.util.Base64
+import javax.imageio.ImageIO
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlinx.coroutines.runBlocking
+
+class ClipLintTest {
+    @Test
+    fun `clip lint flags missing, still and over-budget sources`() {
+        val assets = Files.createTempDirectory("clip-lint")
+        try {
+            Files.write(assets.resolve("clip.webp"), Base64.getDecoder().decode(SAMPLE_WEBP))
+            ImageIO.write(BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB), "png", assets.resolve("still.png").toFile())
+            val play = listOf(Build.Playback(beat = 1, action = PlaybackAction.Play))
+            fun node(id: String, image: ImagePayload, builds: List<Build> = emptyList()) =
+                NodeSpec(id = id, frame = FrameSpec(0.0, 0.0, 100.0, 100.0), image = image, builds = builds)
+            val doc = DeckDocument(
+                id = "d",
+                slides = listOf(
+                    SlideSpec(
+                        id = "s",
+                        beats = listOf(BeatSpec(), BeatSpec()),
+                        nodes = listOf(
+                            node("missing", ImagePayload("gone.webp"), play),
+                            node("still", ImagePayload("still.png", loop = true)),
+                            node("tight", ImagePayload("clip.webp", maxPixels = 100), play),
+                            node("ok", ImagePayload("clip.webp"), play),
+                            node("plain", ImagePayload("still.png")),
+                        ),
+                    ),
+                ),
+            )
+            val report = DocumentDeckLintEngine().use { engine ->
+                runBlocking { engine.lintSingleSlide(document = doc, slideIndex = 0, assetsDir = assets) }
+            }
+            val clipCodes = report.issues
+                .filter { it.code.startsWith("CLIP_") }
+                .map { it.nodeId to it.code }
+                .toSet()
+            assertEquals(
+                setOf(
+                    "missing" to "CLIP_SOURCE_MISSING",
+                    "still" to "CLIP_SOURCE_NOT_ANIMATED",
+                    "tight" to "CLIP_OVER_BUDGET",
+                ),
+                clipCodes,
+            )
+        } finally {
+            assets.toFile().deleteRecursively()
+        }
+    }
+
+    private companion object {
+        /** The CC0 4-frame 64x48 animated WebP fixture from `deck-effects` test resources. */
+        const val SAMPLE_WEBP =
+            "UklGRvoAAABXRUJQVlA4WAoAAAASAAAAPwAALwAAQU5JTQYAAAAAAAAAAABBTk1GKAAAAAAAAAAAAD8AAC8AAGQAAAJWUDhMDwAAAC8/wAsABxD9j/4HIqL/AQBBTk1GKAAAAAQAAAgAAA8AAA8AAMgAAABWUDhMEAAAAC8PwAMAB9D//kf/AxHR/wBBTk1GNAAAAAQAAAgAAC8AAA8AACwBAABWUDhMHAAAAC8vwAMQFzD/8x/zH3AgJCCcdNJYOaL/oQpQtRxBTk1GMgAAAAAAAAAAAD8AAC8AAJABAAJWUDhMGQAAAC8/wAsQDxAx//MfDLFgMn/pFDoj+h9VsB0A"
+    }
+}
