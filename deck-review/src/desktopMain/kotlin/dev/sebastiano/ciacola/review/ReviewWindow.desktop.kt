@@ -360,9 +360,10 @@ private fun ReviewOuterWindowOverlay(
             content()
         }
 
-        // Fullscreen presenting is audience-facing: keep the review HUD off it unless reviewing.
+        // Audience-facing presenting (windowed or fullscreen) keeps the review HUD and notices off stage.
         // Also hide the HUD whenever the Esc Overview grid is open so it never occludes thumbnails.
-        val hideForAudience = LocalPresentingFullscreen.current && !coordinator.inspectModeEnabled &&
+        val isAudience = LocalPresentingFullscreen.current || LocalAudiencePresenting.current
+        val hideForAudience = isAudience && !coordinator.inspectModeEnabled &&
             pending == null && coordinator.selectedPinCommentId == null
         val overviewOpen = LocalOverviewOpen.current
         val showHud = coordinator.showStageBadges &&

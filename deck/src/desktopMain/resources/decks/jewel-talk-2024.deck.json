@@ -376,14 +376,19 @@
         },
         {
           "id": "chris",
-          "frame": { "x": 200, "y": 844.85, "w": 141.46, "h": 60.15 },
+          "frame": { "x": 200, "y": 844.85, "w": 156, "h": 60.15 },
           "text": {
             "value": "Chris",
             "font": "Hanken Grotesk",
             "size": 38,
             "weight": 600,
             "color": "#E3F272",
-            "lineHeight": 49.51
+            "lineHeight": 49.51,
+            "surface": {
+              "fill": "#29223A",
+              "cornerRadius": 12,
+              "padding": { "bottom": 4, "left": 14, "right": 14, "top": 4 }
+            }
           },
           "builds": [
             {
@@ -402,14 +407,19 @@
         },
         {
           "id": "seb",
-          "frame": { "x": 924, "y": 862.58, "w": 108.52, "h": 60.15 },
+          "frame": { "x": 924, "y": 862.58, "w": 128, "h": 60.15 },
           "text": {
             "value": "Seb",
             "font": "Hanken Grotesk",
             "size": 38,
             "weight": 600,
             "color": "#E3F272",
-            "lineHeight": 49.51
+            "lineHeight": 49.51,
+            "surface": {
+              "fill": "#29223A",
+              "cornerRadius": 12,
+              "padding": { "bottom": 4, "left": 14, "right": 14, "top": 4 }
+            }
           },
           "builds": [
             {
@@ -1945,7 +1955,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1803, "y": 966.39, "w": 84.12, "h": 49.37 },
+          "frame": { "x": 1803, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🐨",
             "font": "Noto Emoji",
@@ -1968,7 +1978,7 @@
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 1652.05, "y": 966.39 }
+                "frame": { "x": 1652.05, "y": 961 }
               },
               "delayMs": 300,
               "durationMs": 800,
@@ -1978,14 +1988,14 @@
         },
         {
           "id": "koala-2",
-          "frame": { "x": 1707, "y": 963.94, "w": 168.3, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Koala.2",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           },
           "builds": [
             {
@@ -2046,7 +2056,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1653, "y": 966.39, "w": 82.9, "h": 49.37 },
+          "frame": { "x": 1653, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🐨",
             "font": "Noto Emoji",
@@ -2058,14 +2068,14 @@
         },
         {
           "id": "koala-2",
-          "frame": { "x": 1707, "y": 963.94, "w": 168.3, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Koala.2",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           }
         },
         {
@@ -2250,7 +2260,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1806, "y": 966.39, "w": 76.8, "h": 49.37 },
+          "frame": { "x": 1806, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🐞",
             "font": "Noto Emoji",
@@ -2273,7 +2283,7 @@
               "kind": "change",
               "beat": 2,
               "set": {
-                "frame": { "x": 1615.05, "y": 966.39 }
+                "frame": { "x": 1617, "y": 961 }
               },
               "delayMs": 300,
               "durationMs": 800,
@@ -2283,14 +2293,14 @@
         },
         {
           "id": "ladybug-2",
-          "frame": { "x": 1671, "y": 963.94, "w": 219.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Ladybug.2",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           },
           "builds": [
             {
@@ -2367,7 +2377,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1616, "y": 966.39, "w": 75.58, "h": 49.37 },
+          "frame": { "x": 1616, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🐞",
             "font": "Noto Emoji",
@@ -2379,14 +2389,14 @@
         },
         {
           "id": "ladybug-2",
-          "frame": { "x": 1671, "y": 963.94, "w": 219.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Ladybug.2",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -2591,7 +2601,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1807, "y": 966.39, "w": 75.58, "h": 49.37 },
+          "frame": { "x": 1807, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -2614,7 +2624,7 @@
               "kind": "change",
               "beat": 2,
               "set": {
-                "frame": { "x": 1606.05, "y": 966.39 }
+                "frame": { "x": 1630, "y": 961 }
               },
               "delayMs": 300,
               "durationMs": 800,
@@ -2624,14 +2634,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           },
           "builds": [
             {
@@ -2703,7 +2713,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -2715,14 +2725,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -2830,7 +2840,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -2842,14 +2852,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -2982,7 +2992,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -2994,14 +3004,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -3046,7 +3056,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -3058,14 +3068,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -3115,7 +3125,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -3127,14 +3137,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -3189,7 +3199,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -3201,14 +3211,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -3274,7 +3284,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -3286,14 +3296,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -3358,7 +3368,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1607, "y": 966.39, "w": 74.36, "h": 49.37 },
+          "frame": { "x": 1607, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔜",
             "font": "Noto Emoji",
@@ -3370,14 +3380,14 @@
         },
         {
           "id": "meerkat-1",
-          "frame": { "x": 1672, "y": 963.94, "w": 213.44, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "Meerkat.1",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 20,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 28
           }
         },
         {
@@ -3578,7 +3588,7 @@
               },
               {
                 "id": "325-label",
-                "frame": { "x": 96.06, "y": 13.4, "w": 100.27, "h": 71.6 },
+                "frame": { "x": 82, "y": 14, "w": 94, "h": 50 },
                 "text": {
                   "value": "325",
                   "font": "Roboto",
@@ -3671,7 +3681,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1810, "y": 966.39, "w": 67.04, "h": 49.37 },
+          "frame": { "x": 1810, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔮",
             "font": "Noto Emoji",
@@ -3695,7 +3705,7 @@
               "kind": "change",
               "beat": 2,
               "set": {
-                "frame": { "x": 1659.05, "y": 966.39 }
+                "frame": { "x": 1659.05, "y": 961 }
               },
               "delayMs": 300,
               "durationMs": 800,
@@ -3705,14 +3715,14 @@
         },
         {
           "id": "node-2",
-          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "??????",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           },
           "builds": [
             {
@@ -3855,7 +3865,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "frame": { "x": 1658, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔮",
             "font": "Noto Emoji",
@@ -3867,14 +3877,14 @@
         },
         {
           "id": "node-2",
-          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "??????",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           }
         }
       ],
@@ -3916,7 +3926,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "frame": { "x": 1658, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔮",
             "font": "Noto Emoji",
@@ -3928,14 +3938,14 @@
         },
         {
           "id": "node-2",
-          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "??????",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           }
         },
         {
@@ -4080,7 +4090,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "frame": { "x": 1658, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔮",
             "font": "Noto Emoji",
@@ -4092,14 +4102,14 @@
         },
         {
           "id": "node-2",
-          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "??????",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           }
         },
         {
@@ -4212,7 +4222,7 @@
       "nodes": [
         {
           "id": "specimen-markdown-standalone",
-          "frame": { "x": 329, "y": -17, "w": 1262, "h": 974 },
+          "frame": { "x": 329, "y": 0, "w": 1262, "h": 924 },
           "interactive": "keyboard",
           "specimen": { "ref": "jewel.markdownStandaloneSample" }
         },
@@ -4240,7 +4250,7 @@
         },
         {
           "id": "node",
-          "frame": { "x": 1660, "y": 966.39, "w": 65.82, "h": 49.37 },
+          "frame": { "x": 1658, "y": 961, "w": 56, "h": 45.4 },
           "text": {
             "value": "🔮",
             "font": "Noto Emoji",
@@ -4252,14 +4262,14 @@
         },
         {
           "id": "node-2",
-          "frame": { "x": 1706, "y": 963.94, "w": 158.54, "h": 53.82 },
+          "frame": { "x": 1707, "y": 962, "w": 117, "h": 45.4 },
           "text": {
             "value": "??????",
             "font": "Hanken Grotesk",
-            "size": 34,
+            "size": 28,
             "weight": 600,
             "color": "#542859",
-            "lineHeight": 44.3
+            "lineHeight": 36
           }
         }
       ],
@@ -4564,7 +4574,7 @@
       "nodes": [
         {
           "id": "weeks-days",
-          "frame": { "x": 546.65, "y": 437.39, "w": 1137.41, "h": 724 },
+          "frame": { "x": 546.65, "y": 437.39, "w": 1137.41, "h": 640 },
           "text": {
             "value": "WEEKS\nDAYS",
             "font": "Hanken Grotesk",
@@ -5661,7 +5671,7 @@
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 653, "y": 492.26 }
+                "frame": { "x": 653, "y": 478, "h": 126 }
               },
               "durationMs": 600,
               "curve": "easeOut"
@@ -5671,11 +5681,14 @@
         {
           "id": "rect-2",
           "frame": { "x": 629, "y": 566, "w": 662, "h": 130 },
-          "shape": { "geometry": "rect", "fill": "#29223A" }
+          "shape": { "geometry": "rect", "fill": "#29223A" },
+          "builds": [
+            { "kind": "exit", "beat": 1, "effect": "appear" }
+          ]
         },
         {
           "id": "quality",
-          "frame": { "x": 804, "y": 479.61, "w": 411.08, "h": 123.47 },
+          "frame": { "x": 804, "y": 484, "w": 411.08, "h": 112 },
           "text": {
             "value": "QUALITY",
             "font": "Hanken Grotesk",
@@ -5683,11 +5696,20 @@
             "weight": 600,
             "color": "#29223A",
             "lineHeight": 101.63
-          }
+          },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "dissolve",
+              "durationMs": 400,
+              "curve": "easeInOut"
+            }
+          ]
         },
         {
           "id": "raise",
-          "frame": { "x": 684, "y": 489.37, "w": 276.88, "h": 123.47 },
+          "frame": { "x": 684, "y": 454, "w": 276.88, "h": 108 },
           "text": {
             "value": "RAISE",
             "font": "Hanken Grotesk",
@@ -5701,7 +5723,7 @@
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 684.6, "y": 406.37 }
+                "frame": { "x": 684.6, "y": 368 }
               },
               "durationMs": 500,
               "curve": "easeInOut"
@@ -5710,7 +5732,7 @@
         },
         {
           "id": "the",
-          "frame": { "x": 917, "y": 489.37, "w": 203.68, "h": 123.47 },
+          "frame": { "x": 917, "y": 454, "w": 203.68, "h": 108 },
           "text": {
             "value": "THE",
             "font": "Hanken Grotesk",
@@ -5724,7 +5746,7 @@
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 916.51, "y": 406.37 }
+                "frame": { "x": 916.51, "y": 368 }
               },
               "durationMs": 400,
               "curve": "easeInOut"
@@ -5733,7 +5755,7 @@
         },
         {
           "id": "bar",
-          "frame": { "x": 1096, "y": 489.37, "w": 203.68, "h": 123.47 },
+          "frame": { "x": 1096, "y": 454, "w": 203.68, "h": 108 },
           "text": {
             "value": "BAR",
             "font": "Hanken Grotesk",
@@ -5747,7 +5769,7 @@
               "kind": "change",
               "beat": 1,
               "set": {
-                "frame": { "x": 1095.76, "y": 406.37 }
+                "frame": { "x": 1095.76, "y": 368 }
               },
               "durationMs": 400,
               "curve": "easeInOut"
@@ -5825,14 +5847,14 @@
         },
         {
           "id": "5-00-pm-this-room",
-          "frame": { "x": 746, "y": 621.85, "w": 547.72, "h": 71.23 },
+          "frame": { "x": 738, "y": 623, "w": 441.44, "h": 52.129999999999995 },
           "text": {
             "value": "5:00 PM — this room",
             "font": "Hanken Grotesk",
-            "size": 45,
+            "size": 38,
             "weight": 700,
             "color": "#29223A",
-            "lineHeight": 58.63
+            "lineHeight": 48
           },
           "builds": [
             {

@@ -34,6 +34,7 @@ import dev.sebastiano.ciacola.inspector.design.InspectorSegmented
 import dev.sebastiano.ciacola.inspector.design.InspectorTokens
 import dev.sebastiano.ciacola.inspector.design.humanizeTokenKey
 import dev.sebastiano.ciacola.inspector.design.inspectorBodyStyle
+import dev.sebastiano.ciacola.inspector.design.inspectorSecondaryTextColor
 import dev.sebastiano.ciacola.inspector.design.toHexString
 import dev.sebastiano.ciacola.inspector.document.DOCUMENT_TYPOGRAPHY_ROLES
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
@@ -66,7 +67,7 @@ internal fun InspectorLabeledRow(label: String, content: @Composable () -> Unit)
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         ModifiedDot(modified = false, label = label, tag = "", onReset = null)
-        Text(label, style = inspectorBodyStyle(), color = JewelTheme.globalColors.text.info, modifier = Modifier.width(72.dp), maxLines = 1)
+        Text(label, style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(72.dp), maxLines = 1)
         Row(Modifier.weight(1f)) { content() }
     }
 }
@@ -274,7 +275,7 @@ internal fun DocumentTextSection(
             }
         }
 
-        Text("Morph by", style = inspectorBodyStyle(), color = JewelTheme.globalColors.text.info)
+        Text("Morph by", style = inspectorBodyStyle(), color = inspectorSecondaryTextColor())
         val currentGranularity = TextMorphGranularity.entries.firstOrNull { it.morphBy == textPayload.morph?.by }
             ?: TextMorphGranularity.Whole
         InspectorSegmented(
@@ -499,7 +500,7 @@ internal fun DocumentSpecimenParamsSection(
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
                         ModifiedDot(isModified(spec.name), spec.label, "ciacola-specimen-param-${spec.name}") { controller.resetSpecimenParam(spec.name) }
-                        Text(spec.label, style = inspectorBodyStyle(), color = JewelTheme.globalColors.text.info, modifier = Modifier.width(72.dp))
+                        Text(spec.label, style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(72.dp))
                         Dropdown(
                             modifier = Modifier.weight(1f).height(InspectorTokens.RowHeight).testTag("ciacola-specimen-param-${spec.name}"),
                             menuContent = {
@@ -525,7 +526,7 @@ internal fun DocumentSpecimenParamsSection(
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
                         ModifiedDot(isModified(spec.name), spec.label, "ciacola-specimen-param-${spec.name}") { controller.resetSpecimenParam(spec.name) }
-                        Text(spec.label, style = inspectorBodyStyle(), color = JewelTheme.globalColors.text.info, modifier = Modifier.width(72.dp))
+                        Text(spec.label, style = inspectorBodyStyle(), color = inspectorSecondaryTextColor(), modifier = Modifier.width(72.dp))
                         TextField(
                             state = tfState,
                             modifier = Modifier

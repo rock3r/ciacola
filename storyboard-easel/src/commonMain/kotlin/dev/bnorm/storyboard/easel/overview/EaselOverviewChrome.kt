@@ -286,6 +286,7 @@ internal fun BoxScope.OverviewGridView(
     storyboard: Storyboard,
     overviewState: OverviewState,
     highlightedColumnIndex: Int?,
+    quickJumpOpen: Boolean,
     quickJumpQuery: String,
     columns: List<OverviewState.SceneColumn<*>>,
     gridColumnCount: Int,
@@ -342,14 +343,22 @@ internal fun BoxScope.OverviewGridView(
     ) {
         items(columns, key = { it.index }) { column ->
             val isSelected = column.index == (highlightedColumnIndex ?: overviewState.currentColumnIndex)
-            val borderColor by animateColorAsState(if (isSelected) style.accent else style.border)
+            // When Quick Jump's input owns focus, soften the card selection border so there is only
+            // one active focus ring on screen (the search field).
+            val targetBorder = when {
+                isSelected && quickJumpOpen -> style.onSurface.copy(alpha = 0.55f)
+                isSelected -> style.accent
+                else -> style.border
+            }
+            val borderColor by animateColorAsState(targetBorder)
+            val borderWidth = if (isSelected && !quickJumpOpen) 2.dp else 1.dp
             val selectedItem = column.items[column.currentItemIndex]
             val captionText = overviewCardCaption(column.index, overviewSlideLabel(column, slideTitle))
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(if (isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(6.dp))
+                    .border(borderWidth, borderColor, RoundedCornerShape(6.dp))
                     .background(style.surface, RoundedCornerShape(6.dp))
                     .pointerHoverIcon(PointerIcon.Hand)
                     .clickable(

@@ -330,6 +330,7 @@ class PresenterController(
         StoryboardSpeakerNotesRegistry.forStoryboard(it)
     },
     internal var isStudioOpenProvider: () -> Boolean = { false },
+    internal var isStageAuthoringChromeOpenProvider: (() -> Boolean)? = null,
     internal var isInspectOpenProvider: () -> Boolean = { false },
     internal var openAuthoringToolsProvider: () -> List<String> = { emptyList() },
     internal var onEnterCleanShowModeAction: () -> Unit = {},
@@ -512,6 +513,17 @@ class PresenterController(
         }
     }
 
+    /** Returns `(oneBasedNumber, title)` entries for every non-skipped slide in the deck. */
+    fun slideJumpEntries(): List<Pair<Int, String>> {
+        val notes = currentSpeakerNotes()
+        val nonSkipped = documentProvider?.invoke()?.slides?.filterNot { it.skipped }
+        return (0 until slideCount).map { sceneIndex ->
+            val docTitle = nonSkipped?.getOrNull(sceneIndex)?.title.orEmpty()
+            val rawTitle = notes.sceneTitle(sceneIndex).ifBlank { docTitle }
+            (sceneIndex + 1) to humanizePresenterSlideTitle(rawTitle, sceneIndex)
+        }
+    }
+
     fun wallClockText(): String = wallClockProvider()
 
     /** The `(slideId, beatIndex)` the current slide/beat's notes live at in the document. */
@@ -629,7 +641,7 @@ class PresenterController(
     }
 
     fun isShowModeActive(): Boolean =
-        !isStudioOpenProvider() &&
+        !(isStageAuthoringChromeOpenProvider?.invoke() ?: isStudioOpenProvider()) &&
             !isInspectOpenProvider() &&
             openAuthoringToolsProvider().isEmpty() &&
             !isOverviewOpen &&
@@ -742,7 +754,7 @@ class PresenterController(
         if (event.type != KeyEventType.KeyDown) return false
 
         val primaryMod = event.isMetaPressed || event.isCtrlPressed
-        if (primaryMod && !event.isAltPressed && !event.isShiftPressed && event.key == Key.G) {
+        if (primaryMod && !event.isAltPressed && !event.isShiftPressed && (event.key == Key.G || event.key == Key.K)) {
             if (!isExternalTextInputActive && !isOverviewOpen) {
                 openJumpDialog(JumpDialogHost.Story)
                 return true
@@ -815,7 +827,7 @@ class PresenterController(
         val primaryMod = event.isMetaPressed || event.isCtrlPressed
         if (primaryMod && !event.isAltPressed) {
             when (event.key) {
-                Key.G -> if (!event.isShiftPressed) {
+                Key.G, Key.K -> if (!event.isShiftPressed) {
                     openJumpDialog(JumpDialogHost.Presenter)
                     return true
                 }

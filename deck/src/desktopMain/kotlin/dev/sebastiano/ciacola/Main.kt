@@ -28,6 +28,7 @@ import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.ContentDecorator
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.DesktopEasel
+import dev.bnorm.storyboard.easel.DesktopExportActions
 import dev.bnorm.storyboard.easel.overview.LocalOverviewChromeStyle
 import dev.bnorm.storyboard.easel.overview.LocalOverviewSlideTitleProvider
 import dev.bnorm.storyboard.easel.rememberAnimatic
@@ -81,6 +82,7 @@ import dev.sebastiano.ciacola.studio.StudioBottomDockTabStrip
 import dev.sebastiano.ciacola.studio.StudioBottomIssuesDockBody
 import dev.sebastiano.ciacola.studio.StudioBottomIssuesDockHeaderTrailing
 import dev.sebastiano.ciacola.studio.StudioIssuesDock
+import dev.sebastiano.ciacola.studio.StudioMode
 import dev.sebastiano.ciacola.studio.StudioThemeSheet
 import dev.sebastiano.ciacola.studio.StudioUnifiedInspectorPane
 import dev.sebastiano.ciacola.studio.StudioWorkspaceController
@@ -117,6 +119,7 @@ import dev.sebastiano.ciacola.studio.saveSpeakerNote
 import dev.sebastiano.ciacola.studio.storyboardDirForDeck
 import dev.sebastiano.ciacola.theme.DeckThemePreset
 import dev.sebastiano.ciacola.theme.LocalAmbientLoopsPaused
+import dev.sebastiano.ciacola.theme.ReducedMotionMode
 import dev.sebastiano.ciacola.theme.parseReducedMotionEnv
 import dev.sebastiano.ciacola.theme.rememberSystemReducedMotion
 import dev.sebastiano.ciacola.theme.resolveEffectiveReducedMotion
@@ -204,8 +207,8 @@ private fun ciacolaApplication(smokeDirectory: String?, launch: StudioLaunch?) =
 @Composable
 private fun ApplicationScope.CiacolaStudioApplication(
     launch: StudioLaunch,
-    motionMode: dev.sebastiano.ciacola.theme.ReducedMotionMode,
-    onSelectMotionMode: (dev.sebastiano.ciacola.theme.ReducedMotionMode) -> Unit,
+    motionMode: ReducedMotionMode,
+    onSelectMotionMode: (ReducedMotionMode) -> Unit,
     ambientLoopsPaused: Boolean,
     onToggleAmbientLoopsPaused: (Boolean) -> Unit,
     systemReducedMotion: Boolean,
@@ -419,6 +422,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         subCompositionScrubMillis = { timelineController.subCompositionScrubMillis },
     )
     var presenterWindowHolder by remember { mutableStateOf<PresenterWindow?>(null) }
+    var exportActionsHolder by remember { mutableStateOf<DesktopExportActions?>(null) }
     val presenterVisible = presenterWindowHolder?.visible == true
     val liveSession = remember(store, activeDeck.id) { newPresentSession() }
     val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible) {
@@ -470,6 +474,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
                     )
                     StageShortcutToastOverlay(
                         toast = studioWorkspace.lastShortcutToast,
+                        enabled = studioWorkspace.mode != StudioMode.Present,
+                        onDismissed = studioWorkspace::clearShortcutToast,
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
                 }
@@ -513,21 +519,11 @@ private fun ApplicationScope.CiacolaStudioApplication(
         )
     }
     val presenterCurrentStoryboard = if (presenterVisible && presenterCurrentSession != null) {
-        rememberDocumentStoryboard(
-            session = presenterCurrentSession,
-            config = stillConfig,
-        )
-    } else {
-        null
-    }
+        rememberDocumentStoryboard(session = presenterCurrentSession, config = stillConfig)
+    } else null
     val presenterNextStoryboard = if (presenterVisible && presenterNextSession != null) {
-        rememberDocumentStoryboard(
-            session = presenterNextSession,
-            config = stillConfig,
-        )
-    } else {
-        null
-    }
+        rememberDocumentStoryboard(session = presenterNextSession, config = stillConfig)
+    } else null
 
     // Isolated RenderSession #5 (PDF Export, Still) & #6a/#6b (Video Export measurement vs render pass).
     val pdfExportStoryboardProvider: () -> Storyboard = remember(store, activeDeck, stillConfig) {
@@ -899,11 +895,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         animatic = animatic,
         speakerNotesProvider = { speakerNotesMemo.notesFor(store.document) },
         documentProvider = { store.document },
-        onSaveSpeakerNote = if (store.isReadOnly) {
-            null
-        } else {
-            { slideId, beatIndex, note -> saveSpeakerNote(store, slideId, beatIndex, note) }
-        },
+        onSaveSpeakerNote = if (store.isReadOnly) null else { id, beat, note -> saveSpeakerNote(store, id, beat, note) },
         notesEditingBlockedProvider = { // No new note edits mid switch/quit (drafts commit first).
             switchingToDeckId != null || closingDeckTransition ||
                 (syncController != null && syncController.closeGuard !is CloseGuardState.Idle)
@@ -911,11 +903,12 @@ private fun ApplicationScope.CiacolaStudioApplication(
         previewStoryboardProvider = presenterCurrentStoryboard?.let { sb -> { sb } },
         nextPreviewStoryboardProvider = presenterNextStoryboard?.let { sb -> { sb } },
         currentPresetProvider = { currentPreset },
-        isStudioOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
+        isStudioOpenProvider = { studioWorkspace.hasExpandedAuthoringTools },
+        isStageAuthoringChromeOpenProvider = { studioWorkspace.isAnyAuthoringToolOpen },
         isInspectOpenProvider = { reviewStageCoordinator.inspectModeEnabled },
         openAuthoringToolsProvider = {
             buildList {
-                if (timelineWindow.authoringActive) add("Timeline (F5)")
+                if (studioWorkspace.isTimelineTracksOpen) add("Timeline (F5)")
                 if (studioWorkspace.isDesignEditorVisible) add("Deck Theme (F7)")
                 if (studioWorkspace.isLinterVisible) add("Issues (F8)")
                 if (reviewStageCoordinator.inspectModeEnabled) add("Review Inspect (F3)")
@@ -992,6 +985,15 @@ private fun ApplicationScope.CiacolaStudioApplication(
                 breadcrumb = breadcrumb,
                 presenterOpen = presenterWindow.visible,
                 onTogglePresenter = { presenterWindow.visible = !presenterWindow.visible },
+                reducedMotion = effectiveReducedMotion,
+                ambientLoopsPaused = ambientLoopsPaused,
+                isExporting = exportActionsHolder?.isExporting?.invoke() == true,
+                onExportPdf = { exportActionsHolder?.exportPdf?.invoke() },
+                onExportVideo = { exportActionsHolder?.exportVideo?.invoke() },
+                onToggleReducedMotion = {
+                    onSelectMotionMode(if (effectiveReducedMotion) ReducedMotionMode.Full else ReducedMotionMode.Reduced)
+                },
+                onToggleAmbientLoopsPaused = { onToggleAmbientLoopsPaused(!ambientLoopsPaused) },
                 deckSwitcher = {
                     DeckSwitcherDropdown(
                         activeDeck = activeDeck,
@@ -1044,25 +1046,9 @@ private fun ApplicationScope.CiacolaStudioApplication(
     // Outermost first: the shell sits directly outside the timeline so the App Bar spans the stage
     // and the hoisted right inspector.
     val decoratedWindows = remember(
-        deckMenuWindow,
-        syncGateWindow,
-        presenterWindow,
-        shellWindow,
-        timelineWindow,
-        reviewWindow,
-        themeWindow,
-        lintWindow,
+        deckMenuWindow, syncGateWindow, presenterWindow, shellWindow, timelineWindow, reviewWindow, themeWindow, lintWindow,
     ) {
-        listOf(
-            deckMenuWindow,
-            syncGateWindow,
-            presenterWindow,
-            shellWindow,
-            timelineWindow,
-            reviewWindow,
-            themeWindow,
-            lintWindow,
-        )
+        listOf(deckMenuWindow, syncGateWindow, presenterWindow, shellWindow, timelineWindow, reviewWindow, themeWindow, lintWindow)
     }
 
     CompositionLocalProvider(
@@ -1089,6 +1075,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
                         pdfExportStoryboardProvider = pdfExportStoryboardProvider,
                         videoExportStoryboardProvider = videoExportStoryboardProvider,
                         holdDurationForState = videoHoldDurationForState,
+                        onRegisterExportActions = { exportActionsHolder = it },
                     )
                 }
             }

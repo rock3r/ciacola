@@ -20,6 +20,14 @@ import dev.bnorm.storyboard.plus
 import java.awt.Dimension
 import kotlin.math.roundToInt
 import kotlin.time.Duration
+import kotlinx.coroutines.launch
+
+/** Host-callable actions wired to the same [ExportCoordinator] / exporters as the `Export` menu. */
+class DesktopExportActions(
+    val isExporting: () -> Boolean,
+    val exportPdf: () -> Unit,
+    val exportVideo: () -> Unit,
+)
 
 private val StoryWindowMinimumSize = Dimension(640, 420)
 
@@ -49,6 +57,7 @@ fun ApplicationScope.DesktopEasel(
     pdfExportStoryboardProvider: (() -> Storyboard)? = null,
     videoExportStoryboardProvider: (() -> Storyboard)? = null,
     holdDurationForState: ((Storyboard.Index) -> Duration)? = null,
+    onRegisterExportActions: ((DesktopExportActions) -> Unit)? = null,
 ) {
     // One coordinator/exporter pair for the app's lifetime: the storyboard is rebuilt on every
     // override or theme change, and a new coordinator would drop a running export's status and
@@ -66,6 +75,26 @@ fun ApplicationScope.DesktopEasel(
             },
         )
     }
+    val exportScope = rememberCoroutineScope()
+    val latestStoryboard by rememberUpdatedState(animatic.storyboard)
+    val latestPdfProvider by rememberUpdatedState(pdfExportStoryboardProvider)
+    val latestVideoProvider by rememberUpdatedState(videoExportStoryboardProvider)
+    val exportActions = remember(exportCoordinator, pdfExporter, videoExporter) {
+        DesktopExportActions(
+            isExporting = { exportCoordinator.isExporting },
+            exportPdf = {
+                if (!exportCoordinator.isExporting) {
+                    exportScope.launch { pdfExporter.export(latestPdfProvider?.invoke() ?: latestStoryboard) }
+                }
+            },
+            exportVideo = {
+                if (!exportCoordinator.isExporting) {
+                    exportScope.launch { videoExporter.export(latestVideoProvider?.invoke() ?: latestStoryboard) }
+                }
+            },
+        )
+    }
+    SideEffect { onRegisterExportActions?.invoke(exportActions) }
 
     val storyWindowState = rememberWindowState(fileName = "Story", defaultSize = DefaultStoryWindowSize)
     var storyWindow by remember { mutableStateOf<ComposeWindow?>(null) }

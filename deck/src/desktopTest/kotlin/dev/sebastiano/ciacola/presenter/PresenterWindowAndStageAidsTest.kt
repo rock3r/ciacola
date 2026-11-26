@@ -164,6 +164,7 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-pace-pill").assertTextContains("On pace", substring = true)
         onNodeWithTag("ciacola-presenter-current-preview").assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-next-preview").assertIsDisplayed()
+        onNodeWithTag("ciacola-presenter-next-build-badge", useUnmergedTree = true).assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-notes-content").assertIsDisplayed()
 
         // Readiness banner is visible with Enter Clean Show Mode and disappears once Studio/Inspect are closed.
@@ -369,6 +370,52 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-jump-dialog").assertDoesNotExist()
         assertEquals(Storyboard.Index(3, 0), animatic.currentIndex)
 
+        // Re-open with Cmd+K, try title search jump ("Typographic" or "Beats"), and check Next Build badge!
+        onRoot().performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.K)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-dialog").assertIsDisplayed()
+        onNodeWithTag("ciacola-presenter-jump-input").performTextReplacement("Beats")
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        mainClock.advanceTimeBy(200)
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-dialog").assertDoesNotExist()
+        assertEquals(Storyboard.Index(0, 0), animatic.currentIndex, "Cmd+K title jump must land on matching slide")
+
+        // Empty-query arrow navigation on existing deck: currently at Slide 1; jump to Slide 4 first via Cmd+G, then Cmd+K + Down + Enter -> Slide 2!
+        onRoot().performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.G)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performTextReplacement("4")
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        mainClock.advanceTimeBy(200)
+        waitForIdle()
+        assertEquals(Storyboard.Index(3, 0), animatic.currentIndex)
+
+        onRoot().performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.K)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput {
+            pressKey(Key.DirectionDown)
+            pressKey(Key.Enter)
+        }
+        waitForIdle()
+        mainClock.advanceTimeBy(200)
+        waitForIdle()
+        assertEquals(Storyboard.Index(1, 0), animatic.currentIndex, "Arrow navigation with empty query must submit highlighted result (#2), not stay on slide #4")
+
         // Clicking an active curtain resumes the stage without leaking clicks underneath.
         onRoot().performKeyInput { pressKey(Key.B) }
         waitForIdle()
@@ -491,5 +538,66 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-swap-displays").performClick()
         waitForIdle()
         assertTrue(swapped, "Swap Displays must enable as soon as a second display is detected")
+    }
+
+    @Test
+    fun quickJumpScrollsHighlightedItemBeyondEightMatchesIntoView() = runComposeUiTest {
+        val twelveSlideDeck = Storyboard.build(title = "TwelveSlides") {
+            repeat(12) { scene(frameCount = 1) {} }
+        }
+        lateinit var animatic: Animatic
+        lateinit var controller: PresenterController
+
+        setContent {
+            animatic = rememberAnimatic(storyboard = { twelveSlideDeck })
+            controller = remember(animatic) {
+                PresenterController(initialAnimatic = animatic, wallClockProvider = { "14:30" })
+            }
+            Box(Modifier.size(900.dp, 600.dp)) {
+                CiacolaJewelTheme(isDark = true) {
+                    PresenterDashboard(controller = controller)
+                }
+            }
+        }
+        waitForIdle()
+
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.K)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-dialog").assertIsDisplayed()
+
+        // Navigate down 9 times to reach item #10 (beyond the initial 8-item viewport).
+        repeat(9) {
+            onNodeWithTag("ciacola-presenter-jump-input").performKeyInput { pressKey(Key.DirectionDown) }
+            waitForIdle()
+        }
+        onNodeWithTag("ciacola-presenter-jump-option-10").assertIsDisplayed()
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        mainClock.advanceTimeBy(300)
+        waitForIdle()
+        assertEquals(Storyboard.Index(9, 0), animatic.currentIndex, "Quick jump must scroll and submit slide #10 beyond 8 results")
+
+        // Numeric prefix query ("1" -> matches #1, #10, #11, #12) + Down + Enter must submit #10 rather than literal 1.
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.K)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performTextReplacement("1")
+        waitForIdle()
+        onNodeWithTag("ciacola-presenter-jump-input").performKeyInput {
+            pressKey(Key.DirectionDown)
+            pressKey(Key.DirectionDown)
+            pressKey(Key.Enter)
+        }
+        waitForIdle()
+        mainClock.advanceTimeBy(300)
+        waitForIdle()
+        assertEquals(Storyboard.Index(10, 0), animatic.currentIndex, "Arrow selection on numeric query '1' must jump to highlighted slide #11")
     }
 }

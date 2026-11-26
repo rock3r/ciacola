@@ -148,13 +148,13 @@ class StudioShellInteractionTest {
         waitForIdle()
         assertEquals(StudioMode.Present, workspace.mode, "Esc in fullscreen must not flip the workspace to Edit behind the stage")
 
-        // Windowed Present keeps Esc → Edit.
+        // Windowed Present also keeps Esc owned by EaselOverview (exit via toolbar / mode switch).
         runOnIdle { fullscreen = false }
         waitForIdle()
         runOnIdle { stageFocus.requestFocus() }
         onNodeWithTag("fake-stage").performKeyInput { pressKey(Key.Escape) }
         waitForIdle()
-        assertEquals(StudioMode.Edit, workspace.mode)
+        assertEquals(StudioMode.Present, workspace.mode)
     }
 
     @Test

@@ -507,7 +507,13 @@ class DocumentDeckLintEngine(
         for (beat in 0 until beatCount) {
             currentCoroutineContext().ensureActive()
             val laidOut = DocumentDeckLintLayout.layoutSlideAtBeat(slide, beat, document, themeSpec)
-            val textEntries = laidOut.filter { it.node.text != null }
+            val textEntries = laidOut.filter { entry ->
+                val text = entry.node.text
+                text != null &&
+                    text.value.plainText.isNotBlank() &&
+                    entry.effectiveOpacity > 0.05 &&
+                    DocumentDeckLintLayout.hasVisibleTextColor(text, slide, document, themeSpec)
+            }
             val pendingPixelEntries = mutableListOf<Pair<LaidOutNode, StaticContrastDecision.RequiresPixelRender>>()
 
             // Check layout rules for every present node.

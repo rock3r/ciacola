@@ -236,7 +236,7 @@
             "font": "Fredoka",
             "size": 50,
             "weight": 600,
-            "color": "#D96E30",
+            "color": "#F49354",
             "lineHeight": 60.5
           },
           "builds": [
@@ -439,7 +439,7 @@
             "font": "Fredoka",
             "size": 112,
             "weight": 600,
-            "color": "#BF4F26",
+            "color": "#9B3A0E",
             "lineHeight": 135.52
           }
         },
@@ -450,7 +450,7 @@
             "value": "code that runs on the GPU",
             "font": "Assistant",
             "size": 112,
-            "color": "#D96E30",
+            "color": "#A84412",
             "lineHeight": 146.5
           },
           "builds": [
@@ -474,7 +474,7 @@
             "value": "to decide the colour of pixels",
             "font": "Assistant",
             "size": 112,
-            "color": "#D96E30",
+            "color": "#A84412",
             "lineHeight": 146.5
           },
           "builds": [
@@ -546,7 +546,7 @@
             "value": "fragment",
             "font": "Assistant",
             "size": 68,
-            "color": "#BF4F26",
+            "color": "#9B3A0E",
             "lineHeight": 88.94
           },
           "builds": [
@@ -613,7 +613,7 @@
             {
               "kind": "change",
               "beat": 1,
-              "set": { "opacity": 0.5 },
+              "set": { "opacity": 0.68 },
               "durationMs": 300
             }
           ]
@@ -644,7 +644,7 @@
             {
               "kind": "change",
               "beat": 1,
-              "set": { "opacity": 0.5 },
+              "set": { "opacity": 0.68 },
               "delayMs": 200,
               "durationMs": 300
             }
@@ -676,7 +676,7 @@
             {
               "kind": "change",
               "beat": 1,
-              "set": { "opacity": 0.5 },
+              "set": { "opacity": 0.68 },
               "delayMs": 100,
               "durationMs": 300
             }
@@ -689,7 +689,7 @@
             "value": "fragment",
             "font": "Assistant",
             "size": 68,
-            "color": "#BF4F26",
+            "color": "#9B3A0E",
             "lineHeight": 88.94
           }
         },
@@ -719,7 +719,7 @@
             {
               "kind": "change",
               "beat": 1,
-              "set": { "opacity": 0.5 },
+              "set": { "opacity": 0.68 },
               "delayMs": 300,
               "durationMs": 300
             }
@@ -843,7 +843,12 @@
             "size": 186,
             "weight": 500,
             "color": "#FFFFFF",
-            "lineHeight": 225.06
+            "lineHeight": 225.06,
+            "surface": {
+              "fill": "#CC182230",
+              "cornerRadius": 16,
+              "padding": { "bottom": 6, "left": 18, "right": 18, "top": 6 }
+            }
           }
         },
         {
@@ -899,7 +904,12 @@
                   "font": "Google Sans",
                   "size": 86,
                   "color": "#FFFFFF",
-                  "lineHeight": 104.06
+                  "lineHeight": 104.06,
+                  "surface": {
+                    "fill": "#CC182230",
+                    "cornerRadius": 16,
+                    "padding": { "bottom": 6, "left": 18, "right": 18, "top": 6 }
+                  }
                 }
               }
             ]
@@ -992,7 +1002,7 @@
           "text": {
             "value": [
               { "text": "…in the beginning, there was " },
-              { "text": "OpenGL", "color": "#BF4F26" }
+              { "text": "OpenGL", "color": "#9B3A0E" }
             ],
             "font": "Assistant",
             "size": 48,
@@ -1106,7 +1116,7 @@
             "font": "Fredoka",
             "size": 85,
             "weight": 600,
-            "color": "#D96E30",
+            "color": "#A84412",
             "lineHeight": 102.85
           },
           "builds": [
@@ -1181,7 +1191,7 @@
             "font": "Fredoka",
             "size": 85,
             "weight": 600,
-            "color": "#D96E30",
+            "color": "#A84412",
             "lineHeight": 102.85
           },
           "builds": [
@@ -2061,7 +2071,7 @@
             "font": "Fredoka",
             "size": 85,
             "weight": 600,
-            "color": "#D96E30",
+            "color": "#BC5216",
             "lineHeight": 102.85,
             "tracking": -0.05
           },
@@ -2113,7 +2123,7 @@
             "font": "JetBrains Mono",
             "size": 44,
             "weight": 500,
-            "color": "#D96E30",
+            "color": "#BC5216",
             "lineHeight": 58.08,
             "surface": { "fill": "#EBEDEC" }
           },
@@ -2143,7 +2153,7 @@
             "font": "JetBrains Mono",
             "size": 44,
             "weight": 500,
-            "color": "#D96E30",
+            "color": "#BC5216",
             "lineHeight": 58.08,
             "surface": { "fill": "#EBEDEC" }
           },
@@ -2174,7 +2184,7 @@
             "font": "JetBrains Mono",
             "size": 44,
             "weight": 500,
-            "color": "#D96E30",
+            "color": "#BC5216",
             "lineHeight": 58.08,
             "surface": { "fill": "#EBEDEC" }
           },
@@ -2206,7 +2216,7 @@
             "font": "JetBrains Mono",
             "size": 44,
             "weight": 500,
-            "color": "#D96E30",
+            "color": "#BC5216",
             "lineHeight": 58.08,
             "surface": { "fill": "#EBEDEC" }
           },
@@ -3564,7 +3574,7 @@
               },
               {
                 "id": "uniform-float2-ire-label",
-                "frame": { "x": 25.37, "y": 28.09, "w": 1070.63, "h": 267.91 },
+                "frame": { "x": 25.37, "y": 28.09, "w": 780, "h": 267.91 },
                 "code": {
                   "value": "uniform float2 iResolution;\n\nhalf4 main(float2 fragCoord) {\n    // TODO\n    return vec4(1.0);\n}",
                   "language": "agsl",
@@ -4559,7 +4569,7 @@
             "font": "Fredoka",
             "size": 55,
             "weight": 500,
-            "color": "#BF4F26",
+            "color": "#9B3A0E",
             "lineHeight": 66.55
           },
           "builds": [
@@ -4640,17 +4650,17 @@
           "frame": { "x": 345, "y": 174.95, "w": 709.98, "h": 81.95 },
           "text": {
             "value": [
-              { "text": "S", "color": "#BF4F26" },
+              { "text": "S", "color": "#9B3A0E" },
               { "text": "igned" },
-              { "text": " D", "color": "#BF4F26" },
+              { "text": " D", "color": "#9B3A0E" },
               { "text": "istance" },
-              { "text": " F", "color": "#BF4F26" },
+              { "text": " F", "color": "#9B3A0E" },
               { "text": "ields" }
             ],
             "font": "Fredoka",
             "size": 55,
             "weight": 500,
-            "color": "#D96E30",
+            "color": "#A84412",
             "lineHeight": 66.55
           },
           "builds": [
@@ -4668,20 +4678,20 @@
         {
           "id": "signed-distance-functions",
           "frame": { "x": 345, "y": 104.95, "w": 822.22, "h": 81.95 },
-          "opacity": 0.523,
+          "opacity": 0.85,
           "text": {
             "value": [
-              { "text": "S", "color": "#BF4F26" },
+              { "text": "S", "color": "#9B3A0E" },
               { "text": "igned" },
-              { "text": " D", "color": "#BF4F26" },
+              { "text": " D", "color": "#9B3A0E" },
               { "text": "istance" },
-              { "text": " F", "color": "#BF4F26" },
+              { "text": " F", "color": "#9B3A0E" },
               { "text": "unctions" }
             ],
             "font": "Fredoka",
             "size": 55,
             "weight": 500,
-            "color": "#D96E30",
+            "color": "#A84412",
             "lineHeight": 66.55
           },
           "builds": [
@@ -5020,10 +5030,10 @@
             "value": "https://www.shadertoy.com/view/wlBfD1",
             "font": "Assistant",
             "size": 28,
-            "color": "#594548",
+            "color": "#3F3134",
             "lineHeight": 36.62,
             "surface": {
-              "fill": "#86FFFFFF",
+              "fill": "#EBEDEC",
               "padding": { "bottom": 0, "left": 6.1, "right": 6.1, "top": 5.9 }
             }
           },
@@ -5118,10 +5128,10 @@
             "value": "https://www.shadertoy.com/view/wlBfD1",
             "font": "Assistant",
             "size": 28,
-            "color": "#594548",
+            "color": "#3F3134",
             "lineHeight": 36.62,
             "surface": {
-              "fill": "#86FFFFFF",
+              "fill": "#EBEDEC",
               "padding": { "bottom": 0, "left": 6.1, "right": 6.1, "top": 5.9 }
             }
           }
@@ -5186,7 +5196,7 @@
             "font": "Fredoka",
             "size": 85,
             "weight": 600,
-            "color": "#D96E30",
+            "color": "#F49354",
             "lineHeight": 82.4,
             "align": "center"
           },
@@ -5212,7 +5222,7 @@
             "font": "Noto Emoji",
             "size": 115,
             "weight": 700,
-            "color": "#BF4F26",
+            "color": "#F49354",
             "lineHeight": 134.78
           },
           "builds": [

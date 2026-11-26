@@ -324,11 +324,16 @@
         },
         {
           "id": "s3:eyebrow",
-          "frame": { "x": 128, "y": 128, "w": 1664, "h": 44 },
+          "frame": { "x": 112, "y": 122, "w": 1696, "h": 56 },
           "text": {
             "value": "CONTINUOUS COMPOSE / PROVISIONAL",
             "style": "eyebrow",
-            "color": "muted"
+            "color": "foreground",
+            "surface": {
+              "fill": "cardScrim",
+              "cornerRadius": 12,
+              "padding": { "bottom": 6, "left": 16, "right": 16, "top": 6 }
+            }
           }
         },
         {
@@ -685,7 +690,7 @@
               },
               {
                 "id": "s5:warp-card",
-                "frame": { "x": 1014, "y": 0, "w": 746, "h": 380 },
+                "frame": { "x": 1014, "y": 0, "w": 746, "h": 420 },
                 "code": {
                   "value": "fun fade(s: String) {\n  BasicText(s)\n}",
                   "language": "kotlin",
@@ -694,7 +699,7 @@
                     "fill": "codeBackground",
                     "stroke": { "color": "border", "width": 2 },
                     "cornerRadius": 40,
-                    "padding": 56
+                    "padding": 20
                   }
                 },
                 "builds": [
@@ -713,7 +718,7 @@
                     "beat": 3,
                     "set": {
                       "code": {
-                        "value": "fun fade(\n  s: String,\n  a: Float,\n) {\n  BasicText(s, alpha = a)\n}"
+                        "value": "fun fade(s: String,\n  a: Float\n) {\n  BasicText(s, a)\n}"
                       }
                     },
                     "durationMs": 280,
@@ -725,7 +730,7 @@
               },
               {
                 "id": "s5:warp-callout",
-                "frame": { "x": 998, "y": -16, "w": 778, "h": 412 },
+                "frame": { "x": 998, "y": -16, "w": 778, "h": 452 },
                 "shape": {
                   "geometry": "rect",
                   "stroke": {

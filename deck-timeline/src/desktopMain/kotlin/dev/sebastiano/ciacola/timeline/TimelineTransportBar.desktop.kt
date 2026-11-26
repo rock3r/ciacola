@@ -344,7 +344,14 @@ private fun TransportSearchField(
     LaunchedEffect(autoFocus) { if (autoFocus) runCatching { focusRequester.requestFocus() } }
     TextField(
         state = searchState,
-        placeholder = { Text("Filter tracks", style = studioCaptionStyle(), maxLines = 1) },
+        placeholder = {
+            Text(
+                text = "Filter tracks",
+                style = studioCaptionStyle(),
+                color = studioSecondaryTextColor(JewelTheme.isDark),
+                maxLines = 1,
+            )
+        },
         modifier = Modifier
             .width(width)
             .height(STUDIO_CONTROL_HEIGHT)

@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola.presenter
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,9 +11,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
@@ -22,6 +27,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -291,7 +297,7 @@ internal fun PresenterStageDecorator(
 }
 
 /**
- * Lightweight Jewel dialog overlay for `Cmd+G` quick slide jump (`1..N`).
+ * Jewel dialog overlay for `Cmd+K` / `Cmd+G` quick slide jump by slide number (`1..N`) or fuzzy title query.
  */
 @Composable
 internal fun QuickSlideJumpOverlay(
@@ -301,29 +307,67 @@ internal fun QuickSlideJumpOverlay(
 ) {
     val globalColors = JewelTheme.globalColors
     val slideCount = controller.slideCount.coerceAtLeast(1)
-    val initialText = (controller.currentSceneIndex + 1).toString()
-    val inputState = rememberTextFieldState(initialText = initialText)
+    val allEntries = remember(slideCount, controller.currentSceneIndex) { controller.slideJumpEntries() }
+    val inputState = rememberTextFieldState(initialText = "")
     var validationError by remember { mutableStateOf<String?>(null) }
+    var highlightedIndex by remember { mutableIntStateOf(0) }
+    var highlightTouched by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
 
+    val query = inputState.text.toString().trim()
+    var previousQuery by remember { mutableStateOf(query) }
+    val matches = remember(query, allEntries) { filterJumpEntries(query, allEntries) }
+
     LaunchedEffect(Unit) {
-        inputState.setTextAndPlaceCursorAtEnd(initialText)
         runCatching { focusRequester.requestFocus() }
     }
 
-    LaunchedEffect(inputState.text.toString()) {
-        if (validationError != null) {
-            validationError = null
+    LaunchedEffect(query) {
+        if (query != previousQuery) {
+            previousQuery = query
+            if (validationError != null) {
+                validationError = null
+            }
+            highlightedIndex = 0
+            highlightTouched = false
+        }
+    }
+
+    LaunchedEffect(highlightedIndex, matches.size) {
+        if (highlightedIndex in matches.indices) {
+            val layoutInfo = listState.layoutInfo
+            val completelyVisible = layoutInfo.visibleItemsInfo.any { item ->
+                item.index == highlightedIndex &&
+                    item.offset >= layoutInfo.viewportStartOffset &&
+                    item.offset + item.size <= layoutInfo.viewportEndOffset
+            }
+            if (!completelyVisible) {
+                listState.scrollToItem(highlightedIndex)
+            }
         }
     }
 
     fun submitJump() {
-        val parsed = inputState.text.toString().trim().toIntOrNull()
-        if (parsed == null || parsed !in 1..slideCount) {
-            validationError = "Enter a slide number from 1 to $slideCount"
+        val numeric = query.toIntOrNull()
+        if (numeric != null && !highlightTouched) {
+            if (numeric !in 1..slideCount) {
+                validationError = "Enter a slide number from 1 to $slideCount"
+                return
+            }
+            controller.jumpToSlide(navigationScope, numeric)
             return
         }
-        controller.jumpToSlide(navigationScope, parsed)
+        val target = if (query.isEmpty() && !highlightTouched) {
+            controller.currentSceneIndex + 1
+        } else {
+            matches.getOrNull(highlightedIndex.coerceIn(0, (matches.size - 1).coerceAtLeast(0)))?.first
+        }
+        if (target == null || target !in 1..slideCount) {
+            validationError = "No matching slides"
+            return
+        }
+        controller.jumpToSlide(navigationScope, target)
     }
 
     Popup(
@@ -333,7 +377,7 @@ internal fun QuickSlideJumpOverlay(
     ) {
         Column(
             modifier = Modifier
-                .width(320.dp)
+                .width(380.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(globalColors.panelBackground)
                 .border(1.dp, globalColors.borders.focused, RoundedCornerShape(8.dp))
@@ -341,6 +385,22 @@ internal fun QuickSlideJumpOverlay(
                 .onPreviewKeyEvent { ev ->
                     if (ev.type == KeyEventType.KeyDown) {
                         when (ev.key) {
+                            Key.DirectionDown -> {
+                                if (matches.isNotEmpty()) {
+                                    highlightedIndex = (highlightedIndex + 1).coerceAtMost(matches.lastIndex)
+                                    highlightTouched = true
+                                }
+                                true
+                            }
+
+                            Key.DirectionUp -> {
+                                if (matches.isNotEmpty()) {
+                                    highlightedIndex = (highlightedIndex - 1).coerceAtLeast(0)
+                                    highlightTouched = true
+                                }
+                                true
+                            }
+
                             Key.Enter, Key.NumPadEnter -> {
                                 submitJump()
                                 true
@@ -366,18 +426,64 @@ internal fun QuickSlideJumpOverlay(
                 color = globalColors.text.normal,
             )
 
-            InfoText("Enter slide number (1..$slideCount):")
+            InfoText("Enter slide number (1..$slideCount) or title:")
 
             TextField(
                 state = inputState,
                 outline = if (validationError != null) Outline.Error else Outline.None,
-                placeholder = { Text("1..$slideCount") },
+                placeholder = { Text("Slide # or title…") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
                     .trackAuthoringTextInputFocus()
                     .testTag("ciacola-presenter-jump-input"),
             )
+
+            if (matches.isNotEmpty()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                        .testTag("ciacola-presenter-jump-results"),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    itemsIndexed(matches, key = { _, (slideNum, _) -> slideNum }) { idx, (slideNum, title) ->
+                        val isHighlighted = idx == highlightedIndex
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    if (isHighlighted) {
+                                        globalColors.outlines.focused.copy(alpha = 0.16f)
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                )
+                                .clickable { controller.jumpToSlide(navigationScope, slideNum) }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                                .testTag("ciacola-presenter-jump-option-$slideNum"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "#$slideNum",
+                                style = JewelTheme.typography.small.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (isHighlighted) globalColors.text.normal else globalColors.text.info,
+                            )
+                            Text(
+                                text = title,
+                                style = JewelTheme.typography.regular,
+                                color = globalColors.text.normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
 
             val err = validationError
             if (err != null) {
@@ -409,4 +515,29 @@ internal fun QuickSlideJumpOverlay(
             }
         }
     }
+}
+
+internal fun filterJumpEntries(query: String, entries: List<Pair<Int, String>>): List<Pair<Int, String>> {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return entries
+    val numeric = trimmed.toIntOrNull()
+    if (numeric != null) {
+        return entries.filter { (num, _) -> num == numeric || num.toString().startsWith(trimmed) }
+    }
+    val lower = trimmed.lowercase()
+    val exactOrPrefix = entries.filter { (_, title) -> title.lowercase().contains(lower) }
+    if (exactOrPrefix.isNotEmpty()) return exactOrPrefix
+    return entries.filter { (_, title) -> isSubsequenceMatch(lower, title.lowercase()) }
+}
+
+private fun isSubsequenceMatch(needle: String, haystack: String): Boolean {
+    if (needle.isEmpty()) return true
+    var ni = 0
+    for (ch in haystack) {
+        if (ch == needle[ni]) {
+            ni++
+            if (ni == needle.length) return true
+        }
+    }
+    return false
 }

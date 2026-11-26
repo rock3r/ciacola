@@ -161,21 +161,32 @@ fun openInitialDeckSession(
 fun StageShortcutToastOverlay(
     toast: Pair<Long, String>?,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     displayDurationMs: Long = 1_200L,
+    onDismissed: (Long) -> Unit = {},
 ) {
     var visible by remember { mutableStateOf(false) }
     var lastText by remember { mutableStateOf("") }
 
-    LaunchedEffect(toast?.first) {
-        val current = toast ?: return@LaunchedEffect
+    LaunchedEffect(toast?.first, enabled) {
+        if (!enabled) {
+            visible = false
+            toast?.first?.let(onDismissed)
+            return@LaunchedEffect
+        }
+        val current = toast ?: run {
+            visible = false
+            return@LaunchedEffect
+        }
         lastText = current.second
         visible = true
         delay(displayDurationMs)
         visible = false
+        onDismissed(current.first)
     }
 
     AnimatedVisibility(
-        visible = visible && lastText.isNotBlank(),
+        visible = enabled && visible && lastText.isNotBlank(),
         enter = fadeIn(),
         exit = fadeOut(),
         modifier = modifier.padding(top = 12.dp),

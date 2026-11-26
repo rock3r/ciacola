@@ -765,6 +765,34 @@ internal object DocumentDeckLintLayout {
         return DocumentThemeResolver.resolveDefaultInkColor(slide, document, themeSpec)
     }
 
+    /** Returns true when at least one non-blank run resolves to a visible foreground alpha. */
+    fun hasVisibleTextColor(
+        text: dev.sebastiano.ciacola.document.TextPayload,
+        slide: SlideSpec,
+        document: DeckDocument,
+        themeSpec: DeckThemeSpec,
+    ): Boolean {
+        val palette = slide.palette?.let { document.palettes[it] }
+        val roleColor = DocumentThemeResolver.resolveTypographyRole(text.style, themeSpec).color
+        val baseFg = DocumentThemeResolver.resolveColor(text.color ?: roleColor, palette, themeSpec)
+        return when (val value = text.value) {
+            is dev.sebastiano.ciacola.document.RichTextValue.Plain ->
+                value.text.isNotBlank() && (baseFg == null || baseFg.alpha > 0.05f)
+            is dev.sebastiano.ciacola.document.RichTextValue.Runs -> value.runs.any { run ->
+                if (run.text.isBlank()) {
+                    false
+                } else {
+                    val runFg = if (run.color != null) {
+                        DocumentThemeResolver.resolveColor(run.color, palette, themeSpec)
+                    } else {
+                        baseFg
+                    }
+                    runFg == null || runFg.alpha > 0.05f
+                }
+            }
+        }
+    }
+
     private fun resolveFillCanonical(fill: Fill?, palette: SlidePaletteSpec?, themeSpec: DeckThemeSpec): String? =
         when (fill) {
             null -> null

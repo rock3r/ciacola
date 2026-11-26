@@ -279,7 +279,7 @@ internal fun DesignStepperRow(
             Text(
                 text = label,
                 style = JewelTheme.typography.small,
-                color = globalColors.text.info,
+                color = inspectorSecondaryTextColor(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -410,7 +410,7 @@ internal fun DesignSliderRow(
                 Text(
                     text = label,
                     style = JewelTheme.typography.small,
-                    color = globalColors.text.info,
+                    color = inspectorSecondaryTextColor(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -516,6 +516,14 @@ internal object InspectorTokens {
 /** Unified Jewel focus/accent colour used for every selection and active state. */
 @Composable
 internal fun inspectorAccent(): Color = JewelTheme.globalColors.outlines.focused
+
+/** WCAG AA secondary chrome label colour (≥ 4.5:1 on both dark and light inspector panels). */
+internal fun inspectorSecondaryTextColor(isDark: Boolean): Color =
+    if (isDark) Color(0xFFB4BCC8) else Color(0xFF475061)
+
+@Composable
+internal fun inspectorSecondaryTextColor(): Color =
+    inspectorSecondaryTextColor(JewelTheme.isDark)
 
 /** Caption text style (11sp, secondary). */
 @Composable
