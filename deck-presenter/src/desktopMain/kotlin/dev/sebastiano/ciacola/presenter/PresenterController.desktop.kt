@@ -7,7 +7,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -17,17 +16,10 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.window.WindowPlacement
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.bnorm.storyboard.Storyboard
 import dev.bnorm.storyboard.easel.Animatic
 import dev.sebastiano.ciacola.document.DeckDocument
-import java.awt.EventQueue
-import java.awt.GraphicsDevice
-import java.awt.GraphicsEnvironment
-import java.awt.HeadlessException
-import java.awt.Rectangle
-import java.awt.Window as AwtWindow
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineScope
@@ -84,145 +76,6 @@ data class SpeakerNoteTarget(
      */
     val deckId: String = "",
 )
-
-/** Connected physical/logical display metadata from AWT [GraphicsEnvironment]. */
-data class DisplayScreenInfo(
-    val id: String,
-    val label: String,
-    val bounds: Rectangle,
-    val isPrimary: Boolean,
-    val device: GraphicsDevice? = null,
-)
-
-/** Abstracts connected display discovery and window routing for testability. */
-interface DisplayRoutingAdapter {
-    fun screens(): List<DisplayScreenInfo>
-    fun presentStoryOn(screen: DisplayScreenInfo): Boolean
-    fun swapAudienceAndPresenter(): Boolean
-}
-
-/** Default AWT/Swing display router backed by [GraphicsEnvironment] and open [ComposeWindow]s. */
-class AwtDisplayRouter(
-    private val windowLister: () -> List<ComposeWindow> = {
-        runCatching {
-            AwtWindow.getWindows().filterIsInstance<ComposeWindow>().filter { it.isShowing }
-        }.getOrDefault(emptyList())
-    },
-) : DisplayRoutingAdapter {
-    override fun screens(): List<DisplayScreenInfo> {
-        return try {
-            val env = GraphicsEnvironment.getLocalGraphicsEnvironment()
-            val primary = runCatching { env.defaultScreenDevice }.getOrNull()
-            env.screenDevices.mapIndexed { index, device ->
-                val bounds = device.defaultConfiguration.bounds
-                val isPrimary = device === primary
-                val suffix = if (isPrimary) " · Primary" else ""
-                DisplayScreenInfo(
-                    id = device.iDstring ?: "display-$index",
-                    label = "Display ${index + 1} (${bounds.width}×${bounds.height}$suffix)",
-                    bounds = bounds,
-                    isPrimary = isPrimary,
-                    device = device,
-                )
-            }
-        } catch (_: HeadlessException) {
-            emptyList()
-        }
-    }
-
-    override fun presentStoryOn(screen: DisplayScreenInfo): Boolean {
-        val storyWin = findStoryWindow() ?: return false
-        runOnEdt {
-            moveAndFullscreen(storyWin, screen.bounds)
-        }
-        return true
-    }
-
-    override fun swapAudienceAndPresenter(): Boolean {
-        val allScreens = screens()
-        if (allScreens.size < 2) return false
-        val storyWin = findStoryWindow() ?: return false
-        val presenterWin = findPresenterWindow() ?: return false
-
-        val currentStoryScreen = screenForWindow(storyWin, allScreens) ?: allScreens.first()
-        val currentPresenterScreen = screenForWindow(presenterWin, allScreens)
-            ?.takeIf { it.id != currentStoryScreen.id }
-            ?: allScreens.first { it.id != currentStoryScreen.id }
-
-        val storyWasFullscreen = storyWin.placement == WindowPlacement.Fullscreen
-        runOnEdt {
-            moveWindowToBounds(presenterWin, currentStoryScreen.bounds, fullscreen = false)
-            if (storyWasFullscreen) {
-                moveAndFullscreen(storyWin, currentPresenterScreen.bounds)
-            } else {
-                moveWindowToBounds(storyWin, currentPresenterScreen.bounds, fullscreen = false)
-            }
-        }
-        return true
-    }
-
-    private fun findStoryWindow(): ComposeWindow? =
-        windowLister().firstOrNull { it.title.endsWith(" - Story") }
-
-    private fun findPresenterWindow(): ComposeWindow? =
-        windowLister().firstOrNull { it.title.endsWith(" - Presenter") }
-
-    private fun screenForWindow(window: ComposeWindow, screens: List<DisplayScreenInfo>): DisplayScreenInfo? {
-        val device = window.graphicsConfiguration?.device
-        if (device != null) {
-            screens.firstOrNull { it.device === device }?.let { return it }
-        }
-        val centerX = window.x + window.width / 2
-        val centerY = window.y + window.height / 2
-        return screens.firstOrNull { it.bounds.contains(centerX, centerY) }
-    }
-
-    private fun moveAndFullscreen(window: ComposeWindow, targetBounds: Rectangle) {
-        if (window.placement == WindowPlacement.Fullscreen) {
-            window.placement = WindowPlacement.Floating
-            EventQueue.invokeLater {
-                relocateCentered(window, targetBounds)
-                EventQueue.invokeLater {
-                    window.placement = WindowPlacement.Fullscreen
-                }
-            }
-        } else {
-            relocateCentered(window, targetBounds)
-            EventQueue.invokeLater {
-                window.placement = WindowPlacement.Fullscreen
-            }
-        }
-    }
-
-    private fun moveWindowToBounds(window: ComposeWindow, targetBounds: Rectangle, fullscreen: Boolean) {
-        if (window.placement == WindowPlacement.Fullscreen) {
-            window.placement = WindowPlacement.Floating
-        }
-        relocateCentered(window, targetBounds)
-        if (fullscreen) {
-            EventQueue.invokeLater { window.placement = WindowPlacement.Fullscreen }
-        }
-    }
-
-    private fun relocateCentered(window: ComposeWindow, targetBounds: Rectangle) {
-        val minSize = window.minimumSize
-        val minW = (minSize?.width ?: 640).coerceAtLeast(320)
-        val minH = (minSize?.height ?: 420).coerceAtLeast(240)
-        val w = window.width.coerceIn(minW, targetBounds.width.coerceAtLeast(minW))
-        val h = window.height.coerceIn(minH, targetBounds.height.coerceAtLeast(minH))
-        val x = targetBounds.x + ((targetBounds.width - w) / 2).coerceAtLeast(0)
-        val y = targetBounds.y + ((targetBounds.height - h) / 2).coerceAtLeast(0)
-        window.setBounds(x, y, w, h)
-    }
-
-    private fun runOnEdt(block: () -> Unit) {
-        if (EventQueue.isDispatchThread()) {
-            block()
-        } else {
-            EventQueue.invokeLater(block)
-        }
-    }
-}
 
 /**
  * Elapsed talk timer and pace calculator decoupled from UI composition.
