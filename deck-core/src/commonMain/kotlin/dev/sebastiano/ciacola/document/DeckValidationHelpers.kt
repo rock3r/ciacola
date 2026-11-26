@@ -24,6 +24,7 @@ internal object DeckValidationHelpers {
         "exit" to Build.Exit.serializer().descriptor,
         "emphasis" to Build.Emphasis.serializer().descriptor,
         "change" to Build.Change.serializer().descriptor,
+        "playback" to Build.Playback.serializer().descriptor,
     )
 
     private val SCALE_KEYS: Set<String> = setOf("x", "y")

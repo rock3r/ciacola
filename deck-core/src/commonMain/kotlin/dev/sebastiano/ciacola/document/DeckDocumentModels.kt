@@ -399,6 +399,18 @@ data class ImagePayload(
     val src: String,
     val fit: String? = null,
     val tint: String? = null,
+    /** Animated sources only: wrap to [startMs] at the end instead of holding the last frame. */
+    val loop: Boolean = false,
+    /** Animated sources only: playback speed multiplier (`> 0`). */
+    val playbackRate: Double = 1.0,
+    /** Animated sources only: trim start in source milliseconds. */
+    val startMs: Int? = null,
+    /** Animated sources only: trim end in source milliseconds (defaults to the clip's duration). */
+    val endMs: Int? = null,
+    /** Animated sources only: frame (source milliseconds) shown before playback and in stills. */
+    val posterMs: Int? = null,
+    /** Animated sources only: total decoded full-canvas pixel budget (`width * height * frames`). */
+    val maxPixels: Long? = null,
 )
 
 @Immutable
@@ -657,6 +669,28 @@ sealed interface Build {
         override val curve: Curve? = null,
     ) : Build
 
+    /**
+     * Controls an animated `image` node's clip at [beat]. Playback state is derived by folding every
+     * `playback` build up to the current beat, so it never depends on how the beat was reached.
+     */
+    @Immutable
+    @Serializable
+    @SerialName("playback")
+    data class Playback(
+        override val beat: Int,
+        override val id: String? = null,
+        val action: PlaybackAction,
+        /** Source-time position for `play`, `pause` and `seek` (`seek` without it goes to the trim start). */
+        val atMs: Int? = null,
+        /** New playback rate (required for `rate`, optional on the other actions). */
+        val rate: Double? = null,
+    ) : Build {
+        override val after: String? get() = null
+        override val delayMs: Int? get() = null
+        override val durationMs: Int? get() = null
+        override val curve: Curve? get() = null
+    }
+
     @Immutable
     @Serializable
     @SerialName("change")
@@ -671,6 +705,14 @@ sealed interface Build {
         override val durationMs: Int? = null,
         override val curve: Curve? = null,
     ) : Build
+}
+
+@Serializable
+enum class PlaybackAction {
+    @SerialName("play") Play,
+    @SerialName("pause") Pause,
+    @SerialName("seek") Seek,
+    @SerialName("rate") Rate,
 }
 
 @Serializable

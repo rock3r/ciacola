@@ -132,6 +132,7 @@ object DocumentMotionEvaluator {
                 is Build.Exit -> if (build.by == DeliveryBy.Character || build.effect == BuildEffects.KEYBOARD) return true
                 is Build.Emphasis -> if (build.by == DeliveryBy.Character) return true
                 is Build.Change -> if (build.morph?.by == MorphBy.Character) return true
+                is Build.Playback -> Unit
             }
         }
         return false
@@ -421,7 +422,7 @@ object DocumentMotionEvaluator {
                             onChildDelivery = { childId, override -> childDeliveries[childId] = override },
                         )
                     }
-                    is Build.Change -> Unit
+                    is Build.Change, is Build.Playback -> Unit
                 }
             }
         }

@@ -52,6 +52,7 @@ object CanonicalJson {
         "exit" to Build.Exit.serializer().descriptor,
         "emphasis" to Build.Emphasis.serializer().descriptor,
         "change" to Build.Change.serializer().descriptor,
+        "playback" to Build.Playback.serializer().descriptor,
     )
 
     /** Encodes [document] to a canonical [JsonObject] (`encodeDefaults = false`, nulls only in `set`). */

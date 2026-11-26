@@ -26,7 +26,7 @@ internal object DeckJsonScanner {
         ),
         NodeKind.Code to setOf("value", "language", "highlightLines", "fit", "surface"),
         NodeKind.Shape to setOf("geometry", "fill", "stroke", "cornerRadius", "heads"),
-        NodeKind.Image to setOf("src", "fit", "tint"),
+        NodeKind.Image to setOf("src", "fit", "tint", "loop", "playbackRate", "startMs", "endMs", "posterMs", "maxPixels"),
         NodeKind.Connector to setOf("from", "to", "fromAnchor", "toAnchor", "style", "stroke", "heads", "gap"),
         NodeKind.Specimen to setOf("ref", "params", "tracks"),
         NodeKind.Stack to setOf("gap", "padding", "alignItems", "justify", "surface", "clip"),

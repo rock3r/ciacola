@@ -1076,6 +1076,7 @@ object DeckStructureEdits {
         is Build.Exit -> copy(beat = newBeat)
         is Build.Emphasis -> copy(beat = newBeat)
         is Build.Change -> copy(beat = newBeat)
+        is Build.Playback -> copy(beat = newBeat)
     }
 
     private fun Build.withAfter(newAfter: String?): Build = when (this) {
@@ -1083,6 +1084,7 @@ object DeckStructureEdits {
         is Build.Exit -> copy(after = newAfter)
         is Build.Emphasis -> copy(after = newAfter)
         is Build.Change -> copy(after = newAfter)
+        is Build.Playback -> this
     }
 
     private fun Build.withId(newId: String?): Build = when (this) {
@@ -1090,5 +1092,6 @@ object DeckStructureEdits {
         is Build.Exit -> copy(id = newId)
         is Build.Emphasis -> copy(id = newId)
         is Build.Change -> copy(id = newId)
+        is Build.Playback -> copy(id = newId)
     }
 }
