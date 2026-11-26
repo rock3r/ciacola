@@ -1,11 +1,23 @@
 package dev.sebastiano.ciacola.review
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
@@ -18,12 +30,19 @@ import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.Easel
+import dev.bnorm.storyboard.easel.LocalSceneMode
+import dev.bnorm.storyboard.easel.SceneMode
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.buildFoundationTestStoryboard
+import dev.sebastiano.ciacola.ui.AuthoringTextInputFocusTracker
+import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
+import dev.sebastiano.ciacola.ui.LocalAuthoringTextInputTracker
+import dev.sebastiano.ciacola.ui.trackAuthoringTextInputFocus
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.writeText
@@ -32,6 +51,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.jetbrains.jewel.ui.component.Text
 
 @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
 class ReviewErgonomicsTest {
@@ -444,5 +464,315 @@ class ReviewErgonomicsTest {
         assertEquals("saved-config-id", allEnvStore.effectiveConversationId())
         assertEquals(ConversationIdSource.Config, allEnvStore.resolveConversationId().source)
         assertEquals(false, allEnvStore.resolveConversationId().isAutoDetected)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun keyboardShortcutCorCmdMPinsCommentWithoutModifierClickAndSkipsPresenting() = runComposeUiTest {
+        lateinit var coordinator: ReviewStageCoordinator
+        var presenting by mutableStateOf(false)
+
+        setContent {
+            coordinator = rememberReviewStageCoordinator().apply {
+                inspectModeEnabled = true
+                preferredTargetNodeId = "target-node"
+                fallbackNodeBoundsResolver = { id ->
+                    if (id == "target-node") Rect(100f, 120f, 360f, 220f) else null
+                }
+            }
+            CompositionLocalProvider(
+                LocalAudiencePresenting provides presenting,
+                LocalSceneMode provides SceneMode.Story,
+            ) {
+                CiacolaJewelTheme(isDark = true) {
+                    Box(Modifier.size(800.dp, 600.dp)) {
+                        coordinator.stageDecorator.decorate {
+                            Box(Modifier.fillMaxSize().reviewTarget(kind = "Text", label = "Hero Headline", nodeId = "target-node")) {
+                                Text("Hero Headline")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+
+        // While presenting, C does not open a review comment popup.
+        presenting = true
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+        assertEquals(null, coordinator.pendingSelection)
+
+        // Back in Review mode, pressing C pins to preferred target.
+        presenting = false
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+        val pinnedByC = coordinator.pendingSelection
+        assertTrue(pinnedByC != null, "Expected C to open pending review selection")
+        assertEquals("target-node", pinnedByC.target.nodeId)
+        assertEquals(400f, pinnedByC.stageX, absoluteTolerance = 1f)
+        assertEquals(300f, pinnedByC.stageY, absoluteTolerance = 1f)
+
+        coordinator.dismissActivePopups()
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").performKeyInput {
+            keyDown(Key.MetaLeft)
+            pressKey(Key.M)
+            keyUp(Key.MetaLeft)
+        }
+        waitForIdle()
+        assertTrue(coordinator.pendingSelection != null, "Expected ⌘M to open pending review selection")
+    }
+
+    @Test
+    fun keyboardPinningWorksFromFocusedSidecarAndDropsUnresolvedPreferredNodeId() = runComposeUiTest {
+        val tempRoot = Files.createTempDirectory("ciacola-review-sidecar-pin-")
+        try {
+            val storyboardDir = Files.createDirectories(tempRoot.resolve(".storyboard"))
+            val fakeAgentApi = tempRoot.resolve("fake-agentapi.sh").apply {
+                writeText("#!/bin/sh\nexit 0\n")
+                Files.setPosixFilePermissions(this, PosixFilePermissions.fromString("rwxr-xr-x"))
+            }
+            val store = ReviewCommentStore(
+                storyboardDir = storyboardDir,
+                workspaceRoot = tempRoot,
+                envProvider = { key -> if (key == "CIACOLA_AGENTAPI_BIN") fakeAgentApi.toAbsolutePath().toString() else null },
+            )
+            store.saveConfig(ReviewConfig(conversationId = "conv-sidecar"))
+            lateinit var coordinator: ReviewStageCoordinator
+            lateinit var window: SlideReviewWindow
+
+            setContent {
+                coordinator = rememberReviewStageCoordinator().apply {
+                    inspectModeEnabled = true
+                    preferredTargetNodeId = "stale-node-on-other-slide"
+                    fallbackNodeBoundsResolver = { null }
+                }
+                val deck = buildFoundationTestStoryboard(stageDecorator = coordinator.stageDecorator)
+                val animatic = rememberAnimatic(storyboard = { deck })
+                window = rememberSlideReviewWindow(
+                    animatic = animatic,
+                    store = store,
+                    stageCoordinator = coordinator,
+                ).also { it.visible = true }
+                CompositionLocalProvider(LocalSceneMode provides SceneMode.Story) {
+                    CiacolaJewelTheme(isDark = true) {
+                        Box(Modifier.size(460.dp, 640.dp)) {
+                            window.Content()
+                        }
+                    }
+                }
+            }
+            waitForIdle()
+
+            onNodeWithTag("ciacola-review-agent-config-toggle", useUnmergedTree = true).assertIsDisplayed()
+            onNodeWithTag("ciacola-review-agent-config-toggle", useUnmergedTree = true).requestFocus()
+            waitForIdle()
+            onNodeWithTag("ciacola-review-agent-config-toggle", useUnmergedTree = true).performKeyInput { pressKey(Key.C) }
+            waitForIdle()
+
+            val selection = coordinator.pendingSelection
+            assertNotNull(selection, "Expected C from focused Review sidecar chrome to pin a comment")
+            assertEquals(null, selection.target.nodeId, "Stale preferredTargetNodeId without visible bounds must not stick")
+        } finally {
+            tempRoot.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cPinsToPreferredSelectedContainerOverChildAtCentreAndResolvesFallbackBounds() = runComposeUiTest {
+        lateinit var coordinator: ReviewStageCoordinator
+        setContent {
+            coordinator = rememberReviewStageCoordinator().apply {
+                inspectModeEnabled = true
+                preferredTargetNodeId = "card"
+            }
+            CompositionLocalProvider(
+                LocalAudiencePresenting provides false,
+                LocalSceneMode provides SceneMode.Story,
+            ) {
+                CiacolaJewelTheme(isDark = true) {
+                    Box(Modifier.size(800.dp, 600.dp)) {
+                        coordinator.stageDecorator.decorate {
+                            Box(Modifier.fillMaxSize().reviewTarget(kind = "Shape", label = "Card", nodeId = "card")) {
+                                Box(
+                                    Modifier
+                                        .align(Alignment.Center)
+                                        .size(200.dp, 80.dp)
+                                        .reviewTarget(kind = "Text", label = "Headline", nodeId = "headline"),
+                                ) {
+                                    Text("Headline")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+
+        val cardSelection = coordinator.pendingSelection
+        assertNotNull(cardSelection)
+        assertEquals("card", cardSelection.target.nodeId, "Expected preferred container 'card' to win over centered child")
+
+        // Fallback bounds path without a registered reviewTarget entry.
+        coordinator.dismissActivePopups()
+        coordinator.preferredTargetNodeId = "fallback-card"
+        coordinator.fallbackNodeBoundsResolver = { id ->
+            if (id == "fallback-card") Rect(40f, 50f, 360f, 250f) else null
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-review-stage").performKeyInput { pressKey(Key.C) }
+        waitForIdle()
+
+        val fallbackSelection = coordinator.pendingSelection
+        assertNotNull(fallbackSelection)
+        assertEquals("fallback-card", fallbackSelection.target.nodeId)
+        assertEquals(200f, fallbackSelection.stageX, absoluteTolerance = 1f)
+        assertEquals(150f, fallbackSelection.stageY, absoluteTolerance = 1f)
+    }
+
+    @Test
+    fun realCKeyInsideFocusedConversationIdOrExternalStudioTextFieldDoesNotPinCommentWithNegativeControl() {
+        fun runConvFieldKeyScenario(wireGuard: Boolean): PendingReviewSelection? {
+            var captured: PendingReviewSelection? = null
+            val tempRoot = Files.createTempDirectory("ciacola-review-conv-guard-")
+            try {
+                runComposeUiTest {
+                    val storyboardDir = Files.createDirectories(tempRoot.resolve(".storyboard"))
+                    val store = ReviewCommentStore(storyboardDir = storyboardDir, workspaceRoot = tempRoot)
+                    lateinit var coordinator: ReviewStageCoordinator
+                    lateinit var tracker: AuthoringTextInputFocusTracker
+                    setContent {
+                        tracker = remember { AuthoringTextInputFocusTracker() }
+                        coordinator = rememberReviewStageCoordinator().apply {
+                            inspectModeEnabled = true
+                            isExternalTextInputActiveProvider = if (wireGuard) {
+                                { tracker.hasFocusedTextInput }
+                            } else {
+                                { false }
+                            }
+                        }
+                        val deck = buildFoundationTestStoryboard(stageDecorator = coordinator.stageDecorator)
+                        val animatic = rememberAnimatic(storyboard = { deck })
+                        val window = rememberSlideReviewWindow(
+                            animatic = animatic,
+                            store = store,
+                            stageCoordinator = coordinator,
+                        ).also { it.visible = true }
+                        CompositionLocalProvider(
+                            LocalSceneMode provides SceneMode.Story,
+                            LocalAuthoringTextInputTracker provides tracker,
+                        ) {
+                            CiacolaJewelTheme(isDark = true) {
+                                Box(Modifier.size(460.dp, 720.dp)) { window.Content() }
+                            }
+                        }
+                    }
+                    waitForIdle()
+                    onNodeWithTag("ciacola-review-agent-config-toggle", useUnmergedTree = true).performClick()
+                    waitForIdle()
+                    val convField = onNodeWithTag("ciacola-review-panel-conv-id-input", useUnmergedTree = true)
+                    convField.requestFocus()
+                    waitForIdle()
+                    convField.performKeyInput { pressKey(Key.C) }
+                    waitForIdle()
+                    captured = coordinator.pendingSelection
+                }
+            } finally {
+                tempRoot.toFile().deleteRecursively()
+            }
+            return captured
+        }
+
+        // Negative control: without the text-input focus guard, pressing real Key.C pins a comment.
+        assertNotNull(runConvFieldKeyScenario(wireGuard = false), "Without guard, real Key.C should pin")
+        // With production tracker guard wired, pressing real Key.C inside Conversation ID does not pin.
+        assertNull(runConvFieldKeyScenario(wireGuard = true), "Real Key.C inside Conversation ID must not pin")
+
+        // External Studio TextField mounted inside a host running StudioWorkspace.handleStudioPreviewKey blocks real Key.C,
+        // whereas without the text-input focus guard (negative control), real Key.C inside the same focused field pins.
+        fun runStudioExternalFieldScenario(wireGuard: Boolean): Int {
+            var studioPinCount = 0
+            runComposeUiTest {
+                val docStore = dev.sebastiano.ciacola.createLoadedTestDeckStore()
+                val specimens = dev.sebastiano.ciacola.decks.AllDocumentDecks.foundation.specimens
+                lateinit var tracker: AuthoringTextInputFocusTracker
+                lateinit var externalFieldState: androidx.compose.foundation.text.input.TextFieldState
+                lateinit var workspace: dev.sebastiano.ciacola.studio.StudioWorkspaceController
+                setContent {
+                    tracker = remember { AuthoringTextInputFocusTracker() }
+                    externalFieldState = rememberTextFieldState("")
+                    workspace = remember {
+                        dev.sebastiano.ciacola.studio.StudioWorkspaceController(
+                            store = docStore,
+                            elementController = dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController(
+                                store = docStore,
+                                specimens = specimens,
+                            ),
+                            themeController = dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController(store = docStore),
+                            timelineController = dev.sebastiano.ciacola.timeline.DocumentTimelineController(
+                                store = docStore,
+                                specimens = specimens,
+                            ),
+                            lintController = dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController(
+                                store = docStore,
+                                specimens = specimens,
+                            ),
+                        ).apply {
+                            isTextInputActiveProvider = if (wireGuard) {
+                                { tracker.hasFocusedTextInput }
+                            } else {
+                                { false }
+                            }
+                            onPinReviewComment = { studioPinCount++; true }
+                            switchMode(dev.sebastiano.ciacola.studio.StudioMode.Review)
+                        }
+                    }
+                    CompositionLocalProvider(
+                        LocalSceneMode provides SceneMode.Story,
+                        LocalAuthoringTextInputTracker provides tracker,
+                    ) {
+                        CiacolaJewelTheme(isDark = true) {
+                            Box(
+                                Modifier
+                                    .size(460.dp, 240.dp)
+                                    .onPreviewKeyEvent { workspace.handleStudioPreviewKey(it) },
+                            ) {
+                                org.jetbrains.jewel.ui.component.TextField(
+                                    state = externalFieldState,
+                                    modifier = Modifier.trackAuthoringTextInputFocus().testTag("studio-external-input"),
+                                )
+                            }
+                        }
+                    }
+                }
+                waitForIdle()
+                val externalField = onNodeWithTag("studio-external-input", useUnmergedTree = true)
+                externalField.requestFocus()
+                waitForIdle()
+                assertTrue(tracker.hasFocusedTextInput)
+                externalField.performKeyInput { pressKey(Key.C) }
+                waitForIdle()
+            }
+            return studioPinCount
+        }
+
+        assertEquals(1, runStudioExternalFieldScenario(wireGuard = false), "Without guard, Key.C in Studio field must pin")
+        assertEquals(0, runStudioExternalFieldScenario(wireGuard = true), "With guard, Key.C in Studio field must not pin")
     }
 }

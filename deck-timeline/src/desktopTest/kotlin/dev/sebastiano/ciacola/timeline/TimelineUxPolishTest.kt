@@ -3,11 +3,15 @@ package dev.sebastiano.ciacola.timeline
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.geometry.Offset
@@ -283,5 +287,60 @@ class TimelineUxPolishTest {
             onNodeWithTag("ciacola-fragment-row-${slot.address}", useUnmergedTree = true).assertDoesNotExist()
             onNodeWithTag("ciacola-fragment-tick-${slot.address}", useUnmergedTree = true).assertDoesNotExist()
         }
+    }
+
+    @Test
+    fun animateInspectorHasBottomScrollFadeAndScrollClearance() = runComposeUiTest {
+        val store = DeckDocumentStore(multiSlideDeckWithStaticAndMotionSlides(), initialLoad = DeckLoadState.Loaded)
+        val controller = DocumentTimelineController(store)
+        controller.updatePresentedLocation("slide-motion", sceneIndex = 0, beatIndex = 1)
+        val morphRef = controller.snapshot.trackRefsByTrackId.values
+            .filterIsInstance<DocumentTimelineTrackRef.SlideBuildTrack>()
+            .first { it.nodeId == "headline" }
+        controller.selectTrack(morphRef.trackId)
+
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(320.dp, 260.dp)) {
+                    DocumentTimelineMotionInspector(controller = controller)
+                }
+            }
+        }
+        waitForIdle()
+
+        onNodeWithTag("ciacola-doc-animate-bottom-fade", useUnmergedTree = true).assertIsDisplayed()
+        onAllNodesWithTag("ciacola-doc-animate-scroll-fade", useUnmergedTree = true).let {
+            assertEquals(0, it.fetchSemanticsNodes().size, "Top scroll fade must stay hidden at scroll top")
+        }
+
+        // Outer box has opaque panel background and keeps the full 260dp height.
+        val rootBounds = onNodeWithTag("ciacola-doc-animate-panel-root", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(rootBounds.height >= 259f, "Expected outer animate box to fill 260dp height; got $rootBounds")
+        val panelBgPixels = onNodeWithTag("ciacola-doc-animate-panel-root", useUnmergedTree = true)
+            .captureToImage().toPixelMap()
+        assertEquals(1f, panelBgPixels[0, 0].alpha, "Expected opaque panel background on Animate inspector")
+
+        // Scroll to the very bottom: top fade appears, bottom fade hides, and 32dp bottom clearance is observable.
+        onNodeWithTag("ciacola-doc-timeline-inspector", useUnmergedTree = true).performMouseInput {
+            repeat(25) { scroll(10f) }
+        }
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-animate-scroll-fade", useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(
+            0,
+            onAllNodesWithTag("ciacola-doc-animate-bottom-fade", useUnmergedTree = true).fetchSemanticsNodes().size,
+            "Bottom scroll fade should hide once scrolled to bottom",
+        )
+        val toggleBounds = onNodeWithTag("ciacola-fragment-toggle-subrows", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            rootBounds.bottom - toggleBounds.bottom >= 28f,
+            "Expected genuine 32dp bottom clearance below last item at max scroll; root=$rootBounds toggle=$toggleBounds",
+        )
+        assertTrue(
+            rootBounds.right - toggleBounds.right >= 12f,
+            "Expected 14dp scrollbar gutter on right edge; root=$rootBounds toggle=$toggleBounds",
+        )
     }
 }

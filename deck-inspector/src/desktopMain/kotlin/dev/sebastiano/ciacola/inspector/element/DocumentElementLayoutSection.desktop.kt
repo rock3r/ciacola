@@ -15,6 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.document.Build
@@ -468,6 +471,7 @@ internal fun ToolbarGlyphButton(
     tag: String,
     enabled: Boolean,
     selected: Boolean = false,
+    isToggle: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = JewelTheme.globalColors
@@ -475,7 +479,13 @@ internal fun ToolbarGlyphButton(
         IconButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(InspectorTokens.RowHeight).testTag(tag),
+            modifier = Modifier
+                .size(InspectorTokens.RowHeight)
+                .semantics {
+                    contentDescription = tooltip
+                    if (isToggle) this.selected = selected
+                }
+                .testTag(tag),
         ) {
             InspectorGlyphIcon(
                 glyph = glyph,

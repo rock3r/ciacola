@@ -34,8 +34,10 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -74,6 +76,7 @@ internal fun DocumentInlineTextEditorPopover(
     targetRectPx: Rect,
     siblingTextRectsPx: List<Rect>,
     overlaySizePx: IntSize,
+    onRestoreStageFocus: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val colors = JewelTheme.globalColors
@@ -111,9 +114,25 @@ internal fun DocumentInlineTextEditorPopover(
         runCatching { focusRequester.requestFocus() }
     }
 
-    fun commit() {
-        controller.commitInlineTextEdits(capturedEdits = recordedEdits.toList(), finalText = textFieldState.text.toString())
+    fun commit(fromEnterKey: Boolean = false) {
+        controller.commitInlineTextEdits(
+            capturedEdits = recordedEdits.toList(),
+            finalText = textFieldState.text.toString(),
+            fromEnterKey = fromEnterKey,
+        )
+        onRestoreStageFocus?.invoke()
     }
+
+    fun isProtectedStageKey(key: Key): Boolean =
+        key == Key.Spacebar ||
+            key == Key.DirectionLeft ||
+            key == Key.DirectionRight ||
+            key == Key.DirectionUp ||
+            key == Key.DirectionDown ||
+            key == Key.Backspace ||
+            key == Key.Enter ||
+            key == Key.NumPadEnter ||
+            key == Key.Escape
 
     Column(
         modifier = Modifier
@@ -124,6 +143,7 @@ internal fun DocumentInlineTextEditorPopover(
             .background(colors.panelBackground)
             .border(1.dp, inspectorAccent(), RoundedCornerShape(6.dp))
             .padding(8.dp)
+            .onKeyEvent { ev -> isProtectedStageKey(ev.key) }
             .testTag("ciacola-doc-inline-text-popover"),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -140,7 +160,7 @@ internal fun DocumentInlineTextEditorPopover(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(end = 8.dp).testTag("ciacola-doc-inline-text-header"),
             )
-            Text(text = "⌘↩ Commit · Esc Cancel", style = inspectorCaptionStyle(), color = colors.text.info, maxLines = 1)
+            Text(text = "↩ / ⌘↩ Commit · ⇧↩ Newline · Esc", style = inspectorCaptionStyle(), color = colors.text.info, maxLines = 1)
         }
 
         TextArea(
@@ -154,28 +174,34 @@ internal fun DocumentInlineTextEditorPopover(
                 .onFocusChanged { st -> controller.textInputHasFocus = st.isFocused }
                 .trackAuthoringTextInputFocus()
                 .onPreviewKeyEvent { ev ->
+                    val isEnterKey = ev.key == Key.Enter || ev.key == Key.NumPadEnter
+                    if (ev.type == KeyEventType.KeyUp && isEnterKey && controller.swallowNextEnterKeyUp) {
+                        controller.swallowNextEnterKeyUp = false
+                        return@onPreviewKeyEvent true
+                    }
                     if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {
+                        isEnterKey && controller.swallowNextEnterKeyUp -> true
                         ev.key == Key.Escape -> {
-                            controller.cancelInlineTextEdit()
+                            controller.cancelInlineTextEdit(fromEscapeKey = true)
+                            onRestoreStageFocus?.invoke()
                             true
                         }
-                        (ev.isMetaPressed || ev.isCtrlPressed) && ev.key == Key.Enter -> {
-                            commit()
+                        (ev.isMetaPressed || ev.isCtrlPressed) && isEnterKey -> {
+                            commit(fromEnterKey = true)
                             true
                         }
-                        // Explicitly do NOT intercept ⌘Z / ⇧⌘Z: leave local undo inside TextArea!
+                        !ev.isShiftPressed && !ev.isAltPressed && isEnterKey -> {
+                            commit(fromEnterKey = true)
+                            true
+                        }
+                        // Explicitly do NOT intercept ⌘Z / ⇧⌘Z or Shift+Enter: keep local undo & newlines inside TextArea!
                         else -> false
                     }
                 }
                 .onKeyEvent { ev ->
-                    // Consume bubble-phase Spacebar/navigation keys so typing never advances slides.
-                    ev.key == Key.Spacebar ||
-                        ev.key == Key.DirectionLeft ||
-                        ev.key == Key.DirectionRight ||
-                        ev.key == Key.DirectionUp ||
-                        ev.key == Key.DirectionDown ||
-                        ev.key == Key.Backspace
+                    // Consume bubble-phase Spacebar/navigation/Enter/Esc keys so inline edits never leak to stage navigation.
+                    isProtectedStageKey(ev.key)
                 }
                 .testTag("ciacola-doc-inline-text-field"),
         )

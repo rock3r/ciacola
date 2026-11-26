@@ -34,6 +34,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -65,9 +69,9 @@ import org.jetbrains.jewel.ui.typography
 
 /** Plain-language instruction for leaving a review comment (Review mode needs no modifier). */
 internal fun reviewCommentHint(reviewModeActive: Boolean): String = if (reviewModeActive) {
-    "Click any element to comment."
+    "Click any element or press C / ⌘M to comment."
 } else {
-    "Switch to Review mode (F3), then click any element to comment."
+    "Switch to Review mode (F3), then click any element or press C / ⌘M to comment."
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -115,13 +119,27 @@ internal fun ReviewSidecarPanel(windowController: SlideReviewWindow) {
             .fillMaxSize()
             .background(globalColors.panelBackground)
             .onPreviewKeyEvent { ev ->
-                if (ev.type == KeyEventType.KeyDown && ev.key == Key.F3) {
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (ev.key == Key.F3) {
                     windowController.stageCoordinator.inspectModeEnabled =
                         !windowController.stageCoordinator.inspectModeEnabled
-                    true
-                } else {
-                    false
+                    return@onPreviewKeyEvent true
                 }
+                val coordinator = windowController.stageCoordinator
+                if (coordinator.inspectModeEnabled &&
+                    coordinator.pendingSelection == null &&
+                    coordinator.selectedPinCommentId == null &&
+                    !coordinator.isExternalTextInputActiveProvider()
+                ) {
+                    val unmodifiedC = ev.key == Key.C &&
+                        !ev.isCtrlPressed && !ev.isMetaPressed && !ev.isAltPressed && !ev.isShiftPressed
+                    val primaryModM = ev.key == Key.M &&
+                        (ev.isMetaPressed || ev.isCtrlPressed) && !ev.isAltPressed && !ev.isShiftPressed
+                    if ((unmodifiedC || primaryModM) && coordinator.pinCommentAtCurrentTarget(scope)) {
+                        return@onPreviewKeyEvent true
+                    }
+                }
+                false
             },
     ) {
         if (showAgentConfigDetails) {
@@ -621,13 +639,14 @@ private fun ReviewCommentRowCard(
         } else {
             @OptIn(ExperimentalLayoutApi::class)
             FlowRow(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("ciacola-review-card-actions-${item.id}"),
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 CopyPromptForAgentButton(
                     testTag = "ciacola-review-copy-prompt-${item.id}",
                     tooltipText = "Copy formatted agent prompt for this comment to clipboard",
+                    label = "Copy",
                     onCopy = onCopyPrompt,
                 )
                 if (item.status != ReviewCommentStatus.Applied) {
@@ -668,7 +687,10 @@ private fun ReviewCommentRowCard(
                         }
                     } else {
                         Tooltip(tooltip = { Text("Configure Target Agent Conversation ID") }) {
-                            OutlinedButton(onClick = onConfigureAgent) {
+                            OutlinedButton(
+                                onClick = onConfigureAgent,
+                                modifier = Modifier.testTag("ciacola-review-set-agent-${item.id}"),
+                            ) {
                                 Text("Set Agent…", style = JewelTheme.typography.small)
                             }
                         }

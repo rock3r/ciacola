@@ -1,9 +1,11 @@
 package dev.sebastiano.ciacola.document
 
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -30,6 +32,7 @@ data class WorkspaceLayoutState(
     val inspectorWidthDp: Float = 360f,
     val timelineHeightDp: Float = 260f,
     val activeInspectorTab: String = "element",
+    val presenterNotesFontSizeSp: Float = 20f,
 )
 
 /**
@@ -44,7 +47,22 @@ class StudioSessionStore(
         encodeDefaults = true
     }
 
-    fun load(): StudioSessionState {
+    fun load(): StudioSessionState = synchronized(lockFor(sessionFile)) {
+        loadUnlocked()
+    }
+
+    fun save(state: StudioSessionState) = synchronized(lockFor(sessionFile)) {
+        saveUnlocked(state)
+    }
+
+    fun update(transform: (StudioSessionState) -> StudioSessionState): StudioSessionState =
+        synchronized(lockFor(sessionFile)) {
+            val next = transform(loadUnlocked())
+            saveUnlocked(next)
+            next
+        }
+
+    private fun loadUnlocked(): StudioSessionState {
         if (!Files.exists(sessionFile)) return StudioSessionState()
         return runCatching {
             val raw = Files.readString(sessionFile, StandardCharsets.UTF_8)
@@ -52,20 +70,28 @@ class StudioSessionStore(
         }.getOrElse { StudioSessionState() }
     }
 
-    fun save(state: StudioSessionState) {
-        val parent = sessionFile.toAbsolutePath().normalize().parent
-        if (parent != null) {
-            Files.createDirectories(parent)
-        }
-        val tmp = sessionFile.resolveSibling(".${sessionFile.fileName}.tmp")
+    private fun saveUnlocked(state: StudioSessionState) {
+        val normalized = sessionFile.toAbsolutePath().normalize()
+        val parent = normalized.parent ?: Path.of(".")
+        Files.createDirectories(parent)
+        val tmp = Files.createTempFile(parent, ".${normalized.fileName}.", ".tmp")
         val content = json.encodeToString(StudioSessionState.serializer(), state) + "\n"
-        Files.writeString(tmp, content, StandardCharsets.UTF_8)
-        Files.move(tmp, sessionFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        try {
+            Files.writeString(tmp, content, StandardCharsets.UTF_8)
+            try {
+                Files.move(tmp, normalized, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(tmp, normalized, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            runCatching { Files.deleteIfExists(tmp) }
+        }
     }
 
-    fun update(transform: (StudioSessionState) -> StudioSessionState): StudioSessionState {
-        val next = transform(load())
-        save(next)
-        return next
+    private companion object {
+        private val fileLocks = ConcurrentHashMap<Path, Any>()
+
+        private fun lockFor(sessionFile: Path): Any =
+            fileLocks.computeIfAbsent(sessionFile.toAbsolutePath().normalize()) { Any() }
     }
 }

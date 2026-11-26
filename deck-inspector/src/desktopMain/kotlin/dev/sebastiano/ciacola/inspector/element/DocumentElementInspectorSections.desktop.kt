@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.sebastiano.ciacola.document.Fill
 import dev.sebastiano.ciacola.document.NodeKind
@@ -258,6 +260,7 @@ internal fun DocumentTextSection(
                         tag = "ciacola-doc-text-align-${option.value}",
                         enabled = !controller.store.isReadOnly,
                         selected = option == currentAlign,
+                        isToggle = true,
                         onClick = { controller.setTextProperty("align", JsonPrimitive(option.value)) },
                     )
                 }
@@ -270,6 +273,7 @@ internal fun DocumentTextSection(
                 Checkbox(
                     checked = textPayload.italic == true,
                     onCheckedChange = { controller.setTextProperty("italic", JsonPrimitive(it)) },
+                    modifier = Modifier.semantics { contentDescription = "Italic" },
                 )
                 Text("Italic", style = inspectorBodyStyle())
             }
@@ -473,7 +477,9 @@ internal fun DocumentSpecimenParamsSection(
                         Checkbox(
                             checked = resolved,
                             onCheckedChange = { controller.setSpecimenBooleanParam(spec, it) },
-                            modifier = Modifier.testTag("ciacola-specimen-param-${spec.name}"),
+                            modifier = Modifier
+                                .semantics { contentDescription = spec.label }
+                                .testTag("ciacola-specimen-param-${spec.name}"),
                         )
                         Text(spec.label, style = inspectorBodyStyle())
                     }

@@ -367,4 +367,92 @@ class TimelineUiTest {
         )
         onNodeWithText("Bezier(", substring = true, useUnmergedTree = true).assertDoesNotExist()
     }
+
+    @Test
+    fun compactTransportBarAt640PxKeepsFilterAndScopeReachableWithoutOverflow() = runComposeUiTest {
+        val controller = TimelineFixtures.controller()
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(640.dp, 360.dp)) {
+                    DocumentTimelineStudioPanel(
+                        controller = controller,
+                        showInlineInspector = false,
+                        headerLeadingContent = { Text("Timeline · Issues", modifier = Modifier.testTag("dock-tabs")) },
+                        onToggleExpanded = {},
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        val root = onRoot().fetchSemanticsNode().boundsInRoot
+        onNodeWithTag("ciacola-doc-timeline-search-toggle", useUnmergedTree = true).assertIsDisplayed()
+        val slideChip = onNodeWithTag("ciacola-timeline-filter-current", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val allChip = onNodeWithTag("ciacola-timeline-filter-all", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val expandBtn = onNodeWithTag("ciacola-timeline-expand-toggle", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(slideChip.right <= root.right && allChip.right <= root.right && expandBtn.right <= root.right)
+
+        // Opening track search at 640dp moves Slide | All into Zoom menu instead of hiding Zoom or clipping.
+        onNodeWithTag("ciacola-doc-timeline-search-toggle", useUnmergedTree = true).performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-timeline-search", useUnmergedTree = true).assertIsDisplayed()
+        val zoomBtn = onNodeWithTag("ciacola-doc-timeline-zoom-menu", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val expandAfter = onNodeWithTag("ciacola-timeline-expand-toggle", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(zoomBtn.right <= root.right && expandAfter.right <= root.right)
+
+        onNodeWithTag("ciacola-doc-timeline-zoom-menu", useUnmergedTree = true).performClick()
+        waitForIdle()
+        onNodeWithTag("ciacola-timeline-filter-all", useUnmergedTree = true).assertIsDisplayed().performClick()
+        waitForIdle()
+        assertEquals(TimelineTrackFilterMode.AllSlides, controller.trackFilterMode)
+    }
+
+    @Test
+    fun narrowSearchAt640PxNoTabsAnd660PxWithTabsKeepsControlsInsideBounds() = runComposeUiTest {
+        val controller = TimelineFixtures.controller()
+        var widthDp by androidx.compose.runtime.mutableStateOf(640.dp)
+        var withLeadingTabs by androidx.compose.runtime.mutableStateOf(false)
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(widthDp, 360.dp)) {
+                    DocumentTimelineStudioPanel(
+                        controller = controller,
+                        showInlineInspector = false,
+                        headerLeadingContent = if (withLeadingTabs) {
+                            { Text("Timeline · Issues") }
+                        } else {
+                            null
+                        },
+                        onToggleExpanded = {},
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        onNodeWithTag("ciacola-doc-timeline-search-toggle", useUnmergedTree = true).performClick()
+        waitForIdle()
+        val root640 = onRoot().fetchSemanticsNode().boundsInRoot
+        onNodeWithTag("ciacola-doc-timeline-search", useUnmergedTree = true).assertIsDisplayed()
+        val zoom640 = onNodeWithTag("ciacola-doc-timeline-zoom-menu", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val expand640 = onNodeWithTag("ciacola-timeline-expand-toggle", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(zoom640.right <= root640.right && expand640.right <= root640.right)
+
+        withLeadingTabs = true
+        widthDp = 660.dp
+        waitForIdle()
+        val root660 = onRoot().fetchSemanticsNode().boundsInRoot
+        val zoom660 = onNodeWithTag("ciacola-doc-timeline-zoom-menu", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val expand660 = onNodeWithTag("ciacola-timeline-expand-toggle", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(zoom660.right <= root660.right && expand660.right <= root660.right)
+    }
 }

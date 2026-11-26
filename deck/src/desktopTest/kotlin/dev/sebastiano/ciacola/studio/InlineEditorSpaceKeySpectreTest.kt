@@ -181,6 +181,64 @@ class InlineEditorSpaceKeySpectreTest {
                     afterEnter?.endsWith(" z") == true,
                     "Expected ⌘Enter to commit text ending with ' z', got: '$afterEnter'",
                 )
+
+                // Wait for stage focus restoration, then press Enter to reopen inline editor cleanly.
+                automator.waitUntil(description = "stage focus restored after ⌘Enter commit", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-review-stage")?.isFocused == true
+                }
+                assertEquals("s1:eyebrow", elementController.selectedNodeId)
+                tapAwtKey(KeyEvent.VK_ENTER)
+                automator.waitForNode(tag = "ciacola-doc-inline-text-popover", timeout = 5.seconds)
+                automator.waitUntil(description = "Enter-opened inline input focused", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-doc-inline-text-field")?.isFocused == true
+                }
+                tapAwtKey(KeyEvent.VK_END)
+                tapAwtKey(KeyEvent.VK_SPACE)
+                tapAwtKey(KeyEvent.VK_X)
+                delay(60)
+                // Esc cancels cleanly without saving ' x' and restores stage focus without opening Overview.
+                tapAwtKey(KeyEvent.VK_ESCAPE)
+                automator.waitUntil(description = "inline editor closed by Esc", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-doc-inline-text-popover") == null
+                }
+                automator.waitUntil(description = "stage focus restored after Esc cancel", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-review-stage")?.isFocused == true
+                }
+                settle()
+                assertEquals(afterEnter, store.document.slides[0].nodes.firstOrNull { it.id == "s1:eyebrow" }?.text?.value?.plainText)
+                assertEquals(initialIndex, animatic.currentIndex)
+
+                // Enter reopens and plain Enter commits without advancing the slide, restoring stage focus.
+                tapAwtKey(KeyEvent.VK_ENTER)
+                automator.waitForNode(tag = "ciacola-doc-inline-text-popover", timeout = 5.seconds)
+                automator.waitUntil(description = "reopened inline input focused", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-doc-inline-text-field")?.isFocused == true
+                }
+                tapAwtKey(KeyEvent.VK_END)
+                tapAwtKey(KeyEvent.VK_SPACE)
+                tapAwtKey(KeyEvent.VK_Y)
+                delay(60)
+                tapAwtKey(KeyEvent.VK_ENTER)
+                automator.waitUntil(description = "inline editor closed by plain Enter", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-doc-inline-text-popover") == null
+                }
+                automator.waitUntil(description = "stage focus restored after Enter commit", timeout = 5.seconds) {
+                    automator.findOneByTestTag("ciacola-review-stage")?.isFocused == true
+                }
+                settle()
+                val afterPlainEnter = store.document.slides[0].nodes
+                    .firstOrNull { it.id == "s1:eyebrow" }
+                    ?.text?.value?.plainText
+                assertTrue(
+                    afterPlainEnter?.endsWith(" y") == true,
+                    "Expected plain Enter to commit text ending with ' y', got: '$afterPlainEnter'",
+                )
+                assertEquals(initialIndex, animatic.currentIndex, "Plain Enter commit must not leak to slide navigation")
+                // Stage focus works immediately for slide navigation right after inline edit (Space advances even with element selected).
+                tapAwtKey(KeyEvent.VK_SPACE)
+                automator.waitUntil(description = "Spacebar advances after stage focus restore", timeout = 5.seconds) {
+                    animatic.targetIndex != initialIndex
+                }
             }
         }
 

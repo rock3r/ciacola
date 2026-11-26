@@ -79,6 +79,12 @@ data class RecoveryNotice(
     val quarantinePath: Path? = null,
 )
 
+/** Non-blocking notice surfaced when disk updates reload cleanly over active local undo/redo history. */
+data class ExternalReloadNotice(
+    val previousDocument: DeckDocument,
+    val reloadedAtRevision: Long,
+)
+
 sealed interface CloseFlushResult {
     data object Clean : CloseFlushResult
     data class HeldConflict(val conflict: ConflictInfo) : CloseFlushResult
@@ -489,6 +495,106 @@ internal object SyncFilesHelper {
         }
 
         cleanupOrphanMetaFiles(syncDir, quarantineDir, journalFile, dismissedNames, fileOps)
+    }
+
+    suspend fun recoverStrayAndTornJournalFiles(
+        syncDir: Path,
+        quarantineDir: Path,
+        journalFile: Path,
+        targetFile: Path,
+        targetHash: String,
+        journalExists: Boolean,
+        journalTxid: String?,
+        isOnOpen: Boolean,
+        dismissedNames: MutableSet<String>,
+        resolvedConflictNames: MutableSet<String>,
+        firstObservedMonoMs: MutableMap<String, Long>,
+        clock: SyncClock,
+        fileOps: AtomicFileOps,
+        store: DeckDocumentStore,
+        onNotice: (RecoveryNotice) -> Unit,
+    ) {
+        for (tmpPath in listStrayTmpFiles(syncDir)) {
+            val txid = tmpPath.fileName.toString().removeSuffix(".tmp")
+            val qName = "$txid-${clock.wallTimeMillis()}.${QuarantineKind.Unknown.suffix}"
+            val qPath = quarantineDir.resolve(qName)
+            fileOps.atomicMove(tmpPath, qPath)
+            fileOps.fsyncDirectory(syncDir)
+            fileOps.fsyncDirectory(quarantineDir)
+            firstObservedMonoMs[qName] = clock.monotonicTimeMillis()
+            onNotice(
+                RecoveryNotice(
+                    kind = "unknown",
+                    message = "Recovered temp file without journal to quarantine: $qName",
+                    quarantinePath = qPath,
+                ),
+            )
+        }
+
+        if (journalExists && journalTxid == null) {
+            fileOps.deleteIfExists(journalFile)
+            fileOps.fsyncDirectory(syncDir)
+            onNotice(
+                RecoveryNotice(
+                    kind = "torn_journal",
+                    message = "Cleared unreadable sync journal after moving any temporary files to quarantine.",
+                ),
+            )
+        }
+
+        if (isOnOpen && journalTxid == null) {
+            val entries = scanQuarantineEntries(quarantineDir, dismissedNames).filterNot { it.dismissed }
+            for ((txid, txEntries) in entries.groupBy { it.txid }) {
+                if (txEntries.any { it.kind == QuarantineKind.Theirs || it.kind == QuarantineKind.Mine }) {
+                    rebuildStatusForTxid(
+                        txid = txid,
+                        meta = readMetaOrNull(quarantineDir, txid),
+                        targetHash = targetHash,
+                        targetFile = targetFile,
+                        quarantineDir = quarantineDir,
+                        dismissedNames = dismissedNames,
+                        resolvedConflictNames = resolvedConflictNames,
+                        store = store,
+                        onNotice = onNotice,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Acquires the directory lock and probes atomic exchange; loads [store] read-only on failure. */
+    fun acquireLockAndProbeAtomicExchange(
+        dirLock: SyncDirectoryLock,
+        syncDir: Path,
+        targetFile: Path,
+        dismissedFile: Path,
+        resolvedConflictsFile: Path,
+        dismissedNames: MutableSet<String>,
+        resolvedConflictNames: MutableSet<String>,
+        fileOps: AtomicFileOps,
+        decoded: DeckDecodeResult.Success,
+        store: DeckDocumentStore,
+    ): Boolean {
+        val lockAcquired = try {
+            dirLock.ensureDirectoriesAndAcquire()
+        } catch (e: IOException) {
+            store.loadInitial(decoded.document, "Cannot initialize sync directory: ${e.message}", decoded.lintIssues)
+            return false
+        }
+        if (!lockAcquired) {
+            store.loadInitial(decoded.document, "Another Studio instance holds lock on ${targetFile.fileName}.", decoded.lintIssues)
+            return false
+        }
+        loadDismissedSet(dismissedFile, dismissedNames)
+        loadDismissedSet(resolvedConflictsFile, resolvedConflictNames)
+        val probeReason = when (val probe = fileOps.probeExchangeSupport(syncDir)) {
+            is AtomicExchangeResult.Success -> return true
+            is AtomicExchangeResult.Unsupported -> probe.reason
+            is AtomicExchangeResult.Failed -> probe.message
+        }
+        dirLock.release()
+        store.loadInitial(decoded.document, readOnlyReason = probeReason, issues = decoded.lintIssues)
+        return false
     }
 }
 

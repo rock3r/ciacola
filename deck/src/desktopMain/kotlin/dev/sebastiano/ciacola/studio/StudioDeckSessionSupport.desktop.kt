@@ -17,14 +17,18 @@ import dev.sebastiano.ciacola.document.DeckDocumentStore
 import dev.sebastiano.ciacola.document.SyncState
 import dev.sebastiano.ciacola.document.render.buildDocumentSpeakerNotes
 import dev.sebastiano.ciacola.forExternalFile
+import dev.sebastiano.ciacola.inspector.StageInspectionRegistry
 import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
 import dev.sebastiano.ciacola.inspector.sync.DocumentSyncController
 import dev.sebastiano.ciacola.presenter.DeckSpeakerNotes
 import dev.sebastiano.ciacola.presenter.PresenterController
+import dev.sebastiano.ciacola.review.ReviewStageCoordinator
+import dev.sebastiano.ciacola.review.SlideReviewWindow
 import java.awt.FileDialog
 import java.awt.Frame
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 
 /** System property listing deck ids to cycle through after launch while logging switch timings. */
@@ -297,4 +301,51 @@ internal suspend fun flushOutgoingBeforeSwap(
         baselineDirty = false
     }
     return !sync.store.isDirty
+}
+
+/** Wires stage hit-testing fallbacks and keyboard comment pinning between Review and Studio. */
+internal fun wireReviewAndWorkspaceCallbacks(
+    reviewStageCoordinator: ReviewStageCoordinator,
+    stageInspectionRegistry: StageInspectionRegistry,
+    studioWorkspace: StudioWorkspaceController,
+    reviewWindowHolderProvider: () -> SlideReviewWindow?,
+    appScope: CoroutineScope,
+    isAnyTextInputActive: () -> Boolean,
+    isAudiencePresentingProvider: () -> Boolean = { false },
+    closeAuthoringChrome: () -> Unit,
+    restoreStageFocus: () -> Unit,
+) {
+    reviewStageCoordinator.isExternalTextInputActiveProvider = isAnyTextInputActive
+    reviewStageCoordinator.isAudiencePresentingProvider = isAudiencePresentingProvider
+    reviewStageCoordinator.fallbackNodeIdResolver = { stagePoint, dragRect ->
+        stageInspectionRegistry.nodes.values
+            .filter { snap ->
+                snap.effectiveAlpha > 0.01f &&
+                    snap.stageBounds.width > 0f &&
+                    snap.stageBounds.height > 0f &&
+                    if (dragRect != null) snap.stageBounds.overlaps(dragRect) else snap.stageBounds.contains(stagePoint)
+            }
+            .minByOrNull { it.stageBounds.width * it.stageBounds.height }
+            ?.elementId
+    }
+    reviewStageCoordinator.fallbackNodeBoundsResolver = { nodeId ->
+        stageInspectionRegistry.nodes[nodeId]?.takeIf {
+            it.effectiveAlpha > 0.01f && it.stageBounds.width > 0f && it.stageBounds.height > 0f
+        }?.stageBounds
+    }
+    studioWorkspace.onCaptureReviewTargetNodeId = { nodeId -> reviewStageCoordinator.preferredTargetNodeId = nodeId }
+    studioWorkspace.onActiveSlideChanged = { reviewStageCoordinator.preferredTargetNodeId = null }
+    studioWorkspace.onPinReviewComment = { reviewStageCoordinator.pinCommentAtCurrentTarget(appScope) }
+    studioWorkspace.setReviewInspectMode = { enabled ->
+        reviewStageCoordinator.inspectModeEnabled = enabled
+        if (enabled) reviewStageCoordinator.showStageBadges = true else reviewStageCoordinator.dismissActivePopups()
+    }
+    studioWorkspace.onToggleReviewInspect = {
+        val next = !reviewStageCoordinator.inspectModeEnabled
+        reviewStageCoordinator.inspectModeEnabled = next
+        if (next) reviewStageCoordinator.showStageBadges = true
+    }
+    studioWorkspace.onOpenReviewPanel = { reviewWindowHolderProvider()?.visible = true }
+    studioWorkspace.onEnterCleanShowMode = closeAuthoringChrome
+    studioWorkspace.onRestoreStageFocus = restoreStageFocus
 }

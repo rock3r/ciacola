@@ -175,7 +175,7 @@ internal fun PreShowReadinessBanner(
         if (readiness.hasClosableAuthoringTools) {
             Tooltip(tooltip = { Text("Close all open Studio, Design System, Linter, and Inspect panels") }) {
                 CiacolaPrimaryButton(
-                    text = "Enter Clean Show Mode",
+                    text = "Close Tools",
                     onClick = onEnterCleanShowMode,
                     textStyle = JewelTheme.typography.small,
                     modifier = Modifier.testTag("ciacola-presenter-clean-show-button"),

@@ -20,6 +20,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,10 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -75,6 +80,7 @@ import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.rememberReviewStatusPalette
 import java.awt.Window as AwtWindow
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
@@ -222,6 +228,22 @@ class ReviewStageCoordinator : ReviewStageBridge {
 
     /** Optional fallback resolving a stage point/drag rect to a document `nodeId` (e.g. via `StageInspectionRegistry`). */
     var fallbackNodeIdResolver: ((stagePoint: Offset, dragRect: Rect?) -> String?)? = null
+
+    /** Optional fallback resolving a document `nodeId` to stage bounds for keyboard comment pinning. */
+    var fallbackNodeBoundsResolver: ((nodeId: String) -> Rect?)? = null
+
+    /** Element id captured when switching to Review mode with a selection, for keyboard comment pinning. */
+    var preferredTargetNodeId by mutableStateOf<String?>(null)
+
+    /** Guard preventing keyboard comment pinning while a text input elsewhere owns focus. */
+    var isExternalTextInputActiveProvider: () -> Boolean = { false }
+
+    /** Guard preventing keyboard comment pinning while audience presenting/fullscreen is active. */
+    var isAudiencePresentingProvider: () -> Boolean = { false }
+
+    /** Tracks whether the Story stage subtree currently holds keyboard focus. */
+    var stageHasFocus: Boolean by mutableStateOf(false)
+        internal set
 
     override fun registerTarget(
         key: Any,
@@ -375,6 +397,106 @@ class ReviewStageCoordinator : ReviewStageBridge {
         return hit.copy(nodeId = fallbackId)
     }
 
+    internal fun openPendingSelectionAt(
+        scope: CoroutineScope,
+        anchor: Offset,
+        dragRect: Rect?,
+        cleanLayer: GraphicsLayer?,
+        preferredNodeId: String? = null,
+        preferredBounds: Rect? = null,
+    ) {
+        val formatSize = stageFormatSize
+        val clampedAnchor = clampStagePoint(anchor, formatSize)
+        val rawHit = resolveHit(stagePoint = clampedAnchor, dragRect = dragRect)
+        val hasPreferred = preferredNodeId != null && preferredBounds != null
+        val hit = if (hasPreferred) {
+            val preferredEntry = snapshotRegisteredTargets().firstOrNull { it.nodeId == preferredNodeId }
+            val preferredBoundsDto = StageRectDto.fromRect(preferredBounds)
+            if (preferredEntry != null) {
+                ReviewTargetHit(
+                    kind = preferredEntry.kind,
+                    label = preferredEntry.label,
+                    textSnippet = preferredEntry.textSnippet,
+                    bounds = preferredBoundsDto,
+                    nodeId = preferredNodeId,
+                )
+            } else {
+                rawHit.copy(nodeId = preferredNodeId, bounds = preferredBoundsDto)
+            }
+        } else {
+            rawHit
+        }
+        val selectionBounds = when {
+            dragRect != null -> StageRectDto.fromRect(dragRect)
+            hasPreferred -> StageRectDto.fromRect(preferredBounds)
+            hit.bounds != null -> hit.bounds
+            else -> null
+        }
+        val capturedSlide = currentSlideContextProvider()
+        val capturedSceneTitle = currentSceneTitle
+        val capturedSceneHeader = currentSceneHeader
+        scope.launch {
+            val bitmap = runCatching { cleanLayer?.toImageBitmap() }.getOrNull()
+            pendingSelection = PendingReviewSelection(
+                sceneIndex = capturedSlide.sceneIndex,
+                frameIndex = capturedSlide.frameIndex,
+                sceneCount = capturedSlide.sceneCount,
+                frameCount = capturedSlide.frameCount,
+                sceneTitle = capturedSceneTitle,
+                stageX = clampedAnchor.x,
+                stageY = clampedAnchor.y,
+                selectionBounds = selectionBounds,
+                target = hit,
+                sceneHeader = capturedSceneHeader,
+                stageFormatSize = formatSize,
+                capturedBitmap = bitmap,
+            )
+        }
+    }
+
+    /**
+     * Opens a review comment popup pinned to the active target (preferred selected element, hovered
+     * stage point, first registered target, or stage center) via keyboard shortcut.
+     */
+    fun pinCommentAtCurrentTarget(
+        scope: CoroutineScope,
+        preferredNodeId: String? = preferredTargetNodeId,
+    ): Boolean {
+        if (isAudiencePresentingProvider() ||
+            pendingSelection != null ||
+            selectedPinCommentId != null ||
+            isExternalTextInputActiveProvider()
+        ) {
+            return false
+        }
+        val formatSize = stageFormatSize
+        val targets = snapshotRegisteredTargets()
+        val registeredForNode = preferredNodeId?.let { id -> targets.firstOrNull { it.nodeId == id }?.stageBounds }
+        val preferredBounds = registeredForNode ?: preferredNodeId?.let { fallbackNodeBoundsResolver?.invoke(it) }
+        val hoverPt = hoverStagePoint?.takeUnless { isStagePointOverHud(it) || findVisiblePinAt(it) != null }
+        val rawAnchor = when {
+            preferredBounds != null -> preferredBounds.center
+            hoverPt != null -> hoverPt
+            else -> {
+                val primaryTarget = targets.firstOrNull { !it.isContainer } ?: targets.firstOrNull()
+                primaryTarget?.stageBounds?.center
+                    ?: collectDesktopSemanticsHits().firstOrNull()?.bounds?.let {
+                        Offset((it.left + it.right) / 2f, (it.top + it.bottom) / 2f)
+                    }
+                    ?: Offset(formatSize.width / 2f, formatSize.height / 2f)
+            }
+        }
+        openPendingSelectionAt(
+            scope = scope,
+            anchor = rawAnchor,
+            dragRect = null,
+            cleanLayer = activeGraphicsLayer,
+            preferredNodeId = preferredNodeId,
+            preferredBounds = preferredBounds,
+        )
+        return true
+    }
+
     val stageDecorator: ContentDecorator = ContentDecorator { content ->
         // Esc Overview thumbnails and non-Story preview mounts must never take over
         // (or, when they close, reset) the live stage's coordinates, capture layer, or popups.
@@ -404,6 +526,7 @@ private fun ReviewStageLayer(
     coordinator.activeGraphicsLayer = cleanStageGraphicsLayer
 
     val scope = rememberCoroutineScope()
+    val isAudiencePresenting = LocalAudiencePresenting.current
     val isInspectActive = coordinator.isCtrlKeyHeld || coordinator.inspectModeEnabled
 
     DisposableEffect(coordinator) {
@@ -438,11 +561,17 @@ private fun ReviewStageLayer(
             coordinator.swallowNextEscapeKeyUp = false
         }
     }
+    DisposableEffect(coordinator) {
+        onDispose {
+            coordinator.stageHasFocus = false
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .testTag("ciacola-review-stage")
+            .onFocusChanged { coordinator.stageHasFocus = it.hasFocus }
             .focusRequester(coordinator.stageFocusRequester)
             .focusable()
             .onPlaced { coords ->
@@ -454,6 +583,21 @@ private fun ReviewStageLayer(
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.key == Key.CtrlLeft || keyEvent.key == Key.CtrlRight) {
                     coordinator.isCtrlKeyHeld = keyEvent.type == KeyEventType.KeyDown
+                }
+                if (!isAudiencePresenting &&
+                    coordinator.inspectModeEnabled &&
+                    keyEvent.type == KeyEventType.KeyDown &&
+                    coordinator.pendingSelection == null &&
+                    coordinator.selectedPinCommentId == null &&
+                    !coordinator.isExternalTextInputActiveProvider()
+                ) {
+                    val unmodifiedC = keyEvent.key == Key.C &&
+                        !keyEvent.isCtrlPressed && !keyEvent.isMetaPressed && !keyEvent.isAltPressed && !keyEvent.isShiftPressed
+                    val primaryModM = keyEvent.key == Key.M &&
+                        (keyEvent.isMetaPressed || keyEvent.isCtrlPressed) && !keyEvent.isAltPressed && !keyEvent.isShiftPressed
+                    if ((unmodifiedC || primaryModM) && coordinator.pinCommentAtCurrentTarget(scope)) {
+                        return@onPreviewKeyEvent true
+                    }
                 }
                 false
             }
@@ -543,40 +687,12 @@ private fun ReviewStageLayer(
                                         if (significantDrag) rawDrag.center else clampedEnd,
                                         formatSize,
                                     )
-                                    val hit = coordinator.resolveHit(
-                                        stagePoint = anchor,
+                                    coordinator.openPendingSelectionAt(
+                                        scope = scope,
+                                        anchor = anchor,
                                         dragRect = rawDrag.takeIf { significantDrag },
+                                        cleanLayer = cleanStageGraphicsLayer,
                                     )
-                                    val selectionBounds = if (significantDrag) {
-                                        StageRectDto.fromRect(rawDrag)
-                                    } else {
-                                        hit.bounds
-                                    }
-                                    // Capture slide identity synchronously at selection time so navigating
-                                    // while the composer is open never files under the wrong slide.
-                                    val capturedSlide = coordinator.currentSlideContextProvider()
-                                    val capturedSceneTitle = coordinator.currentSceneTitle
-                                    val capturedSceneHeader = coordinator.currentSceneHeader
-
-                                    scope.launch {
-                                        val bitmap = runCatching {
-                                            cleanStageGraphicsLayer.toImageBitmap()
-                                        }.getOrNull()
-                                        coordinator.pendingSelection = PendingReviewSelection(
-                                            sceneIndex = capturedSlide.sceneIndex,
-                                            frameIndex = capturedSlide.frameIndex,
-                                            sceneCount = capturedSlide.sceneCount,
-                                            frameCount = capturedSlide.frameCount,
-                                            sceneTitle = capturedSceneTitle,
-                                            stageX = anchor.x,
-                                            stageY = anchor.y,
-                                            selectionBounds = selectionBounds,
-                                            target = hit,
-                                            sceneHeader = capturedSceneHeader,
-                                            stageFormatSize = formatSize,
-                                            capturedBitmap = bitmap,
-                                        )
-                                    }
                                 }
                             }
                         }

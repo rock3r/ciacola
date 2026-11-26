@@ -66,12 +66,16 @@ import dev.sebastiano.ciacola.DeckEntry
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.StudioSessionStore
 import dev.sebastiano.ciacola.document.render.DocumentKeyboardCaptureController
+import dev.sebastiano.ciacola.presenter.PresenterController
 import dev.sebastiano.ciacola.sanitizeDeckId
 import dev.sebastiano.ciacola.ui.accessibleFocusRing
 import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import java.nio.file.Path
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -148,6 +152,48 @@ fun persistInspectorWidthDp(rootStoryboardDir: Path, widthDp: Float) {
         val clamped = widthDp.coerceIn(MIN_STUDIO_INSPECTOR_WIDTH_DP, MAX_STUDIO_INSPECTOR_WIDTH_DP)
         studioSessionStore(rootStoryboardDir).update { state ->
             state.copy(workspaceLayout = state.workspaceLayout.copy(inspectorWidthDp = clamped))
+        }
+    }
+}
+
+/** Loads the persisted Presenter speaker-notes font size (in sp) from `.storyboard/session.json`. */
+fun loadPersistedPresenterNotesFontSizeSp(rootStoryboardDir: Path): Float = runCatching {
+    val store = studioSessionStore(rootStoryboardDir)
+    if (!java.nio.file.Files.isRegularFile(store.sessionFile)) return@runCatching PresenterController.DEFAULT_NOTES_FONT_SP
+    store.load().workspaceLayout.presenterNotesFontSizeSp
+        .takeIf { it.isFinite() }
+        ?.coerceIn(PresenterController.MIN_NOTES_FONT_SP, PresenterController.MAX_NOTES_FONT_SP)
+        ?: PresenterController.DEFAULT_NOTES_FONT_SP
+}.getOrDefault(PresenterController.DEFAULT_NOTES_FONT_SP)
+
+/** Persists the Presenter speaker-notes font size (in sp) to `.storyboard/session.json`. */
+fun persistPresenterNotesFontSizeSp(rootStoryboardDir: Path, fontSizeSp: Float) {
+    runCatching {
+        val clamped = fontSizeSp.takeIf { it.isFinite() }
+            ?.coerceIn(PresenterController.MIN_NOTES_FONT_SP, PresenterController.MAX_NOTES_FONT_SP)
+            ?: PresenterController.DEFAULT_NOTES_FONT_SP
+        studioSessionStore(rootStoryboardDir).update { state ->
+            state.copy(workspaceLayout = state.workspaceLayout.copy(presenterNotesFontSizeSp = clamped))
+        }
+    }
+}
+
+/**
+ * Returns a debounced off-UI-thread callback that persists Presenter notes font zoom changes
+ * without blocking Compose key handling or composition on synchronous file I/O.
+ */
+internal fun createDebouncedNotesFontSizeSaver(
+    scope: CoroutineScope,
+    rootStoryboardDir: Path,
+    debounceMs: Long = 150L,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+): (Float) -> Unit {
+    var pendingJob: Job? = null
+    return { fontSizeSp ->
+        pendingJob?.cancel()
+        pendingJob = scope.launch(ioDispatcher) {
+            delay(debounceMs)
+            persistPresenterNotesFontSizeSp(rootStoryboardDir, fontSizeSp)
         }
     }
 }

@@ -167,8 +167,9 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-next-build-badge", useUnmergedTree = true).assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-notes-content").assertIsDisplayed()
 
-        // Readiness banner is visible with Enter Clean Show Mode and disappears once Studio/Inspect are closed.
+        // Readiness banner is visible with Close Tools button and disappears once Studio/Inspect are closed.
         onNodeWithTag("ciacola-presenter-readiness-banner").assertIsDisplayed()
+        onNodeWithText("Close Tools", useUnmergedTree = true).assertIsDisplayed()
         onNodeWithTag("ciacola-presenter-clean-show-button").performClick()
         waitForIdle()
         assertFalse(studioOpen, "Enter Clean Show Mode must close Studio")

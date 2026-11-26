@@ -171,6 +171,8 @@ internal fun EaselOverviewInternal(
     modifier: Modifier = Modifier,
     useSharedElement: Boolean = true,
     slideTitle: ((Int) -> String?)? = null,
+    thumbnailStoryboard: Storyboard = animatic.storyboard,
+    thumbnailFrameIndex: ((sceneIndex: Int, currentFrameIndex: Int) -> Int)? = null,
     onDismiss: () -> Unit = {},
 ) {
     val slideCount = overviewState.columns.size
@@ -342,7 +344,7 @@ internal fun EaselOverviewInternal(
                         overviewState.currentColumnIndex
                     }
                     OverviewGridView(
-                        storyboard = animatic.storyboard,
+                        storyboard = thumbnailStoryboard,
                         overviewState = overviewState,
                         highlightedColumnIndex = highlightedColumnIndex,
                         quickJumpOpen = quickJumpOpen,
@@ -350,6 +352,7 @@ internal fun EaselOverviewInternal(
                         columns = filteredColumns,
                         gridColumnCount = gridColumnCount,
                         slideTitle = slideTitle,
+                        thumbnailFrameIndex = thumbnailFrameIndex,
                         onSelectOrExit = { column ->
                             if (quickJumpOpen && quickJumpQuery.isNotBlank()) {
                                 confirmColumnJump(column)
@@ -384,7 +387,7 @@ internal fun EaselOverviewInternal(
                             //  - invisible padding item with different content padding?
                             OverviewLazyColumn(
                                 state = vState,
-                                storyboard = animatic.storyboard,
+                                storyboard = thumbnailStoryboard,
                                 column = column,
                                 isVisible = isVisible,
                                 useSharedElement = useSharedElement,

@@ -126,7 +126,7 @@ internal fun PresenterSpeakerNotesPane(
             if (resolved.hasNotes && !controller.isEditingNotes && controller.canEditNotes) {
                 PresenterToolbarButton(
                     label = presenterNotesEditLabel(resolved),
-                    tooltip = "Edit the notes for build ${resolved.beatIndex + 1}",
+                    tooltip = "Edit the notes for build ${resolved.beatIndex + 1} (N)",
                     testTag = "ciacola-presenter-notes-edit",
                     onClick = { controller.beginEditingNotes() },
                 )
@@ -211,7 +211,7 @@ private fun EmptyNotesState(controller: PresenterController) {
         if (controller.canEditNotes) {
             PresenterToolbarButton(
                 label = "Add notes",
-                tooltip = "Write speaker notes for this slide",
+                tooltip = "Write speaker notes for this slide (N)",
                 testTag = "ciacola-presenter-notes-add",
                 onClick = { controller.beginEditingNotes() },
             )

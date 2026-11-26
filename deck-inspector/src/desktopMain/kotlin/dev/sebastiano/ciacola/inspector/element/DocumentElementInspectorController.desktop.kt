@@ -89,6 +89,7 @@ class DocumentElementInspectorController(
     var stageBoundsProvider: ((String) -> Rect?)? = null
 
     var textInputHasFocus: Boolean by mutableStateOf(false)
+    var layersTreeHasFocus: Boolean by mutableStateOf(false)
 
     /** Ephemeral stage drag preview (zero document writes until drag release). */
     var dragPreviewNodeId: String? by mutableStateOf(null)
@@ -113,6 +114,8 @@ class DocumentElementInspectorController(
         private set
     var inlineOriginalText: String by mutableStateOf("")
         private set
+    var swallowNextEscapeKeyUp: Boolean by mutableStateOf(false)
+    var swallowNextEnterKeyUp: Boolean by mutableStateOf(false)
 
     /** Notices emitted when manual fragment delays are pruned after a text edit. */
     var remapNotices: List<ManualDelayRemapNotice> by mutableStateOf(emptyList())
@@ -937,6 +940,19 @@ class DocumentElementInspectorController(
     private var inlineStartSlideId: String? = null
     private var inlineStartBeat: Int = 0
 
+    /**
+     * Starts inline stage text editing for the current single selection when it resolves to an
+     * editable text node present on the active beat.
+     */
+    fun startInlineEditForSelection(): Boolean {
+        if (store.isReadOnly || inlineEditingNodeId != null || textInputHasFocus) return false
+        val id = selectedNodeIds.singleOrNull() ?: return false
+        val slide = activeSlide() ?: return false
+        val base = DocumentThemeResolver.findNode(slide.nodes, id) ?: return false
+        if (!JsonMergePatch.isNodePresentAtBeat(base, activeBeat)) return false
+        return startInlineTextEdit(id)
+    }
+
     fun startInlineTextEdit(nodeId: String): Boolean {
         if (store.isReadOnly) return false
         val slide = activeSlide() ?: return false
@@ -959,11 +975,13 @@ class DocumentElementInspectorController(
     fun commitInlineTextEdit(
         newText: String,
         explicitRangeEdit: TextRangeEdit? = null,
+        fromEnterKey: Boolean = false,
     ): Boolean {
         val id = inlineEditingNodeId ?: return false
         val oldText = inlineOriginalText
         val startSlideId = inlineStartSlideId
         val startBeat = inlineStartBeat
+        if (fromEnterKey) swallowNextEnterKeyUp = true
         cancelInlineTextEdit()
 
         val rangeEdit = explicitRangeEdit ?: DocumentThemeResolver.computeTextRangeEdit(oldText, newText)
@@ -988,11 +1006,13 @@ class DocumentElementInspectorController(
     fun commitInlineTextEdits(
         capturedEdits: List<TextRangeEdit>,
         finalText: String,
+        fromEnterKey: Boolean = false,
     ): Boolean {
         val id = inlineEditingNodeId ?: return false
         val oldText = inlineOriginalText
         val startSlideId = inlineStartSlideId
         val startBeat = inlineStartBeat
+        if (fromEnterKey) swallowNextEnterKeyUp = true
         cancelInlineTextEdit()
 
         if (oldText == finalText) return false
@@ -1023,29 +1043,22 @@ class DocumentElementInspectorController(
         startBeat: Int,
         editsToApply: List<TextRangeEdit>,
     ): Boolean = applyTextEdits(id, targetSlideId = startSlideId, targetBeat = startBeat) { doc, slideId, nodeId, beat ->
-        val currentText = resolvedNodeText(doc, slideId, nodeId, beat)
-            ?: return@applyTextEdits doc to emptyList()
-        if (currentText != oldText) {
-            // An external reload or intervening edit changed this node while the popover was open:
-            // never apply stale UTF-16 ranges recorded against `oldText` to a mismatched string.
-            if (currentText == finalText) {
-                doc to emptyList()
-            } else {
-                DeckStructureEdits.applyWholeTextReplacement(doc, slideId, nodeId, beat, finalText)
-            }
-        } else {
-            val collectedNotices = mutableListOf<ManualDelayRemapNotice>()
-            var current = doc
-            for (edit in editsToApply) {
-                val (next, notices) = DeckStructureEdits.applyTextRangeEdit(current, slideId, nodeId, beat, edit)
-                current = next
-                collectedNotices += notices
-            }
-            current to collectedNotices
-        }
+        applyInlineRangeEditsToDocument(
+            doc = doc,
+            slideId = slideId,
+            nodeId = nodeId,
+            beat = beat,
+            oldText = oldText,
+            finalText = finalText,
+            currentText = resolvedNodeText(doc, slideId, nodeId, beat),
+            editsToApply = editsToApply,
+        )
     }
 
-    fun cancelInlineTextEdit() {
+    fun cancelInlineTextEdit(fromEscapeKey: Boolean = false) {
+        if (fromEscapeKey && inlineEditingNodeId != null) {
+            swallowNextEscapeKeyUp = true
+        }
         inlineEditingNodeId = null
         inlineOriginalText = ""
         inlineStartSlideId = null
@@ -1061,8 +1074,8 @@ class DocumentElementInspectorController(
      * With [externalInputActive] (a focused authoring text field or a
      * keyboard-captured interactive specimen) arrows, `⌘A` and every other shortcut are yielded.
      */
-    fun handleKeyEvent(ev: KeyEvent, externalInputActive: Boolean = false): Boolean =
-        if (externalInputActive) false else DocumentElementInspectorKeys.handleKeyEvent(this, ev)
+    fun handleKeyEvent(ev: KeyEvent, externalInputActive: Boolean = false, allowInlineEnter: Boolean = false): Boolean =
+        if (externalInputActive) false else DocumentElementInspectorKeys.handleKeyEvent(this, ev, allowInlineEnter)
 
     /** Alias of [handleKeyEvent] for stage-level key routing. */
     fun handleStageKeyEvent(ev: KeyEvent): Boolean = handleKeyEvent(ev)

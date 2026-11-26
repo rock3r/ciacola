@@ -4,8 +4,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -25,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -32,6 +36,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
@@ -41,9 +55,12 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sebastiano.ciacola.ui.accessibleFocusRing
+import dev.sebastiano.ciacola.ui.rememberAccessibleFocusRingColor
 import dev.sebastiano.ciacola.document.DeckSpecimenRegistry
 import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.NodeKind
@@ -123,6 +140,15 @@ internal fun Modifier.clickWithShift(key: Any, onClick: (shift: Boolean) -> Unit
         }
     }
 
+private fun isUnmodifiedArrowKey(event: androidx.compose.ui.input.key.KeyEvent): Boolean =
+    !event.isAltPressed &&
+        !event.isCtrlPressed &&
+        !event.isMetaPressed &&
+        (event.key == Key.DirectionLeft ||
+            event.key == Key.DirectionRight ||
+            event.key == Key.DirectionUp ||
+            event.key == Key.DirectionDown)
+
 /**
  * Hierarchical, collapsible Layers tree (max 168dp with its own scrollbar): type glyphs, plain
  * display names (raw IDs in tooltips), `Shift+Click` multi-select, and dimmed rows with a
@@ -152,25 +178,38 @@ internal fun DocumentLayersTree(
         // Snap to whole rows so the list never cuts a row mid-text.
         val treeHeight = layersTreeHeightDp(rows.size)
         Box(Modifier.fillMaxWidth().height(treeHeight.dp).testTag("ciacola-doc-layers-tree")) {
-            Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(end = 10.dp)) {
+            DisposableEffect(controller) {
+                onDispose { controller.layersTreeHasFocus = false }
+            }
+            val focusRingColor = rememberAccessibleFocusRingColor()
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scroll)
+                    .padding(end = 10.dp)
+                    .onFocusChanged { controller.layersTreeHasFocus = it.hasFocus }
+                    .focusGroup(),
+            ) {
                 for (row in rows) {
                     val node = row.node
                     val isSelected = node.id in controller.selectedNodeIds
                     val isPrimary = node.id == controller.selectedNodeId
                     val resolved = JsonMergePatch.resolveNodeAtBeat(node, beat)
+                    val typeLabel = InspectorDisplayNames.nodeTypeLabel(node)
                     val name = InspectorDisplayNames.nodeDisplayName(
                         resolved,
                         specimenLabel = resolved.specimen?.ref?.let { specimens.find(it)?.label },
                     )
-                    val rowHover = remember(node.id) { MutableInteractionSource() }
-                    val rowHovered by rowHover.collectIsHoveredAsState()
-                    InspectorTooltip("${slide.id}/${node.id} · ${InspectorDisplayNames.nodeTypeLabel(node)}") {
+                    val rowInteraction = remember(node.id) { MutableInteractionSource() }
+                    val rowHovered by rowInteraction.collectIsHoveredAsState()
+                    val rowFocused by rowInteraction.collectIsFocusedAsState()
+                    InspectorTooltip("${slide.id}/${node.id} · $typeLabel") {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(LAYER_ROW_HEIGHT_DP.dp)
-                                .hoverable(rowHover)
                                 .clip(RoundedCornerShape(InspectorTokens.Corner))
+                                .accessibleFocusRing(rowFocused, focusRingColor, cornerRadius = InspectorTokens.Corner)
                                 .then(
                                     when {
                                         isPrimary -> Modifier.background(accent.copy(alpha = 0.20f)).border(1.dp, accent, RoundedCornerShape(InspectorTokens.Corner))
@@ -178,33 +217,85 @@ internal fun DocumentLayersTree(
                                         else -> Modifier
                                     },
                                 )
-                                .clickWithShift(node.id) { shift -> controller.selectNode(node.id, additive = shift) }
-                                .semantics {
-                                    role = Role.Button
-                                    selected = isSelected
-                                    contentDescription = name
-                                    onClick { controller.selectNode(node.id); true }
-                                }
-                                .padding(start = (4 + row.depth * 12).dp, end = 4.dp)
-                                .testTag("ciacola-doc-node-item-${node.id}"),
+                                .padding(start = (4 + row.depth * 12).dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             if (row.hasChildren) {
                                 val isCollapsed = collapsed[node.id] == true
-                                Icon(
-                                    key = if (isCollapsed) AllIconsKeys.General.ChevronRight else AllIconsKeys.General.ChevronDown,
-                                    contentDescription = if (isCollapsed) "Expand" else "Collapse",
+                                val toggleInteraction = remember(node.id) { MutableInteractionSource() }
+                                val toggleFocused by toggleInteraction.collectIsFocusedAsState()
+                                Box(
                                     modifier = Modifier
-                                        .size(12.dp)
-                                        .clickable { collapsed[node.id] = !isCollapsed }
+                                        .size(16.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .accessibleFocusRing(toggleFocused, focusRingColor, cornerRadius = 3.dp)
+                                        .onKeyEvent { event ->
+                                            if (!isUnmodifiedArrowKey(event)) return@onKeyEvent false
+                                            if (event.type == KeyEventType.KeyDown) {
+                                                if (event.key == Key.DirectionRight) collapsed[node.id] = false
+                                                else if (event.key == Key.DirectionLeft) collapsed[node.id] = true
+                                            }
+                                            true
+                                        }
+                                        .clickable(
+                                            interactionSource = toggleInteraction,
+                                            indication = null,
+                                            role = Role.Button,
+                                            onClick = { collapsed[node.id] = !isCollapsed },
+                                        )
+                                        .semantics {
+                                            contentDescription = if (isCollapsed) "Expand $name" else "Collapse $name"
+                                            stateDescription = if (isCollapsed) "Collapsed" else "Expanded"
+                                        }
                                         .testTag("ciacola-doc-node-toggle-${node.id}"),
-                                )
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        key = if (isCollapsed) AllIconsKeys.General.ChevronRight else AllIconsKeys.General.ChevronDown,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                }
                             } else {
                                 Spacer(Modifier.width(12.dp))
                             }
                             Row(
-                                modifier = Modifier.weight(1f).alpha(if (row.presentOnBeat) 1f else 0.45f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .hoverable(rowInteraction)
+                                    .focusable(interactionSource = rowInteraction)
+                                    .onKeyEvent { event ->
+                                        if (isUnmodifiedArrowKey(event)) {
+                                            // Prevent tree navigation arrows from bubbling into stage X/Y nudging.
+                                            return@onKeyEvent true
+                                        }
+                                        if (event.type == KeyEventType.KeyDown &&
+                                            (event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.Spacebar)
+                                        ) {
+                                            controller.selectNode(node.id, additive = event.isShiftPressed)
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    .clickWithShift(node.id) { shift -> controller.selectNode(node.id, additive = shift) }
+                                    .semantics {
+                                        role = Role.Button
+                                        selected = isSelected
+                                        contentDescription = "$name, $typeLabel"
+                                        val rowState = buildList {
+                                            if (!row.presentOnBeat) add("hidden on current beat")
+                                            if (row.hasChildren) add(if (collapsed[node.id] == true) "collapsed" else "expanded")
+                                        }.joinToString(", ")
+                                        if (rowState.isNotEmpty()) {
+                                            stateDescription = rowState
+                                        }
+                                        onClick { controller.selectNode(node.id); true }
+                                    }
+                                    .alpha(if (row.presentOnBeat) 1f else 0.45f)
+                                    .testTag("ciacola-doc-node-item-${node.id}"),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {

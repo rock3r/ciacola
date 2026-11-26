@@ -2,7 +2,10 @@ package dev.sebastiano.ciacola.a11y
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -10,13 +13,16 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import dev.bnorm.storyboard.easel.Easel
 import dev.bnorm.storyboard.easel.overview.EaselOverview
 import dev.bnorm.storyboard.easel.overview.OverviewVisibility
@@ -25,15 +31,19 @@ import dev.bnorm.storyboard.easel.rememberAnimatic
 import dev.sebastiano.ciacola.buildFoundationTestStoryboard
 import dev.sebastiano.ciacola.createLoadedTestDeckStore
 import dev.sebastiano.ciacola.decks.AllDocumentDecks
+import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
 import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
+import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorUi
 import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
 import dev.sebastiano.ciacola.studio.StudioWorkspaceController
 import dev.sebastiano.ciacola.theme.contrastRatio as wcagContrastRatio
 import dev.sebastiano.ciacola.timeline.DocumentTimelineController
+import dev.sebastiano.ciacola.timeline.DocumentTimelineCurveEditor
 import dev.sebastiano.ciacola.timeline.DocumentTimelineSelection
 import dev.sebastiano.ciacola.timeline.DocumentTimelineWindow
 import dev.sebastiano.ciacola.timeline.rememberDocumentTimelineWindow
+import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.accessibleFocusRingColor
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -176,5 +186,71 @@ class TimelineA11yAndFocusTest {
             node.children.forEach(::checkTree)
         }
         checkTree(onRoot(useUnmergedTree = true).fetchSemanticsNode())
+    }
+
+    @Test
+    fun layersRowsAndBezierHandlesHaveVoiceOverSemanticsFocusAndKeyboardControl() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val firstSlide = store.document.slides.first()
+        val firstNodeId = firstSlide.nodes.first().id
+        val elementController = DocumentElementInspectorController(
+            store = store,
+            specimens = AllDocumentDecks.foundation.specimens,
+            initialSlideId = firstSlide.id,
+        )
+        var currentCurve by mutableStateOf<Curve>(Curve.Bezier(0.25, 0.1, 0.25, 1.0))
+
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(Modifier.size(320.dp, 640.dp)) {
+                    androidx.compose.foundation.layout.Column {
+                        DocumentElementInspectorUi(
+                            controller = elementController,
+                            modifier = Modifier.weight(1f),
+                        )
+                        DocumentTimelineCurveEditor(
+                            targetKey = "a11y-curve",
+                            curve = currentCurve,
+                            onBeginGesture = {},
+                            onCommitGesture = {},
+                            onCancelGesture = {},
+                            onCurveChanged = { next, _ -> currentCurve = next },
+                        )
+                    }
+                }
+            }
+        }
+        waitForIdle()
+
+        val rowNode = onNodeWithTag("ciacola-doc-node-item-$firstNodeId", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        assertFalse(rowNode.config.getOrNull(SemanticsProperties.ContentDescription).isNullOrEmpty())
+        assertEquals(false, rowNode.config.getOrNull(SemanticsProperties.Selected))
+        assertEquals(null, rowNode.config.getOrNull(SemanticsProperties.StateDescription))
+        onNodeWithTag("ciacola-doc-node-item-$firstNodeId", useUnmergedTree = true).requestFocus()
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-node-item-$firstNodeId", useUnmergedTree = true).performKeyInput {
+            pressKey(Key.Enter)
+        }
+        waitForIdle()
+        assertEquals(firstNodeId, elementController.selectedNodeId)
+        val selectedRow = onNodeWithTag("ciacola-doc-node-item-$firstNodeId", useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals(true, selectedRow.config.getOrNull(SemanticsProperties.Selected))
+
+        val p1 = onNodeWithTag("ciacola-bezier-handle-p1", useUnmergedTree = true).assertIsDisplayed()
+        val p1Semantics = p1.fetchSemanticsNode()
+        assertTrue(
+            p1Semantics.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.contains("P1") } == true,
+        )
+        assertFalse(p1Semantics.config.getOrNull(SemanticsProperties.StateDescription).isNullOrEmpty())
+        onNodeWithTag("ciacola-bezier-handle-p2", useUnmergedTree = true).assertIsDisplayed()
+
+        p1.requestFocus()
+        waitForIdle()
+        p1.performKeyInput { pressKey(Key.DirectionRight) }
+        waitForIdle()
+        val updated = currentCurve as Curve.Bezier
+        assertEquals(0.30, updated.x1, absoluteTolerance = 0.005)
     }
 }

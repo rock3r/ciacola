@@ -4,6 +4,9 @@ import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import dev.sebastiano.ciacola.document.DeckDocument
+import dev.sebastiano.ciacola.document.DeckStructureEdits
+import dev.sebastiano.ciacola.document.ManualDelayRemapNotice
 import dev.sebastiano.ciacola.document.TextRangeEdit
 
 internal const val INLINE_EDITOR_MARGIN_PX = 16f
@@ -167,4 +170,33 @@ internal fun replayTextRangeEdits(initial: String, edits: List<TextRangeEdit>): 
         sb.replace(edit.start, edit.start + edit.removedLength, edit.insertedText)
     }
     return sb.toString()
+}
+
+/** Applies coalesced UTF-16 range edits to [doc] when [currentText] matches [oldText], else falls back cleanly. */
+internal fun applyInlineRangeEditsToDocument(
+    doc: DeckDocument,
+    slideId: String,
+    nodeId: String,
+    beat: Int,
+    oldText: String,
+    finalText: String,
+    currentText: String?,
+    editsToApply: List<TextRangeEdit>,
+): Pair<DeckDocument, List<ManualDelayRemapNotice>> {
+    if (currentText == null) return doc to emptyList()
+    if (currentText != oldText) {
+        return if (currentText == finalText) {
+            doc to emptyList()
+        } else {
+            DeckStructureEdits.applyWholeTextReplacement(doc, slideId, nodeId, beat, finalText)
+        }
+    }
+    val collectedNotices = mutableListOf<ManualDelayRemapNotice>()
+    var current = doc
+    for (edit in editsToApply) {
+        val (next, notices) = DeckStructureEdits.applyTextRangeEdit(current, slideId, nodeId, beat, edit)
+        current = next
+        collectedNotices += notices
+    }
+    return current to collectedNotices
 }
