@@ -202,8 +202,8 @@ An `image` whose `src` is an animated WebP or GIF plays in the live deck. All fr
 ```json
 {
   "id": "s05:demo",
-  "frame": { "x": 1300, "y": 60, "w": 440, "h": 964 },
-  "image": { "src": "agent-demo.webp", "posterMs": 0, "maxPixels": 50000000 },
+  "frame": { "x": 960, "y": 300, "w": 832, "h": 468 },
+  "image": { "src": "demo.webp", "posterMs": 0, "maxPixels": 40000000 },
   "builds": [
     { "kind": "playback", "beat": 1, "action": "play" },
     { "kind": "playback", "beat": 2, "action": "pause", "atMs": 4500 },
