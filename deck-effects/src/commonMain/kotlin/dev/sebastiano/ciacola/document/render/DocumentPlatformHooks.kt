@@ -97,12 +97,13 @@ expect fun rememberDocumentFontResolverHandle(
 
 /**
  * Resolves [familyName] against [fontResolverHandle] onto [style], clamping weights to loaded
- * faces when available.
+ * faces when available and applying static variable font [axes] coordinates.
  */
 expect fun resolveDocumentFontStyle(
     fontResolverHandle: Any?,
     familyName: String?,
     style: TextStyle,
+    axes: Map<String, Double> = emptyMap(),
 ): TextStyle
 
 /** Applies a full [LayerState] (including blur, colorMatrix, Wipe/Iris clip). */

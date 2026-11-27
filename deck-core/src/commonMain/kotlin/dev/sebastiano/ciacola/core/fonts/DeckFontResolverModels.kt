@@ -48,6 +48,12 @@ data class ResolvedFontFace(
     val src: String?,
     val inspection: FontTableInspection?,
     val composeFont: Font? = null,
+    /**
+     * Static variable font axis coordinates applied to this face on top of its `wght` instance,
+     * already filtered to the face's `fvar` axes and clamped to their ranges. Empty for the
+     * resolver's base faces.
+     */
+    val axisCoordinates: Map<String, Float> = emptyMap(),
 ) {
     /**
      * `true` iff this face was loaded directly from bundled bytes declared on its own family

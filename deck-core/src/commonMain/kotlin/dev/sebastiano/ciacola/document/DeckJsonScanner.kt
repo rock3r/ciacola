@@ -22,7 +22,7 @@ internal object DeckJsonScanner {
     val PAYLOAD_KEYS_BY_KIND: Map<NodeKind, Set<String>> = mapOf(
         NodeKind.Text to setOf(
             "value", "style", "font", "size", "weight", "italic", "color",
-            "lineHeight", "tracking", "align", "surface", "morph",
+            "lineHeight", "tracking", "align", "surface", "morph", "axes",
         ),
         NodeKind.Code to setOf("value", "language", "highlightLines", "fit", "surface"),
         NodeKind.Shape to setOf("geometry", "fill", "stroke", "cornerRadius", "heads"),

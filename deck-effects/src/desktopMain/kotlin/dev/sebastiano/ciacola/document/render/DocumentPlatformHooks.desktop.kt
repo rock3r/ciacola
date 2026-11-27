@@ -600,6 +600,7 @@ actual fun resolveDocumentFontStyle(
     fontResolverHandle: Any?,
     familyName: String?,
     style: TextStyle,
+    axes: Map<String, Double>,
 ): TextStyle {
     val fontResolver = fontResolverHandle as? DeckFontResolver ?: return style
     return if (!familyName.isNullOrBlank()) {
@@ -607,8 +608,9 @@ actual fun resolveDocumentFontStyle(
             familyName = familyName,
             style = style,
             disableOptionalLigatures = false,
+            axes = axes,
         )
     } else {
-        fontResolver.clampStyleWeights(style)
+        fontResolver.applyAxes(fontResolver.clampStyleWeights(style), axes)
     }
 }

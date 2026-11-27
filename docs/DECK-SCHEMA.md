@@ -43,7 +43,7 @@ This document is the authoritative schema reference for `<deckId>.deck.json` fil
   - Code scheme resolution precedence: `customCodeScheme` > `codeScheme` > preset default (`"intellij-islands-dark"` for dark presets, `"intellij-light"` for light presets), with explicit `colors` overrides (`codeBackground`/`code.background`, `codeForeground`/`code.foreground`, `code.keyword`, `code.string`, `code.comment`, `code.number`, `code.constant`, `code.type`, `code.functionDeclaration`, `code.functionCall`/`code.function`, `code.property`, `code.annotation`, `code.attribute`, `code.tag`, `code.operator`, `code.preprocessor`, `code.punctuation`, `code.invalid`) layered on top.
   - Validation lint codes on `DeckThemeSpec`: `UNKNOWN_CODE_SCHEME` (unrecognized `codeScheme` when `customCodeScheme` is absent), `INVALID_CUSTOM_CODE_SCHEME` (blank `id`/`name`, unknown `appearance`, or invalid CSS hex color), and `UNKNOWN_CODE_SCHEME_TOKEN` (warning for unrecognized key in `customCodeScheme.tokens`).
   - `colors`: `Map<String, String>` (Compose hex `#RRGGBB` or `#AARRGGBB`, e.g. `accent`, `background`, `border`, `cardScrim`, `chipBackground`, `codeBackground`, `codeForeground`, `danger`, `elevatedSurface`, `foreground`, `muted`, `onAccent`, `positive`, `secondary`, `stampFill`, `subtle`, `surface`, `warning`)
-  - `typography`: `Map<String, TextStyleOverride>` (`font`, `size`, `weight`, `italic`, `color`, `lineHeight`, `tracking`, `align`)
+  - `typography`: `Map<String, TextStyleOverride>` (`font`, `size`, `weight`, `italic`, `color`, `lineHeight`, `tracking`, `align`, `axes`)
   - `motion`: `ThemeMotionDefaults?` (`durationMs`, `curve`, `transition`)
 - `SlidePaletteSpec`:
   - `canvas`, `ink`, `mutedInk`, `accent`, `surface`, `border` (all optional `String?` hex or theme token)
@@ -128,10 +128,11 @@ Common layout/transform properties on `NodeSpec`:
 ### Payload Reference
 
 1. **`text` (`TextPayload`)**:
-   - `value`: `"Plain text"` or array of `TextRun` objects (`{ "text": "...", "font": ..., "size": ..., "weight": 700, "italic": true, "color": "accent", "tracking": ..., "underline": true, "strike": true, "baselineShift": ..., "background": "#..." }`)
+   - `value`: `"Plain text"` or array of `TextRun` objects (`{ "text": "...", "font": ..., "size": ..., "weight": 700, "italic": true, "color": "accent", "tracking": ..., "underline": true, "strike": true, "baselineShift": ..., "background": "#...", "axes": { "wdth": 85 } }`)
    - `style`: theme typography role (e.g. `"hero"`, `"title"`, `"heading"`, `"subheading"`, `"body"`, `"bodyEmphasis"`, `"callout"`, `"caption"`, `"eyebrow"`, `"cardTitle"`, `"cardBody"`, `"stamp"`)
-   - `font`, `size`, `weight`, `italic`, `color`, `lineHeight`, `tracking`, `align` (`"start"|"center"|"end"|"justify"`), `surface`, `morph` (`{ "by": "word"|"character"|"line"|"paragraph", "pruneStopwords": true, "phases": ..., "stagger": ... }`)
+   - `font`, `size`, `weight`, `italic`, `color`, `lineHeight`, `tracking`, `align` (`"start"|"center"|"end"|"justify"`), `surface`, `axes`, `morph` (`{ "by": "word"|"character"|"line"|"paragraph", "pruneStopwords": true, "phases": ..., "stagger": ... }`)
    - Note: Multi-line text should explicitly set `lineHeight >= size * 1.15` to avoid collapsed lines.
+   - `axes`: static variable font axis coordinates keyed by 4-character OpenType tag, e.g. `{ "wdth": 85, "GRAD": -25, "opsz": 24 }`. Also accepted on theme `typography` roles and on `TextRun`s. Coordinates merge per tag from role to node to run, so a node can override one axis and inherit the rest. Values outside the face's `fvar` range clamp to `[min, max]` and tags the face lacks are ignored. `axes.wght` overrides the `wght` instance picked from `weight`. Lint codes: `INVALID_FONT_AXIS_TAG` (error, malformed tag), `UNSUPPORTED_FONT_AXIS`, `FONT_AXIS_OUT_OF_RANGE`, and `FONT_AXES_IGNORED` (warnings from the font-aware deck linter). Because `GRAD` does not change advances, per-theme `GRAD` on typography roles tunes dark and light themes without reflowing text.
 2. **`code` (`CodePayload`)**:
    - `value`: source string
    - `language`: e.g. `"kotlin"`, `"glsl"`, `"sksl"`, `"json"`
