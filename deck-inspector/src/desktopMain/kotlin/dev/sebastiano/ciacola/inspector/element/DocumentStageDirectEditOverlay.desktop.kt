@@ -100,13 +100,20 @@ fun DocumentStageDirectEditOverlay(
     modifier: Modifier = Modifier,
     /** `true` while an `interactive = "keyboard"` specimen owns the keyboard (arrows, `⌘A`). */
     keyboardCapturedProvider: () -> Boolean = { false },
-    /** `true` when window chrome (such as the Theme sheet) should suppress Enter-to-edit. */
+    /** `true` when window chrome (such as the Theme sheet or Review inspect/pinning) should suppress inline editing. */
     inlineEditBlockedProvider: () -> Boolean = { false },
     /** Invoked after inline text editing closes (commit or cancel) to return focus to the stage. */
     onRestoreStageFocus: (() -> Unit)? = null,
     content: @Composable () -> Unit = {},
 ) {
     if (!enabled) {
+        val activeEditingId = controller.inlineEditingNodeId
+        if (activeEditingId != null) {
+            // Cancel mid-flight edits when Review or Present disables the overlay so shortcuts cannot lock up.
+            LaunchedEffect(controller, activeEditingId) {
+                controller.cancelInlineTextEdit()
+            }
+        }
         content()
         return
     }
@@ -148,6 +155,12 @@ fun DocumentStageDirectEditOverlay(
 
     var wasInlineEditing by remember(controller) { mutableStateOf(controller.inlineEditingNodeId != null) }
     val isInlineEditing = controller.inlineEditingNodeId != null
+    val editBlocked = inlineEditBlockedProvider()
+    LaunchedEffect(controller, editBlocked) {
+        if (editBlocked && controller.inlineEditingNodeId != null) {
+            controller.cancelInlineTextEdit()
+        }
+    }
     LaunchedEffect(controller, isInlineEditing) {
         if (!isInlineEditing && wasInlineEditing && textInputTracker?.hasFocusedTextInput != true && !controller.textInputHasFocus) {
             withFrameNanos { }

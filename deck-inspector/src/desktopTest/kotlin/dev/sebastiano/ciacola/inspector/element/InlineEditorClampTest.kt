@@ -608,4 +608,67 @@ class InlineEditorClampTest {
         waitForIdle()
         assertNull(controller.inlineEditingNodeId)
     }
+
+    @Test
+    fun disablingOverlayOrBlockingProviderMidEditCancelsActiveSessionWithoutStealingFocus() = runComposeUiTest {
+        val controller = newHeldEnterController()
+        var overlayEnabled by mutableStateOf(true)
+        var editBlocked by mutableStateOf(false)
+        var restoreCalls = 0
+        val stageFocusRequester = FocusRequester()
+
+        setContent {
+            CiacolaJewelTheme(isDark = true) {
+                Box(
+                    modifier = Modifier
+                        .size(960.dp, 540.dp)
+                        .focusRequester(stageFocusRequester)
+                        .focusable()
+                        .onKeyEvent { ev -> DocumentElementInspectorKeys.handleKeyEvent(controller, ev, allowInlineEnter = true) }
+                        .testTag("test-stage-root"),
+                ) {
+                    DocumentStageDirectEditOverlay(
+                        controller = controller,
+                        stageScale = 0.5f,
+                        enabled = overlayEnabled,
+                        inlineEditBlockedProvider = { editBlocked },
+                        onRestoreStageFocus = { restoreCalls++ },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        runOnIdle { controller.selectNode("s1:headline") }
+        waitForIdle()
+        onNodeWithTag("test-stage-root").requestFocus()
+        waitForIdle()
+
+        // Disabling the overlay mid-edit cancels the session and keeps the original text intact.
+        onNodeWithTag("test-stage-root").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals("s1:headline", controller.inlineEditingNodeId)
+        onNodeWithTag("ciacola-doc-inline-text-field").performTextInput(" Draft")
+        waitForIdle()
+        val restoresBeforeDisable = restoreCalls
+        runOnIdle { overlayEnabled = false }
+        waitForIdle()
+        assertNull(controller.inlineEditingNodeId)
+        onNodeWithTag("ciacola-doc-inline-text-popover").assertDoesNotExist()
+        assertEquals(restoresBeforeDisable, restoreCalls, "Disabling overlay must not yank focus back to stage")
+        assertEquals("Initial", controller.store.document.slides.first().nodes.first { it.id == "s1:headline" }.text?.value?.plainText)
+
+        // Blocking provider turning true while enabled also cancels any active inline edit.
+        runOnIdle { overlayEnabled = true }
+        waitForIdle()
+        onNodeWithTag("test-stage-root").requestFocus()
+        waitForIdle()
+        onNodeWithTag("test-stage-root").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals("s1:headline", controller.inlineEditingNodeId)
+        runOnIdle { editBlocked = true }
+        waitForIdle()
+        assertNull(controller.inlineEditingNodeId)
+        onNodeWithTag("ciacola-doc-inline-text-popover").assertDoesNotExist()
+    }
 }
