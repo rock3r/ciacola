@@ -55,6 +55,7 @@ import dev.sebastiano.ciacola.inspector.design.inspectorBodyStyle
 import dev.sebastiano.ciacola.inspector.design.inspectorCaptionStyle
 import dev.sebastiano.ciacola.ui.CiacolaJewelTheme
 import dev.sebastiano.ciacola.ui.CiacolaPrimaryButton
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.Orientation
@@ -115,21 +116,24 @@ fun DocumentDeckLintPanel(
     autoAuditCurrentSlide: Boolean = true,
     modifier: Modifier = Modifier,
     compactHorizontal: Boolean = true,
+    auditScope: CoroutineScope = rememberCoroutineScope(),
 ) {
-    val scope = rememberCoroutineScope()
     val storeRev = controller.store.revision
     val colors = JewelTheme.globalColors
     val listState = rememberLazyListState()
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
 
-    LaunchedEffect(autoAuditCurrentSlide, currentSlideIndex, storeRev) {
-        if (autoAuditCurrentSlide && !controller.isAuditing) {
+    LaunchedEffect(autoAuditCurrentSlide, currentSlideIndex, storeRev, controller.isPaused) {
+        if (autoAuditCurrentSlide && !controller.isPaused && !controller.isAuditing) {
             controller.lintSlideNow(slideIndex = currentSlideIndex, themeNames = themeNamesProvider())
         }
     }
 
     fun checkDeck() {
-        if (controller.isAuditing) controller.cancelAudit() else controller.startFullDeckAudit(scope = scope, themeNames = themeNamesProvider())
+        when {
+            controller.isAuditing || controller.hasPausedAudit -> controller.cancelAudit()
+            !controller.isPaused -> controller.startFullDeckAudit(scope = auditScope, themeNames = themeNamesProvider())
+        }
     }
 
     Column(
@@ -142,7 +146,13 @@ fun DocumentDeckLintPanel(
             controller = controller,
             compactHorizontal = compactHorizontal,
             onCheckDeck = ::checkDeck,
-            onCheckSlide = { scope.launch { controller.lintSlideNow(slideIndex = currentSlideIndex, themeNames = themeNamesProvider()) } },
+            onCheckSlide = {
+                if (!controller.isPaused) {
+                    auditScope.launch {
+                        controller.lintSlideNow(slideIndex = currentSlideIndex, themeNames = themeNamesProvider())
+                    }
+                }
+            },
         )
         if (controller.isAuditing) {
             val fraction = controller.progress.coerceIn(0.02f, 1f)
@@ -155,6 +165,21 @@ fun DocumentDeckLintPanel(
             ) {
                 Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(inspectorAccent()))
             }
+        }
+        if (controller.isPaused) {
+            val pausedMessage = if (controller.hasPausedAudit) {
+                "Deck check paused while presenting — resumes automatically on exit."
+            } else {
+                "Deck checks paused while presenting."
+            }
+            Text(
+                pausedMessage,
+                style = inspectorBodyStyle(),
+                color = colors.text.info,
+                modifier = Modifier
+                    .padding(horizontal = InspectorTokens.SectionHorizontalPadding, vertical = 4.dp)
+                    .testTag("ciacola-doc-lint-paused-banner"),
+            )
         }
         controller.lastError?.let { err ->
             Text(
@@ -227,22 +252,25 @@ private fun LintToolbar(
         )
     }
     val buttons: @Composable () -> Unit = {
-        val deckLabel = if (controller.isAuditing) {
-            val total = controller.totalSlidesToAudit.coerceAtLeast(1)
-            "Cancel (${controller.auditedSlides}/$total)"
-        } else {
-            "Check deck"
+        val deckLabel = when {
+            controller.isAuditing -> {
+                val total = controller.totalSlidesToAudit.coerceAtLeast(1)
+                "Cancel (${controller.auditedSlides}/$total)"
+            }
+            controller.isPaused && controller.hasPausedAudit -> "Cancel paused"
+            else -> "Check deck"
         }
         // The empty state carries the one `Check deck` call to action until the deck is checked.
         if (!lintEmptyStateOwnsCheckDeck(controller)) {
             OutlinedButton(
                 onClick = onCheckDeck,
+                enabled = !controller.isPaused || controller.isAuditing || controller.hasPausedAudit,
                 modifier = Modifier.testTag("ciacola-doc-lint-audit-all"),
             ) { Text(deckLabel, style = inspectorBodyStyle()) }
         }
         OutlinedButton(
             onClick = onCheckSlide,
-            enabled = !controller.isAuditing,
+            enabled = !controller.isAuditing && !controller.isPaused,
             modifier = Modifier.testTag("ciacola-doc-lint-audit-slide"),
         ) { Text("Check slide", style = inspectorBodyStyle()) }
     }
@@ -273,13 +301,17 @@ private fun LintToolbar(
 
 /** `true` while the empty state shows its own `Check deck` button (the toolbar then hides its copy). */
 fun lintEmptyStateOwnsCheckDeck(controller: DocumentDeckLintController): Boolean =
-    !controller.isAuditing && controller.auditScope != LintAuditScope.Deck && controller.issues.isEmpty()
+    !controller.isAuditing && !controller.isPaused && controller.auditScope != LintAuditScope.Deck && controller.issues.isEmpty()
 
 @Composable
 private fun LintEmptyState(controller: DocumentDeckLintController, onCheckDeck: () -> Unit) {
     val colors = JewelTheme.globalColors
     val (title, detail) = when {
         controller.isAuditing -> "Checking slide ${controller.auditedSlides} of ${controller.totalSlidesToAudit.coerceAtLeast(1)}…" to null
+        controller.isPaused && controller.hasPausedAudit ->
+            "Deck check paused" to "Will resume automatically when you leave Present mode."
+        controller.isPaused ->
+            "Checks paused while presenting" to "Leave Present mode to run slide or deck checks."
         controller.issues.isNotEmpty() -> when (controller.severityFilter) {
             LintSeverityFilter.ErrorsOnly -> "No errors" to "Only warnings remain."
             LintSeverityFilter.WarningsOnly -> "No warnings" to "Only errors remain."
@@ -453,6 +485,7 @@ class DocumentDeckLintWindow(
     var isLinterShownProvider: () -> Boolean = { false },
     var onToggleLinter: () -> Unit = {},
     var onPreviewKeyHandler: ((KeyEvent) -> Boolean)? = null,
+    var auditScope: CoroutineScope? = null,
 ) : EaselWindow {
     override val name: String = "Linter"
     override val initialSize: DpSize = DpSize(440.dp, 640.dp)
@@ -461,7 +494,8 @@ class DocumentDeckLintWindow(
 
     @Composable
     override fun MenuScope.Menu() {
-        val scope = rememberCoroutineScope()
+        val menuScope = rememberCoroutineScope()
+        val effectiveScope = auditScope ?: menuScope
         CheckboxItem(
             text = "Show Deck Linter (F8)",
             checked = isLinterShownProvider(),
@@ -470,23 +504,33 @@ class DocumentDeckLintWindow(
         Separator()
         Item(
             text = "Lint Current Slide",
-            enabled = !controller.isAuditing,
+            enabled = !controller.isAuditing && !controller.isPaused,
             onClick = {
-                scope.launch {
-                    controller.lintSlideNow(
-                        slideIndex = currentSlideIndexProvider(),
-                        themeNames = themeNamesProvider(),
-                    )
+                if (!controller.isPaused) {
+                    effectiveScope.launch {
+                        controller.lintSlideNow(
+                            slideIndex = currentSlideIndexProvider(),
+                            themeNames = themeNamesProvider(),
+                        )
+                    }
                 }
             },
         )
         Item(
-            text = if (controller.isAuditing) "Cancel Full-Deck Audit" else "Audit Full Deck",
+            text = when {
+                controller.isAuditing -> "Cancel Full-Deck Audit"
+                controller.isPaused && controller.hasPausedAudit -> "Cancel Paused Full-Deck Audit"
+                controller.isPaused -> "Audit Full Deck (Paused while presenting)"
+                else -> "Audit Full Deck"
+            },
+            enabled = !controller.isPaused || controller.isAuditing || controller.hasPausedAudit,
             onClick = {
-                if (controller.isAuditing) {
-                    controller.cancelAudit()
-                } else {
-                    controller.startFullDeckAudit(scope = scope, themeNames = themeNamesProvider())
+                when {
+                    controller.isAuditing || controller.hasPausedAudit -> controller.cancelAudit()
+                    !controller.isPaused -> controller.startFullDeckAudit(
+                        scope = effectiveScope,
+                        themeNames = themeNamesProvider(),
+                    )
                 }
             },
         )
@@ -494,6 +538,7 @@ class DocumentDeckLintWindow(
 
     @Composable
     override fun Content() {
+        val panelScope = auditScope ?: rememberCoroutineScope()
         CiacolaJewelTheme(isDark = isDarkProvider()) {
             Box(
                 modifier = Modifier
@@ -506,6 +551,7 @@ class DocumentDeckLintWindow(
                     themeNamesProvider = themeNamesProvider,
                     onJumpToIssue = onJumpToIssue,
                     compactHorizontal = false,
+                    auditScope = panelScope,
                 )
             }
         }
@@ -522,6 +568,7 @@ fun rememberDocumentDeckLintWindow(
     isLinterShownProvider: () -> Boolean = { false },
     onToggleLinter: () -> Unit = {},
     onPreviewKeyHandler: ((KeyEvent) -> Boolean)? = null,
+    auditScope: CoroutineScope? = null,
 ): DocumentDeckLintWindow = remember {
     DocumentDeckLintWindow(
         controller = controller,
@@ -532,6 +579,7 @@ fun rememberDocumentDeckLintWindow(
         isLinterShownProvider = isLinterShownProvider,
         onToggleLinter = onToggleLinter,
         onPreviewKeyHandler = onPreviewKeyHandler,
+        auditScope = auditScope,
     )
 }.also {
     it.controller = controller
@@ -542,4 +590,5 @@ fun rememberDocumentDeckLintWindow(
     it.isLinterShownProvider = isLinterShownProvider
     it.onToggleLinter = onToggleLinter
     it.onPreviewKeyHandler = onPreviewKeyHandler
+    it.auditScope = auditScope
 }

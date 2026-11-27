@@ -242,30 +242,33 @@ fun rememberDocumentSyncGateWindow(
     store: DeckDocumentStore,
     onAllowClose: () -> Unit,
     isAudiencePresentingProvider: () -> Boolean = { false },
-): EaselWindow = remember(syncController, store) {
-    object : EaselWindow {
-        override val name: String = "SyncGate"
-        override var visible: Boolean = false
-        override val decorator: ContentDecorator = ContentDecorator { content ->
-            val sync = syncController
-            if (sync != null) {
-                DocumentLoadStateGate(
-                    store = store,
-                    controller = sync,
-                    onAllowClose = onAllowClose,
-                    isAudiencePresentingProvider = isAudiencePresentingProvider,
-                ) {
+): EaselWindow {
+    val latestIsAudiencePresenting by androidx.compose.runtime.rememberUpdatedState(isAudiencePresentingProvider)
+    return remember(syncController, store) {
+        object : EaselWindow {
+            override val name: String = "SyncGate"
+            override var visible: Boolean = false
+            override val decorator: ContentDecorator = ContentDecorator { content ->
+                val sync = syncController
+                if (sync != null) {
+                    DocumentLoadStateGate(
+                        store = store,
+                        controller = sync,
+                        onAllowClose = onAllowClose,
+                        isAudiencePresentingProvider = { latestIsAudiencePresenting() },
+                    ) {
+                        content()
+                    }
+                } else {
                     content()
                 }
-            } else {
-                content()
             }
+
+            @Composable
+            override fun MenuScope.Menu() = Unit
+
+            @Composable
+            override fun Content() = Unit
         }
-
-        @Composable
-        override fun MenuScope.Menu() = Unit
-
-        @Composable
-        override fun Content() = Unit
     }
 }

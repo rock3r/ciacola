@@ -1263,18 +1263,17 @@ fun launchStudio(
             val activeSceneIndex = animatic.presentedIndex.sceneIndex.coerceAtLeast(0)
             val activeBeatIndex = animatic.presentedIndex.frameIndex.coerceAtLeast(0)
             val activeSlideIdForSync = activeNonSkipped.getOrNull(activeSceneIndex)?.id
-            LaunchedEffect(timelineController, activeSlideIdForSync, activeSceneIndex, activeBeatIndex) {
-                timelineController.updatePresentedLocation(
-                    slideId = activeSlideIdForSync,
-                    sceneIndex = activeSceneIndex,
-                    beatIndex = activeBeatIndex,
-                )
-            }
+            val isPresenterVisibleProvider = remember { { presenterWinHolder?.visible == true } }
+            studioWorkspace.isPresenterVisibleProvider = isPresenterVisibleProvider
+            val isAudiencePresentingProvider = remember(studioWorkspace) { { studioWorkspace.isAudiencePresenting } }
+            reviewStageCoordinator.isAudiencePresentingProvider = isAudiencePresentingProvider
             StudioWorkspaceSyncEffects(
                 workspace = studioWorkspace,
                 activeSlideId = activeSlideIdForSync,
                 activeBeatIndex = activeBeatIndex,
                 animatic = animatic,
+                activeSceneIndex = activeSceneIndex,
+                lintResumeScope = appScope,
             )
             reviewStageCoordinator.fallbackNodeIdResolver = { stagePoint, dragRect ->
                 stageInspectionRegistry.nodes.values

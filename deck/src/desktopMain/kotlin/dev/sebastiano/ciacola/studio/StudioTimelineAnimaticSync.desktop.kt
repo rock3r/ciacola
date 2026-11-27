@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import dev.bnorm.storyboard.AdvanceDirection
@@ -29,16 +30,20 @@ internal fun TimelineAnimaticSyncEffects(
     timelineController: DocumentTimelineController,
     animatic: Animatic,
     appScope: CoroutineScope,
+    paused: Boolean = false,
 ) {
     val pendingScrubRequest = remember(animatic) { MutableStateFlow<Pair<Long, Int>?>(null) }
     var scrubSeq by remember(animatic) { mutableStateOf(0L) }
     var isApplyingScrub by remember(animatic) { mutableStateOf(false) }
     var playbackJob by remember(animatic) { mutableStateOf<Job?>(null) }
+    val latestPaused by rememberUpdatedState(paused)
 
     DisposableEffect(timelineController, animatic) {
         timelineController.onPlayheadChanged = { timeMs ->
-            scrubSeq += 1L
-            pendingScrubRequest.value = scrubSeq to timeMs
+            if (!latestPaused) {
+                scrubSeq += 1L
+                pendingScrubRequest.value = scrubSeq to timeMs
+            }
         }
         timelineController.onStepBeat = { delta ->
             playbackJob?.cancel()
@@ -54,7 +59,7 @@ internal fun TimelineAnimaticSyncEffects(
                 playbackJob?.cancel()
                 playbackJob = null
                 timelineController.isPlaying = false
-            } else {
+            } else if (!latestPaused) {
                 timelineController.isPlaying = true
                 playbackJob?.cancel()
                 playbackJob = appScope.launch {
@@ -83,7 +88,16 @@ internal fun TimelineAnimaticSyncEffects(
             timelineController.onTogglePlayback = null
         }
     }
-    LaunchedEffect(animatic, timelineController) {
+    LaunchedEffect(timelineController, paused) {
+        if (paused) {
+            playbackJob?.cancel()
+            playbackJob = null
+            timelineController.isPlaying = false
+            pendingScrubRequest.value = null
+        }
+    }
+    LaunchedEffect(animatic, timelineController, paused) {
+        if (paused) return@LaunchedEffect
         pendingScrubRequest.collect { req ->
             if (req == null) return@collect
             pendingScrubRequest.compareAndSet(req, null)
@@ -104,7 +118,9 @@ internal fun TimelineAnimaticSyncEffects(
             }
         }
     }
-    LaunchedEffect(animatic, timelineController) {
+    LaunchedEffect(animatic, timelineController, paused) {
+        if (paused) return@LaunchedEffect
+        timelineController.refreshSnapshot()
         snapshotFlow { animatic.activeFromStateIndex to animatic.activeFraction }
             .distinctUntilChanged()
             .collect { (stateIdx, frac) ->

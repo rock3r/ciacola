@@ -238,8 +238,16 @@ class ReviewStageCoordinator : ReviewStageBridge {
     /** Guard preventing keyboard comment pinning while a text input elsewhere owns focus. */
     var isExternalTextInputActiveProvider: () -> Boolean = { false }
 
-    /** Guard preventing keyboard comment pinning while audience presenting/fullscreen is active. */
-    var isAudiencePresentingProvider: () -> Boolean = { false }
+    private var audiencePresentingProviderState: () -> Boolean by mutableStateOf({ false })
+
+    /** Guard preventing keyboard comment pinning and background disk polling while presenting is active. */
+    var isAudiencePresentingProvider: () -> Boolean
+        get() = audiencePresentingProviderState
+        set(value) {
+            if (audiencePresentingProviderState !== value) {
+                audiencePresentingProviderState = value
+            }
+        }
 
     /** Tracks whether the Story stage subtree currently holds keyboard focus. */
     var stageHasFocus: Boolean by mutableStateOf(false)
