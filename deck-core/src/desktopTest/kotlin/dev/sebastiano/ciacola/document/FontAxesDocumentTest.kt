@@ -29,13 +29,13 @@ class FontAxesDocumentTest {
             "dark" to DeckThemeSpec(
                 preset = "stageDark",
                 typography = mapOf(
-                    "body" to TextStyleOverride(font = "Google Sans", axes = mapOf("opsz" to 24.0, "GRAD" to -25.0)),
+                    "body" to TextStyleOverride(font = "Google Sans", axes = mapOf("opsz" to 18.0, "GRAD" to -25.0)),
                 ),
             ),
             "light" to DeckThemeSpec(
                 preset = "keynoteLight",
                 typography = mapOf(
-                    "body" to TextStyleOverride(font = "Google Sans", axes = mapOf("opsz" to 24.0, "GRAD" to 0.0)),
+                    "body" to TextStyleOverride(font = "Google Sans", axes = mapOf("opsz" to 18.0, "GRAD" to 0.0)),
                 ),
             ),
         ),
@@ -79,7 +79,7 @@ class FontAxesDocumentTest {
     fun `axes round-trip canonically with tags sorted on roles, nodes, and runs`() {
         val doc = axesDocument()
         val printed = CanonicalJson.print(doc)
-        assertTrue(printed.contains("\"axes\": { \"GRAD\": -25, \"opsz\": 24 }"), printed)
+        assertTrue(printed.contains("\"axes\": { \"GRAD\": -25, \"opsz\": 18 }"), printed)
         assertTrue(printed.contains("\"axes\": { \"GRAD\": 0, \"wdth\": 85 }"), printed)
         assertTrue(printed.contains("\"axes\": { \"wdth\": 120 }"), printed)
 

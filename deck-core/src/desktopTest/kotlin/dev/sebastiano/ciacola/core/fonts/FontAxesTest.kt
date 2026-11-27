@@ -182,7 +182,7 @@ class FontAxesTest {
             style = resolver.resolveTextStyle(
                 familyName = "Google Sans",
                 style = TextStyle(fontSize = 40.sp, fontWeight = FontWeight(400)),
-                axes = mapOf("GRAD" to gradValue, "opsz" to 24.0),
+                axes = mapOf("GRAD" to gradValue, "opsz" to 18.0),
             ),
             constraints = Constraints(maxWidth = 900),
         )

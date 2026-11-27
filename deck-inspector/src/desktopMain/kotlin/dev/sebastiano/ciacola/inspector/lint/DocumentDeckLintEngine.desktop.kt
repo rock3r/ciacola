@@ -8,7 +8,6 @@ import dev.sebastiano.ciacola.document.BuildEffectRegistry
 import dev.sebastiano.ciacola.document.CrossSlideGeometry
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeckDocumentCodec
-import dev.sebastiano.ciacola.document.DeckFontAxisLint
 import dev.sebastiano.ciacola.document.DeckSpecimenRegistry
 import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.DocumentIssue
@@ -17,7 +16,6 @@ import dev.sebastiano.ciacola.document.IssueSeverity
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.SegmentPlanner
 import dev.sebastiano.ciacola.document.SlideSpec
-import dev.sebastiano.ciacola.document.render.createDocumentFontResolver
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
 import java.nio.file.Files
 import java.nio.file.Path
@@ -1045,16 +1043,6 @@ class DocumentDeckLintEngine(
                     out.putIfAbsent(m.id, m)
                 }
         }
-    }
-
-    /**
-     * Checks static `axes` against the `fvar` axes of the faces they resolve to, using the same
-     * shared font resolver the renderer uses for [deckDir].
-     */
-    private fun fontAxisIssues(document: DeckDocument, deckDir: Path?): List<DocumentIssue> {
-        if (!DeckFontAxisLint.declaresAxes(document)) return emptyList()
-        val resolver = createDocumentFontResolver(document, deckDir?.toAbsolutePath()?.toString())
-        return DeckFontAxisLint.validate(document, resolver)
     }
 
     private fun mapDocumentIssue(
