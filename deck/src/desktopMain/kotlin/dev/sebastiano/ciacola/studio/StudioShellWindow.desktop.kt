@@ -147,7 +147,7 @@ internal fun StudioShell(
     val fullscreen = LocalPresentingFullscreen.current
     SideEffect {
         if (workspace.overviewOpen != overviewOpen) workspace.overviewOpen = overviewOpen
-        if (workspace.isFullscreenPresenting != fullscreen) workspace.isFullscreenPresenting = fullscreen
+        workspace.syncFullscreenPresenting(fullscreen)
     }
     val chromeVisible = isStudioChromeVisible(workspace.mode, overviewOpen, fullscreen)
     val presenting = workspace.mode == StudioMode.Present

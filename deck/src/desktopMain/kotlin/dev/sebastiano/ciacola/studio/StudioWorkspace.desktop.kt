@@ -6,6 +6,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -183,6 +184,41 @@ class StudioWorkspaceController(
     var isFullscreenPresenting: Boolean by mutableStateOf(false)
         internal set
 
+    private var presenterVisibleProviderState: () -> Boolean by mutableStateOf({ false })
+
+    /** Reports whether the companion Presenter View window (`F2`) is currently open. */
+    var isPresenterVisibleProvider: () -> Boolean
+        get() = presenterVisibleProviderState
+        set(value) {
+            if (presenterVisibleProviderState !== value) {
+                presenterVisibleProviderState = value
+            }
+        }
+
+    /**
+     * Unified audience-presenting predicate covering Clean Show Mode ([StudioMode.Present]),
+     * fullscreen presenting, and audience presenting with Presenter View open.
+     */
+    val isAudiencePresenting: Boolean
+        get() = mode == StudioMode.Present || isFullscreenPresenting || isPresenterVisibleProvider()
+
+    /**
+     * `true` when edit-time timeline playhead/location/snapshot syncing should pause because
+     * presenting is active and the timeline is not visibly shown for editing.
+     */
+    val isTimelineBackgroundSyncPaused: Boolean
+        get() = mode == StudioMode.Present ||
+            isFullscreenPresenting ||
+            (isPresenterVisibleProvider() && !isStudioOpen)
+
+    internal fun syncFullscreenPresenting(fullscreen: Boolean) {
+        if (isFullscreenPresenting == fullscreen) return
+        isFullscreenPresenting = fullscreen
+        if (fullscreen) {
+            lintController.pauseForPresenting()
+        }
+    }
+
     /** Reports whether the Story stage currently owns keyboard focus (guards stage-local Enter-to-edit). */
     var isStageFocusedProvider: () -> Boolean = { false }
 
@@ -271,9 +307,9 @@ class StudioWorkspaceController(
     val isAppBarActive: Boolean
         get() = mode != StudioMode.Present && !overviewOpen
 
-    /** Stage clicks select nodes in Edit mode on either inspector tab (never while reviewing). */
+    /** Stage clicks select nodes in Edit mode on either inspector tab (never while reviewing or fullscreen presenting). */
     val isElementPickingEnabled: Boolean
-        get() = isStudioOpen && mode == StudioMode.Edit
+        get() = isStudioOpen && mode == StudioMode.Edit && !isFullscreenPresenting
 
     val isDesignEditorVisible: Boolean
         get() = themeSheetOpen || designSidecarVisibleProvider()
@@ -346,6 +382,7 @@ class StudioWorkspaceController(
             }
 
             StudioMode.Present -> {
+                lintController.pauseForPresenting()
                 onCaptureReviewTargetNodeId?.invoke(null)
                 cancelAnyActiveGesture()
                 elementController.cancelInlineTextEdit()
@@ -362,6 +399,7 @@ class StudioWorkspaceController(
 
     /** Records an externally entered Clean Show Mode (e.g. the Presenter readiness banner). */
     fun markPresentMode() {
+        lintController.pauseForPresenting()
         themeSheetOpen = false
         issuesDockOpen = false
         mode = StudioMode.Present
@@ -743,7 +781,8 @@ fun isInspectorCollapsedForWidth(shellWidthDp: Float, overrideCollapsed: Boolean
 }
 
 /**
- * Synchronizes the active slide/beat into the element inspector, the specimen keyboard controller,
+ * Synchronizes lint pause/resume while presenting, active slide/beat into the timeline and element
+ * inspector (paused while presenting with the timeline closed), the specimen keyboard controller,
  * sidecar folding, Present-mode bookkeeping, and bidirectional stage ⇄ timeline selection.
  */
 @Composable
@@ -752,18 +791,38 @@ fun StudioWorkspaceSyncEffects(
     activeSlideId: String?,
     activeBeatIndex: Int,
     animatic: Animatic? = null,
+    activeSceneIndex: Int? = null,
+    lintResumeScope: CoroutineScope = rememberCoroutineScope(),
 ) {
     val studioOpen = workspace.isStudioOpen
+    val isAudiencePresenting = workspace.isAudiencePresenting
+    val pauseTimelineSync = workspace.isTimelineBackgroundSyncPaused
+    val lintController = workspace.lintController
+    val timelineController = workspace.timelineController
+
+    LaunchedEffect(lintController, isAudiencePresenting) {
+        lintController.setPaused(paused = isAudiencePresenting, resumeScope = lintResumeScope)
+    }
 
     LaunchedEffect(activeSlideId) {
         workspace.onActiveSlideChanged?.invoke(activeSlideId)
+        workspace.keyboardController?.onActiveSlideChanged(activeSlideId)
     }
 
-    LaunchedEffect(activeSlideId, activeBeatIndex) {
-        if (activeSlideId != null) {
+    LaunchedEffect(timelineController, activeSlideId, activeSceneIndex, activeBeatIndex, pauseTimelineSync) {
+        if (!pauseTimelineSync && activeSceneIndex != null) {
+            timelineController.updatePresentedLocation(
+                slideId = activeSlideId,
+                sceneIndex = activeSceneIndex,
+                beatIndex = activeBeatIndex,
+            )
+        }
+    }
+
+    LaunchedEffect(activeSlideId, activeBeatIndex, pauseTimelineSync) {
+        if (!pauseTimelineSync && activeSlideId != null) {
             workspace.elementController.selectLocation(activeSlideId, activeBeatIndex)
         }
-        workspace.keyboardController?.onActiveSlideChanged(activeSlideId)
     }
 
     LaunchedEffect(studioOpen) {

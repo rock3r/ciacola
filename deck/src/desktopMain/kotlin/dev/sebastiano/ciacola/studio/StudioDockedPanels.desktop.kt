@@ -265,6 +265,7 @@ fun StudioBottomIssuesDockBody(
                 )
             },
             compactHorizontal = true,
+            auditScope = scope,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -313,6 +314,7 @@ fun StudioIssuesDock(
                         beatIndex = issue.beatIndex,
                     )
                 },
+                auditScope = scope,
                 modifier = Modifier.fillMaxSize(),
             )
         }

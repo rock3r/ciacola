@@ -353,15 +353,16 @@ private fun ApplicationScope.CiacolaStudioApplication(
             reducedMotionProvider = { latestReducedMotion },
         )
     }
-    LaunchedEffect(timelineController, effectiveReducedMotion, resolvedThemeName) {
-        timelineController.refreshSnapshot()
-    }
 
     val reviewStageCoordinator = rememberReviewStageCoordinator()
     val keyboardController = remember(activeDeck.id) { DocumentKeyboardCaptureController() }
     val stageDragPreview = remember(activeDeck.id) { StageDragPreview() }
     val stageInspectionRegistry = remember(activeDeck.id) { StageInspectionRegistry() }
     val stageInteractiveRegistry = remember(activeDeck.id) { StageInteractiveRegistry() }
+
+    var presenterWindowHolder by remember { mutableStateOf<PresenterWindow?>(null) }
+    var exportActionsHolder by remember { mutableStateOf<DesktopExportActions?>(null) }
+    val isPresenterVisibleProvider = remember { { presenterWindowHolder?.visible == true } }
 
     var workspaceHolder by remember { mutableStateOf<StudioWorkspaceController?>(null) }
     val studioWorkspace = remember(rootStoryboardDir) {
@@ -385,10 +386,14 @@ private fun ApplicationScope.CiacolaStudioApplication(
             newSyncController = syncController,
             newKeyboardController = keyboardController,
         )
+        it.isPresenterVisibleProvider = isPresenterVisibleProvider
         it.onInspectorWidthPersisted = { widthDp ->
             persistInspectorWidthDp(rootStoryboardDir, widthDp)
         }
         workspaceHolder = it
+    }
+    LaunchedEffect(timelineController, effectiveReducedMotion, resolvedThemeName, studioWorkspace.isTimelineBackgroundSyncPaused) {
+        if (!studioWorkspace.isTimelineBackgroundSyncPaused) timelineController.refreshSnapshot()
     }
 
     val assetsRootDir: String? = remember(deckSource, activeDeck) {
@@ -426,8 +431,6 @@ private fun ApplicationScope.CiacolaStudioApplication(
         },
         subCompositionScrubMillis = { timelineController.subCompositionScrubMillis },
     )
-    var presenterWindowHolder by remember { mutableStateOf<PresenterWindow?>(null) }
-    var exportActionsHolder by remember { mutableStateOf<DesktopExportActions?>(null) }
     val presenterVisible = presenterWindowHolder?.visible == true
     val liveSession = remember(store, activeDeck.id) { newPresentSession() }
     val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible) {
@@ -568,7 +571,12 @@ private fun ApplicationScope.CiacolaStudioApplication(
         )
     }
 
-    TimelineAnimaticSyncEffects(timelineController, animatic, appScope)
+    TimelineAnimaticSyncEffects(
+        timelineController = timelineController,
+        animatic = animatic,
+        appScope = appScope,
+        paused = studioWorkspace.isTimelineBackgroundSyncPaused,
+    )
 
     AutoAdvanceEffect(
         animatic = animatic,
@@ -749,18 +757,13 @@ private fun ApplicationScope.CiacolaStudioApplication(
     val activeSceneIndex = animatic.presentedIndex.sceneIndex.coerceAtLeast(0)
     val activeBeatIndex = animatic.presentedIndex.frameIndex.coerceAtLeast(0)
     val activeSlideId = activeNonSkipped.getOrNull(activeSceneIndex)?.id
-    LaunchedEffect(timelineController, activeSlideId, activeSceneIndex, activeBeatIndex) {
-        timelineController.updatePresentedLocation(
-            slideId = activeSlideId,
-            sceneIndex = activeSceneIndex,
-            beatIndex = activeBeatIndex,
-        )
-    }
     StudioWorkspaceSyncEffects(
         workspace = studioWorkspace,
         activeSlideId = activeSlideId,
         activeBeatIndex = activeBeatIndex,
         animatic = animatic,
+        activeSceneIndex = activeSceneIndex,
+        lintResumeScope = appScope,
     )
 
     val themeWindow = rememberDocumentThemeInspectorWindow(
@@ -807,6 +810,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         isLinterShownProvider = { studioWorkspace.isLinterVisible },
         onToggleLinter = { studioWorkspace.toggleDeckLinter() },
         onPreviewKeyHandler = { ev -> studioWorkspace.handleStudioPreviewKey(ev, allowStageAuthoringShortcuts = false) },
+        auditScope = appScope,
     ).also {
         if (lintWindowHolder != null && lintWindowHolder !== it) {
             it.visible = prevLintVisible
@@ -964,6 +968,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
     val restoreStageFocus: () -> Unit = {
         runCatching { reviewStageCoordinator.stageFocusRequester.requestFocus() }
     }
+    val isAudiencePresentingProvider = remember(studioWorkspace) { { studioWorkspace.isAudiencePresenting } }
     wireReviewAndWorkspaceCallbacks(
         reviewStageCoordinator = reviewStageCoordinator,
         stageInspectionRegistry = stageInspectionRegistry,
@@ -971,11 +976,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         reviewWindowHolderProvider = { reviewWindowHolder },
         appScope = appScope,
         isAnyTextInputActive = isAnyTextInputActive,
-        isAudiencePresentingProvider = {
-            studioWorkspace.mode == StudioMode.Present ||
-                studioWorkspace.isFullscreenPresenting ||
-                presenterWindowHolder?.visible == true
-        },
+        isAudiencePresentingProvider = isAudiencePresentingProvider,
         closeAuthoringChrome = ::closeAuthoringChrome,
         restoreStageFocus = restoreStageFocus,
     )
@@ -1052,9 +1053,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
             pendingCloseAction = null
             action()
         },
-        isAudiencePresentingProvider = {
-            studioWorkspace.mode == StudioMode.Present || presenterWindowHolder?.visible == true
-        },
+        isAudiencePresentingProvider = isAudiencePresentingProvider,
     )
 
     // Outermost first: the shell sits directly outside the timeline so the App Bar spans the stage

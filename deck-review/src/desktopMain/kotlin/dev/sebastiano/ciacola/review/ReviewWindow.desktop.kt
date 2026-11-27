@@ -80,6 +80,7 @@ class SlideReviewWindow(
         }
     var highlightAgentConfigBanner: Boolean by mutableStateOf(false)
         internal set
+    internal var pollingWasPausedForPresenting: Boolean = false
 
     fun openForAgentConfiguration() {
         highlightAgentConfigBanner = true
@@ -281,7 +282,19 @@ private fun ReviewOuterWindowOverlay(
         coordinator.dismissActivePopups(fromEscapeKey = fromEscapeKey)
     }
 
-    LaunchedEffect(store) {
+    val isPollingPaused = LocalPresentingFullscreen.current ||
+        LocalAudiencePresenting.current ||
+        coordinator.isAudiencePresentingProvider()
+    LaunchedEffect(windowController, store, isPollingPaused) {
+        if (isPollingPaused) {
+            windowController.pollingWasPausedForPresenting = true
+            return@LaunchedEffect
+        }
+        if (windowController.pollingWasPausedForPresenting) {
+            windowController.pollingWasPausedForPresenting = false
+            store.reloadFromDisk()
+            store.reloadClaims()
+        }
         while (true) {
             delay(250)
             store.reloadFromDisk()
