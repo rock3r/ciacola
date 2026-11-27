@@ -43,7 +43,10 @@ import dev.sebastiano.ciacola.document.DeckDocumentStore
 import dev.sebastiano.ciacola.inspector.design.DocumentThemeInspectorController
 import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorController
 import dev.sebastiano.ciacola.inspector.element.DocumentElementInspectorUi
+import dev.sebastiano.ciacola.inspector.element.DocumentStageDirectEditOverlay
 import dev.sebastiano.ciacola.inspector.lint.DocumentDeckLintController
+import dev.sebastiano.ciacola.review.ReviewStageCoordinator
+import dev.sebastiano.ciacola.review.rememberReviewStageCoordinator
 import dev.sebastiano.ciacola.timeline.DocumentTimelineController
 import dev.sebastiano.ciacola.timeline.DocumentTimelineSelection
 import dev.sebastiano.ciacola.timeline.DocumentTimelineWindow
@@ -748,6 +751,83 @@ class StudioAppBarAndShellTest {
         onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
         waitForIdle()
         assertEquals(editableTextNode.id, elementController.inlineEditingNodeId)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun f3ReviewInspectMidEditCancelsActiveSessionWithoutStrandingEditor() = runComposeUiTest {
+        val store = createLoadedTestDeckStore()
+        val specimens = AllDocumentDecks.foundation.specimens
+        lateinit var elementController: DocumentElementInspectorController
+        lateinit var workspace: StudioWorkspaceController
+        lateinit var coordinator: ReviewStageCoordinator
+        val hostFocus = FocusRequester()
+
+        setContent {
+            coordinator = rememberReviewStageCoordinator()
+            val timelineController = remember { DocumentTimelineController(store = store, specimens = specimens) }
+            val timelineWindow = rememberDocumentTimelineWindow(controller = timelineController, initialDocked = true)
+            elementController = remember { DocumentElementInspectorController(store = store, specimens = specimens) }
+            workspace = remember {
+                StudioWorkspaceController(
+                    store = store,
+                    elementController = elementController,
+                    themeController = DocumentThemeInspectorController(store = store),
+                    timelineController = timelineController,
+                    lintController = DocumentDeckLintController(store = store, specimens = specimens),
+                ).apply {
+                    this.timelineWindow = timelineWindow
+                    isStageFocusedProvider = { true }
+                    inlineEditBlockedProvider = {
+                        themeSheetOpen || coordinator.inspectModeEnabled ||
+                            coordinator.pendingSelection != null || coordinator.selectedPinCommentId != null
+                    }
+                    onToggleReviewInspect = { coordinator.inspectModeEnabled = !coordinator.inspectModeEnabled }
+                }
+            }
+            val reviewOwnsClick = coordinator.inspectModeEnabled ||
+                coordinator.pendingSelection != null ||
+                coordinator.selectedPinCommentId != null
+            CiacolaJewelTheme(isDark = true) {
+                Box(
+                    Modifier
+                        .size(900.dp, 600.dp)
+                        .onPreviewKeyEvent { workspace.handleStudioPreviewKey(it) },
+                ) {
+                    DocumentStageDirectEditOverlay(
+                        controller = elementController,
+                        enabled = workspace.isElementPickingEnabled && !reviewOwnsClick,
+                        inlineEditBlockedProvider = { workspace.inlineEditBlockedProvider() },
+                    ) {
+                        Box(Modifier.fillMaxSize().focusRequester(hostFocus).focusable().testTag("inspector-host"))
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        val editableTextNode = store.document.slides.first().nodes.first { it.text != null }
+        runOnIdle { elementController.selectNode(editableTextNode.id) }
+        waitForIdle()
+        onNodeWithTag("inspector-host").requestFocus()
+        waitForIdle()
+
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(editableTextNode.id, elementController.inlineEditingNodeId)
+        onNodeWithTag("ciacola-doc-inline-text-popover").assertExists()
+
+        // Modeling F3 pressed inside the Review sidecar cancels the open inline editor when overlay disables.
+        runOnIdle { coordinator.inspectModeEnabled = true }
+        waitForIdle()
+        onNodeWithTag("ciacola-doc-inline-text-popover").assertDoesNotExist()
+        assertEquals(null, elementController.inlineEditingNodeId)
+
+        // Stage shortcuts (including F3) must stay responsive.
+        onNodeWithTag("inspector-host").requestFocus()
+        waitForIdle()
+        onNodeWithTag("inspector-host").performKeyInput { pressKey(Key.F3) }
+        waitForIdle()
+        assertFalse(coordinator.inspectModeEnabled)
     }
 
     @OptIn(ExperimentalTestApi::class)
