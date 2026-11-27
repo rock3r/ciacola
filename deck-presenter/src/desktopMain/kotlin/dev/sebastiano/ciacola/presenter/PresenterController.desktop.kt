@@ -725,11 +725,17 @@ class PresenterController(
 
     /**
      * Bubble-phase key handler on the Presenter window root: runs after focused child buttons had
-     * first crack at `Space` / `Enter`, handling timer (`T`/`R`), curtains (`B`/`W`), and smooth
-     * deck navigation.
+     * first crack at `Space` / `Enter`, handling timer (`T`/`R`), curtains (`B`/`W`), stage clips
+     * (`P` pauses/resumes, `Shift+R` restarts), and smooth deck navigation.
      */
     fun handlePresenterBubbleKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean {
         if (event.type != KeyEventType.KeyDown || jumpDialogOpen || isEditingNotes) return false
+
+        val onlyShift = event.isShiftPressed && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed
+        if (onlyShift && event.key == Key.R && isShowModeActive()) {
+            DeckClipControls.requestRestart()
+            return true
+        }
 
         val noModifiers = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed
         if (!noModifiers) return false
@@ -766,6 +772,15 @@ class PresenterController(
             Key.W -> {
                 if (isShowModeActive()) {
                     toggleCurtain(StageCurtain.Whiteout)
+                    true
+                } else {
+                    false
+                }
+            }
+
+            Key.P -> {
+                if (isShowModeActive()) {
+                    DeckClipControls.requestTogglePause()
                     true
                 } else {
                     false

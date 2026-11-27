@@ -196,6 +196,21 @@ class PresenterWindowAndStageAidsTest {
         onNodeWithTag("ciacola-presenter-dashboard").performKeyInput { pressKey(Key.R) }
         waitForIdle()
         assertEquals(TimerRunState.Stopped, controller.timer.runState)
+
+        // Clip controls from the speaker window: P pauses/resumes, Shift+R restarts (R stays the timer reset).
+        val pauseEpoch = dev.sebastiano.ciacola.document.DeckClipControls.pauseEpoch
+        val restartEpoch = dev.sebastiano.ciacola.document.DeckClipControls.restartEpoch
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput { pressKey(Key.P) }
+        waitForIdle()
+        assertEquals(pauseEpoch + 1, dev.sebastiano.ciacola.document.DeckClipControls.pauseEpoch)
+        onNodeWithTag("ciacola-presenter-dashboard").performKeyInput {
+            keyDown(Key.ShiftLeft)
+            pressKey(Key.R)
+            keyUp(Key.ShiftLeft)
+        }
+        waitForIdle()
+        assertEquals(restartEpoch + 1, dev.sebastiano.ciacola.document.DeckClipControls.restartEpoch)
+        assertEquals(TimerRunState.Stopped, controller.timer.runState)
         onNodeWithTag("ciacola-presenter-dashboard").performKeyInput {
             keyDown(Key.MetaLeft)
             pressKey(Key.Equals)
