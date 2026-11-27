@@ -51,7 +51,7 @@ license.
 
 | Component | Artifact(s) / Version | Copyright / Project | License | Upstream |
 |---|---|---|---|---|
-| **Spectre** | `dev.sebastiano.spectre:spectre-{core,testing,recording,recording-macos}:0.9.0` (`:deck` E2E tests) | Copyright Sebastiano Poggi | Apache-2.0 | <https://github.com/rock3r/spectre> |
+| **Spectre** | `dev.sebastiano.spectre:spectre-{core,testing,recording,recording-macos}:0.10.0` (`:deck` E2E tests) | Copyright Sebastiano Poggi | Apache-2.0 | <https://github.com/rock3r/spectre> |
 | **JUnit Jupiter** | `org.junit.jupiter:junit-jupiter-api:5.11.4` | Copyright JUnit Team | EPL-2.0 | <https://junit.org/> |
 | **Dokka** | `org.jetbrains.dokka:2.2.0` | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/Kotlin/dokka> |
 | **Binary Compatibility Validator** | `org.jetbrains.kotlinx.binary-compatibility-validator:0.18.1` | JetBrains s.r.o. and contributors | Apache-2.0 | <https://github.com/Kotlin/binary-compatibility-validator> |
