@@ -77,7 +77,7 @@ val sckRecording = providers.gradleProperty("ciacola.sckRecording")
     .getOrElse(false)
 val desktopTestTask = tasks.named<Test>("desktopTest")
 tasks.register<Test>("spectreTest") {
-    description = "Runs real-window Spectre 0.9.0 E2E tests on JetBrains Runtime 25."
+    description = "Runs real-window Spectre 0.10.0 E2E tests on JetBrains Runtime 25."
     group = "verification"
     maxHeapSize = "3g"
     javaLauncher.set(jbr25)
