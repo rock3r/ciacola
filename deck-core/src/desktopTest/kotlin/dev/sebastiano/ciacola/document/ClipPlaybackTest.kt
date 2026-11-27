@@ -104,6 +104,39 @@ class ClipPlaybackTest {
     }
 
     @Test
+    fun `holding a scrub freezes the frame and releasing resumes from it`() {
+        val head = ClipPlayhead()
+        head.enterBeat(0, ClipPlayback.stateAtBeat(image, emptyList(), 0), window)
+        head.advance(1000.0, window)
+        head.beginScrub()
+        head.seek(4000.0, window)
+        head.advance(500.0, window)
+        assertEquals(4000.0, head.positionMs, "held while the button is down")
+        head.endScrub()
+        head.advance(500.0, window)
+        assertEquals(4500.0, head.positionMs)
+        assertTrue(head.playing)
+    }
+
+    @Test
+    fun `toggling pause stops and resumes, and replays a clip held at its end`() {
+        val head = ClipPlayhead()
+        head.enterBeat(0, ClipPlayback.stateAtBeat(image, emptyList(), 0), window)
+        head.advance(1000.0, window)
+        head.togglePause(window)
+        head.advance(500.0, window)
+        assertEquals(1000.0, head.positionMs)
+        head.togglePause(window)
+        head.advance(500.0, window)
+        assertEquals(1500.0, head.positionMs)
+        head.advance(60_000.0, window)
+        head.togglePause(window)
+        head.togglePause(window)
+        assertEquals(0.0, head.positionMs, "resuming at the end starts over")
+        assertTrue(head.playing)
+    }
+
+    @Test
     fun `end of trim holds or loops`() {
         val head = ClipPlayhead()
         val trimmed = ClipWindow(startMs = 1000.0, endMs = 2000.0, loop = false)

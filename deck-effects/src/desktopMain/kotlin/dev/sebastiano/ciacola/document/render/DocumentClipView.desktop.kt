@@ -37,9 +37,13 @@ import dev.sebastiano.ciacola.document.ClipPlayhead
 import dev.sebastiano.ciacola.document.ClipWindow
 import dev.sebastiano.ciacola.document.DeckClipControls
 import dev.sebastiano.ciacola.document.ImagePayload
+import dev.sebastiano.ciacola.document.RenderSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runInterruptible
+
+/** How often a mirroring preview looks for the stage clip's playhead until the stage has decoded it. */
+private const val MIRROR_LOOKUP_INTERVAL_MS = 100L
 
 /** How long the scrub bar stays after the pointer leaves the clip, before it fades out. */
 private const val SCRUB_BAR_LINGER_MS = 1000L
@@ -66,6 +70,17 @@ internal fun DocumentClipView(
     val payload = playback.payload
     val info = remember(deckId, src, assetsRootDir) { DocumentAssetLoader.probeAnimation(deckId, src, assetsRootDir) }
         ?: return false
+    val mirrorSource = playback.session.clipMirrorSource
+    if (!playback.live && mirrorSource != null) {
+        val frames by produceState<List<AnimationFrame>?>(null, deckId, src, assetsRootDir, payload.maxPixels, info) {
+            value = runInterruptible(Dispatchers.IO) {
+                DocumentAssetLoader.loadAnimation(deckId, src, assetsRootDir, payload.maxPixels)
+            }
+        }
+        val decoded = frames ?: return false
+        MirroredClip(decoded, src, contentScale, colorFilter, playback, mirrorSource, modifier)
+        return true
+    }
     if (!playback.live) {
         val poster = posterMs(payload)
         // The static path already draws frame zero; only decode when the poster is a later frame.
@@ -108,13 +123,21 @@ private fun LiveClip(
         if (beat != null && beatState != null) head.enterBeat(beat, beatState, window)
     }
     DisposableEffect(head) {
-        onDispose { head.detach() }
+        onDispose {
+            head.endScrub()
+            head.detach()
+        }
     }
 
     val restartEpoch = DeckClipControls.restartEpoch
     val composedEpoch = remember(head) { restartEpoch }
     LaunchedEffect(restartEpoch) {
         if (restartEpoch != composedEpoch) head.restart(window)
+    }
+    val pauseEpoch = DeckClipControls.pauseEpoch
+    val composedPauseEpoch = remember(head) { pauseEpoch }
+    LaunchedEffect(pauseEpoch) {
+        if (pauseEpoch != composedPauseEpoch) head.togglePause(window)
     }
 
     val heldAtEnd = !window.loop && head.positionMs >= window.endMs
@@ -129,14 +152,40 @@ private fun LiveClip(
         }
     }
 
-    val shownMs = if (head.showPoster) posterMs(payload).toDouble() else head.positionMs.coerceAtMost(window.endMs - 0.5)
-    val bitmap = frames[frameIndexAt(frames, shownMs)].first
+    val bitmap = frames[frameIndexAt(frames, shownMs(head, payload, window))].first
     val scrubModifier = if (playback.scrubbable) {
         Modifier.clipScrubbing(head, window, bitmap, contentScale)
     } else {
         Modifier
     }
     ClipImage(bitmap, src, contentScale, colorFilter, modifier.then(scrubModifier))
+}
+
+/**
+ * Shows the frame of [source]'s playhead for the same node (the presenter's `Current` preview
+ * mirroring the stage): no ticker and no scrubbing of its own, and the poster until the stage clip
+ * has decoded.
+ */
+@Composable
+private fun MirroredClip(
+    frames: List<AnimationFrame>,
+    src: String,
+    contentScale: ContentScale,
+    colorFilter: ColorFilter?,
+    playback: DocumentImagePlayback,
+    source: RenderSession,
+    modifier: Modifier,
+) {
+    val payload = playback.payload
+    val window = remember(payload, frames) { ClipWindow.of(payload, animationDurationMs(frames)) }
+    val head by produceState<ClipPlayhead?>(null, source, playback.retainKey) {
+        while (value == null) {
+            value = source.retainedOrNull<ClipPlayhead>(playback.retainKey)
+            if (value == null) delay(MIRROR_LOOKUP_INTERVAL_MS)
+        }
+    }
+    val shown = head?.let { shownMs(it, payload, window) } ?: posterMs(payload).toDouble()
+    ClipImage(frames[frameIndexAt(frames, shown)].first, src, contentScale, colorFilter, modifier)
 }
 
 @Composable
@@ -158,7 +207,8 @@ private fun ClipImage(
 
 /**
  * Show-mode scrubbing: hovering reveals a thin progress bar along the bottom of the drawn image,
- * clicking or dragging seeks, and the bar fades out [SCRUB_BAR_LINGER_MS] after the pointer leaves.
+ * clicking or dragging seeks and holds that frame while the button is down (playback carries on
+ * from it on release), and the bar fades out [SCRUB_BAR_LINGER_MS] after the pointer leaves.
  */
 @Composable
 private fun Modifier.clipScrubbing(
@@ -197,6 +247,7 @@ private fun Modifier.clipScrubbing(
                         PointerEventType.Press -> {
                             hovered = true
                             dragging = true
+                            head.beginScrub()
                             seekTo(change.position.x)
                             change.consume()
                         }
@@ -210,6 +261,7 @@ private fun Modifier.clipScrubbing(
                         PointerEventType.Release -> {
                             if (dragging) change.consume()
                             dragging = false
+                            head.endScrub()
                         }
                     }
                 }
@@ -246,3 +298,6 @@ internal fun drawnImageRect(intrinsic: Size, box: Size, contentScale: ContentSca
 }
 
 private fun posterMs(payload: ImagePayload): Int = payload.posterMs ?: payload.startMs ?: 0
+
+private fun shownMs(head: ClipPlayhead, payload: ImagePayload, window: ClipWindow): Double =
+    if (head.showPoster) posterMs(payload).toDouble() else head.positionMs.coerceAtMost(window.endMs - 0.5)

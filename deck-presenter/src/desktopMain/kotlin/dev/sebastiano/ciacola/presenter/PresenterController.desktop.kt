@@ -650,6 +650,11 @@ class PresenterController(
                 return true
             }
 
+            Key.P -> {
+                DeckClipControls.requestTogglePause()
+                return true
+            }
+
             Key.DirectionRight,
             Key.DirectionDown,
             Key.PageDown,

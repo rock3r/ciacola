@@ -164,15 +164,43 @@ class ClipPlayhead {
         apply(beat, state, window.clamp(position))
     }
 
+    /** `true` while the mouse button is held on the clip: the frame under the pointer stays put. */
+    var scrubbing: Boolean by mutableStateOf(false)
+        private set
+
     /** Moves the playhead to [ms] (mouse scrubbing); the playing state is kept. */
     fun seek(ms: Double, window: ClipWindow) {
         positionMs = window.clamp(ms)
         showPoster = false
     }
 
+    /** Freezes playback while the mouse button is held, so a scrubbed frame can be shown. */
+    fun beginScrub() {
+        scrubbing = true
+    }
+
+    /** Releases the mouse button: playback carries on from the scrubbed position. */
+    fun endScrub() {
+        scrubbing = false
+    }
+
+    /**
+     * Pauses a playing clip or resumes a paused one (the show-mode `P` key). Resuming a clip held
+     * on its last frame plays it again from the trim start.
+     */
+    fun togglePause(window: ClipWindow) {
+        if (playing && !showPoster) {
+            playing = false
+            return
+        }
+        if (!window.loop && positionMs >= window.endMs) positionMs = window.startMs
+        playing = true
+        showPoster = false
+    }
+
     /** Advances by [elapsedMs] of wall time; non-looping clips hold their last frame at the end. */
     fun advance(elapsedMs: Double, window: ClipWindow) {
-        if (!playing || showPoster || elapsedMs <= 0.0) return
+        if (!playing || showPoster || scrubbing || elapsedMs <= 0.0) return
         val next = positionMs + elapsedMs * rate
         positionMs = when {
             next < window.endMs -> next
@@ -201,6 +229,14 @@ class ClipPlayhead {
 object DeckClipControls {
     var restartEpoch: Int by mutableIntStateOf(0)
         private set
+
+    /** Bumped by the show-mode `P` key: clips on the shown slide pause or resume. */
+    var pauseEpoch: Int by mutableIntStateOf(0)
+        private set
+
+    fun requestTogglePause() {
+        pauseEpoch++
+    }
 
     fun requestRestart() {
         restartEpoch++

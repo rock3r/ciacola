@@ -14,6 +14,7 @@ import dev.sebastiano.ciacola.document.ImagePayload
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.PlaybackAction
 import dev.sebastiano.ciacola.document.RenderPurpose
+import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.SlideSpec
 import java.io.File
 import java.nio.file.Files
@@ -62,9 +63,14 @@ class DocumentClipPlaybackTest {
         )
     }
 
-    private fun harness(doc: DeckDocument, purpose: RenderPurpose = RenderPurpose.Present) = DocumentStageHarness(
+    private fun harness(
+        doc: DeckDocument,
+        purpose: RenderPurpose = RenderPurpose.Present,
+        session: RenderSession? = null,
+    ) = DocumentStageHarness(
         initialDocument = doc,
         initialConfig = DocumentRenderConfig(baseDensity = 1f, fontsDir = bundledFontsDirPath(), assetsRootDir = assetsDir.absolutePath),
+        existingSession = session,
         purpose = purpose,
     )
 
@@ -115,21 +121,46 @@ class DocumentClipPlaybackTest {
     }
 
     @Test
-    fun `scrubbing seeks and the next beat continues from there`() {
+    fun `scrubbing holds the frame until release and the next beat continues from there`() {
         val builds = listOf(Build.Playback(beat = 1, action = PlaybackAction.Play))
         harness(deck(ImagePayload("clip.webp", fit = "fill"), builds)).use { h ->
             val head = h.awaitDecode()
-            h.onUiThread {
-                h.scene.sendPointerEvent(PointerEventType.Enter, Offset(h.width * 0.65f, h.height * 0.5f))
-                h.scene.sendPointerEvent(PointerEventType.Press, Offset(h.width * 0.65f, h.height * 0.5f))
-                h.scene.sendPointerEvent(PointerEventType.Release, Offset(h.width * 0.65f, h.height * 0.5f))
+            h.advanceToRest(AdvanceDirection.Forward)
+            val beat = h.animatic.currentIndex
+            fun send(type: PointerEventType, fraction: Float) = h.onUiThread {
+                h.scene.sendPointerEvent(type, Offset(h.width * fraction, h.height * 0.5f))
             }
-            h.renderStep(1_000_000L)
-            assertEquals(650.0, head.positionMs, 1.0)
+            send(PointerEventType.Enter, 0.65f)
+            send(PointerEventType.Press, 0.65f)
+            repeat(20) { h.renderStep(10_000_000L) }
+            assertEquals(650.0, head.positionMs, 1.0, "held while the button is down")
             assertColor(BLUE, h.probe(), "scrubbed frame")
+            send(PointerEventType.Move, 0.2f)
+            repeat(20) { h.renderStep(10_000_000L) }
+            assertEquals(200.0, head.positionMs, 1.0, "dragging moves the held frame")
+            send(PointerEventType.Release, 0.2f)
+            repeat(10) { h.renderStep(10_000_000L) }
+            assertTrue(head.positionMs > 200.0 && head.playing, "plays on after release, at ${head.positionMs}")
+            assertEquals(beat, h.animatic.currentIndex, "scrubbing never changes beat")
 
             h.advanceToRest(AdvanceDirection.Forward)
-            assertTrue(head.positionMs >= 650.0, "continues from the scrub, at ${head.positionMs}")
+            assertTrue(head.positionMs > 200.0, "continues from the scrub, at ${head.positionMs}")
+        }
+    }
+
+    @Test
+    fun `pause request toggles the clip`() {
+        harness(deck(ImagePayload("clip.webp", fit = "fill"), emptyList())).use { h ->
+            val head = h.awaitDecode()
+            repeat(20) { h.renderStep(10_000_000L) }
+            h.onUiThread { DeckClipControls.requestTogglePause() }
+            h.renderStep(1_000_000L)
+            val paused = head.positionMs
+            repeat(20) { h.renderStep(10_000_000L) }
+            assertEquals(paused, head.positionMs, "paused")
+            h.onUiThread { DeckClipControls.requestTogglePause() }
+            repeat(20) { h.renderStep(10_000_000L) }
+            assertTrue(head.positionMs > paused, "resumed")
         }
     }
 
@@ -161,6 +192,31 @@ class DocumentClipPlaybackTest {
             val head = h.awaitDecode()
             repeat(120) { h.renderStep(10_000_000L) }
             assertTrue(head.positionMs < 1000.0, "wrapped, at ${head.positionMs}")
+        }
+    }
+
+    @Test
+    fun `a mirroring preview shows the stage clip's frame instead of its poster`() {
+        val builds = listOf(
+            Build.Playback(beat = 1, action = PlaybackAction.Play),
+            Build.Playback(beat = 2, action = PlaybackAction.Pause, atMs = 700),
+        )
+        val doc = deck(ImagePayload("clip.webp", fit = "fill"), builds)
+        harness(doc).use { stage ->
+            stage.awaitDecode()
+            val previewSession = RenderSession.forStill(doc).also { it.clipMirrorSource = stage.session }
+            harness(doc, RenderPurpose.Still, previewSession).use { preview ->
+                stage.advanceToRest(AdvanceDirection.Forward)
+                stage.advanceToRest(AdvanceDirection.Forward)
+                preview.jumpAndSettle(dev.bnorm.storyboard.Storyboard.Index(0, 2))
+                repeat(200) {
+                    preview.renderStep(10_000_000L)
+                    if (preview.probe().contentEquals(BLUE)) return@repeat
+                    Thread.sleep(5)
+                }
+                assertColor(BLUE, preview.probe(), "preview mirrors the stage paused at 700 ms")
+                assertFalse(previewSession.hasRetained(KEY), "the mirror never creates its own playhead")
+            }
         }
     }
 

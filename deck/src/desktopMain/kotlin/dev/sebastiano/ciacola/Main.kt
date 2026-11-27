@@ -430,8 +430,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
     var exportActionsHolder by remember { mutableStateOf<DesktopExportActions?>(null) }
     val presenterVisible = presenterWindowHolder?.visible == true
     val liveSession = remember(store, activeDeck.id) { newPresentSession() }
-    val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible) {
-        if (presenterVisible) newPresentSession() else null
+    val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible, liveSession) {
+        if (presenterVisible) newPresentSession().also { it.clipMirrorSource = liveSession } else null
     }
     val presenterNextSession = remember(store, activeDeck.id, presenterVisible) {
         if (presenterVisible) newPresentSession() else null

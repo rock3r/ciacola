@@ -96,6 +96,7 @@ The Studio shell organizes deck editing around three modes in the centered App B
 | `⌘G` | Presenter | Jump to slide `1..N` |
 | `T` / `R` | Presenter | Start/pause talk timer / reset timer |
 | `R` | Show | Restart the animated images on the current slide (same beat) |
+| `P` | Show | Pause / resume the animated images on the current slide |
 | `⌘-` / `⌘=` | Presenter | Decrease / increase speaker notes font size |
 | `⌥⌘P` | Window | Toggle Easel fullscreen |
 | `⌘⌥1`..`⌘⌥9` | Global | Switch catalog deck |

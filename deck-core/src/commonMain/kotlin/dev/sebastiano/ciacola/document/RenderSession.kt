@@ -176,6 +176,16 @@ class RenderSession private constructor(
     /** Returns `true` if [key] is currently populated in this session's isolated `retained` store. */
     fun hasRetained(key: String): Boolean = key in retainedStore
 
+    /** Returns the retained value for [key] without creating it, or `null`. */
+    @Suppress("UNCHECKED_CAST")
+    fun <T : Any> retainedOrNull(key: String): T? = retainedStore[key] as T?
+
+    /**
+     * Session whose animated-image playheads this session's still mounts show instead of their
+     * poster frame (the presenter's `Current` preview mirrors the stage). Set once at creation.
+     */
+    var clipMirrorSource: RenderSession? = null
+
     /**
      * Returns a stable `movableContentOf` wrapper keyed by [slotKey] (typically
      * `"$nodeId:$specimenRef"`) for exclusive single-owner cross-slide handoffs.
