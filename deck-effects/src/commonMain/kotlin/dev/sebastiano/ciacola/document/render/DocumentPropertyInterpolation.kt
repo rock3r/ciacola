@@ -4,6 +4,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp as lerpColor
 import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.Curve
+import dev.sebastiano.ciacola.document.CurveEvaluator
+import dev.sebastiano.ciacola.document.DeckClock
 import dev.sebastiano.ciacola.document.Fill
 import dev.sebastiano.ciacola.document.FrameSpec
 import dev.sebastiano.ciacola.document.JsonMergePatch
@@ -14,6 +17,9 @@ import dev.sebastiano.ciacola.document.ScaleValue
 import dev.sebastiano.ciacola.document.ShapeGeometry
 import dev.sebastiano.ciacola.document.StrokeSpec
 import dev.sebastiano.ciacola.document.SurfaceSpec
+import dev.sebastiano.ciacola.document.TextPayload
+import dev.sebastiano.ciacola.document.TrackPlan
+import dev.sebastiano.ciacola.document.TransitionSpec
 import dev.sebastiano.ciacola.document.Vec2
 import kotlin.math.abs
 import kotlin.math.max
@@ -466,14 +472,43 @@ private fun colorToHexArgb(color: Color): String {
 private fun lerpDouble(a: Double, b: Double, t: Double): Double = a + (b - a) * t
 
 /**
+ * Whether going from [from] to [to] needs a text morph between the two endpoint layouts. Payloads
+ * that differ only in variable font axes keep the same glyphs, so they re-lay out at rest with
+ * interpolated coordinates instead.
+ */
+internal fun needsTextMorph(from: TextPayload, to: TextPayload): Boolean = from != to && from.copy(axes = to.axes) != to
+
+/**
+ * The payload a travelling text node renders at rest: [to], with axes interpolated along the move
+ * when [from] differs from it only in axes.
+ */
+internal fun restPayloadAlongMove(
+    from: TextPayload,
+    to: TextPayload,
+    moveTrack: TrackPlan?,
+    transitionSpec: TransitionSpec,
+    clock: DeckClock,
+): TextPayload {
+    if (from.axes == to.axes) return to
+    val curve = moveTrack?.curve ?: transitionSpec.phases?.move?.curve ?: transitionSpec.curve ?: Curve.EaseInOut
+    val durMs = (moveTrack?.durationMs ?: clock.effMs.toInt()).coerceAtLeast(1)
+    val elapsedMs = (clock.t - (moveTrack?.startMs ?: 0).toFloat()).coerceIn(0f, durMs.toFloat())
+    val progress = CurveEvaluator.evaluateFraction(curve, elapsedMs / durMs).toDouble()
+    return to.copy(axes = interpolateAxes(from.axes, to.axes, progress))
+}
+
+/**
  * Interpolates per-tag variable font axis coordinates. A tag set on both sides moves smoothly; a
  * tag set on one side only has no known other end (the face's default lives in the font), so it
- * switches at the midpoint like other unpaired properties. Values are rounded to 1/100 of an axis
- * unit, so the same time always yields the same coordinates and reuses the same axis-derived font.
+ * switches at the midpoint like other unpaired properties. Progress snaps to 1/[AXIS_PROGRESS_STEPS]
+ * and values round to 1/100 of an axis unit, so the same time always yields the same coordinates
+ * and one change derives at most `AXIS_PROGRESS_STEPS + 1` fonts however it is scrubbed: each
+ * axis-derived font holds a native copy of the font file for the rest of the session.
  */
-internal fun interpolateAxes(a: Map<String, Double>, b: Map<String, Double>, t: Double): Map<String, Double> {
+internal fun interpolateAxes(a: Map<String, Double>, b: Map<String, Double>, progress: Double): Map<String, Double> {
     if (a == b) return b
     if (a.isEmpty() && b.isEmpty()) return b
+    val t = kotlin.math.round(progress * AXIS_PROGRESS_STEPS) / AXIS_PROGRESS_STEPS
     val out = LinkedHashMap<String, Double>(a.size + b.size)
     for (tag in a.keys + b.keys) {
         val from = a[tag]
@@ -487,6 +522,8 @@ internal fun interpolateAxes(a: Map<String, Double>, b: Map<String, Double>, t: 
     }
     return out
 }
+
+private const val AXIS_PROGRESS_STEPS: Double = 128.0
 
 private fun lerpNullableDouble(a: Double?, b: Double?, t: Double): Double? = when {
     a != null && b != null -> lerpDouble(a, b, t)

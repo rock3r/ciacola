@@ -14,8 +14,11 @@ import dev.sebastiano.ciacola.document.RichTextValue
 import dev.sebastiano.ciacola.document.SegmentPlanner
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.document.TextPayload
+import dev.sebastiano.ciacola.document.TransitionSpec
+import dev.sebastiano.ciacola.document.TransitionType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -29,8 +32,9 @@ class DocumentAxisChangeTest {
         val to = mapOf("wght" to 900.0, "opsz" to 48.0)
         assertEquals(mapOf("wght" to 450.0, "wdth" to 100.0), interpolateAxes(from, to, 0.25))
         assertEquals(mapOf("wght" to 750.0, "opsz" to 48.0), interpolateAxes(from, to, 0.75))
-        // Coordinates are rounded so the same time always yields the same axis-derived font.
-        assertEquals(mapOf("wght" to 300.33), interpolateAxes(mapOf("wght" to 300.0), mapOf("wght" to 301.0), 1.0 / 3.0))
+        // Progress snaps to 1/128 and coordinates round, so a change derives a bounded set of fonts.
+        assertEquals(mapOf("wght" to 300.34), interpolateAxes(mapOf("wght" to 300.0), mapOf("wght" to 301.0), 1.0 / 3.0))
+        assertEquals(interpolateAxes(from, to, 0.5), interpolateAxes(from, to, 0.502))
         assertEquals(to, interpolateAxes(to, to, 0.4))
     }
 
@@ -75,7 +79,7 @@ class DocumentAxisChangeTest {
         val plan = SegmentPlanner.planSegment(doc, "s0", beat = 1)
         val colorResolver = DocumentColorResolver(themeSpec = doc.themes["t"], baseTheme = resolveDeckTheme(doc, "t"))
 
-        fun axesAt(segment: DocSegment, t: Float): Map<String, Double> = DocumentMotionEvaluator.evaluateNode(
+        fun frameAt(segment: DocSegment, t: Float) = DocumentMotionEvaluator.evaluateNode(
             rawNode = slide.nodes[0],
             slide = slide,
             clock = DeckClock(segment, t = t, effMs = 400f),
@@ -84,7 +88,9 @@ class DocumentAxisChangeTest {
             densityValue = 1f,
             colorResolver = colorResolver,
             reducedMotion = false,
-        ).resolvedNode.text!!.axes
+        )
+
+        fun axesAt(segment: DocSegment, t: Float): Map<String, Double> = frameAt(segment, t).resolvedNode.text!!.axes
 
         val beat = DocSegment.Beat("s0", 0)
         assertEquals(mapOf("wght" to 200.0, "wdth" to 100.0), axesAt(DocSegment.Rest("s0", 0), 0f))
@@ -94,5 +100,36 @@ class DocumentAxisChangeTest {
         // Random access: scrubbing back to the same time gives the same coordinates.
         assertEquals(axesAt(beat, 100f), axesAt(beat, 100f))
         assertEquals(axesAt(beat, 300f), axesAt(beat, 300f))
+        // The same glyphs re-lay out with the interpolated axes instead of morphing between endpoints.
+        val midState = frameAt(beat, 200f).textState
+        assertIs<DocumentTextRenderState.Rest>(midState)
+        assertEquals(mapOf("wght" to 500.0, "wdth" to 100.0), midState.payload.axes)
+    }
+
+    @Test
+    fun `a magic move between axes-only differences renders at rest with interpolated axes`() {
+        fun node(wght: Double) = NodeSpec(
+            id = "word",
+            frame = FrameSpec(x = 20.0, y = 20.0, w = 300.0, h = 80.0),
+            text = TextPayload(value = RichTextValue.Plain("Variable"), size = 48.0, axes = mapOf("wght" to wght)),
+        )
+        val state = DocumentMotionEvaluator.resolveTravellingTextRenderState(
+            fromNode = node(200.0),
+            toNode = node(800.0),
+            nodeId = "word",
+            fromEndpointMinWidthPx = null,
+            toEndpointMinWidthPx = null,
+            fromEndpointMaxWidthPx = null,
+            toEndpointMaxWidthPx = null,
+            fromEndpointSurfacePadPx = null,
+            toEndpointSurfacePadPx = null,
+            fallbackFromAvailableWidth = 400.0,
+            fallbackToAvailableWidth = 400.0,
+            moveTrack = null,
+            clock = DeckClock(DocSegment.Beat("s0", 0), t = 200f, effMs = 400f),
+            transitionSpec = TransitionSpec(type = TransitionType.MagicMove, curve = Curve.Linear),
+        )
+        assertIs<DocumentTextRenderState.Rest>(state)
+        assertEquals(mapOf("wght" to 500.0), state.payload.axes)
     }
 }

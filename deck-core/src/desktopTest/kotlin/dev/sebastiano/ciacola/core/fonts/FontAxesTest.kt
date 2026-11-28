@@ -136,6 +136,20 @@ class FontAxesTest {
     }
 
     @Test
+    fun `a wght axis sets the requested weight so Skia does not synthesize bold`() {
+        val resolver = resolver(listOf(BundledFontCatalog.Fredoka))
+        val bold = TextStyle(fontSize = 48.sp, fontWeight = FontWeight(700))
+        val light = resolver.resolveTextStyle("Fredoka", bold, axes = mapOf("wght" to 350.0))
+        assertEquals(FontWeight(350), light.fontWeight)
+        val span = resolver.resolveSpanStyle("Fredoka", SpanStyle(fontWeight = FontWeight(700)), axes = mapOf("wght" to 350.0))
+        assertEquals(FontWeight(350), span.fontWeight)
+        val rebound = resolver.applyAxes(resolver.resolveTextStyle("Fredoka", bold), mapOf("wght" to 350.0))
+        assertEquals(FontWeight(350), rebound.fontWeight)
+        // Without a wght coordinate the requested weight is left alone.
+        assertEquals(FontWeight(700), resolver.resolveTextStyle("Fredoka", bold, axes = mapOf("wdth" to 90.0)).fontWeight)
+    }
+
+    @Test
     fun `evicted axis families stay resolvable while their FontFamily is in use`() {
         val resolver = resolver(listOf(BundledFontCatalog.Fredoka))
         val fredoka = assertNotNull(resolver.resolveFamily("Fredoka"))
