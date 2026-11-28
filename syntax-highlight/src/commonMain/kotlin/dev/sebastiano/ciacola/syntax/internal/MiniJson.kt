@@ -207,11 +207,11 @@ internal object MiniJson {
             }
             pos++ // '{'
             skipTrivia()
-            val map = LinkedHashMap<String, JsonValue>()
             if (pos < len && input[pos] == '}') {
                 pos++
-                return JsonObject(map)
+                return JsonObject(emptyMap())
             }
+            val map = LinkedHashMap<String, JsonValue>(4)
             while (true) {
                 skipTrivia()
                 if (pos >= len) fail("Unterminated JSON object")
@@ -249,11 +249,11 @@ internal object MiniJson {
             }
             pos++ // '['
             skipTrivia()
-            val items = ArrayList<JsonValue>()
             if (pos < len && input[pos] == ']') {
                 pos++
-                return JsonArray(items)
+                return JsonArray(emptyList())
             }
+            val items = ArrayList<JsonValue>(4)
             while (true) {
                 skipTrivia()
                 if (pos >= len) fail("Unterminated JSON array")

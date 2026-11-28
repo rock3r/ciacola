@@ -3,6 +3,7 @@ package dev.sebastiano.ciacola.syntax.internal
 import dev.sebastiano.ciacola.syntax.SyntaxTokenKind
 import dev.sebastiano.ciacola.syntax.theme.SyntaxColor
 import dev.sebastiano.ciacola.syntax.theme.SyntaxColorScheme
+import dev.sebastiano.ciacola.syntax.theme.SyntaxColorSchemes
 import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeAppearance
 import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeMetadata
 import dev.sebastiano.ciacola.syntax.theme.SyntaxSchemeParseException
@@ -212,6 +213,27 @@ internal object IjEmbeddedBaseSchemes {
         }
         return IjAttributeEntry(baseAttributes = null, value = opts)
     }
+
+    val defaultBaseSchemes: Map<String, IjSchemeData> by lazy {
+        val map = LinkedHashMap<String, IjSchemeData>()
+        map[defaultScheme.name] = defaultScheme
+        map["Classic Light"] = defaultScheme
+        map[darculaScheme.name] = darculaScheme
+
+        for (bundled in SyntaxColorSchemes.intelliJ) {
+            val ijData = toIjSchemeData(bundled)
+            if (bundled.name !in map) {
+                map[bundled.name] = ijData
+            }
+            when (bundled) {
+                SyntaxColorSchemes.IntelliJDark -> map["Dark"] = ijData
+                SyntaxColorSchemes.IntelliJLight -> map["Light"] = ijData
+                SyntaxColorSchemes.IntelliJHighContrast -> map["High contrast"] = ijData
+                else -> Unit
+            }
+        }
+        map
+    }
 }
 
 internal object IntelliJSchemeMapper {
@@ -245,40 +267,56 @@ internal object IntelliJSchemeMapper {
         val name = el.attributes["name"]?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw SyntaxSchemeParseException("IntelliJ <scheme> element is missing a non-empty 'name' attribute")
         val parentScheme = el.attributes["parent_scheme"]?.trim()?.takeIf { it.isNotEmpty() }
-        val originalScheme = el.firstChildOrNull("metaInfo")
-            ?.childrenNamed("property")
-            ?.firstOrNull { it.attributes["name"] == "originalScheme" }
-            ?.text
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-
-        val colors = LinkedHashMap<String, String>()
-        el.firstChildOrNull("colors")?.childrenNamed("option")?.forEach { opt ->
-            val cname = opt.attributes["name"]
-            val cval = opt.attributes["value"]
-            if (!cname.isNullOrEmpty() && !cval.isNullOrEmpty()) {
-                colors[cname] = cval
+        var originalScheme: String? = null
+        val metaChildren = el.firstChildOrNull("metaInfo")?.children
+        if (metaChildren != null) {
+            for (prop in metaChildren) {
+                if (prop.name == "property" && prop.attributes["name"] == "originalScheme") {
+                    originalScheme = prop.text.trim().takeIf { it.isNotEmpty() }
+                    break
+                }
             }
         }
 
-        val attributes = LinkedHashMap<String, IjAttributeEntry>()
-        el.firstChildOrNull("attributes")?.childrenNamed("option")?.forEach { opt ->
-            val aname = opt.attributes["name"]
-            if (!aname.isNullOrEmpty()) {
-                val baseAttr = opt.attributes["baseAttributes"]?.takeIf { it.isNotEmpty() }
-                val valueEl = opt.firstChildOrNull("value")
-                val valueMap = valueEl?.let { vEl ->
-                    val map = LinkedHashMap<String, String?>()
-                    vEl.childrenNamed("option").forEach { vOpt ->
-                        val vname = vOpt.attributes["name"]
-                        if (!vname.isNullOrEmpty()) {
-                            map[vname] = vOpt.attributes["value"]
-                        }
-                    }
-                    map
+        val colors = LinkedHashMap<String, String>()
+        val colorChildren = el.firstChildOrNull("colors")?.children
+        if (colorChildren != null) {
+            for (opt in colorChildren) {
+                if (opt.name != "option") continue
+                val cname = opt.attributes["name"]
+                val cval = opt.attributes["value"]
+                if (!cname.isNullOrEmpty() && !cval.isNullOrEmpty()) {
+                    colors[cname] = cval
                 }
-                attributes[aname] = IjAttributeEntry(baseAttributes = baseAttr, value = valueMap)
             }
+        }
+
+        val attrChildren = el.firstChildOrNull("attributes")?.children
+        val attributes = if (attrChildren != null) {
+            LinkedHashMap<String, IjAttributeEntry>(attrChildren.size).apply {
+                for (opt in attrChildren) {
+                    if (opt.name != "option") continue
+                    val aname = opt.attributes["name"]
+                    if (!aname.isNullOrEmpty()) {
+                        val baseAttr = opt.attributes["baseAttributes"]?.takeIf { it.isNotEmpty() }
+                        val valueEl = opt.firstChildOrNull("value")
+                        val valueMap = valueEl?.let { vEl ->
+                            val map = LinkedHashMap<String, String?>(maxOf(vEl.children.size, 2))
+                            for (vOpt in vEl.children) {
+                                if (vOpt.name != "option") continue
+                                val vname = vOpt.attributes["name"]
+                                if (!vname.isNullOrEmpty()) {
+                                    map[vname] = vOpt.attributes["value"]
+                                }
+                            }
+                            map
+                        }
+                        this[aname] = IjAttributeEntry(baseAttributes = baseAttr, value = valueMap)
+                    }
+                }
+            }
+        } else {
+            emptyMap()
         }
 
         return IjSchemeData(
@@ -852,8 +890,9 @@ internal object VsCodeThemeMapper {
         }
 
         val plainStyle = SyntaxTokenStyle(foreground = fg)
+        val textMateIndex = buildTextMateIndex(result.tokenColors)
         val wsFg = result.colors["editorWhitespace.foreground"]
-            ?: matchTextMate(listOf("comment", "punctuation.definition.comment"), result.tokenColors)?.foreground
+            ?: matchFromIndex(listOf("comment", "punctuation.definition.comment"), textMateIndex)?.foreground
             ?: fg
 
         val styles = LinkedHashMap<SyntaxTokenKind, SyntaxTokenStyle>()
@@ -862,16 +901,16 @@ internal object VsCodeThemeMapper {
         for (kind in SyntaxTokenKind.entries) {
             if (kind == SyntaxTokenKind.Plain || kind == SyntaxTokenKind.Whitespace) continue
             val spec = SCOPE_MAP[kind] ?: continue
-            val style = matchTextMate(spec.tmCandidates, result.tokenColors)
+            val style = matchFromIndex(spec.tmCandidates, textMateIndex)
                 ?: matchSemantic(spec.semanticCandidates, result.semanticTokenColors)
-                ?: matchTextMate(spec.tmFallbackCandidates, result.tokenColors)
+                ?: matchFromIndex(spec.tmFallbackCandidates, textMateIndex)
                 ?: plainStyle
             styles[kind] = style
         }
 
-        val tmFnDecl = matchTextMate(
+        val tmFnDecl = matchFromIndex(
             listOf("entity.name.function.declaration"),
-            result.tokenColors,
+            textMateIndex,
             exactOnly = true,
         )
         val semFnDecl = matchSemantic(listOf("function.declaration"), result.semanticTokenColors)
@@ -1004,64 +1043,174 @@ internal object VsCodeThemeMapper {
         return if (slash <= 0) "" else normalizedPath.substring(0, slash)
     }
 
-    private data class TextMateMatch(
-        val depth: Int,
-        val index: Int,
+    private const val FONT_BOLD = 1
+    private const val FONT_ITALIC = 2
+    private const val FONT_UNDERLINE = 4
+    private const val FONT_STRIKETHROUGH = 8
+
+    private val TARGET_PREFIXES: Map<String, List<String>> = buildMap {
+        fun addTarget(target: String) {
+            if (!containsKey(target)) {
+                put(target, dotPrefixes(target))
+            }
+        }
+        addTarget("comment")
+        addTarget("punctuation.definition.comment")
+        for (spec in SCOPE_MAP.values) {
+            for (c in spec.tmCandidates) addTarget(c)
+            for (c in spec.tmFallbackCandidates) addTarget(c)
+        }
+        addTarget("entity.name.function.declaration")
+    }
+
+    private val RELEVANT_SCOPES: Set<String> = buildSet {
+        for (prefixes in TARGET_PREFIXES.values) {
+            addAll(prefixes)
+        }
+    }
+
+    private class IndexedTextMateRule(
         val fg: SyntaxColor?,
         val bg: SyntaxColor?,
         val hasFontStyle: Boolean,
-        val fontStyle: String,
+        val fontFlags: Int,
     )
 
-    private fun matchTextMate(
-        candidates: List<String>,
-        tokenColors: List<JsonObject>,
-        exactOnly: Boolean = false,
-    ): SyntaxTokenStyle? {
-        for (target in candidates) {
-            val matches = ArrayList<TextMateMatch>()
-            tokenColors.forEachIndexed { idx, rule ->
-                val rawScope = rule.entries["scope"] ?: return@forEachIndexed
-                val scopes = when (rawScope) {
-                    is JsonString -> rawScope.value.split(',').map { it.trim() }
-                    is JsonArray -> rawScope.items.mapNotNull { (it as? JsonString)?.value?.trim() }
-                    else -> return@forEachIndexed
-                }
-                val settings = rule.entries["settings"] as? JsonObject ?: return@forEachIndexed
-                val fg = (settings.entries["foreground"] as? JsonString)?.value?.let {
-                    SyntaxColor.parseCssHexOrNull(it)
-                }
-                val bg = (settings.entries["background"] as? JsonString)?.value?.let {
-                    SyntaxColor.parseCssHexOrNull(it)
-                }
-                val fontStyleValue = settings.entries["fontStyle"] as? JsonString
-                val hasFontStyle = fontStyleValue != null
-                if (fg == null && bg == null && !hasFontStyle) return@forEachIndexed
+    private class TextMateRuleIndex(
+        val byScope: Map<String, List<IndexedTextMateRule>>,
+    )
 
-                var maxMatchedDepth = -1
-                for (scope in scopes) {
-                    if (scope.isEmpty() || scope.contains(' ')) continue
-                    val matched = if (exactOnly) target == scope else (target == scope || target.startsWith("$scope."))
-                    if (matched) {
-                        val depth = scope.count { it == '.' } + 1
-                        if (depth > maxMatchedDepth) {
-                            maxMatchedDepth = depth
+    private fun dotPrefixes(target: String): List<String> {
+        val out = ArrayList<String>(4)
+        var dot = target.indexOf('.')
+        while (dot >= 0) {
+            out += target.substring(0, dot)
+            dot = target.indexOf('.', dot + 1)
+        }
+        out += target
+        return out
+    }
+
+    private fun buildTextMateIndex(tokenColors: List<JsonObject>): TextMateRuleIndex {
+        if (tokenColors.isEmpty()) return TextMateRuleIndex(emptyMap())
+        val byScope = HashMap<String, ArrayList<IndexedTextMateRule>>()
+        val matchedScopesForRule = ArrayList<String>(4)
+
+        for (rule in tokenColors) {
+            val rawScope = rule.entries["scope"] ?: continue
+            matchedScopesForRule.clear()
+            when (rawScope) {
+                is JsonString -> collectRelevantScopesFromString(rawScope.value, matchedScopesForRule)
+                is JsonArray -> {
+                    for (item in rawScope.items) {
+                        val str = (item as? JsonString)?.value ?: continue
+                        val trimmed = trimZeroAlloc(str)
+                        if (trimmed in RELEVANT_SCOPES && trimmed !in matchedScopesForRule) {
+                            matchedScopesForRule += trimmed
                         }
                     }
                 }
-                if (maxMatchedDepth >= 0) {
-                    matches += TextMateMatch(
-                        depth = maxMatchedDepth,
-                        index = idx,
-                        fg = fg,
-                        bg = bg,
-                        hasFontStyle = hasFontStyle,
-                        fontStyle = fontStyleValue?.value ?: "",
-                    )
+                else -> continue
+            }
+            if (matchedScopesForRule.isEmpty()) continue
+
+            val settings = rule.entries["settings"] as? JsonObject ?: continue
+            val fg = (settings.entries["foreground"] as? JsonString)?.value?.let {
+                SyntaxColor.parseCssHexOrNull(it)
+            }
+            val bg = (settings.entries["background"] as? JsonString)?.value?.let {
+                SyntaxColor.parseCssHexOrNull(it)
+            }
+            val fontStyleValue = settings.entries["fontStyle"] as? JsonString
+            val hasFontStyle = fontStyleValue != null
+            if (fg == null && bg == null && !hasFontStyle) continue
+
+            val indexedRule = IndexedTextMateRule(
+                fg = fg,
+                bg = bg,
+                hasFontStyle = hasFontStyle,
+                fontFlags = if (hasFontStyle) parseFontStyleFlags(fontStyleValue.value) else 0,
+            )
+            for (scope in matchedScopesForRule) {
+                byScope.getOrPut(scope) { ArrayList(2) }.add(indexedRule)
+            }
+        }
+        return TextMateRuleIndex(byScope)
+    }
+
+    private fun collectRelevantScopesFromString(raw: String, out: MutableList<String>) {
+        val len = raw.length
+        var start = 0
+        while (start <= len) {
+            val comma = raw.indexOf(',', start)
+            val end = if (comma < 0) len else comma
+            var s = start
+            var e = end
+            while (s < e && raw[s].isWhitespace()) s++
+            while (e > s && raw[e - 1].isWhitespace()) e--
+            if (s < e) {
+                val scope = if (s == 0 && e == len) raw else raw.substring(s, e)
+                if (scope in RELEVANT_SCOPES && scope !in out) {
+                    out += scope
                 }
             }
-            if (matches.isEmpty()) continue
-            matches.sortWith(compareBy<TextMateMatch>({ it.depth }, { it.index }))
+            if (comma < 0) break
+            start = comma + 1
+        }
+    }
+
+    private fun trimZeroAlloc(str: String): String {
+        val len = str.length
+        if (len == 0) return str
+        if (!str[0].isWhitespace() && !str[len - 1].isWhitespace()) return str
+        return str.trim()
+    }
+
+    private fun matchFromIndex(
+        candidates: List<String>,
+        index: TextMateRuleIndex,
+        exactOnly: Boolean = false,
+    ): SyntaxTokenStyle? {
+        if (index.byScope.isEmpty()) return null
+        for (target in candidates) {
+            if (exactOnly) {
+                val rules = index.byScope[target]
+                if (rules.isNullOrEmpty()) continue
+                var fg: SyntaxColor? = null
+                var bg: SyntaxColor? = null
+                var bold = false
+                var italic = false
+                var underline = false
+                var strikethrough = false
+                for (m in rules) {
+                    if (m.fg != null) fg = m.fg
+                    if (m.bg != null) bg = m.bg
+                    if (m.hasFontStyle) {
+                        bold = (m.fontFlags and FONT_BOLD) != 0
+                        italic = (m.fontFlags and FONT_ITALIC) != 0
+                        underline = (m.fontFlags and FONT_UNDERLINE) != 0
+                        strikethrough = (m.fontFlags and FONT_STRIKETHROUGH) != 0
+                    }
+                }
+                return SyntaxTokenStyle(
+                    foreground = fg,
+                    background = bg,
+                    bold = bold,
+                    italic = italic,
+                    underline = underline,
+                    strikethrough = strikethrough,
+                )
+            }
+
+            val prefixes = TARGET_PREFIXES[target] ?: dotPrefixes(target)
+            var hasAny = false
+            for (prefix in prefixes) {
+                if (prefix in index.byScope) {
+                    hasAny = true
+                    break
+                }
+            }
+            if (!hasAny) continue
 
             var fg: SyntaxColor? = null
             var bg: SyntaxColor? = null
@@ -1069,15 +1218,17 @@ internal object VsCodeThemeMapper {
             var italic = false
             var underline = false
             var strikethrough = false
-            for (m in matches) {
-                if (m.fg != null) fg = m.fg
-                if (m.bg != null) bg = m.bg
-                if (m.hasFontStyle) {
-                    val fontTokens = splitWhitespaceTokens(m.fontStyle)
-                    bold = "bold" in fontTokens
-                    italic = "italic" in fontTokens
-                    underline = "underline" in fontTokens
-                    strikethrough = "strikethrough" in fontTokens
+            for (prefix in prefixes) {
+                val rules = index.byScope[prefix] ?: continue
+                for (m in rules) {
+                    if (m.fg != null) fg = m.fg
+                    if (m.bg != null) bg = m.bg
+                    if (m.hasFontStyle) {
+                        bold = (m.fontFlags and FONT_BOLD) != 0
+                        italic = (m.fontFlags and FONT_ITALIC) != 0
+                        underline = (m.fontFlags and FONT_UNDERLINE) != 0
+                        strikethrough = (m.fontFlags and FONT_STRIKETHROUGH) != 0
+                    }
                 }
             }
             return SyntaxTokenStyle(
@@ -1118,11 +1269,11 @@ internal object VsCodeThemeMapper {
                         underlineProp != null ||
                         strikethroughProp != null
                     if (fg == null && !hasStyleProp) continue
-                    val fontTokens = splitWhitespaceTokens(fontStyleRaw ?: "")
-                    val bold = boldProp ?: ("bold" in fontTokens)
-                    val italic = italicProp ?: ("italic" in fontTokens)
-                    val underline = underlineProp ?: ("underline" in fontTokens)
-                    val strikethrough = strikethroughProp ?: ("strikethrough" in fontTokens)
+                    val flags = if (fontStyleRaw != null) parseFontStyleFlags(fontStyleRaw) else 0
+                    val bold = boldProp ?: ((flags and FONT_BOLD) != 0)
+                    val italic = italicProp ?: ((flags and FONT_ITALIC) != 0)
+                    val underline = underlineProp ?: ((flags and FONT_UNDERLINE) != 0)
+                    val strikethrough = strikethroughProp ?: ((flags and FONT_STRIKETHROUGH) != 0)
                     return SyntaxTokenStyle(
                         foreground = fg,
                         bold = bold,
@@ -1137,23 +1288,31 @@ internal object VsCodeThemeMapper {
         return null
     }
 
-    private fun splitWhitespaceTokens(raw: String): Set<String> {
-        val tokens = HashSet<String>()
+    private fun parseFontStyleFlags(raw: String): Int {
+        var flags = 0
         var start = -1
-        for (i in raw.indices) {
-            if (raw[i].isWhitespace()) {
+        for (i in 0..raw.length) {
+            val isWs = i == raw.length || raw[i].isWhitespace()
+            if (isWs) {
                 if (start >= 0) {
-                    tokens += raw.substring(start, i).lowercase()
+                    val tokLen = i - start
+                    when {
+                        tokLen == 4 && raw.regionMatches(start, "bold", 0, 4, ignoreCase = true) ->
+                            flags = flags or FONT_BOLD
+                        tokLen == 6 && raw.regionMatches(start, "italic", 0, 6, ignoreCase = true) ->
+                            flags = flags or FONT_ITALIC
+                        tokLen == 9 && raw.regionMatches(start, "underline", 0, 9, ignoreCase = true) ->
+                            flags = flags or FONT_UNDERLINE
+                        tokLen == 13 && raw.regionMatches(start, "strikethrough", 0, 13, ignoreCase = true) ->
+                            flags = flags or FONT_STRIKETHROUGH
+                    }
                     start = -1
                 }
             } else if (start < 0) {
                 start = i
             }
         }
-        if (start >= 0) {
-            tokens += raw.substring(start).lowercase()
-        }
-        return tokens
+        return flags
     }
 }
 

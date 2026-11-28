@@ -30,9 +30,14 @@ internal object MiniXml {
     private class MutableElement(
         val name: String,
         val attributes: Map<String, String>,
-        val children: MutableList<XmlElement> = ArrayList(),
+        var children: MutableList<XmlElement>? = null,
         var textBuilder: StringBuilder? = null,
     ) {
+        fun addChild(child: XmlElement) {
+            val list = children ?: ArrayList<XmlElement>(4).also { children = it }
+            list.add(child)
+        }
+
         fun appendChar(ch: Char) {
             val sb = textBuilder ?: StringBuilder().also { textBuilder = it }
             sb.append(ch)
@@ -47,7 +52,7 @@ internal object MiniXml {
         fun freeze(): XmlElement = XmlElement(
             name = name,
             attributes = attributes,
-            children = children,
+            children = children ?: emptyList(),
             text = textBuilder?.toString() ?: "",
         )
     }
@@ -121,7 +126,7 @@ internal object MiniXml {
                         if (stack.isEmpty()) {
                             root = frozen
                         } else {
-                            stack.last().children.add(frozen)
+                            stack.last().addChild(frozen)
                         }
                     }
                     else -> {
@@ -155,7 +160,7 @@ internal object MiniXml {
                             if (stack.isEmpty()) {
                                 root = frozen
                             } else {
-                                stack.last().children.add(frozen)
+                                stack.last().addChild(frozen)
                             }
                         } else {
                             stack.add(elem)
@@ -235,7 +240,7 @@ internal object MiniXml {
         }
 
         private fun readAttributes(): Map<String, String> {
-            val attrs = LinkedHashMap<String, String>()
+            var attrs: LinkedHashMap<String, String>? = null
             while (pos < len) {
                 val hadSpace = skipWhitespaceCount() > 0
                 if (pos >= len) break
@@ -252,9 +257,10 @@ internal object MiniXml {
                 pos++
                 skipWhitespace()
                 val value = readAttributeValue()
-                attrs[attrName] = value
+                val map = attrs ?: LinkedHashMap<String, String>(4).also { attrs = it }
+                map[attrName] = value
             }
-            return attrs
+            return attrs ?: emptyMap()
         }
 
         private fun readAttributeValue(): String {
@@ -264,21 +270,31 @@ internal object MiniXml {
                 fail("Expected quoted attribute value")
             }
             pos++
-            val sb = StringBuilder()
+            val start = pos
+            var sb: StringBuilder? = null
+            var chunkStart = pos
             while (pos < len) {
                 val ch = input[pos]
                 if (ch == quote) {
+                    val result = if (sb == null) {
+                        input.substring(start, pos)
+                    } else {
+                        sb.append(input, chunkStart, pos)
+                        sb.toString()
+                    }
                     pos++
-                    return sb.toString()
+                    return result
                 }
                 if (ch == '<') {
                     fail("Unescaped '<' in attribute value")
                 }
                 if (ch == '&') {
-                    sb.append(readEntity())
+                    val builder = sb ?: StringBuilder().also { sb = it }
+                    builder.append(input, chunkStart, pos)
+                    builder.append(readEntity())
+                    chunkStart = pos
                     continue
                 }
-                sb.append(ch)
                 pos++
             }
             fail("Unterminated XML attribute value")
@@ -290,33 +306,39 @@ internal object MiniXml {
             if (semi < 0 || semi - pos > 16) {
                 fail("Unterminated or invalid XML entity reference")
             }
-            val entity = input.substring(pos, semi)
+            val start = pos
+            val entityLen = semi - start
             pos = semi + 1
             return when {
-                entity == "amp" -> "&"
-                entity == "lt" -> "<"
-                entity == "gt" -> ">"
-                entity == "quot" -> "\""
-                entity == "apos" -> "'"
-                entity.startsWith("#x") || entity.startsWith("#X") -> {
-                    val hexDigits = entity.substring(2)
-                    if (hexDigits.isEmpty() || !hexDigits.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
-                        fail("Invalid hexadecimal character reference '&$entity;'")
+                entityLen == 3 && input.regionMatches(start, "amp", 0, 3) -> "&"
+                entityLen == 2 && input.regionMatches(start, "lt", 0, 2) -> "<"
+                entityLen == 2 && input.regionMatches(start, "gt", 0, 2) -> ">"
+                entityLen == 4 && input.regionMatches(start, "quot", 0, 4) -> "\""
+                entityLen == 4 && input.regionMatches(start, "apos", 0, 4) -> "'"
+                else -> {
+                    val entity = input.substring(start, semi)
+                    when {
+                        entity.startsWith("#x") || entity.startsWith("#X") -> {
+                            val hexDigits = entity.substring(2)
+                            if (hexDigits.isEmpty() || !hexDigits.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                                fail("Invalid hexadecimal character reference '&$entity;'")
+                            }
+                            val code = hexDigits.toIntOrNull(16)
+                                ?: fail("Invalid hexadecimal character reference '&$entity;'")
+                            codePointToString(code)
+                        }
+                        entity.startsWith('#') -> {
+                            val decDigits = entity.substring(1)
+                            if (decDigits.isEmpty() || !decDigits.all { it in '0'..'9' }) {
+                                fail("Invalid numeric character reference '&$entity;'")
+                            }
+                            val code = decDigits.toIntOrNull(10)
+                                ?: fail("Invalid numeric character reference '&$entity;'")
+                            codePointToString(code)
+                        }
+                        else -> fail("Unsupported XML entity '&$entity;'")
                     }
-                    val code = hexDigits.toIntOrNull(16)
-                        ?: fail("Invalid hexadecimal character reference '&$entity;'")
-                    codePointToString(code)
                 }
-                entity.startsWith('#') -> {
-                    val decDigits = entity.substring(1)
-                    if (decDigits.isEmpty() || !decDigits.all { it in '0'..'9' }) {
-                        fail("Invalid numeric character reference '&$entity;'")
-                    }
-                    val code = decDigits.toIntOrNull(10)
-                        ?: fail("Invalid numeric character reference '&$entity;'")
-                    codePointToString(code)
-                }
-                else -> fail("Unsupported XML entity '&$entity;'")
             }
         }
 
