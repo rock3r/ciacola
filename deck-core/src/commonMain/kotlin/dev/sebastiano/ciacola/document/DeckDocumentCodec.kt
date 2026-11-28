@@ -1,6 +1,7 @@
 package dev.sebastiano.ciacola.document
 
 import androidx.compose.runtime.Immutable
+import dev.sebastiano.ciacola.core.fonts.FontAxes
 import dev.sebastiano.ciacola.core.fonts.FontValidationSeverity
 import dev.sebastiano.ciacola.core.fonts.validateFontDeclarations
 import dev.sebastiano.ciacola.syntax.theme.SyntaxColor
@@ -350,6 +351,7 @@ object DeckDocumentCodec {
                         "Theme typography role '$role' references undeclared font '${style.font}'.",
                     )
                 }
+                validateAxisTags(style.axes, "<root>/themes/$themeName/$role", issues)
             }
             themeSpec.motion?.let { motion ->
                 validateTimingFields(
@@ -492,11 +494,13 @@ object DeckDocumentCodec {
                 if (text.font != null && declaredFonts.isNotEmpty() && text.font !in declaredFonts) {
                     issues += lintError("UNKNOWN_FONT", addr, "Text node references undeclared font '${text.font}'.")
                 }
+                validateAxisTags(text.axes, addr, issues)
                 if (text.value is RichTextValue.Runs) {
                     for (run in text.value.runs) {
                         if (run.font != null && declaredFonts.isNotEmpty() && run.font !in declaredFonts) {
                             issues += lintError("UNKNOWN_FONT", addr, "Text run references undeclared font '${run.font}'.")
                         }
+                        validateAxisTags(run.axes, addr, issues)
                     }
                 }
                 text.morph?.let { morph ->
@@ -996,6 +1000,24 @@ object DeckDocumentCodec {
 
     private fun extractLineColumn(message: String?, text: String): Pair<Int?, Int?> =
         DeckJsonScanner.extractLineColumn(message, text)
+
+    /**
+     * Font-independent `axes` checks: every key must be a well-formed 4-character OpenType tag.
+     * Range and support checks need the resolved face and run in the deck linter.
+     */
+    private fun validateAxisTags(axes: Map<String, Double>, address: String, issues: MutableList<DocumentIssue>) {
+        for ((tag, value) in axes) {
+            if (!FontAxes.isValidTag(tag)) {
+                issues += lintError(
+                    "INVALID_FONT_AXIS_TAG",
+                    address,
+                    "Font axis tag '$tag' must be exactly 4 printable ASCII characters (e.g. 'wdth', 'GRAD').",
+                )
+            } else if (!value.isFinite()) {
+                issues += lintError("INVALID_FONT_AXIS_VALUE", address, "Font axis '$tag' value must be a finite number.")
+            }
+        }
+    }
 
     private fun loadError(code: String, address: String, message: String) =
         DocumentIssue(IssueSeverity.LoadError, code, address, message)

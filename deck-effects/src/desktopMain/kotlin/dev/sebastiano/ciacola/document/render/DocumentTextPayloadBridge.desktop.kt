@@ -31,6 +31,7 @@ import dev.sebastiano.ciacola.StyledText
 import dev.sebastiano.ciacola.TextBuildKind
 import dev.sebastiano.ciacola.TextContent
 import dev.sebastiano.ciacola.core.fonts.DeckFontResolver
+import dev.sebastiano.ciacola.core.fonts.FontAxes
 import dev.sebastiano.ciacola.document.Curve
 import dev.sebastiano.ciacola.document.DeckClock
 import dev.sebastiano.ciacola.document.DeckDocument
@@ -592,15 +593,17 @@ internal fun buildStyledTextV2(
         textAlign = payload.align?.let { parseTextAlign(it) } ?: textStyle.textAlign,
     )
 
+    val paragraphAxes = FontAxes.merge(themeOverride?.axes.orEmpty(), payload.axes)
     if (fontResolver != null) {
         textStyle = if (!resolvedFontName.isNullOrBlank()) {
             fontResolver.resolveTextStyle(
                 familyName = resolvedFontName,
                 style = textStyle,
                 disableOptionalLigatures = disableLigatures,
+                axes = paragraphAxes,
             )
         } else {
-            fontResolver.clampStyleWeights(textStyle)
+            fontResolver.applyAxes(fontResolver.clampStyleWeights(textStyle), paragraphAxes)
         }
     }
 
@@ -608,6 +611,7 @@ internal fun buildStyledTextV2(
         value = payload.value,
         baseStyle = textStyle,
         primaryFontName = resolvedFontName,
+        paragraphAxes = paragraphAxes,
         colorResolver = colorResolver,
         fontResolver = fontResolver,
         density = density,
@@ -674,6 +678,7 @@ private fun buildAnnotatedText(
     value: RichTextValue,
     baseStyle: TextStyle,
     primaryFontName: String?,
+    paragraphAxes: Map<String, Double>,
     colorResolver: DocumentColorResolver,
     fontResolver: DeckFontResolver?,
     density: Density,
@@ -698,13 +703,21 @@ private fun buildAnnotatedText(
                 background = run.background?.let { colorResolver.resolve(it, Color.Unspecified) } ?: Color.Unspecified,
             )
             val runFontName = run.font ?: primaryFontName
+            val runAxes = FontAxes.merge(paragraphAxes, run.axes)
             if (fontResolver != null && !runFontName.isNullOrBlank()) {
                 span = fontResolver.resolveSpanStyle(
                     familyName = runFontName,
                     style = span,
                     fallbackFontStyle = baseStyle.fontStyle ?: FontStyle.Normal,
                     disableOptionalLigatures = disableLigatures,
+                    axes = runAxes,
                 )
+            } else if (fontResolver != null && run.axes.isNotEmpty()) {
+                // No explicit family: rebind the paragraph's resolver-managed family with the
+                // run's merged coordinates.
+                val withFamily = span.copy(fontFamily = baseStyle.fontFamily)
+                val rebound = fontResolver.applyAxes(withFamily, runAxes)
+                if (rebound !== withFamily) span = rebound
             }
             val startIdx = length
             append(run.text)

@@ -103,6 +103,18 @@ class DeckFontResolver(
     private val familiesByNormalizedName: HashMap<String, ResolvedFontFamily> = hashMapOf()
     private val familiesByComposeFontFamily: HashMap<FontFamily, ResolvedFontFamily> = hashMapOf()
     private val rawBytesBySha256: HashMap<String, ByteArray> = hashMapOf()
+    private val axisFamilyLock = Any()
+    private val axisFamilies = object : LinkedHashMap<AxisFamilyKey, ResolvedFontFamily>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<AxisFamilyKey, ResolvedFontFamily>?): Boolean =
+            size > MAX_AXIS_FAMILIES
+    }
+
+    /**
+     * Reverse lookup for axis-derived families that outlives [axisFamilies] eviction for as long
+     * as the [FontFamily] is still referenced (weak keys). Records never reference their key, so
+     * they do not keep it alive.
+     */
+    private val axisFamiliesByComposeFontFamily = java.util.WeakHashMap<FontFamily, AxisFamilyRecord>()
 
     /** All validation and load-time lint issues recorded while resolving [declarations]. */
     val issues: List<FontValidationIssue>
@@ -170,7 +182,75 @@ class DeckFontResolver(
 
     /** Looks up the [ResolvedFontFamily] previously produced by this resolver for [fontFamily]. */
     fun findResolvedFamily(fontFamily: FontFamily?): ResolvedFontFamily? =
-        if (fontFamily == null) null else familiesByComposeFontFamily[fontFamily]
+        if (fontFamily == null) {
+            null
+        } else {
+            familiesByComposeFontFamily[fontFamily]
+                ?: synchronized(axisFamilyLock) { axisFamiliesByComposeFontFamily[fontFamily]?.familyFor(fontFamily) }
+        }
+
+    /**
+     * Resolves [axes] against the `fvar` axes of [familyName]'s face for [italic], reporting
+     * unsupported tags and clamped values. Returns `null` when [familyName] is unknown. A family
+     * without inspectable bundled faces (system or default fallback) reports every valid tag as
+     * unsupported.
+     */
+    fun resolveAxes(
+        familyName: String,
+        axes: Map<String, Double>,
+        italic: Boolean = false,
+    ): AxisResolution? {
+        val family = resolveFamily(familyName) ?: return null
+        val face = family.faces.firstOrNull { it.italic == italic && it.inspection != null }
+            ?: family.faces.firstOrNull { it.inspection != null }
+        return FontAxes.resolve(axes, face?.inspection?.variationAxes.orEmpty())
+    }
+
+    /**
+     * Returns a family that renders [family]'s faces with static [axes] coordinates applied on
+     * top of each face's `wght` instance. Tags a face does not declare are ignored and values are
+     * clamped to the face's `fvar` range. Returns [family] itself when no coordinate applies.
+     *
+     * Derived families are memoized (bounded LRU) so equal requests share one [FontFamily]
+     * instance and Compose's font cache, and [findResolvedFamily] recognizes them.
+     */
+    fun withAxes(family: ResolvedFontFamily, axes: Map<String, Double>): ResolvedFontFamily {
+        if (axes.isEmpty()) return family
+        val base = baseFamilyOf(family)
+        val requestKey = axes.entries.sortedBy { it.key }.joinToString(",") { "${it.key}=${it.value}" }
+        val key = AxisFamilyKey(base.familyName, requestKey)
+        synchronized(axisFamilyLock) {
+            axisFamilies[key]?.let { return it }
+        }
+        val derived = deriveAxisFamily(base, axes)
+        synchronized(axisFamilyLock) {
+            axisFamilies[key]?.let { return it }
+            axisFamilies[key] = derived
+            if (derived !== base) {
+                axisFamiliesByComposeFontFamily[derived.fontFamily] = AxisFamilyRecord(base, derived.faces, derived)
+            }
+        }
+        return derived
+    }
+
+    /**
+     * Rebinds [style] to the axis-derived variant of the resolver-managed family it already uses.
+     * Returns [style] unchanged when [axes] is empty or its family is not managed by this resolver.
+     */
+    fun applyAxes(style: TextStyle, axes: Map<String, Double>): TextStyle {
+        if (axes.isEmpty()) return style
+        val resolved = findResolvedFamily(style.fontFamily) ?: return style
+        val derived = withAxes(resolved, axes)
+        return if (derived.fontFamily == style.fontFamily) style else style.copy(fontFamily = derived.fontFamily)
+    }
+
+    /** Span-level counterpart of [applyAxes]. */
+    fun applyAxes(style: SpanStyle, axes: Map<String, Double>): SpanStyle {
+        if (axes.isEmpty()) return style
+        val resolved = findResolvedFamily(style.fontFamily) ?: return style
+        val derived = withAxes(resolved, axes)
+        return if (derived.fontFamily == style.fontFamily) style else style.copy(fontFamily = derived.fontFamily)
+    }
 
     /**
      * Clamps [requested] weight to the resolved family's supported weight range for [style].
@@ -190,6 +270,7 @@ class DeckFontResolver(
         familyName: String,
         style: TextStyle = TextStyle.Default,
         disableOptionalLigatures: Boolean = false,
+        axes: Map<String, Double> = emptyMap(),
     ): TextStyle {
         val resolved = resolveFamily(familyName)
             ?: return if (disableOptionalLigatures) {
@@ -197,7 +278,7 @@ class DeckFontResolver(
             } else {
                 style
             }
-        return resolved.applyTo(style, disableOptionalLigatures)
+        return withAxes(resolved, axes).applyTo(style, disableOptionalLigatures)
     }
 
     /**
@@ -209,6 +290,7 @@ class DeckFontResolver(
         style: SpanStyle = SpanStyle(),
         fallbackFontStyle: FontStyle = FontStyle.Normal,
         disableOptionalLigatures: Boolean = false,
+        axes: Map<String, Double> = emptyMap(),
     ): SpanStyle {
         val resolved = resolveFamily(familyName)
             ?: return if (disableOptionalLigatures) {
@@ -216,7 +298,7 @@ class DeckFontResolver(
             } else {
                 style
             }
-        return resolved.applyTo(style, fallbackFontStyle, disableOptionalLigatures)
+        return withAxes(resolved, axes).applyTo(style, fallbackFontStyle, disableOptionalLigatures)
     }
 
     /**
@@ -356,6 +438,54 @@ class DeckFontResolver(
         existingAssignment = existingAssignment,
         limits = limits,
     )
+
+    private data class AxisFamilyKey(val familyName: String, val axes: String)
+
+    /** Resolution metadata for one axis-derived family, holding no strong reference to its [FontFamily]. */
+    private class AxisFamilyRecord(
+        private val base: ResolvedFontFamily,
+        private val faces: List<ResolvedFontFace>,
+        derived: ResolvedFontFamily,
+    ) {
+        private var cached = java.lang.ref.WeakReference(derived)
+
+        fun familyFor(fontFamily: FontFamily): ResolvedFontFamily =
+            cached.get() ?: base.copy(fontFamily = fontFamily, faces = faces).also { cached = java.lang.ref.WeakReference(it) }
+    }
+
+    private fun baseFamilyOf(family: ResolvedFontFamily): ResolvedFontFamily {
+        if (family.faces.none { it.axisCoordinates.isNotEmpty() }) return family
+        return familiesByExactName[family.familyName] ?: family
+    }
+
+    private fun deriveAxisFamily(base: ResolvedFontFamily, axes: Map<String, Double>): ResolvedFontFamily {
+        if (base.origin != FontOrigin.Bundled && base.origin != FontOrigin.FallbackToBundled) return base
+        var changed = false
+        val derivedFonts = mutableListOf<Font>()
+        val derivedFaces = base.faces.map { face ->
+            val loaded = face.composeFont as? androidx.compose.ui.text.platform.LoadedFont
+            val applied = FontAxes.resolve(axes, face.inspection?.variationAxes.orEmpty()).applied
+            if (loaded == null || applied.isEmpty()) {
+                face.composeFont?.let { derivedFonts += it }
+                return@map face
+            }
+            changed = true
+            val merged = LinkedHashMap<String, FontVariation.Setting>()
+            for (setting in loaded.variationSettings.settings) merged[setting.axisName] = setting
+            for ((tag, value) in applied) merged[tag] = FontVariation.Setting(tag, value)
+            val font = PlatformFontFactory(
+                identity = "${loaded.identity}:axes[${FontAxes.cacheKey(applied)}]",
+                data = loaded.data,
+                weight = loaded.weight,
+                style = loaded.style,
+                variationSettings = FontVariation.Settings(*merged.values.toTypedArray()),
+            )
+            derivedFonts += font
+            face.copy(composeFont = font, axisCoordinates = applied)
+        }
+        if (!changed || derivedFonts.isEmpty()) return base
+        return base.copy(fontFamily = FontFamily(derivedFonts), faces = derivedFaces)
+    }
 
     private fun registerFamily(resolved: ResolvedFontFamily) {
         familiesByExactName[resolved.familyName] = resolved
@@ -613,6 +743,9 @@ class DeckFontResolver(
     companion object {
         val DEFAULT_VARIABLE_WEIGHT_STEPS: List<Int> =
             listOf(100, 200, 300, 400, 500, 600, 700, 800, 900)
+
+        /** Upper bound on memoized static-axis family variants per resolver. */
+        internal const val MAX_AXIS_FAMILIES: Int = 64
 
         internal fun computeVariableWeightSteps(
             minWeight: Int,

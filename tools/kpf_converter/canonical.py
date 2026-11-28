@@ -52,11 +52,11 @@ TYPED_ORDERS: Dict[str, List[str]] = {
     ],
     "TextPayload": [
         "value", "style", "font", "size", "weight", "italic", "color",
-        "lineHeight", "tracking", "align", "surface", "morph",
+        "lineHeight", "tracking", "align", "surface", "morph", "axes",
     ],
     "TextRun": [
         "text", "font", "size", "weight", "italic", "color",
-        "tracking", "underline", "strike", "baselineShift", "background",
+        "tracking", "underline", "strike", "baselineShift", "background", "axes",
     ],
     "TextMorph": ["by", "pruneStopwords", "phases", "stagger"],
     "CodePayload": ["value", "language", "highlightLines", "fit", "surface"],

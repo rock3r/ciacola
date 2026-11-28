@@ -182,7 +182,8 @@ class DocumentDeckLintEngine(
         var dedupCount = 0
 
         val assetExistsFn = buildAssetExistsFn(document.id, deckDir, assetsDir)
-        val staticIssues = DeckDocumentCodec.validate(document, specimens, effects, assetExistsFn)
+        val staticIssues = DeckDocumentCodec.validate(document, specimens, effects, assetExistsFn) +
+            fontAxisIssues(document, deckDir)
         for (docIssue in staticIssues) {
             if (docIssue.address.contains(slide.id) || docIssue.address == "<root>") {
                 val mapped = mapDocumentIssue(docIssue, document, defaultSlideIndex = slideIndex)
@@ -305,7 +306,8 @@ class DocumentDeckLintEngine(
 
         // 1. Document-wide static validation (fast pure check).
         val assetExistsFn = buildAssetExistsFn(document.id, deckDir, assetsDir)
-        val validationIssues = DeckDocumentCodec.validate(document, specimens, effects, assetExistsFn)
+        val validationIssues = DeckDocumentCodec.validate(document, specimens, effects, assetExistsFn) +
+            fontAxisIssues(document, deckDir)
         for (docIssue in validationIssues) {
             val mapped = mapDocumentIssue(docIssue, document, defaultSlideIndex = 0)
             allIssues.putIfAbsent(mapped.id, mapped)

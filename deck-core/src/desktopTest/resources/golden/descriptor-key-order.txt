@@ -5,7 +5,7 @@ CodeSchemeSpec: id, name, appearance, background, foreground, selectionBackgroun
 CodeTokenStyleSpec: fg, bg, bold, italic, underline, strikethrough
 CodeSchemeSourceSpec: family, upstream, license, revision
 ThemeMotionDefaults: durationMs, curve, transition
-TextStyleOverride: font, size, weight, italic, color, lineHeight, tracking, align
+TextStyleOverride: font, size, weight, italic, color, lineHeight, tracking, align, axes
 SlidePaletteSpec: canvas, ink, mutedInk, accent, surface, border
 SlideSpec: id, title, skipped, palette, background, beats, nodes, transition
 BeatSpec: notes, phases, stagger, autoAdvanceMs
@@ -16,9 +16,9 @@ GradientSpec: type, angle, center, radius, stops
 ImageFillSpec: src, fit, tint
 StrokeSpec: color, width, dash, cap, join
 SurfaceSpec: fill, stroke, cornerRadius, padding
-TextRun: text, font, size, weight, italic, color, tracking, underline, strike, baselineShift, background
+TextRun: text, font, size, weight, italic, color, tracking, underline, strike, baselineShift, background, axes
 TextMorphSpec: by, pruneStopwords, phases, stagger
-TextPayload: value, style, font, size, weight, italic, color, lineHeight, tracking, align, surface, morph
+TextPayload: value, style, font, size, weight, italic, color, lineHeight, tracking, align, surface, morph, axes
 CodePayload: value, language, highlightLines, fit, surface
 LineHeads: start, end
 ShapePayload: geometry, fill, stroke, cornerRadius, heads

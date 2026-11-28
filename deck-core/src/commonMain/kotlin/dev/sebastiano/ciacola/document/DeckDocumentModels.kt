@@ -126,6 +126,8 @@ data class TextStyleOverride(
     val lineHeight: Double? = null,
     val tracking: Double? = null,
     val align: String? = null,
+    /** Variable font axis coordinates keyed by 4-character OpenType tag (e.g. `wdth`, `GRAD`). */
+    val axes: Map<String, Double> = emptyMap(),
 )
 
 @Immutable
@@ -291,6 +293,8 @@ data class TextRun(
     val strike: Boolean? = null,
     val baselineShift: Double? = null,
     val background: String? = null,
+    /** Per-tag axis coordinates merged over the enclosing text node's resolved axes. */
+    val axes: Map<String, Double> = emptyMap(),
 )
 
 @Immutable
@@ -341,6 +345,8 @@ data class TextPayload(
     val align: String? = null,
     val surface: SurfaceSpec? = null,
     val morph: TextMorphSpec? = null,
+    /** Per-tag axis coordinates merged over the theme typography role's axes. */
+    val axes: Map<String, Double> = emptyMap(),
 )
 
 @Immutable

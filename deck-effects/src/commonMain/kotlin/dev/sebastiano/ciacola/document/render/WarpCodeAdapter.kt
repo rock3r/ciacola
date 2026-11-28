@@ -84,6 +84,7 @@ import dev.bnorm.storyboard.buildDiffList
 import dev.bnorm.storyboard.content
 import dev.bnorm.storyboard.easel.LocalStoryboardTransition
 import dev.bnorm.storyboard.easel.stableSegment
+import dev.sebastiano.ciacola.core.fonts.FontAxes
 import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.SegmentPlan
@@ -709,7 +710,8 @@ internal fun resolveDocumentCodeTextStyle(
         fallback
     }
     val fontFamilyName = override?.font ?: roles["code"]?.font
-    return resolveDocumentFontStyle(fontResolverHandle, fontFamilyName, base)
+    val axes = FontAxes.merge(roles["code"]?.axes.orEmpty(), override?.axes.orEmpty())
+    return resolveDocumentFontStyle(fontResolverHandle, fontFamilyName, base, axes)
 }
 
 private fun computeFittedCodeStyle(

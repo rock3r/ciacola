@@ -226,7 +226,7 @@ internal sealed interface FaceTierBState {
  * `cmap` subtable guessing.
  */
 internal object BundledTypefaceRegistry {
-    private data class Key(val sha256: String, val weight: Int, val italic: Boolean)
+    private data class Key(val sha256: String, val weight: Int, val italic: Boolean, val axes: String)
 
     private val baseTypefaces = ConcurrentHashMap<String, Any>() // Typeface or UNAVAILABLE
     private val faceTypefaces = ConcurrentHashMap<Key, Any>() // Typeface or UNAVAILABLE
@@ -236,7 +236,7 @@ internal object BundledTypefaceRegistry {
         if (face.origin != FontOrigin.Bundled) return null
         val inspection = face.inspection ?: return null
         val bytes = rawBytes ?: (face.composeFont as? LoadedFont)?.data ?: return null
-        val key = Key(inspection.contentSha256, face.weight, face.italic)
+        val key = Key(inspection.contentSha256, face.weight, face.italic, FontAxes.cacheKey(face.axisCoordinates))
         val cached = faceTypefaces[key]
         if (cached != null) return cached as? Typeface
 
@@ -256,9 +256,13 @@ internal object BundledTypefaceRegistry {
             return null
         }
 
-        val resolved: Typeface = if (inspection.weightAxis != null) {
+        val coordinates = LinkedHashMap<String, Float>()
+        if (inspection.weightAxis != null) coordinates["wght"] = face.weight.toFloat()
+        coordinates.putAll(face.axisCoordinates)
+        val resolved: Typeface = if (coordinates.isNotEmpty()) {
             try {
-                base.makeClone(arrayOf(FontVariation("wght", face.weight.toFloat())), 0) ?: base
+                val variations = coordinates.map { (tag, value) -> FontVariation(tag, value) }.toTypedArray()
+                base.makeClone(variations, 0) ?: base
             } catch (_: Throwable) {
                 base
             }
