@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
@@ -75,6 +76,14 @@ internal class MovableSpecimenSlotPool {
 
 internal val LocalMovableSpecimenSlotPool =
     compositionLocalOf<MovableSpecimenSlotPool?> { null }
+
+/**
+ * The deck's font resolver handle while specimen content composes, or `null` when the document
+ * declares no fonts. Desktop text helpers such as `VariableAxisText` read it to reach the deck's
+ * bundled faces.
+ */
+val LocalSpecimenFontResolverHandle =
+    compositionLocalOf<Any?> { null }
 
 @Composable
 internal fun DocumentSpecimenPayloadView(
@@ -169,13 +178,15 @@ internal fun DocumentSpecimenPayloadView(
     }
     val useMovable = ctx.isAnimatedMount && !ctx.reducedMotion && chainSlotKey != null && slotPool != null
     Box(modifier = recordSizeMod) {
-        if (useMovable) {
-            val slot = slotPool.slot(chainSlotKey)
-            slot {
+        CompositionLocalProvider(LocalSpecimenFontResolverHandle provides ctx.fontResolverHandle) {
+            if (useMovable) {
+                val slot = slotPool.slot(chainSlotKey)
+                slot {
+                    entry.content(specimenScope)
+                }
+            } else {
                 entry.content(specimenScope)
             }
-        } else {
-            entry.content(specimenScope)
         }
     }
 }

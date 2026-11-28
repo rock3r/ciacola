@@ -62,9 +62,9 @@ object AllDocumentDecks {
 
     fun byId(id: String): DocumentDeckRegistration? = entries.firstOrNull { it.id == id }
 
-    /** Combined registry of every specimen across all four decks. */
+    /** Combined registry of every specimen across all four decks, plus the typography specimens. */
     val allSpecimens: DeckSpecimenRegistry =
-        foundationSpecimens + shadersQuickieSpecimens + jewelTalkSpecimens + notJustPlainTextSpecimens
+        foundationSpecimens + shadersQuickieSpecimens + jewelTalkSpecimens + notJustPlainTextSpecimens + typographySpecimens
 
     /** Returns the curated specimen registry for a built-in deck, or [allSpecimens] for custom/external decks. */
     fun resolveSpecimensForDeck(deckId: String?): DeckSpecimenRegistry =

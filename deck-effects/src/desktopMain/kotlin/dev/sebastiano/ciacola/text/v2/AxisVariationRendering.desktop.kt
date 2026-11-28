@@ -216,7 +216,7 @@ internal object AxisPiecePainter {
     }
 
     /** Skia font settings matching what Compose applies to the piece's paragraph. */
-    private class Rasterization(
+    internal class Rasterization(
         val edging: FontEdging,
         val hinting: FontHinting,
         val subpixel: Boolean,
@@ -224,7 +224,7 @@ internal object AxisPiecePainter {
     )
 
     @OptIn(ExperimentalTextApi::class)
-    private fun rasterization(style: TextStyle): Rasterization {
+    internal fun rasterization(style: TextStyle): Rasterization {
         val resolved = style.platformStyle?.paragraphStyle?.fontRasterizationSettings
             ?: FontRasterizationSettings.PlatformDefault
         return Rasterization(
@@ -244,7 +244,7 @@ internal object AxisPiecePainter {
         )
     }
 
-    private fun configure(font: SkiaFont, raster: Rasterization) {
+    internal fun configure(font: SkiaFont, raster: Rasterization) {
         font.isSubpixel = raster.subpixel
         font.hinting = raster.hinting
         font.edging = raster.edging
