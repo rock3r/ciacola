@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.isUnspecified
 import dev.sebastiano.ciacola.core.fonts.DeckFontResolver
+import java.text.Bidi
 import kotlin.math.roundToInt
 import org.jetbrains.skia.Canvas as SkiaCanvas
 import org.jetbrains.skia.Font as SkiaFont
@@ -139,6 +140,9 @@ internal object AxisPiecePainter {
         val text = layout.layoutInput.text
         val raw = text.text
         if (raw.isEmpty()) return null
+        // Mixed-direction pieces are admitted with isRtl = false; shaping them as one LTR run here
+        // would bypass the paragraph's bidi reordering.
+        if (Bidi.requiresBidi(raw.toCharArray(), 0, raw.length)) return null
         val baseStyle = layout.layoutInput.style
         var style: SpanStyle = baseStyle.toSpanStyle()
         for (span in text.spanStyles) {
