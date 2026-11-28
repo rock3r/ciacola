@@ -70,17 +70,21 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.DirectContext
 import org.jetbrains.skia.Graphics
 import org.jetbrains.skia.Image as SkiaImage
 import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.impl.Stats
+import org.jetbrains.skiko.ExperimentalSkikoApi
+import org.jetbrains.skiko.graphicapi.DirectXOffscreenContext
 import org.jetbrains.skiko.graphicapi.MetalOffscreenContext
+import org.jetbrains.skiko.graphicapi.OpenGLOffscreenContext
 
 class MagicTextV2EffectsAndRenderingTest {
 
     // -------------------------------------------------------------------------
-    // Production Composable Path Benchmark at 1920×1080 (CPU + Metal)
+    // Production Composable Path Benchmark at 1920×1080 (CPU + the host's GPU backend)
     //   - 300-fragment moving morph (layer-free: 0 managed B/frame)
     //   - 300 pieces fading at once (layered: bounded constant B/frame, non-growing with count)
     //   - Overlapping additive cross-fade groups (BlendMode.PLUS)
@@ -106,15 +110,99 @@ class MagicTextV2EffectsAndRenderingTest {
         val midFrameRgba: ByteArray? = null,
     )
 
-    @OptIn(InternalComposeUiApi::class)
+    /**
+     * Offscreen GPU backend Skiko offers on the current OS. Each run gets a fresh context, and
+     * [withDirectContext] keeps it current on the calling thread for the whole [block].
+     */
+    @OptIn(ExperimentalSkikoApi::class)
+    private enum class GpuBackend(val label: String) {
+        Metal("Metal") {
+            override fun <T> withDirectContext(block: (DirectContext) -> T): T =
+                MetalOffscreenContext().use { ctx -> block(ctx.directContext) }
+        },
+        DirectX("Direct3D") {
+            override fun <T> withDirectContext(block: (DirectContext) -> T): T =
+                DirectXOffscreenContext().use { ctx -> block(ctx.directContext) }
+        },
+        OpenGL("OpenGL") {
+            // The GL context is only current (and its DirectContext only exists) inside withTexture.
+            override fun <T> withDirectContext(block: (DirectContext) -> T): T =
+                OpenGLOffscreenContext().use { ctx -> ctx.withTexture(1, 1) { block(ctx.directContext) } }
+        },
+        ;
+
+        abstract fun <T> withDirectContext(block: (DirectContext) -> T): T
+
+        companion object {
+            fun forHost(osName: String): GpuBackend {
+                val os = osName.lowercase()
+                return when {
+                    os.contains("mac") -> Metal
+                    os.contains("windows") -> DirectX
+                    else -> OpenGL
+                }
+            }
+        }
+    }
+
+    /** Hardware GPU [description] when usable, otherwise null with the [skipReason] for the report. */
+    private data class GpuProbe(val description: String?, val skipReason: String?)
+
+    private fun probeHardwareGpu(backend: GpuBackend): GpuProbe = try {
+        val description = backend.withDirectContext {
+            if (backend == GpuBackend.OpenGL) currentGlRenderer() ?: backend.label else backend.label
+        }
+        if (SOFTWARE_GL_RENDERERS.any { description.contains(it, ignoreCase = true) }) {
+            // Mesa's software rasterizers are CPU rendering behind a GL API: not a GPU measurement.
+            GpuProbe(null, "software renderer ($description)")
+        } else {
+            GpuProbe(description, null)
+        }
+    } catch (t: Throwable) {
+        GpuProbe(null, "${backend.label} offscreen context unavailable: ${t.javaClass.simpleName}: ${t.message}")
+    }
+
     private fun runProductionScene(
         fixtureName: String,
         backend: String,
-        useMetal: Boolean,
+        gpu: GpuBackend?,
         frames: Array<TextContent>,
         config: MagicTextV2Config,
         density: Density,
         captureMidRgba: Boolean = false,
+    ): ProductionRunResult = if (gpu == null) {
+        runProductionSceneOn(fixtureName, backend, null, frames, config, density, captureMidRgba)
+    } else {
+        gpu.withDirectContext { ctx ->
+            runProductionSceneOn(fixtureName, backend, ctx, frames, config, density, captureMidRgba)
+        }
+    }
+
+    /**
+     * Reads `GL_VENDOR` / `GL_RENDERER` from the current GL context through Skiko's OpenGLApi, which
+     * is Kotlin-internal, so it is reached reflectively. Returns null if that API is not available.
+     */
+    private fun currentGlRenderer(): String? = try {
+        val api = Class.forName("org.jetbrains.skiko.OpenGLApi")
+        val companion = api.getField("Companion").get(null)
+        val gl = companion.javaClass.getMethod("getInstance").apply { isAccessible = true }.invoke(companion)
+        val glGetString = api.getMethod("glGetString", Int::class.javaPrimitiveType)
+        val vendor = glGetString.invoke(gl, api.getMethod("getGL_VENDOR").invoke(gl))
+        val renderer = glGetString.invoke(gl, api.getMethod("getGL_RENDERER").invoke(gl))
+        "OpenGL: $vendor $renderer"
+    } catch (_: ReflectiveOperationException) {
+        null
+    }
+
+    @OptIn(InternalComposeUiApi::class)
+    private fun runProductionSceneOn(
+        fixtureName: String,
+        backend: String,
+        gpuContext: DirectContext?,
+        frames: Array<TextContent>,
+        config: MagicTextV2Config,
+        density: Density,
+        captureMidRgba: Boolean,
     ): ProductionRunResult {
         val renderer = MagicTextV2Renderer()
         val frameIdx = mutableIntStateOf(0)
@@ -145,13 +233,12 @@ class MagicTextV2EffectsAndRenderingTest {
             }
         }
 
-        val metalCtx = if (useMetal) MetalOffscreenContext() else null
-        val surface = if (metalCtx != null) {
+        val surface = if (gpuContext != null) {
             Surface.makeRenderTarget(
-                context = metalCtx.directContext,
+                context = gpuContext,
                 budgeted = false,
                 imageInfo = ImageInfo.makeN32Premul(1920, 1080),
-            ) ?: error("Failed to create 1920x1080 Metal render target Surface")
+            ) ?: error("Failed to create 1920x1080 $backend render target Surface")
         } else {
             Surface.makeRasterN32Premul(1920, 1080)
         }
@@ -170,9 +257,7 @@ class MagicTextV2EffectsAndRenderingTest {
             scene.measureAndLayout()
             surface.canvas.clear(0xFF0E1117.toInt())
             scene.draw(composeCanvas)
-            if (metalCtx != null) {
-                metalCtx.directContext.flushAndSubmit(surface, syncCpu = true)
-            }
+            gpuContext?.flushAndSubmit(surface, syncCpu = true)
         }
 
         val warmupCount = 48
@@ -194,7 +279,7 @@ class MagicTextV2EffectsAndRenderingTest {
                 }
             }
 
-            // Warmup phase (populates TextMeasurer, Partition, Morph/Build plans, JIT, and Metal pipelines).
+            // Warmup phase (populates TextMeasurer, Partition, Morph/Build plans, JIT, and GPU pipelines).
             for (w in 0 until warmupCount) {
                 renderOneFrame((w * (frames.size - 1)) / (warmupCount - 1).coerceAtLeast(1), w.toLong())
             }
@@ -250,7 +335,6 @@ class MagicTextV2EffectsAndRenderingTest {
             scene.close()
             frameRecomposer.close()
             surface.close()
-            metalCtx?.close()
         }
 
         val sortedMs = durationsNs.map { it / 1_000_000.0 }.sorted()
@@ -280,7 +364,7 @@ class MagicTextV2EffectsAndRenderingTest {
     }
 
     @Test
-    fun productionComposablePathCpuAndMetalAll4FixturesAllocAndNativeResources() {
+    fun productionComposablePathCpuAndGpuAll4FixturesAllocAndNativeResources() {
         val resolver = MagicTextV2TestSupport.createBundledFontResolver()
         val density = Density(2f)
         val config = MagicTextV2Config(
@@ -505,20 +589,19 @@ class MagicTextV2EffectsAndRenderingTest {
             )
         }
 
-        // Check whether Metal offscreen rendering is available on this host (always true on macOS arm64).
-        val metalAvailable = try {
-            MetalOffscreenContext().use { true }
-        } catch (_: Throwable) {
-            false
-        }
-        val isMacOs = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
-        if (isMacOs) {
-            assertTrue(metalAvailable, "Production Metal benchmark requires real Metal offscreen context on macOS")
+        // Benchmark the GPU backend the app renders with on this OS (Metal on macOS, Direct3D on
+        // Windows, OpenGL on Linux) whenever the host has a hardware GPU for it.
+        val osName = System.getProperty("os.name").orEmpty()
+        val gpuBackend = GpuBackend.forHost(osName)
+        val gpuProbe = probeHardwareGpu(gpuBackend)
+        val gpuDescription = gpuProbe.description
+        if (osName.lowercase().contains("mac")) {
+            assertNotNull(gpuDescription, "Production Metal benchmark requires real Metal offscreen context on macOS")
         }
 
-        val backends = buildList {
-            add("CPU" to false)
-            if (metalAvailable) add("Metal" to true)
+        val backends = buildList<Pair<String, GpuBackend?>> {
+            add("CPU" to null)
+            if (gpuDescription != null) add(gpuBackend.label to gpuBackend)
         }
 
         val report = StringBuilder("\n=== Production Composable Path Benchmark (1920x1080, Density=2f, Warm Caches) ===\n")
@@ -526,35 +609,35 @@ class MagicTextV2EffectsAndRenderingTest {
             "  Host : ${System.getProperty("os.name")} ${System.getProperty("os.version")} (${System.getProperty("os.arch")}), " +
                 "${Runtime.getRuntime().availableProcessors()} cores, JDK ${System.getProperty("java.version")}\n",
         )
+        report.append("  GPU  : ${gpuDescription ?: "none (${gpuProbe.skipReason})"}\n")
 
         val isCi = System.getenv("CI").equals("true", ignoreCase = true) ||
             System.getenv("GITHUB_ACTIONS").equals("true", ignoreCase = true)
 
-        for ((backendName, useMetal) in backends) {
-            // Keep the strict 60 fps (16.67 ms) budget for GPU (Metal) runs and for the CPU path on
-            // hosts that have Metal (the presentation hardware). Hosts without Metal only exercise
-            // pure software CPU rasterization (32 additive saveLayers / 1920x1080 24 px blur
-            // fallback): local Linux machines hold that to 30 fps (33.33 ms), and shared
-            // virtualized CI runners, which run ~8x slower than Apple Silicon, to 100 ms.
+        for ((backendName, gpu) in backends) {
+            // The app draws through the GPU on every OS, so GPU runs keep the strict 60 fps (16.67 ms)
+            // budget. The CPU raster run is a software reference (32 additive saveLayers / 1920x1080
+            // 24 px blur fallback): 30 fps (33.33 ms) on local machines, and 100 ms on shared
+            // virtualized CI runners, which run ~8x slower than Apple Silicon.
             val p95BudgetMs = when {
-                useMetal || metalAvailable -> 16.67
+                gpu != null -> 16.67
                 isCi -> 100.0
                 else -> 33.33
             }
             val rMove = runProductionScene(
-                "300-move (layer-free)", backendName, useMetal, fixture1Move300, config, density,
+                "300-move (layer-free)", backendName, gpu, fixture1Move300, config, density,
             )
             val rFade50 = runProductionScene(
-                "50-fade (layered)", backendName, useMetal, fixture2Fade50, config, density,
+                "50-fade (layered)", backendName, gpu, fixture2Fade50, config, density,
             )
             val rFade300 = runProductionScene(
-                "300-fade (layered)", backendName, useMetal, fixture2Fade300, config, density,
+                "300-fade (layered)", backendName, gpu, fixture2Fade300, config, density,
             )
             val rAdditive = runProductionScene(
-                "300-morph + 32 additive", backendName, useMetal, fixture3Additive, config, density,
+                "300-morph + 32 additive", backendName, gpu, fixture3Additive, config, density,
             )
             val rOverflow = runProductionScene(
-                "overflow-fallback", backendName, useMetal, fixture4Overflow, config, density, captureMidRgba = true,
+                "overflow-fallback", backendName, gpu, fixture4Overflow, config, density, captureMidRgba = true,
             )
 
             for (r in listOf(rMove, rFade50, rFade300, rAdditive, rOverflow)) {
@@ -1373,3 +1456,6 @@ class MagicTextV2EffectsAndRenderingTest {
         return count
     }
 }
+
+/** Mesa / ANGLE software GL renderers: CPU rasterization behind a GL API, not a GPU measurement. */
+private val SOFTWARE_GL_RENDERERS = listOf("llvmpipe", "softpipe", "swrast", "SwiftShader", "Software Rasterizer")

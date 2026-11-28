@@ -1,6 +1,8 @@
 [versions]
 antlr-kotlin = "1.0.13"
-compose-jb = "1.13.0-beta02"
+compose-jb = "1.13.0-rc01"
+# Overrides the Skiko that Compose pins (0.156.1 cannot create OpenGL offscreen contexts on Mesa).
+skiko = "0.157.0"
 compose-hot-reload = "1.2.0"
 jewel = "0.42.0-263.7307.200"
 intellij-icons = "263.7307.200"
