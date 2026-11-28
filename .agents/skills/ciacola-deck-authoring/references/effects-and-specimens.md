@@ -7,6 +7,8 @@
 - **Vector path draw**: `lineDraw` (on `shape`/`connector`, `direction`: `startToEnd`|`endToStart`|`fromCenter`|`clockwise`|`counterClockwise`).
 - **Content shimmer/sparkle**: `trace`, `sparkle`, `shimmer`.
 - **Emphasis**: `jiggle` (`kind: "emphasis"`, `args.amplitude`, `args.cycles`).
+- **Motion presets** (typographic, best with `by: "character"` or `"word"`; lengths in em): `rise` (enter/exit, `direction`, `args.distance`, `args.reveal`, `args.revealPadding`, `args.fadeWindow`), `focusPull` (enter/exit, or emphasis to sweep a focal plane: `args.radius`, `args.restOpacity`, `args.focusFrom`, `args.focusTo`, `args.focusWidth`, `args.settle`), `wave` (emphasis, `args.amplitude`, `args.rotation`, `args.scale`, `args.cycles`, `args.phasePerPiece`, `args.shape`, `args.fade`), `trackingBreathe` (emphasis, `args.amplitude`, `args.cycles`, `args.phasePerLine`). Override any channel with `"channels": { "offsetY": { "curve": ... } }` (see `docs/DECK-SCHEMA.md` §5.1); a worked example lives in `docs/decks/motion-presets.deck.json`.
+- **Stagger shapes**: `"stagger": { "ms": 40, "distribution": "fromCenter" | "fromEdges" | "random", "curve": "easeOut", "totalMs": 600, "seed": 3 }`.
 
 ## Standard Curves
 

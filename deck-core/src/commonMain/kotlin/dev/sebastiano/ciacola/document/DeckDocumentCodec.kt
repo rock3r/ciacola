@@ -678,12 +678,15 @@ object DeckDocumentCodec {
                         )
                     }
                     validateEffectBuild(build.effect, build.direction, build.args, build.by, build.stagger, kind, node, buildAddr, effects, issues)
+                    DeckValidationHelpers.validateMotionChannels(build.channels, buildAddr, issues)
                 }
                 is Build.Exit -> {
                     validateEffectBuild(build.effect, build.direction, build.args, build.by, build.stagger, kind, node, buildAddr, effects, issues)
+                    DeckValidationHelpers.validateMotionChannels(build.channels, buildAddr, issues)
                 }
                 is Build.Emphasis -> {
                     validateEffectBuild(build.effect, build.direction, build.args, build.by, build.stagger, kind, node, buildAddr, effects, issues)
+                    DeckValidationHelpers.validateMotionChannels(build.channels, buildAddr, issues)
                 }
                 is Build.Change -> {
                     build.morph?.let { morph ->

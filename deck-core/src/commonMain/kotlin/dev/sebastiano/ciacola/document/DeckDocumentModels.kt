@@ -562,7 +562,23 @@ data class Stagger(
     val order: StaggerOrder = StaggerOrder.Document,
     val reverse: Boolean = false,
     val manual: Map<String, Int> = emptyMap(),
+    /** How offsets spread across ranks; see [StaggerShaping]. */
+    val distribution: StaggerDistribution = StaggerDistribution.Linear,
+    /** Optional falloff curve over the normalized rank position. */
+    val curve: Curve? = null,
+    /** Spread of the last offset in ms; when set it replaces `ms * (count - 1)`. */
+    val totalMs: Int? = null,
+    /** Seed for [StaggerDistribution.Random]. */
+    val seed: Int = 1,
 )
+
+@Serializable
+enum class StaggerDistribution {
+    @SerialName("linear") Linear,
+    @SerialName("fromCenter") FromCenter,
+    @SerialName("fromEdges") FromEdges,
+    @SerialName("random") Random,
+}
 
 @Serializable
 enum class DeliveryBy {
@@ -621,6 +637,8 @@ sealed interface Build {
         val effect: String,
         val direction: String? = null,
         val args: Map<String, JsonElement> = emptyMap(),
+        /** Per-channel overrides layered over the effect's own channels (motion presets). */
+        val channels: Map<String, MotionChannelSpec> = emptyMap(),
         val by: DeliveryBy = DeliveryBy.Whole,
         val stagger: Stagger? = null,
         override val after: String? = null,
@@ -638,6 +656,8 @@ sealed interface Build {
         val effect: String,
         val direction: String? = null,
         val args: Map<String, JsonElement> = emptyMap(),
+        /** Per-channel overrides layered over the effect's own channels (motion presets). */
+        val channels: Map<String, MotionChannelSpec> = emptyMap(),
         val by: DeliveryBy = DeliveryBy.Whole,
         val stagger: Stagger? = null,
         override val after: String? = null,
@@ -655,6 +675,8 @@ sealed interface Build {
         val effect: String,
         val direction: String? = null,
         val args: Map<String, JsonElement> = emptyMap(),
+        /** Per-channel overrides layered over the effect's own channels (motion presets). */
+        val channels: Map<String, MotionChannelSpec> = emptyMap(),
         val by: DeliveryBy = DeliveryBy.Whole,
         val stagger: Stagger? = null,
         override val after: String? = null,

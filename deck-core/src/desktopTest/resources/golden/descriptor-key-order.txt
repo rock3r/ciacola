@@ -31,10 +31,13 @@ LoupePayload: children, target, zoom, diameter, align, lensFill
 NodeSpec: id, frame, align, weight, offset, opacity, rotation, scale, origin, interactive, text, code, shape, image, connector, specimen, stack, row, column, loupe, builds
 Timing: delayMs, durationMs, curve
 Phases: exit, move, enter
-Stagger: ms, order, reverse, manual
+Stagger: ms, order, reverse, manual, distribution, curve, totalMs, seed
 SpringParams: damping, stiffness
-Build.Enter: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
-Build.Exit: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
-Build.Emphasis: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
+MotionChannelSpec: from, to, curve, window, keyframes, wave
+MotionKeyframeSpec: at, value, curve
+MotionWaveSpec: amplitude, offset, shape, cycles, phase, phasePerPiece, phasePerLine, fade, seed
+Build.Enter: beat, id, effect, direction, args, channels, by, stagger, after, delayMs, durationMs, curve
+Build.Exit: beat, id, effect, direction, args, channels, by, stagger, after, delayMs, durationMs, curve
+Build.Emphasis: beat, id, effect, direction, args, channels, by, stagger, after, delayMs, durationMs, curve
 Build.Change: beat, id, set, path, morph, after, delayMs, durationMs, curve
 TransitionSpec: type, direction, color, center, delayMs, durationMs, curve, phases, stagger, text

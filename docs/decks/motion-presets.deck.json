@@ -1,0 +1,164 @@
+{
+  "format": 1,
+  "id": "motion-presets",
+  "title": "Motion presets",
+  "stage": { "width": 1920, "height": 1080 },
+  "defaultTheme": "dark",
+  "themes": {
+    "dark": {
+      "preset": "stageDark",
+      "colors": {
+        "background": "#0B0D12",
+        "foreground": "#F4F1EA",
+        "muted": "#A9B0C0",
+        "accent": "#6F8BFF",
+        "surface": "#171B24",
+        "elevatedSurface": "#202634",
+        "border": "#2B3345"
+      }
+    }
+  },
+  "slides": [
+    {
+      "id": "rise",
+      "title": "Rise",
+      "beats": [
+        { "notes": "Base: empty stage." },
+        { "notes": "Eyebrow, title and subtitle rise out of their lines." },
+        { "notes": "Title leaves upwards through its own line." }
+      ],
+      "nodes": [
+        {
+          "id": "rise:eyebrow",
+          "frame": { "x": 160, "y": 250, "w": 1600, "h": 60 },
+          "text": { "value": "KEYNOTE · 2026", "style": "eyebrow", "color": "muted" },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "rise", "by": "character", "stagger": { "ms": 18 }, "durationMs": 700 }
+          ]
+        },
+        {
+          "id": "rise:title",
+          "frame": { "x": 160, "y": 330, "w": 1600, "h": 300 },
+          "text": { "value": "Ship it", "size": 240, "lineHeight": 280, "weight": 800 },
+          "builds": [
+            {
+              "kind": "enter",
+              "beat": 1,
+              "effect": "rise",
+              "args": { "distance": 1.1 },
+              "channels": {
+                "offsetY": { "curve": { "bezier": [0.2, 0.9, 0.1, 1.0] } },
+                "rotation": { "keyframes": [{ "at": 0, "value": 6 }, { "at": 1, "value": 0, "curve": "easeOut" }] }
+              },
+              "by": "character",
+              "stagger": { "ms": 45, "distribution": "fromCenter", "curve": "easeOut" },
+              "delayMs": 150,
+              "durationMs": 900
+            },
+            { "kind": "exit", "beat": 2, "effect": "rise", "by": "character", "stagger": { "ms": 30 }, "durationMs": 600 }
+          ]
+        },
+        {
+          "id": "rise:subtitle",
+          "frame": { "x": 160, "y": 680, "w": 1600, "h": 80 },
+          "text": { "value": "A short sentence that earns its place.", "style": "subheading", "color": "muted" },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "rise", "args": { "distance": 0.6 }, "by": "word", "stagger": { "ms": 60 }, "delayMs": 600, "durationMs": 700 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "focus",
+      "title": "Focus pull",
+      "beats": [
+        { "notes": "Base: empty stage." },
+        { "notes": "Letters resolve from soft focus, one after another." },
+        { "notes": "The focal plane sweeps across the word and settles sharp." }
+      ],
+      "nodes": [
+        {
+          "id": "focus:word",
+          "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
+          "text": { "value": "Focus pull", "size": 220, "lineHeight": 260, "weight": 700, "align": "center" },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "focusPull", "by": "character", "stagger": { "ms": 55 }, "durationMs": 900 },
+            {
+              "kind": "emphasis",
+              "beat": 2,
+              "effect": "focusPull",
+              "args": { "radius": 0.25, "focusWidth": 1.5, "focusFrom": -0.1, "focusTo": 1.1 },
+              "by": "character",
+              "durationMs": 2600
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "wave",
+      "title": "Wave",
+      "beats": [
+        { "notes": "Base: the word at rest." },
+        { "notes": "A travelling lift with a slight tilt." },
+        { "notes": "Same preset, noise shape and a swell." }
+      ],
+      "nodes": [
+        {
+          "id": "wave:word",
+          "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
+          "text": { "value": "typography", "size": 200, "lineHeight": 240, "weight": 700, "align": "center" },
+          "builds": [
+            {
+              "kind": "emphasis",
+              "beat": 1,
+              "effect": "wave",
+              "args": { "amplitude": 0.22, "rotation": 6, "cycles": 2, "phasePerPiece": 0.09 },
+              "by": "character",
+              "durationMs": 2400
+            },
+            {
+              "kind": "emphasis",
+              "beat": 2,
+              "effect": "wave",
+              "args": { "amplitude": 0.12, "scale": 0.12, "cycles": 3, "shape": "noise", "phasePerPiece": 0.3 },
+              "by": "character",
+              "durationMs": 3000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tracking",
+      "title": "Tracking breathe",
+      "beats": [
+        { "notes": "Base: three lines at rest." },
+        { "notes": "Letter-spacing opens and closes, each line a little later." }
+      ],
+      "nodes": [
+        {
+          "id": "tracking:lines",
+          "frame": { "x": 160, "y": 260, "w": 1600, "h": 560 },
+          "text": {
+            "value": "TRACKING\nTRACKING\nTRACKING",
+            "size": 150,
+            "lineHeight": 180,
+            "weight": 700,
+            "align": "center"
+          },
+          "builds": [
+            {
+              "kind": "emphasis",
+              "beat": 1,
+              "effect": "trackingBreathe",
+              "args": { "amplitude": 0.18, "cycles": 2, "phasePerLine": 0.2 },
+              "by": "character",
+              "durationMs": 4000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

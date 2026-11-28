@@ -4,6 +4,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
@@ -26,7 +27,7 @@ import org.jetbrains.skia.Surface
 fun Modifier.applyLayerState(state: LayerState): Modifier {
     if (state.isIdentity) return this
     val skiaRenderEffect = buildSkiaImageFilter(state)?.asComposeRenderEffect()
-    val transformed = this.graphicsLayer {
+    val layerBlock: GraphicsLayerScope.() -> Unit = {
         alpha = state.alpha.coerceIn(0f, 1f)
         translationX = state.translationX
         translationY = state.translationY
@@ -36,6 +37,7 @@ fun Modifier.applyLayerState(state: LayerState): Modifier {
         rotationZ = state.rotationZ
         renderEffect = skiaRenderEffect
     }
+    val transformed = this.graphicsLayer(layerBlock)
     return when (val clip = state.clip) {
         EffectClip.None -> transformed
         is EffectClip.Wipe -> transformed.drawWithContent {
@@ -50,6 +52,7 @@ fun Modifier.applyLayerState(state: LayerState): Modifier {
                 this@drawWithContent.drawContent()
             }
         }
+        is EffectClip.RestBounds -> this.restBoundsClip(clip).graphicsLayer(layerBlock)
     }
 }
 

@@ -173,14 +173,17 @@ Common layout/transform properties on `NodeSpec`:
 ### `Build` (`builds` array on `NodeSpec`)
 
 Discriminated by `"kind"`:
-- `"enter"`: reveals the node at `beat` using `effect`, optional `direction`, `args`, `by` (`"whole"|"child"|"paragraph"|"word"|"character"`), `stagger`, `after`, `delayMs`, `durationMs`, `curve`.
+- `"enter"`: reveals the node at `beat` using `effect`, optional `direction`, `args`, `channels` (motion presets, see §5.1), `by` (`"whole"|"child"|"paragraph"|"word"|"character"`), `stagger`, `after`, `delayMs`, `durationMs`, `curve`.
 - `"exit"`: hides/exits the node at `beat` (same timing/effect fields as `"enter"`).
 - `"emphasis"`: in-place emphasis at `beat` (e.g. `"jiggle"`).
 - `"change"`: RFC 7396 JSON Merge Patch applied at `beat` via `"set": { ... }` (plus optional `path` for motion path, `morph` for `TextMorphSpec`, `after`, `delayMs`, `durationMs`, `curve`).
 
 ### `Stagger` & `Timing`
 
-- `Stagger`: `{ "ms": 45, "order": "document"|"topToBottom"|"leftToRight"|"readingOrder", "reverse": false, "manual": { "<fragmentKey>": 120 } }`
+- `Stagger`: `{ "ms": 45, "order": "document"|"topToBottom"|"leftToRight"|"readingOrder", "reverse": false, "manual": { "<fragmentKey>": 120 }, "distribution": "linear"|"fromCenter"|"fromEdges"|"random", "curve": ..., "totalMs": 600, "seed": 1 }`
+  - `distribution` spreads offsets across ranks: `fromCenter` starts the middle piece first, `fromEdges` the outer ones, `random` shuffles deterministically by `seed`.
+  - `curve` shapes the offsets over the normalized rank (a Cavalry-style falloff); `totalMs` sets the last offset directly instead of `ms * (count - 1)`.
+  - With the defaults (`linear`, no `curve`, no `totalMs`) offsets are exactly `rank * ms`. `manual` entries always win.
 - `Timing`: `{ "delayMs": 0, "durationMs": 350, "curve": ... }`
 
 ### `Curve`
@@ -219,6 +222,57 @@ Discriminated by `"kind"`:
 | `sparkle` | Content | All | No | 8-way | `900 ms` | — |
 | `shimmer` | Content | All | No | — | `900 ms` | — |
 | `jiggle` (emphasis) | Layer | All | Yes | — | `500 ms` | `amplitude` (`6`), `cycles` (`3`) |
+| `rise` | Layer | All | Yes | `up`, `down`, `left`, `right` | `750 ms` | `distance` (em, `0.9`), `reveal` (`true`), `revealPadding` (em, `0.12`), `fadeWindow` (`0.35`) |
+| `focusPull` | Layer | All (+ emphasis) | Yes | — | `900 ms` | `radius` (em, `0.3`), `restOpacity` (`0.45`), `fromScale` (`1.06`), `focusFrom` (`0`), `focusTo` (`1`), `focusWidth` (em, `1.2`), `settle` (`true`) |
+| `wave` (emphasis) | Layer | All | Yes | — | `2000 ms` | `amplitude` (em, `0.18`), `rotation` (deg, `0`), `scale` (`0`), `cycles` (`2`), `phasePerPiece` (`0.08`), `shape` (`sine`), `fade` (`0.15`) |
+| `trackingBreathe` (emphasis) | Layer | All | Yes | — | `3000 ms` | `amplitude` (em per glyph, `0.12`), `cycles` (`1`), `phasePerLine` (`0.15`), `shape` (`sine`), `fade` (`0.12`) |
+
+### 5.1 Motion presets and channels
+
+`rise`, `focusPull`, `wave` and `trackingBreathe` are **motion presets**: typographic effects built
+from per-piece animatable **channels**. Each preset turns its `args` into default channels, and a
+build's `channels` map overrides any of them field by field, so you can change one curve, window or
+amplitude and keep the rest. Presets work on any node, and shine with `by: "character"` or `"word"`.
+
+Channels and units (lengths are in em of the piece's font size; for whole-node delivery 1 em is one
+line of the node's height):
+
+| Channel | Rest | Unit |
+|---|---|---|
+| `opacity` | `1` | 0..1 |
+| `offsetX`, `offsetY` | `0` | em |
+| `scale`, `scaleX`, `scaleY` | `1` | factor (`scale` multiplies the axis scales) |
+| `rotation` | `0` | degrees |
+| `blur` | `0` | em |
+| `tracking` | `0` | em per glyph, spread around the centre of each line |
+
+A channel value is `base + wave` over the piece's progress (`0..1`):
+
+```json
+"channels": {
+  "offsetY": { "from": 1.1, "to": 0, "curve": { "bezier": [0.2, 0.9, 0.1, 1] }, "window": [0, 0.8] },
+  "rotation": { "keyframes": [{ "at": 0, "value": 6 }, { "at": 0.7, "value": -1, "curve": "easeOut" }, { "at": 1, "value": 0 }] },
+  "scale": { "wave": { "amplitude": 0.05, "cycles": 2, "phasePerPiece": 0.1, "shape": "sine", "fade": 0.2 } }
+}
+```
+
+- **Tween**: `from`, `to` (a missing end uses the rest value), `curve`, and `window` (`[start, end]`
+  slice of the progress the tween spans, for example to finish a fade early).
+- **Keyframes**: sorted `{ "at", "value", "curve" }` stops; each `curve` shapes the segment that ends
+  at that stop. Keyframes take precedence over `from`/`to`.
+- **Wave**: `amplitude`, `offset`, `shape` (`sine`, `triangle`, `square`, `saw`, `noise` with
+  `seed`), `cycles` over the progress, `phase`, `phasePerPiece` and `phasePerLine` (fractions of a
+  cycle, for travelling waves), and `fade` (share of the progress used to ease the wave in and out).
+
+Timing: the build `curve` remaps each piece's progress before the channels apply their own curves
+(presets default to `linear`), and `stagger` (with its `distribution`, `curve` and `totalMs`) sets
+when each piece starts. `focusPull` used as an emphasis computes blur and opacity from a focal point
+travelling across the text; an explicit `blur` or `opacity` channel replaces that sweep.
+
+Lint: `UNKNOWN_MOTION_CHANNEL` (warning), `INVALID_MOTION_WINDOW`, `EMPTY_MOTION_KEYFRAMES`,
+`MOTION_KEYFRAME_OUT_OF_RANGE`, `MOTION_KEYFRAMES_UNSORTED`, `INVALID_MOTION_WAVE` and
+`NEGATIVE_STAGGER_TOTAL_MS` (errors). A worked example deck lives in
+[`docs/decks/motion-presets.deck.json`](decks/motion-presets.deck.json).
 
 ---
 

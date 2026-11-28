@@ -1,5 +1,7 @@
 package dev.sebastiano.ciacola.effects.v2
 
+import dev.sebastiano.ciacola.document.MotionPresetDeclarations
+
 /**
  * Central 3-tier (+ Text-tier) build effects registry for Ciacola v2, plus the complete 52-entry
  * Keynote `(type, name)` mapping table covering every effect observed in the reference KPF decks.
@@ -211,6 +213,66 @@ object BuildEffects {
                 EffectParamSpec("caretColor", EffectParamType.Color),
             ),
         ),
+        EffectDeclaration(
+            id = MotionPresetDeclarations.RISE,
+            tier = EffectTier.Layer,
+            supportedKinds = enterExit,
+            supportedNodeKinds = allNodes,
+            params = listOf(
+                EffectParamSpec("direction", EffectParamType.Direction8),
+                EffectParamSpec("distance", EffectParamType.Float, minValue = 0f, maxValue = 5f),
+                EffectParamSpec("reveal", EffectParamType.Boolean),
+                EffectParamSpec("revealPadding", EffectParamType.Float, minValue = 0f, maxValue = 2f),
+                EffectParamSpec("fadeWindow", EffectParamType.Float, minValue = 0f, maxValue = 1f),
+                EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
+            ),
+        ),
+        EffectDeclaration(
+            id = MotionPresetDeclarations.FOCUS_PULL,
+            tier = EffectTier.Layer,
+            supportedKinds = setOf(EffectBuildKind.Enter, EffectBuildKind.Exit, EffectBuildKind.Emphasis),
+            supportedNodeKinds = allNodes,
+            params = listOf(
+                EffectParamSpec("radius", EffectParamType.Float, minValue = 0f, maxValue = 3f),
+                EffectParamSpec("restOpacity", EffectParamType.Float, minValue = 0f, maxValue = 1f),
+                EffectParamSpec("fromScale", EffectParamType.Float, minValue = 0.2f, maxValue = 3f),
+                EffectParamSpec("focusFrom", EffectParamType.Float, minValue = -0.5f, maxValue = 1.5f),
+                EffectParamSpec("focusTo", EffectParamType.Float, minValue = -0.5f, maxValue = 1.5f),
+                EffectParamSpec("focusWidth", EffectParamType.Float, minValue = 0.05f, maxValue = 20f),
+                EffectParamSpec("settle", EffectParamType.Boolean),
+                EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
+            ),
+        ),
+        EffectDeclaration(
+            id = MotionPresetDeclarations.WAVE,
+            tier = EffectTier.Layer,
+            supportedKinds = setOf(EffectBuildKind.Emphasis),
+            supportedNodeKinds = allNodes,
+            params = listOf(
+                EffectParamSpec("amplitude", EffectParamType.Float, minValue = -3f, maxValue = 3f),
+                EffectParamSpec("rotation", EffectParamType.Float, minValue = -90f, maxValue = 90f),
+                EffectParamSpec("scale", EffectParamType.Float, minValue = -1f, maxValue = 2f),
+                EffectParamSpec("cycles", EffectParamType.Float, minValue = 0f, maxValue = 50f),
+                EffectParamSpec("phasePerPiece", EffectParamType.Float, minValue = -1f, maxValue = 1f),
+                EffectParamSpec("shape", EffectParamType.String),
+                EffectParamSpec("fade", EffectParamType.Float, minValue = 0f, maxValue = 0.5f),
+                EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
+            ),
+        ),
+        EffectDeclaration(
+            id = MotionPresetDeclarations.TRACKING_BREATHE,
+            tier = EffectTier.Layer,
+            supportedKinds = setOf(EffectBuildKind.Emphasis),
+            supportedNodeKinds = allNodes,
+            params = listOf(
+                EffectParamSpec("amplitude", EffectParamType.Float, minValue = -1f, maxValue = 2f),
+                EffectParamSpec("cycles", EffectParamType.Float, minValue = 0f, maxValue = 50f),
+                EffectParamSpec("phasePerLine", EffectParamType.Float, minValue = -1f, maxValue = 1f),
+                EffectParamSpec("shape", EffectParamType.String),
+                EffectParamSpec("fade", EffectParamType.Float, minValue = 0f, maxValue = 0.5f),
+                EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
+            ),
+        ),
     ).associateBy { it.id }
 
     fun get(id: String): EffectDeclaration? = declarations[id]
@@ -308,7 +370,11 @@ object BuildEffects {
             BLUR -> LayerEffects.evaluateBlur(kind, progress, context, args, curve)
             FROM_DARKNESS -> LayerEffects.evaluateFromDarkness(kind, progress, context, args, curve)
             JIGGLE -> LayerEffects.evaluateJiggle(kind, progress, context, args)
-            else -> LayerEffects.evaluateDissolve(kind, progress, curve)
+            else -> if (MotionPresets.isPreset(effectiveId)) {
+                MotionPresets.evaluateLayer(effectiveId, kind, progress, context, args, curve)
+            } else {
+                LayerEffects.evaluateDissolve(kind, progress, curve)
+            }
         }
     }
 
@@ -479,6 +545,7 @@ object BuildEffects {
                 val ok = rawVal is CurveV2 || (rawVal is String && KeynoteCurves.byName(rawVal) != null)
                 if (!ok) typeError("CurveV2") else null
             }
+            EffectParamType.Channels -> if (rawVal is Map<*, *>) null else typeError("channels map")
         }
     }
 }

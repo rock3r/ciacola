@@ -11,12 +11,15 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextPainter
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.unit.sp
 import dev.sebastiano.ciacola.effects.v2.BuildEffects
 import dev.sebastiano.ciacola.effects.v2.EffectBuildKind
 import dev.sebastiano.ciacola.effects.v2.EffectClip
 import dev.sebastiano.ciacola.effects.v2.EffectEvalContext
 import dev.sebastiano.ciacola.effects.v2.LayerEffects
 import dev.sebastiano.ciacola.effects.v2.LayerState
+import dev.sebastiano.ciacola.effects.v2.MotionPresets
+import dev.sebastiano.ciacola.effects.v2.PieceContext
 import kotlin.math.abs
 import org.jetbrains.skia.BlendMode as SkiaBlendMode
 import org.jetbrains.skia.ColorFilter
@@ -400,6 +403,12 @@ internal object MagicTextV2Drawing {
             return
         }
 
+        val motion = MotionPresets.resolve(eff.effectId, eff.kind, eff.args)
+        if (motion != null) {
+            drawMotionPresetBuildFrame(plan, timings, elapsedMs, eff, motion, stageSize)
+            return
+        }
+
         for (i in 0 until timings.size) {
             val timing = timings[i]
             val piece = timing.piece
@@ -416,6 +425,58 @@ internal object MagicTextV2Drawing {
                 progress = rawP,
                 context = ctx,
                 args = eff.args,
+                curve = eff.curve ?: timing.curve,
+            )
+            drawPieceWithLayerState(piece, layerState)
+        }
+    }
+
+    /**
+     * Motion preset build: channels are resolved once per frame, then evaluated per piece with the
+     * piece's index, line, position inside its line, font size and the whole text box.
+     */
+    private fun DrawScope.drawMotionPresetBuildFrame(
+        plan: BuildPlanV2,
+        timings: List<BuildPieceTiming>,
+        elapsedMs: Float,
+        eff: EffectCallV2,
+        motion: MotionPresets.ResolvedMotion,
+        stageSize: Size,
+    ) {
+        val count = timings.size
+        var maxLine = 0
+        for (i in 0 until count) maxLine = maxOf(maxLine, timings[i].piece.line)
+        val lineLengths = IntArray(maxLine + 1)
+        for (i in 0 until count) lineLengths[timings[i].piece.line]++
+        val seenInLine = IntArray(maxLine + 1)
+        val whole = plan.partition.wholeLayout
+        val textBounds = Rect(0f, 0f, whole.size.width.toFloat(), whole.size.height.toFloat())
+
+        for (i in 0 until count) {
+            val timing = timings[i]
+            val piece = timing.piece
+            val line = piece.line
+            val indexInLine = seenInLine[line]
+            seenInLine[line] = indexInLine + 1
+            val ctx = EffectEvalContext(
+                nodeBounds = piece.boundingBox,
+                stageSize = stageSize,
+                density = density,
+                reducedMotion = false,
+                piece = PieceContext(
+                    index = i,
+                    count = count,
+                    line = line,
+                    indexInLine = indexInLine,
+                    lineLength = lineLengths[line],
+                    emPx = piece.dominantFontSizeSp.sp.toPx(),
+                    textBounds = textBounds,
+                ),
+            )
+            val layerState = MotionPresets.evaluate(
+                resolved = motion,
+                progress = timing.rawProgressAt(elapsedMs),
+                context = ctx,
                 curve = eff.curve ?: timing.curve,
             )
             drawPieceWithLayerState(piece, layerState)
@@ -755,6 +816,19 @@ internal object MagicTextV2Drawing {
             val native = canvas.nativeCanvas
             native.save()
             try {
+                val restClip = state.clip
+                if (restClip is EffectClip.RestBounds) {
+                    // Fixed at the piece's resting box, so the piece slides in from behind its edge.
+                    native.clipRect(
+                        SkiaRect.makeLTRB(
+                            originX - restClip.padLeft,
+                            originY - restClip.padTop,
+                            originX + pieceW + restClip.padRight,
+                            originY + pieceH + restClip.padBottom,
+                        ),
+                        true,
+                    )
+                }
                 native.translate(originX + state.translationX, originY + state.translationY)
                 if (hasTransform && (state.scaleX != 1f || state.scaleY != 1f || state.rotationZ != 0f)) {
                     native.translate(pivotX, pivotY)
@@ -773,6 +847,7 @@ internal object MagicTextV2Drawing {
                         val p = LayerEffects.buildIrisClipPath(Size(pieceW, pieceH), clip)
                         native.clipPath(p.asSkiaPath(), antiAlias = true)
                     }
+                    is EffectClip.RestBounds -> Unit
                 }
 
                 if (!needsLayer) {

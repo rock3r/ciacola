@@ -192,6 +192,19 @@ sealed interface EffectClip {
         val radiusFraction: Float,
         val keepInside: Boolean = true,
     ) : EffectClip
+
+    /**
+     * Rectangular mask fixed at the layer's resting bounds (before the layer's own translation,
+     * scale and rotation), grown by the given padding in px. Content that moves outside its rest
+     * box disappears, as if emerging from behind the edge of its line.
+     */
+    @Immutable
+    data class RestBounds(
+        val padLeft: Float,
+        val padTop: Float,
+        val padRight: Float,
+        val padBottom: Float,
+    ) : EffectClip
 }
 
 /**
@@ -293,7 +306,32 @@ data class EffectEvalContext(
     val density: Float = 1f,
     val reducedMotion: Boolean = false,
     val stageOffset: Offset? = null,
+    /** Piece-level placement for per-piece effects (motion presets); defaults describe a whole node. */
+    val piece: PieceContext = PieceContext.Whole,
 )
+
+/**
+ * Where a piece sits inside its text, for effects that vary per piece (tracking, travelling waves,
+ * focus sweeps).
+ *
+ * [emPx] is the piece's font size in px (0 when unknown; evaluators then fall back to
+ * `16 * density`). [textBounds] is the whole text's box in the same coordinate space as
+ * `EffectEvalContext.nodeBounds`.
+ */
+@Immutable
+data class PieceContext(
+    val index: Int = 0,
+    val count: Int = 1,
+    val line: Int = 0,
+    val indexInLine: Int = 0,
+    val lineLength: Int = 1,
+    val emPx: Float = 0f,
+    val textBounds: Rect? = null,
+) {
+    companion object {
+        val Whole: PieceContext = PieceContext()
+    }
+}
 
 /**
  * Typed argument bag passed to build effects from declarations or compiled timelines.
@@ -399,6 +437,9 @@ enum class EffectParamType {
     LineDrawDirection,
     Offset,
     Curve,
+
+    /** Motion preset channel overrides (`Map<String, MotionChannelSpec>`). */
+    Channels,
 }
 
 @Immutable

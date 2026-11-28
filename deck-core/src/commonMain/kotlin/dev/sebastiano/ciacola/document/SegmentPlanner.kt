@@ -107,6 +107,8 @@ object SegmentPlanner {
             stagger = beatSpec.stagger,
         )
 
+        val unsequencedRankCount = (unsequencedNodeRank.values.maxOrNull() ?: 0) + 1
+
         val resolvedTracks = arrayOfNulls<TrackPlan>(tasks.size)
         for (tIdx in orderedTaskIndices) {
             val task = tasks[tIdx]
@@ -130,7 +132,7 @@ object SegmentPlanner {
                 val staggerDelay = when {
                     stagger == null -> 0
                     nodeId in stagger.manual -> stagger.manual.getValue(nodeId)
-                    else -> (unsequencedNodeRank[nodeId] ?: 0) * stagger.ms
+                    else -> StaggerShaping.delayMs(stagger, unsequencedNodeRank[nodeId] ?: 0, unsequencedRankCount)
                 }
                 phaseDelay + staggerDelay + buildDelay
             }
@@ -687,6 +689,7 @@ object SegmentPlanner {
             }
         }
 
+        val rankCount = (rankByOrigIndex.maxOrNull() ?: 0) + 1
         val slots = ArrayList<Slot>(count)
         for ((origIdx, item) in items.withIndex()) {
             val addr = item.first
@@ -694,7 +697,7 @@ object SegmentPlanner {
             val slotStart = when {
                 stagger != null && addr in stagger.manual -> stagger.manual.getValue(addr)
                 effectDecl?.pieceStartMs != null -> effectDecl.pieceStartMs.invoke(rank, count, stagger, args)
-                stagger != null -> rank * stagger.ms
+                stagger != null -> StaggerShaping.delayMs(stagger, rank, rankCount)
                 else -> 0
             }
             slots += Slot(
@@ -761,12 +764,13 @@ object SegmentPlanner {
                 }
             }
 
+            val rankCount = (rankByAddr.values.maxOrNull() ?: 0) + 1
             for (frag in frags) {
                 val rank = rankByAddr[frag.address] ?: 0
                 val start = if (stagger != null && frag.address in stagger.manual) {
                     stagger.manual.getValue(frag.address)
                 } else {
-                    phaseDelay + rank * (stagger?.ms ?: 0)
+                    phaseDelay + (stagger?.let { StaggerShaping.delayMs(it, rank, rankCount) } ?: 0)
                 }
                 slots += Slot(
                     address = frag.address,
@@ -927,7 +931,7 @@ object SegmentPlanner {
     private fun staggerDelayFor(nodeId: String, ranks: Map<String, Int>, stagger: Stagger?): Int = when {
         stagger == null -> 0
         nodeId in stagger.manual -> stagger.manual.getValue(nodeId)
-        else -> (ranks[nodeId] ?: 0) * stagger.ms
+        else -> StaggerShaping.delayMs(stagger, ranks[nodeId] ?: 0, (ranks.values.maxOrNull() ?: 0) + 1)
     }
 
     private fun isCodeWarpChange(setObj: JsonObject): Boolean {
