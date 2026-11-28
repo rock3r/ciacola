@@ -233,6 +233,9 @@ private fun Modifier.clipScrubbing(
     var hovered by remember { mutableStateOf(false) }
     var dragging by remember { mutableStateOf(false) }
     val barAlpha = remember { Animatable(0f) }
+    DisposableEffect(head) {
+        onDispose { head.endScrub() }
+    }
     LaunchedEffect(hovered || dragging) {
         if (hovered || dragging) {
             barAlpha.snapTo(1f)
@@ -244,39 +247,44 @@ private fun Modifier.clipScrubbing(
     val intrinsic = Size(bitmap.width.toFloat(), bitmap.height.toFloat())
     return this
         .pointerInput(head, window, intrinsic, contentScale) {
-            awaitPointerEventScope {
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull() ?: continue
-                    val box = Size(size.width.toFloat(), size.height.toFloat())
-                    val drawn = drawnImageRect(intrinsic, box, contentScale)
-                    val inside = change.position.x in 0f..box.width && change.position.y in 0f..box.height
-                    when (event.type) {
-                        PointerEventType.Press -> {
-                            // Only a plain primary click scrubs: review pins (Ctrl+Click), context
-                            // clicks and anything another handler already took are left alone.
-                            val plain = event.buttons.isPrimaryPressed && !event.keyboardModifiers.isCtrlPressed &&
-                                !event.keyboardModifiers.isMetaPressed && !event.keyboardModifiers.isAltPressed
-                            if (!change.isConsumed && plain) {
-                                dragging = true
-                                head.beginScrub()
+            try {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: continue
+                        val box = Size(size.width.toFloat(), size.height.toFloat())
+                        val drawn = drawnImageRect(intrinsic, box, contentScale)
+                        val inside = change.position.x in 0f..box.width && change.position.y in 0f..box.height
+                        when (event.type) {
+                            PointerEventType.Press -> {
+                                // Only a plain primary click scrubs: review pins (Ctrl+Click), context
+                                // clicks and anything another handler already took are left alone.
+                                val plain = event.buttons.isPrimaryPressed && !event.keyboardModifiers.isCtrlPressed &&
+                                    !event.keyboardModifiers.isMetaPressed && !event.keyboardModifiers.isAltPressed
+                                if (!change.isConsumed && plain) {
+                                    dragging = true
+                                    head.beginScrub()
+                                }
                             }
+                            PointerEventType.Release -> if (dragging) {
+                                change.consume()
+                                dragging = false
+                                head.endScrub()
+                            }
+                            PointerEventType.Exit -> hovered = false
+                            else -> hovered = inside
                         }
-                        PointerEventType.Release -> if (dragging) {
+                        if (event.type == PointerEventType.Release) hovered = inside
+                        if (dragging && change.pressed) {
+                            val fraction = if (drawn.width > 0f) ((change.position.x - drawn.left) / drawn.width).coerceIn(0f, 1f) else 0f
+                            head.seek(window.startMs + fraction * window.lengthMs, window)
                             change.consume()
-                            dragging = false
-                            head.endScrub()
                         }
-                        PointerEventType.Exit -> hovered = false
-                        else -> hovered = inside
-                    }
-                    if (event.type == PointerEventType.Release) hovered = inside
-                    if (dragging && change.pressed) {
-                        val fraction = if (drawn.width > 0f) ((change.position.x - drawn.left) / drawn.width).coerceIn(0f, 1f) else 0f
-                        head.seek(window.startMs + fraction * window.lengthMs, window)
-                        change.consume()
                     }
                 }
+            } finally {
+                dragging = false
+                head.endScrub()
             }
         }
         .drawWithContent {

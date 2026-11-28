@@ -185,6 +185,27 @@ class DocumentClipPlaybackTest {
     }
 
     @Test
+    fun `cancelling the scrub handler mid-drag clears scrubbing so playback resumes`() {
+        val trimChange = Build.Change(
+            beat = 1,
+            set = buildJsonObject { put("image", buildJsonObject { put("endMs", 900) }) },
+        )
+        harness(deck(ImagePayload("clip.webp", fit = "fill", loop = false), listOf(trimChange))).use { h ->
+            val head = h.awaitDecode()
+            h.send(PointerEventType.Enter, 0.1f)
+            h.send(PointerEventType.Press, 0.1f)
+            h.renderStep(10_000_000L)
+            assertTrue(head.scrubbing)
+            // Advancing restarts pointerInput(window) without delivering a pointer release.
+            h.advanceToRest(AdvanceDirection.Forward)
+            assertFalse(head.scrubbing, "pointerInput cancellation clears scrubbing")
+            val pos = head.positionMs
+            repeat(20) { h.renderStep(10_000_000L) }
+            assertTrue(head.positionMs > pos, "playback resumes after cancellation, pos=$pos -> ${head.positionMs}")
+        }
+    }
+
+    @Test
     fun `only a plain primary click in show mode scrubs`() {
         harness(deck(ImagePayload("clip.webp", fit = "fill"), emptyList())).use { h ->
             val head = h.awaitDecode()

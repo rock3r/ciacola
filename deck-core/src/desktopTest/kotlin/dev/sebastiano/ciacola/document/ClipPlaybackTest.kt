@@ -187,8 +187,11 @@ class ClipPlaybackTest {
         head.enterBeat(1, ClipPlayback.stateAtBeat(image, emptyList(), 1), window)
         assertTrue(head.playing)
         head.advance(500.0, window)
+        head.beginScrub()
+        assertTrue(head.scrubbing)
         head.hold()
         assertFalse(head.playing)
+        assertFalse(head.scrubbing)
         assertEquals(500.0, head.positionMs)
     }
 

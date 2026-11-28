@@ -227,6 +227,7 @@ class ClipPlayhead {
      */
     fun hold() {
         playing = false
+        scrubbing = false
         held = true
         currentBeat = null
         currentState = null
