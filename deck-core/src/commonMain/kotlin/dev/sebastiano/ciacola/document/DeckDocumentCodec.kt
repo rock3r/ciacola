@@ -634,8 +634,8 @@ object DeckDocumentCodec {
                 issues += lintError("NEGATIVE_CLIP_TIME", addr, "$name must be >= 0, got $value.")
             }
         }
-        if (img.startMs != null && img.endMs != null && img.endMs <= img.startMs) {
-            issues += lintError("EMPTY_CLIP_TRIM", addr, "endMs (${img.endMs}) must be greater than startMs (${img.startMs}).")
+        if (img.endMs != null && img.endMs <= (img.startMs ?: 0)) {
+            issues += lintError("EMPTY_CLIP_TRIM", addr, "endMs (${img.endMs}) must be greater than startMs (${img.startMs ?: 0}).")
         }
         val poster = img.posterMs
         if (poster != null && ((img.startMs != null && poster < img.startMs) || (img.endMs != null && poster > img.endMs))) {
@@ -888,6 +888,7 @@ object DeckDocumentCodec {
         if (afterNode.opacity !in 0.0..1.0) {
             issues += loadError("OPACITY_OUT_OF_RANGE", buildAddr, "Patched opacity ${afterNode.opacity} must be in 0..1.")
         }
+        if (build.set["image"] is JsonObject) afterNode.image?.let { validateImagePlaybackFields(it, "$buildAddr/set/image", issues) }
 
         // Validate patched specimen params if present
         if (afterNode.specimen != null) {

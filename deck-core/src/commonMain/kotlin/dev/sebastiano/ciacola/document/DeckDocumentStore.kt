@@ -967,14 +967,15 @@ object DeckStructureEdits {
                 if ('#' in afterRaw) continue
 
                 val targetNode = nodesById[afterRaw] ?: continue
-                if (targetNode.builds.none { it.beat == deletedBeat }) continue
+                if (targetNode.builds.none { it.beat == deletedBeat && it !is Build.Playback }) continue
 
                 val targetBuildIdx = if (targetBeat == 0 && build is Build.Enter) {
                     targetNode.builds.indexOfLast { it.beat == targetBeat && it is Build.Enter }
                         .takeIf { it >= 0 }
                         ?: targetNode.builds.indexOfLast { it.beat == targetBeat }
                 } else {
-                    targetNode.builds.indexOfLast { it.beat == targetBeat }
+                    // Playback builds are not on the beat timeline, so `after` never binds to them.
+                    targetNode.builds.indexOfLast { it.beat == targetBeat && it !is Build.Playback }
                 }
                 if (targetBuildIdx < 0) continue
 

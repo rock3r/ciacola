@@ -253,6 +253,54 @@ class ClipPlaybackTest {
     }
 
     @Test
+    fun `validation covers an empty trim from zero and change builds on clip fields`() {
+        fun codes(node: NodeSpec) = DeckDocumentCodec.validate(
+            DeckDocument(id = "d", slides = listOf(SlideSpec(id = "s", beats = listOf(BeatSpec(), BeatSpec()), nodes = listOf(node)))),
+        ).map { it.code }.toSet()
+        assertTrue("EMPTY_CLIP_TRIM" in codes(NodeSpec(id = "clip", image = ImagePayload("clip.webp", endMs = 0))))
+        val patch = kotlinx.serialization.json.buildJsonObject {
+            put("image", kotlinx.serialization.json.buildJsonObject {
+                put("playbackRate", kotlinx.serialization.json.JsonPrimitive(-2.0))
+                put("startMs", kotlinx.serialization.json.JsonPrimitive(900))
+                put("endMs", kotlinx.serialization.json.JsonPrimitive(500))
+                put("maxPixels", kotlinx.serialization.json.JsonPrimitive(0))
+            })
+        }
+        val changed = codes(NodeSpec(id = "clip", image = ImagePayload("clip.webp"), builds = listOf(Build.Change(beat = 1, set = patch))))
+        for (code in listOf("INVALID_PLAYBACK_RATE", "EMPTY_CLIP_TRIM", "INVALID_MAX_PIXELS")) {
+            assertTrue(code in changed, "expected $code in $changed")
+        }
+    }
+
+    @Test
+    fun `after references never bind to playback builds`() {
+        val clip = NodeSpec(
+            id = "clip",
+            image = ImagePayload("clip.webp"),
+            builds = listOf(
+                Build.Enter(beat = 1, effect = "fade", durationMs = 500),
+                Build.Playback(beat = 1, id = "play1", action = PlaybackAction.Play),
+                Build.Playback(beat = 2, action = PlaybackAction.Pause),
+            ),
+        )
+        val label = NodeSpec(
+            id = "label",
+            text = TextPayload(value = RichTextValue.Plain("x")),
+            builds = listOf(Build.Enter(beat = 1, effect = "fade", after = "clip")),
+        )
+        val explicit = label.copy(id = "label2", builds = listOf(Build.Enter(beat = 1, effect = "fade", after = "clip#play1")))
+        val doc = DeckDocument(
+            id = "d",
+            slides = listOf(SlideSpec(id = "s", beats = listOf(BeatSpec(), BeatSpec(), BeatSpec()), nodes = listOf(clip, label, explicit))),
+        )
+        val issues = DeckDocumentCodec.validate(doc).filter { it.address.contains("label2") }.map { it.code }
+        assertTrue("AFTER_PLAYBACK_BUILD" in issues, "$issues")
+        val edited = DeckStructureEdits.deleteBeat(doc, "s", 2)
+        val after = edited.slides.single().nodes.first { it.id == "label" }.builds.single().after
+        assertTrue(after == "clip" || after?.startsWith("clip#") == true && after != "clip#play1", "after rewritten to $after")
+    }
+
+    @Test
     fun `deck JSON with playback decodes and keeps static images unchanged`() {
         val text = """
             {"format":1,"id":"d","slides":[{"id":"s","beats":[{},{}],"nodes":[
