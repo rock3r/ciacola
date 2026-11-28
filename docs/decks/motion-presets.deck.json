@@ -4,6 +4,12 @@
   "title": "Motion presets",
   "stage": { "width": 1920, "height": 1080 },
   "defaultTheme": "dark",
+  "fonts": [
+    { "family": "Inter", "src": "fonts/Inter-Regular.ttf", "weight": 400 },
+    { "family": "Inter", "src": "fonts/Inter-Medium.ttf", "weight": 500 },
+    { "family": "Inter", "src": "fonts/Inter-Bold.ttf", "weight": 700 },
+    { "family": "Inter", "src": "fonts/Inter-ExtraBold.ttf", "weight": 800 }
+  ],
   "themes": {
     "dark": {
       "preset": "stageDark",
@@ -31,7 +37,7 @@
         {
           "id": "rise:eyebrow",
           "frame": { "x": 160, "y": 250, "w": 1600, "h": 60 },
-          "text": { "value": "KEYNOTE · 2026", "style": "eyebrow", "color": "muted" },
+          "text": { "value": "KEYNOTE · 2026", "font": "Inter", "style": "eyebrow", "color": "muted" },
           "builds": [
             { "kind": "enter", "beat": 1, "effect": "rise", "by": "character", "stagger": { "ms": 18 }, "durationMs": 700 }
           ]
@@ -39,7 +45,7 @@
         {
           "id": "rise:title",
           "frame": { "x": 160, "y": 330, "w": 1600, "h": 300 },
-          "text": { "value": "Ship it", "size": 240, "lineHeight": 280, "weight": 800 },
+          "text": { "value": "Ship it", "font": "Inter", "size": 240, "lineHeight": 280, "weight": 800 },
           "builds": [
             {
               "kind": "enter",
@@ -61,7 +67,7 @@
         {
           "id": "rise:subtitle",
           "frame": { "x": 160, "y": 680, "w": 1600, "h": 80 },
-          "text": { "value": "A short sentence that earns its place.", "style": "subheading", "color": "muted" },
+          "text": { "value": "A short sentence that earns its place.", "font": "Inter", "style": "subheading", "color": "muted" },
           "builds": [
             { "kind": "enter", "beat": 1, "effect": "rise", "args": { "distance": 0.6 }, "by": "word", "stagger": { "ms": 60 }, "delayMs": 600, "durationMs": 700 }
           ]
@@ -80,7 +86,7 @@
         {
           "id": "focus:word",
           "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
-          "text": { "value": "Focus pull", "size": 220, "lineHeight": 260, "weight": 700, "align": "center" },
+          "text": { "value": "Focus pull", "font": "Inter", "size": 220, "lineHeight": 260, "weight": 700, "align": "center" },
           "builds": [
             { "kind": "enter", "beat": 1, "effect": "focusPull", "by": "character", "stagger": { "ms": 55 }, "durationMs": 900 },
             {
@@ -107,7 +113,7 @@
         {
           "id": "wave:word",
           "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
-          "text": { "value": "typography", "size": 200, "lineHeight": 240, "weight": 700, "align": "center" },
+          "text": { "value": "typography", "font": "Inter", "size": 200, "lineHeight": 240, "weight": 700, "align": "center" },
           "builds": [
             {
               "kind": "emphasis",
@@ -142,6 +148,7 @@
           "frame": { "x": 160, "y": 260, "w": 1600, "h": 560 },
           "text": {
             "value": "TRACKING\nTRACKING\nTRACKING",
+            "font": "Inter",
             "size": 150,
             "lineHeight": 180,
             "weight": 700,

@@ -233,6 +233,9 @@ Discriminated by `"kind"`:
 from per-piece animatable **channels**. Each preset turns its `args` into default channels, and a
 build's `channels` map overrides any of them field by field, so you can change one curve, window or
 amplitude and keep the rest. Presets work on any node, and shine with `by: "character"` or `"word"`.
+Per-character delivery needs the node's font declared in the deck's `fonts`: without a font
+resolver the text cannot be certified safe to split, so `by: "character"` quietly falls back to
+word pieces. `trackingBreathe` spreads pieces within a line, so a one-word line then does not move.
 
 Channels and units (lengths are in em of the piece's font size; for whole-node delivery 1 em is one
 line of the node's height):
