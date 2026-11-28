@@ -139,7 +139,20 @@ fun dumpAndKillWorkerProcesses(marker: String, toolchainHome: File?) {
     }
 }
 
+// Compose 1.13 pins Skiko 0.156.1, whose Linux OpenGLOffscreenContext fails on Mesa (glXCreateContext
+// with a visual-less pbuffer config). Skiko 0.157.0 switched to glXCreateNewContext.
+val skikoVersion = libs.versions.skiko.get()
+
 allprojects {
+    configurations.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.skiko") {
+                useVersion(skikoVersion)
+                because("Skiko 0.157.0 fixes OpenGLOffscreenContext creation on Mesa")
+            }
+        }
+    }
+
     val isDeckModule = project.path in ciacolaDeckModules
     group = if (isDeckModule) "dev.sebastiano.ciacola" else "dev.bnorm.storyboard"
     version = if (isDeckModule) "0.1-SNAPSHOT" else "0.1.0-SNAPSHOT"
