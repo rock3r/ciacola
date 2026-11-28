@@ -124,9 +124,10 @@ class FontAxesDocumentTest {
         val issues = DeckFontAxisLint.validate(doc, resolverFor(doc))
         assertTrue(issues.all { it.severity == IssueSeverity.LintWarning }, "$issues")
 
+        // The node declares GRAD and the run inherits it, so both report it against Fredoka.
         val unsupported = issues.filter { it.code == DeckFontAxisLint.CODE_UNSUPPORTED_AXIS }
-        assertEquals(1, unsupported.size, "$issues")
-        assertTrue(unsupported.single().message.contains("'GRAD'") && unsupported.single().message.contains("'Fredoka'"))
+        assertEquals(2, unsupported.size, "$issues")
+        assertTrue(unsupported.all { it.message.contains("'GRAD'") && it.message.contains("'Fredoka'") }, "$unsupported")
 
         val clamped = issues.filter { it.code == DeckFontAxisLint.CODE_AXIS_OUT_OF_RANGE }
         assertEquals(1, clamped.size, "$issues")
@@ -148,6 +149,24 @@ class FontAxesDocumentTest {
             }
         val staticIssues = DeckFontAxisLint.validate(static, resolverFor(static))
         assertTrue(staticIssues.isNotEmpty() && staticIssues.all { it.code == DeckFontAxisLint.CODE_AXES_IGNORED }, "$staticIssues")
+
+        // A run that switches to a static font is checked against its inherited coordinates.
+        val inherited = axesDocument(
+            fonts = listOf(BundledFontCatalog.Fredoka, BundledFontCatalog.NanumPenScript),
+            nodeAxes = mapOf("wdth" to 80.0),
+            runAxes = emptyMap(),
+        ).let { d ->
+            val node = d.slides.single().nodes.single()
+            val runs = listOf(TextRun(text = "Fredoka "), TextRun(text = "Nanum", font = "Nanum Pen Script"))
+            d.copy(
+                themes = emptyMap(),
+                slides = listOf(d.slides.single().copy(nodes = listOf(node.copy(text = node.text!!.copy(value = RichTextValue.Runs(runs)))))),
+            )
+        }
+        val inheritedIssues = DeckFontAxisLint.validate(inherited, resolverFor(inherited))
+        assertEquals(1, inheritedIssues.size, "$inheritedIssues")
+        assertEquals(DeckFontAxisLint.CODE_AXES_IGNORED, inheritedIssues.single().code)
+        assertTrue(inheritedIssues.single().message.contains("'Nanum Pen Script'"), "$inheritedIssues")
 
         // Without declared fonts every axis is ignored.
         val noFonts = axesDocument(fonts = emptyList())

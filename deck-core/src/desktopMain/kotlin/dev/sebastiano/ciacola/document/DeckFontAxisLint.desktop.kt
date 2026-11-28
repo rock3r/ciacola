@@ -68,16 +68,22 @@ object DeckFontAxisLint {
                     val role = text.style?.let { theme?.typography?.get(it) }
                     val nodeFamily = text.font ?: role?.font
                     val nodeItalic = text.italic ?: role?.italic ?: false
-                    if (text.axes.isNotEmpty()) {
-                        checkAxes(resolver, nodeFamily, text.axes, nodeItalic, addr, "Text node '${node.id}'", ::add)
+                    // Check the coordinates the renderer actually applies: inherited axes count
+                    // whenever a level switches to a different font than the one they were set for.
+                    val nodeAxes = FontAxes.merge(role?.axes.orEmpty(), text.axes)
+                    val nodeSwitchesFont = text.font != null && text.font != role?.font
+                    if (text.axes.isNotEmpty() || (nodeSwitchesFont && nodeAxes.isNotEmpty())) {
+                        checkAxes(resolver, nodeFamily, nodeAxes, nodeItalic, addr, "Text node '${node.id}'", ::add)
                     }
                     val runs = (text.value as? RichTextValue.Runs)?.runs.orEmpty()
                     for (run in runs) {
-                        if (run.axes.isEmpty()) continue
+                        val runAxes = FontAxes.merge(nodeAxes, run.axes)
+                        val runSwitchesFont = run.font != null && run.font != nodeFamily
+                        if (run.axes.isEmpty() && !(runSwitchesFont && runAxes.isNotEmpty())) continue
                         checkAxes(
                             resolver = resolver,
                             familyName = run.font ?: nodeFamily,
-                            axes = run.axes,
+                            axes = runAxes,
                             italic = run.italic ?: nodeItalic,
                             address = addr,
                             subject = "Text run '${run.text.take(RUN_PREVIEW_CHARS)}' in '${node.id}'",

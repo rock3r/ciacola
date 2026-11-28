@@ -136,6 +136,20 @@ class FontAxesTest {
     }
 
     @Test
+    fun `evicted axis families stay resolvable while their FontFamily is in use`() {
+        val resolver = resolver(listOf(BundledFontCatalog.Fredoka))
+        val fredoka = assertNotNull(resolver.resolveFamily("Fredoka"))
+        val first = resolver.withAxes(fredoka, mapOf("wdth" to 75.0))
+        val live = first.fontFamily
+        for (i in 1..DeckFontResolver.MAX_AXIS_FAMILIES + 8) {
+            resolver.withAxes(fredoka, mapOf("wdth" to 75.0 + i * 0.5))
+        }
+        val found = assertNotNull(resolver.findResolvedFamily(live), "Evicted but live family must still resolve")
+        assertEquals(live, found.fontFamily)
+        assertTrue(found.faces.all { it.axisCoordinates == mapOf("wdth" to 75f) })
+    }
+
+    @Test
     fun `wdth changes measured advances while clamped requests measure like the bound`() {
         val resolver = resolver(listOf(BundledFontCatalog.Fredoka))
         val base = TextStyle(fontSize = 48.sp, fontWeight = FontWeight(400))

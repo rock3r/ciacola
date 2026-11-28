@@ -105,13 +105,16 @@ class DeckFontResolver(
     private val rawBytesBySha256: HashMap<String, ByteArray> = hashMapOf()
     private val axisFamilyLock = Any()
     private val axisFamilies = object : LinkedHashMap<AxisFamilyKey, ResolvedFontFamily>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<AxisFamilyKey, ResolvedFontFamily>?): Boolean {
-            if (size <= MAX_AXIS_FAMILIES || eldest == null) return false
-            axisFamiliesByComposeFontFamily.remove(eldest.value.fontFamily)
-            return true
-        }
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<AxisFamilyKey, ResolvedFontFamily>?): Boolean =
+            size > MAX_AXIS_FAMILIES
     }
-    private val axisFamiliesByComposeFontFamily: HashMap<FontFamily, ResolvedFontFamily> = hashMapOf()
+
+    /**
+     * Reverse lookup for axis-derived families that outlives [axisFamilies] eviction for as long
+     * as the [FontFamily] is still referenced (weak keys). Records never reference their key, so
+     * they do not keep it alive.
+     */
+    private val axisFamiliesByComposeFontFamily = java.util.WeakHashMap<FontFamily, AxisFamilyRecord>()
 
     /** All validation and load-time lint issues recorded while resolving [declarations]. */
     val issues: List<FontValidationIssue>
@@ -183,7 +186,7 @@ class DeckFontResolver(
             null
         } else {
             familiesByComposeFontFamily[fontFamily]
-                ?: synchronized(axisFamilyLock) { axisFamiliesByComposeFontFamily[fontFamily] }
+                ?: synchronized(axisFamilyLock) { axisFamiliesByComposeFontFamily[fontFamily]?.familyFor(fontFamily) }
         }
 
     /**
@@ -223,7 +226,9 @@ class DeckFontResolver(
         synchronized(axisFamilyLock) {
             axisFamilies[key]?.let { return it }
             axisFamilies[key] = derived
-            if (derived !== base) axisFamiliesByComposeFontFamily[derived.fontFamily] = derived
+            if (derived !== base) {
+                axisFamiliesByComposeFontFamily[derived.fontFamily] = AxisFamilyRecord(base, derived.faces, derived)
+            }
         }
         return derived
     }
@@ -435,6 +440,18 @@ class DeckFontResolver(
     )
 
     private data class AxisFamilyKey(val familyName: String, val axes: String)
+
+    /** Resolution metadata for one axis-derived family, holding no strong reference to its [FontFamily]. */
+    private class AxisFamilyRecord(
+        private val base: ResolvedFontFamily,
+        private val faces: List<ResolvedFontFace>,
+        derived: ResolvedFontFamily,
+    ) {
+        private var cached = java.lang.ref.WeakReference(derived)
+
+        fun familyFor(fontFamily: FontFamily): ResolvedFontFamily =
+            cached.get() ?: base.copy(fontFamily = fontFamily, faces = faces).also { cached = java.lang.ref.WeakReference(it) }
+    }
 
     private fun baseFamilyOf(family: ResolvedFontFamily): ResolvedFontFamily {
         if (family.faces.none { it.axisCoordinates.isNotEmpty() }) return family
