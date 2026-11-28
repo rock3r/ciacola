@@ -575,7 +575,7 @@ internal fun DocumentNodeItem(
                     tint = img.tint?.let { ctx.colorResolver.resolveOrNull(it) },
                     assetsRootDir = ctx.config.assetsRootDir,
                     modifier = nodeModifier,
-                    playback = documentImagePlayback(ctx, rawNode, img),
+                    playback = documentImagePlayback(nodeCtx, rawNode, img),
                 )
             }
             NodeKind.Connector -> {
@@ -948,13 +948,38 @@ private fun documentImagePlayback(
     image: ImagePayload,
 ): DocumentImagePlayback {
     val live = ctx.isAnimatedMount && ctx.session.purpose == RenderPurpose.Present && !ctx.isGhostSubtree
+    val beat = ClipPlayback.effectiveBeat(ctx.clock, ctx.slide.id, lastBeat = ctx.slide.beats.lastIndex)
+    // Before its `enter` or after its `exit` the node is drawn invisible: it must not play or take clicks.
+    val present = beat == null || beat < 0 || JsonMergePatch.isNodePresentAtBeat(rawNode, beat)
     return DocumentImagePlayback(
         payload = image,
         builds = rawNode.builds,
-        retainKey = "clip:${ctx.slide.id}/${rawNode.id}",
+        // Keyed by source too, so a `change` build swapping `src` starts the new clip on its own playhead.
+        retainKey = clipRetainKey(ctx.slide.id, rawNode.id, image),
         session = ctx.session,
-        beat = ClipPlayback.effectiveBeat(ctx.clock, ctx.slide.id, lastBeat = ctx.slide.beats.lastIndex),
+        beat = beat,
         live = live,
-        scrubbable = live && !ctx.config.isEditMode,
+        present = present,
+        scrubbable = live && present && ctx.config.clipScrubbing,
+        mirrorOf = ctx.session.clipMirrorSource,
     )
 }
+
+private fun clipRetainKey(slideId: String, nodeId: String, image: ImagePayload): String = "clip:$slideId/$nodeId/${image.src}"
+
+/**
+ * Playback for an image drawn by a magicMove overlay: in show mode it shows the frame the node's
+ * clip on [slideId] is on, elsewhere its poster frame.
+ */
+internal fun overlayImagePlayback(ctx: DocumentNodeRenderContext, slideId: String, nodeId: String, image: ImagePayload) =
+    DocumentImagePlayback(
+        payload = image,
+        builds = emptyList(),
+        retainKey = clipRetainKey(slideId, nodeId, image),
+        session = ctx.session,
+        beat = null,
+        live = false,
+        present = true,
+        scrubbable = false,
+        mirrorOf = if (ctx.isAnimatedMount && ctx.session.purpose == RenderPurpose.Present) ctx.session else ctx.session.clipMirrorSource,
+    )

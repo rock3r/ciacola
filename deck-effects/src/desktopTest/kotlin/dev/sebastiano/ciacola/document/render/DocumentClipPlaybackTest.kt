@@ -2,7 +2,9 @@ package dev.sebastiano.ciacola.document.render
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.sebastiano.ciacola.document.BeatSpec
 import dev.sebastiano.ciacola.document.Build
@@ -67,9 +69,15 @@ class DocumentClipPlaybackTest {
         doc: DeckDocument,
         purpose: RenderPurpose = RenderPurpose.Present,
         session: RenderSession? = null,
+        clipScrubbing: Boolean = true,
     ) = DocumentStageHarness(
         initialDocument = doc,
-        initialConfig = DocumentRenderConfig(baseDensity = 1f, fontsDir = bundledFontsDirPath(), assetsRootDir = assetsDir.absolutePath),
+        initialConfig = DocumentRenderConfig(
+            baseDensity = 1f,
+            fontsDir = bundledFontsDirPath(),
+            assetsRootDir = assetsDir.absolutePath,
+            clipScrubbing = clipScrubbing,
+        ),
         existingSession = session,
         purpose = purpose,
     )
@@ -84,6 +92,15 @@ class DocumentClipPlaybackTest {
             Thread.sleep(5)
         }
         error("clip never decoded")
+    }
+
+    private fun DocumentStageHarness.send(
+        type: PointerEventType,
+        fraction: Float,
+        buttons: PointerButtons? = null,
+        modifiers: PointerKeyboardModifiers? = null,
+    ) = onUiThread {
+        scene.sendPointerEvent(type, Offset(width * fraction, height * 0.5f), buttons = buttons, keyboardModifiers = modifiers)
     }
 
     private fun assertColor(expected: IntArray, actual: IntArray, label: String) = assertTrue(
@@ -127,9 +144,7 @@ class DocumentClipPlaybackTest {
             val head = h.awaitDecode()
             h.advanceToRest(AdvanceDirection.Forward)
             val beat = h.animatic.currentIndex
-            fun send(type: PointerEventType, fraction: Float) = h.onUiThread {
-                h.scene.sendPointerEvent(type, Offset(h.width * fraction, h.height * 0.5f))
-            }
+            fun send(type: PointerEventType, fraction: Float) = h.send(type, fraction)
             send(PointerEventType.Enter, 0.65f)
             send(PointerEventType.Press, 0.65f)
             repeat(20) { h.renderStep(10_000_000L) }
@@ -145,6 +160,77 @@ class DocumentClipPlaybackTest {
 
             h.advanceToRest(AdvanceDirection.Forward)
             assertTrue(head.positionMs > 200.0, "continues from the scrub, at ${head.positionMs}")
+        }
+    }
+
+    @Test
+    fun `dragging past the edge clamps to the end and releasing outside lets go`() {
+        harness(deck(ImagePayload("clip.webp", fit = "fill"), emptyList())).use { h ->
+            val head = h.awaitDecode()
+            h.send(PointerEventType.Enter, 0.5f)
+            h.send(PointerEventType.Press, 0.5f)
+            h.send(PointerEventType.Exit, 1.2f)
+            h.renderStep(1_000_000L)
+            assertEquals(1000.0, head.positionMs, 1.0, "the step that crosses the edge still seeks")
+            h.send(PointerEventType.Release, 1.2f)
+            h.renderStep(1_000_000L)
+            assertFalse(head.scrubbing)
+        }
+    }
+
+    @Test
+    fun `only a plain primary click in show mode scrubs`() {
+        harness(deck(ImagePayload("clip.webp", fit = "fill"), emptyList())).use { h ->
+            val head = h.awaitDecode()
+            h.onUiThread { DeckClipControls.requestTogglePause() }
+            h.renderStep(1_000_000L)
+            val paused = head.positionMs
+            h.send(PointerEventType.Press, 0.65f, modifiers = PointerKeyboardModifiers(isCtrlPressed = true))
+            h.send(PointerEventType.Release, 0.65f)
+            h.send(PointerEventType.Press, 0.65f, buttons = PointerButtons(isSecondaryPressed = true))
+            h.send(PointerEventType.Release, 0.65f)
+            h.renderStep(1_000_000L)
+            assertEquals(paused, head.positionMs, "Ctrl+Click and right-click leave the clip alone")
+        }
+        harness(deck(ImagePayload("clip.webp", fit = "fill"), emptyList()), clipScrubbing = false).use { h ->
+            val head = h.awaitDecode()
+            h.onUiThread { DeckClipControls.requestTogglePause() }
+            h.renderStep(1_000_000L)
+            val paused = head.positionMs
+            h.send(PointerEventType.Press, 0.65f)
+            h.send(PointerEventType.Release, 0.65f)
+            h.renderStep(1_000_000L)
+            assertEquals(paused, head.positionMs, "no scrubbing outside show mode")
+        }
+    }
+
+    @Test
+    fun `a clip hidden until its enter beat neither plays nor takes clicks`() {
+        val builds = listOf(Build.Enter(beat = 1, effect = "fade"))
+        harness(deck(ImagePayload("clip.webp", fit = "fill"), builds)).use { h ->
+            val head = h.awaitDecode()
+            repeat(30) { h.renderStep(10_000_000L) }
+            h.send(PointerEventType.Press, 0.65f)
+            h.send(PointerEventType.Release, 0.65f)
+            h.renderStep(1_000_000L)
+            assertEquals(0.0, head.positionMs, "held while hidden")
+            assertFalse(head.playing)
+            h.advanceToRest(AdvanceDirection.Forward)
+            repeat(10) { h.renderStep(10_000_000L) }
+            assertTrue(head.playing && head.positionMs > 0.0, "plays once shown, at ${head.positionMs}")
+        }
+    }
+
+    @Test
+    fun `a clip decoded by another mount shows its poster on the first frame`() {
+        val doc = deck(
+            ImagePayload("clip.webp", fit = "fill", posterMs = 700),
+            listOf(Build.Playback(beat = 1, action = PlaybackAction.Play)),
+        )
+        harness(doc).use { it.awaitDecode() }
+        harness(doc).use { h ->
+            h.renderStep(1_000_000L)
+            assertColor(BLUE, h.probe(), "poster from the cache, no first-frame flash")
         }
     }
 
@@ -236,7 +322,7 @@ class DocumentClipPlaybackTest {
     }
 
     private companion object {
-        const val KEY = "clip:s/clip"
+        const val KEY = "clip:s/clip/clip.webp"
         val RED = intArrayOf(255, 0, 0, 255)
         val YELLOW = intArrayOf(255, 255, 0, 255)
         val BLUE = intArrayOf(0, 0, 255, 255)

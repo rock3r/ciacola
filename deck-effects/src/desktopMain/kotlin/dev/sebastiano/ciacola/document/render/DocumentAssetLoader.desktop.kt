@@ -57,6 +57,9 @@ internal object DocumentAssetLoader {
         },
     )
 
+    /** One lock per animation cache key, so two mounts asking for the same clip decode it once. */
+    private val animationDecodeLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
     private val animationInfoCache: MutableMap<String, Optional<AnimationInfo>> = Collections.synchronizedMap(
         object : LinkedHashMap<String, Optional<AnimationInfo>>(64, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Optional<AnimationInfo>>?): Boolean =
@@ -126,11 +129,40 @@ internal object DocumentAssetLoader {
         assetsRootDir: String? = null,
         maxPixels: Long? = null,
     ): List<AnimationFrame>? {
+        val cacheKey = animationCacheKey(deckId, src, assetsRootDir, maxPixels) ?: return null
+        animationCache[cacheKey]?.let { return it.orElse(null) }
+        synchronized(animationDecodeLocks.computeIfAbsent(cacheKey) { Any() }) {
+            animationCache[cacheKey]?.let { return it.orElse(null) }
+            return decodeAnimation(deckId, src.trim().removePrefix("/"), assetsRootDir, cacheKey, maxPixels)
+        }
+    }
+
+    /** Frames [loadAnimation] already decoded, without reading or decoding anything. */
+    fun cachedAnimation(
+        deckId: String,
+        src: String,
+        assetsRootDir: String? = null,
+        maxPixels: Long? = null,
+    ): List<AnimationFrame>? =
+        animationCacheKey(deckId, src, assetsRootDir, maxPixels)?.let { animationCache[it]?.orElse(null) }
+
+    private fun animationCacheKey(deckId: String, src: String, assetsRootDir: String?, maxPixels: Long?): String? {
         val clean = src.trim().removePrefix("/")
         if (!isAnimatableSource(clean)) return null
-        val budget = maxPixels?.takeIf { it > 0 }?.let { AnimationBudget(maxPixels = it) } ?: AnimationBudget()
-        val cacheKey = "${assetsRootDir.orEmpty()}|$deckId|$clean|${budget.maxPixels}"
-        animationCache[cacheKey]?.let { return it.orElse(null) }
+        return "${assetsRootDir.orEmpty()}|$deckId|$clean|${budgetFor(maxPixels).maxPixels}"
+    }
+
+    private fun budgetFor(maxPixels: Long?): AnimationBudget =
+        maxPixels?.takeIf { it > 0 }?.let { AnimationBudget(maxPixels = it) } ?: AnimationBudget()
+
+    private fun decodeAnimation(
+        deckId: String,
+        clean: String,
+        assetsRootDir: String?,
+        cacheKey: String,
+        maxPixels: Long?,
+    ): List<AnimationFrame>? {
+        val budget = budgetFor(maxPixels)
         val bytes = readAssetBytes(deckId, clean, assetsRootDir) ?: return null
         val frames = try {
             decodeAnimatedFrames(bytes, budget)

@@ -499,6 +499,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         assetsRootDir = assetsRootDir,
         fontsDir = deckFontsDir,
         isEditMode = studioWorkspace.isStudioOpen,
+        clipScrubbing = studioWorkspace.mode == StudioMode.Present,
         keyboardController = keyboardController,
         onNodeClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.selectNode(nodeId) },
         onNodeDoubleClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.startInlineTextEdit(nodeId) },

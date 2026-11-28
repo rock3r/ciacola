@@ -138,13 +138,23 @@ class ClipPlayhead {
     private var currentState: ClipBeatState? = null
     private val entryPositions = HashMap<Int, Double>()
 
+    /** Set by [hold]: the frame stays put, and the next beat at or after zero counts as a fresh arrival. */
+    private var held = false
+
     /**
      * Applies [state] for [beat]. An adjacent forward step continues from the live position unless
      * the beat pins one; any other arrival restores the position recorded when [beat] was last
-     * entered forward, falling back to the derived anchor.
+     * entered forward, falling back to the derived anchor. Going from a shown beat back to
+     * [ClipPlayback.BEFORE_FIRST_BEAT] (stepping backward off the slide) [hold]s the frame instead
+     * of jumping to the poster.
      */
     fun enterBeat(beat: Int, state: ClipBeatState, window: ClipWindow) {
         val previous = currentBeat
+        if (beat < 0 && (held || (previous != null && previous >= 0))) {
+            hold()
+            return
+        }
+        held = false
         if (previous == beat && currentState == state) return
         val forwardStep = previous != null && beat == previous + 1
         val position = when {
@@ -158,7 +168,7 @@ class ClipPlayhead {
 
     /** Replays the current beat from its entry position without changing beat (the `R` key). */
     fun restart(window: ClipWindow) {
-        val beat = currentBeat ?: return
+        val beat = currentBeat?.takeIf { it >= 0 } ?: return
         val state = currentState ?: return
         val position = if (state.pinnedAtBeat) state.anchorMs.toDouble() else entryPositions[beat] ?: state.anchorMs.toDouble()
         apply(beat, state, window.clamp(position))
@@ -189,24 +199,37 @@ class ClipPlayhead {
      * on its last frame plays it again from the trim start.
      */
     fun togglePause(window: ClipWindow) {
-        if (playing && !showPoster) {
+        if ((currentBeat ?: return) < 0) return
+        val heldAtEnd = !window.loop && positionMs >= window.endMs
+        if (playing && !showPoster && !heldAtEnd) {
             playing = false
             return
         }
-        if (!window.loop && positionMs >= window.endMs) positionMs = window.startMs
+        if (heldAtEnd) positionMs = window.startMs
         playing = true
         showPoster = false
     }
 
     /** Advances by [elapsedMs] of wall time; non-looping clips hold their last frame at the end. */
     fun advance(elapsedMs: Double, window: ClipWindow) {
-        if (!playing || showPoster || scrubbing || elapsedMs <= 0.0) return
+        if (!playing || showPoster || scrubbing || elapsedMs <= 0.0 || rate <= 0.0) return
         val next = positionMs + elapsedMs * rate
         positionMs = when {
             next < window.endMs -> next
             window.loop && window.lengthMs > 0.0 -> window.startMs + (next - window.startMs) % window.lengthMs
             else -> window.endMs
         }
+    }
+
+    /**
+     * Stops on the frame shown now, for a node that is hidden (before its `enter`, after its
+     * `exit`) or a slide being left backward. The next shown beat is entered as a fresh arrival.
+     */
+    fun hold() {
+        playing = false
+        held = true
+        currentBeat = null
+        currentState = null
     }
 
     /** Marks the node as no longer composed, so its next appearance counts as a fresh arrival. */

@@ -819,6 +819,12 @@ private fun RenderTravellingChildEntry(
                         tint = img.tint?.let { ctx.colorResolver.resolveOrNull(it) },
                         assetsRootDir = ctx.config.assetsRootDir,
                         modifier = childMod,
+                        playback = overlayImagePlayback(
+                            ctx,
+                            slideId = if (entry is TravellingChildEntry.UnmatchedEntering) ctx.slide.id else fromSlide.id,
+                            nodeId = node.id,
+                            image = img,
+                        ),
                     )
                 }
                 NodeKind.Connector -> DocumentConnectorPayloadView(

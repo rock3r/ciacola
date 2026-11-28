@@ -213,6 +213,7 @@ internal fun RenderStaticOverlaySubtree(
                 tint = img.tint?.let { ctx.colorResolver.resolveOrNull(it) },
                 assetsRootDir = ctx.config.assetsRootDir,
                 modifier = effectiveMod,
+                playback = overlayImagePlayback(ctx, slide.id, node.id, img),
             )
         }
         NodeKind.Connector -> DocumentConnectorPayloadView(

@@ -23,9 +23,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isAltPressed
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -68,16 +71,10 @@ internal fun DocumentClipView(
     modifier: Modifier,
 ): Boolean {
     val payload = playback.payload
-    val info = remember(deckId, src, assetsRootDir) { DocumentAssetLoader.probeAnimation(deckId, src, assetsRootDir) }
-        ?: return false
-    val mirrorSource = playback.session.clipMirrorSource
+    remember(deckId, src, assetsRootDir) { DocumentAssetLoader.probeAnimation(deckId, src, assetsRootDir) } ?: return false
+    val mirrorSource = playback.mirrorOf
     if (!playback.live && mirrorSource != null) {
-        val frames by produceState<List<AnimationFrame>?>(null, deckId, src, assetsRootDir, payload.maxPixels, info) {
-            value = runInterruptible(Dispatchers.IO) {
-                DocumentAssetLoader.loadAnimation(deckId, src, assetsRootDir, payload.maxPixels)
-            }
-        }
-        val decoded = frames ?: return false
+        val decoded = rememberClipFrames(deckId, src, assetsRootDir, payload.maxPixels) ?: return false
         MirroredClip(decoded, src, contentScale, colorFilter, playback, mirrorSource, modifier)
         return true
     }
@@ -91,14 +88,27 @@ internal fun DocumentClipView(
         ClipImage(frames[frameIndexAt(frames, poster.toDouble())].first, src, contentScale, colorFilter, modifier)
         return true
     }
-    val frames by produceState<List<AnimationFrame>?>(null, deckId, src, assetsRootDir, payload.maxPixels, info) {
-        value = runInterruptible(Dispatchers.IO) {
-            DocumentAssetLoader.loadAnimation(deckId, src, assetsRootDir, payload.maxPixels)
-        }
-    }
-    val decoded = frames ?: return false
+    val decoded = rememberClipFrames(deckId, src, assetsRootDir, payload.maxPixels) ?: return false
     LiveClip(decoded, src, contentScale, colorFilter, playback, modifier)
     return true
+}
+
+/**
+ * The clip's decoded frames: taken from the cache straight away when another mount already decoded
+ * them (no first-frame flash), otherwise decoded in the background. Keyed by source and budget, so
+ * a `change` build swapping either never shows the old clip's frames.
+ */
+@Composable
+private fun rememberClipFrames(deckId: String, src: String, assetsRootDir: String?, maxPixels: Long?): List<AnimationFrame>? {
+    val frames = remember(deckId, src, assetsRootDir, maxPixels) {
+        mutableStateOf(DocumentAssetLoader.cachedAnimation(deckId, src, assetsRootDir, maxPixels))
+    }
+    LaunchedEffect(frames) {
+        if (frames.value == null) {
+            frames.value = runInterruptible(Dispatchers.IO) { DocumentAssetLoader.loadAnimation(deckId, src, assetsRootDir, maxPixels) }
+        }
+    }
+    return frames.value
 }
 
 @Composable
@@ -120,7 +130,7 @@ private fun LiveClip(
         beat?.let { ClipPlayback.stateAtBeat(payload, playback.builds, it) }
     }
     SideEffect {
-        if (beat != null && beatState != null) head.enterBeat(beat, beatState, window)
+        if (!playback.present) head.hold() else if (beat != null && beatState != null) head.enterBeat(beat, beatState, window)
     }
     DisposableEffect(head) {
         onDispose {
@@ -230,39 +240,38 @@ private fun Modifier.clipScrubbing(
     }
     val intrinsic = Size(bitmap.width.toFloat(), bitmap.height.toFloat())
     return this
-        .testTag("doc-clip-scrub")
         .pointerInput(head, window, intrinsic, contentScale) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent()
                     val change = event.changes.firstOrNull() ?: continue
-                    val drawn = drawnImageRect(intrinsic, Size(size.width.toFloat(), size.height.toFloat()), contentScale)
-                    fun seekTo(x: Float) {
-                        val fraction = if (drawn.width > 0f) ((x - drawn.left) / drawn.width).coerceIn(0f, 1f) else 0f
-                        head.seek(window.startMs + fraction * window.lengthMs, window)
-                    }
+                    val box = Size(size.width.toFloat(), size.height.toFloat())
+                    val drawn = drawnImageRect(intrinsic, box, contentScale)
+                    val inside = change.position.x in 0f..box.width && change.position.y in 0f..box.height
                     when (event.type) {
-                        PointerEventType.Enter -> hovered = true
-                        PointerEventType.Exit -> hovered = false
                         PointerEventType.Press -> {
-                            hovered = true
-                            dragging = true
-                            head.beginScrub()
-                            seekTo(change.position.x)
-                            change.consume()
-                        }
-                        PointerEventType.Move -> {
-                            hovered = true
-                            if (dragging && change.pressed) {
-                                seekTo(change.position.x)
-                                change.consume()
+                            // Only a plain primary click scrubs: review pins (Ctrl+Click), context
+                            // clicks and anything another handler already took are left alone.
+                            val plain = event.buttons.isPrimaryPressed && !event.keyboardModifiers.isCtrlPressed &&
+                                !event.keyboardModifiers.isMetaPressed && !event.keyboardModifiers.isAltPressed
+                            if (!change.isConsumed && plain) {
+                                dragging = true
+                                head.beginScrub()
                             }
                         }
-                        PointerEventType.Release -> {
-                            if (dragging) change.consume()
+                        PointerEventType.Release -> if (dragging) {
+                            change.consume()
                             dragging = false
                             head.endScrub()
                         }
+                        PointerEventType.Exit -> hovered = false
+                        else -> hovered = inside
+                    }
+                    if (event.type == PointerEventType.Release) hovered = inside
+                    if (dragging && change.pressed) {
+                        val fraction = if (drawn.width > 0f) ((change.position.x - drawn.left) / drawn.width).coerceIn(0f, 1f) else 0f
+                        head.seek(window.startMs + fraction * window.lengthMs, window)
+                        change.consume()
                     }
                 }
             }

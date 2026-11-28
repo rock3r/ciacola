@@ -131,9 +131,52 @@ class ClipPlaybackTest {
         assertEquals(1500.0, head.positionMs)
         head.advance(60_000.0, window)
         head.togglePause(window)
-        head.togglePause(window)
-        assertEquals(0.0, head.positionMs, "resuming at the end starts over")
+        assertEquals(0.0, head.positionMs, "one press at the end starts over")
         assertTrue(head.playing)
+    }
+
+    @Test
+    fun `a zero or negative rate does not move the playhead`() {
+        val head = ClipPlayhead()
+        head.enterBeat(0, ClipPlayback.stateAtBeat(image.copy(playbackRate = -2.0), emptyList(), 0), window)
+        head.advance(1000.0, window)
+        assertEquals(0.0, head.positionMs)
+    }
+
+    @Test
+    fun `leaving a slide backward holds the frame instead of showing the poster`() {
+        val head = ClipPlayhead()
+        val before = ClipPlayback.stateAtBeat(image, emptyList(), ClipPlayback.BEFORE_FIRST_BEAT)
+        head.enterBeat(0, ClipPlayback.stateAtBeat(image, emptyList(), 0), window)
+        head.advance(700.0, window)
+        head.enterBeat(ClipPlayback.BEFORE_FIRST_BEAT, before, window)
+        head.enterBeat(ClipPlayback.BEFORE_FIRST_BEAT, before, window)
+        assertEquals(700.0, head.positionMs)
+        assertFalse(head.playing)
+        assertFalse(head.showPoster)
+        head.advance(500.0, window)
+        assertEquals(700.0, head.positionMs)
+        head.togglePause(window)
+        head.restart(window)
+        assertFalse(head.playing, "P and R do nothing before the first beat")
+        head.enterBeat(0, ClipPlayback.stateAtBeat(image, emptyList(), 0), window)
+        assertEquals(0.0, head.positionMs, "coming back restores the entry position")
+        assertTrue(head.playing)
+    }
+
+    @Test
+    fun `a held clip stops until its node is shown again`() {
+        val head = ClipPlayhead()
+        head.hold()
+        head.advance(500.0, window)
+        assertEquals(0.0, head.positionMs)
+        assertFalse(head.playing)
+        head.enterBeat(1, ClipPlayback.stateAtBeat(image, emptyList(), 1), window)
+        assertTrue(head.playing)
+        head.advance(500.0, window)
+        head.hold()
+        assertFalse(head.playing)
+        assertEquals(500.0, head.positionMs)
     }
 
     @Test

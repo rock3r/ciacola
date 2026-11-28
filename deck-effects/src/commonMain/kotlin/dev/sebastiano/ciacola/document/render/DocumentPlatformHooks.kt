@@ -159,7 +159,10 @@ expect fun DocumentShapePayloadView(
  * @property beat the beat whose playback state is shown, or `null` when the node's slide is not
  *   the one the clock is on.
  * @property live the clip plays (an animated `Present` mount); otherwise only the poster frame shows.
+ * @property present the node is shown at [beat]; a hidden node holds its frame and takes no clicks.
  * @property scrubbable hovering shows the progress bar and clicking or dragging seeks (show mode).
+ * @property mirrorOf session whose playhead for [retainKey] a non-live mount shows instead of the
+ *   poster (the presenter's `Current` preview, magicMove overlays carrying a playing clip).
  */
 @Immutable
 data class DocumentImagePlayback(
@@ -169,7 +172,9 @@ data class DocumentImagePlayback(
     val session: RenderSession,
     val beat: Int?,
     val live: Boolean,
+    val present: Boolean,
     val scrubbable: Boolean,
+    val mirrorOf: RenderSession? = null,
 )
 
 /**
