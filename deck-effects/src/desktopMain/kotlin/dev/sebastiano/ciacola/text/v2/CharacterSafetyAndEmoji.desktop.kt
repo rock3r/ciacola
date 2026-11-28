@@ -416,7 +416,7 @@ internal object VectorGlyphOutlineBuilder {
         }
     }
 
-    private fun parseShapingOptions(featureSettings: String?, isRtl: Boolean): ShapingOptions {
+    internal fun parseShapingOptions(featureSettings: String?, isRtl: Boolean): ShapingOptions {
         val base = ShapingOptions.DEFAULT.withLeftToRight(!isRtl)
         if (featureSettings.isNullOrBlank()) return base
         val parsed = ArrayList<SkiaFontFeature>(4)

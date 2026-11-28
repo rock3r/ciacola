@@ -13,6 +13,8 @@ object MotionPresetDeclarations {
     const val FOCUS_PULL: String = "focusPull"
     const val WAVE: String = "wave"
     const val TRACKING_BREATHE: String = "trackingBreathe"
+    const val AXIS_WAVE: String = "axisWave"
+    const val AXIS_RISE: String = "axisRise"
 
     val WAVE_SHAPES: List<String> = listOf("sine", "triangle", "square", "saw", "noise")
 
@@ -79,6 +81,40 @@ object MotionPresetDeclarations {
                 ParamSpec.FloatParam("fade", label = "Fade in/out share", defaultValue = 0.12f, range = 0f..0.5f, step = 0.01f),
             ),
             defaultDurationMs = 3000,
+            defaultCurve = Curve.Linear,
+        ),
+        BuildEffectDeclaration(
+            id = AXIS_WAVE,
+            tier = EffectTier.Layer,
+            supportsPieceDelivery = true,
+            isEmphasis = true,
+            args = listOf(
+                ParamSpec.StringParam("axis", label = "Axis tag", defaultValue = "wght"),
+                ParamSpec.FloatParam("amplitude", label = "Swing (axis units)", defaultValue = 200f, range = -2000f..2000f, step = 1f),
+                ParamSpec.FloatParam("offset", label = "Bias (axis units)", defaultValue = 0f, range = -2000f..2000f, step = 1f),
+                ParamSpec.FloatParam("cycles", label = "Cycles", defaultValue = 2f, range = 0f..50f, step = 0.25f),
+                ParamSpec.FloatParam("phasePerPiece", label = "Phase per piece", defaultValue = 0.08f, range = -1f..1f, step = 0.01f),
+                ParamSpec.FloatParam("phasePerLine", label = "Phase per line", defaultValue = 0f, range = -1f..1f, step = 0.01f),
+                ParamSpec.ChoiceParam("shape", label = "Shape", defaultValue = "sine", choices = WAVE_SHAPES),
+                ParamSpec.FloatParam("fade", label = "Fade in/out share", defaultValue = 0.15f, range = 0f..0.5f, step = 0.01f),
+            ),
+            defaultDurationMs = 2400,
+            defaultCurve = Curve.Linear,
+        ),
+        BuildEffectDeclaration(
+            id = AXIS_RISE,
+            tier = EffectTier.Layer,
+            supportsPieceDelivery = true,
+            supportedDirections = RISE_DIRECTIONS,
+            args = listOf(
+                ParamSpec.StringParam("axis", label = "Axis tag", defaultValue = "wght"),
+                ParamSpec.FloatParam("axisFrom", label = "Axis offset at the start (axis units)", defaultValue = -300f, range = -2000f..2000f, step = 1f),
+                ParamSpec.FloatParam("distance", label = "Distance (em)", defaultValue = 0.5f, range = 0f..5f, step = 0.05f),
+                ParamSpec.BooleanParam("reveal", label = "Mask to line", defaultValue = true),
+                ParamSpec.FloatParam("revealPadding", label = "Mask padding (em)", defaultValue = 0.12f, range = 0f..2f, step = 0.01f),
+                ParamSpec.FloatParam("fadeWindow", label = "Fade-in share", defaultValue = 0.35f, range = 0f..1f, step = 0.05f),
+            ),
+            defaultDurationMs = 900,
             defaultCurve = Curve.Linear,
         ),
     )

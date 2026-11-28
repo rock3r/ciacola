@@ -273,6 +273,39 @@ object BuildEffects {
                 EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
             ),
         ),
+        EffectDeclaration(
+            id = MotionPresetDeclarations.AXIS_WAVE,
+            tier = EffectTier.Layer,
+            supportedKinds = setOf(EffectBuildKind.Emphasis),
+            supportedNodeKinds = allNodes,
+            params = listOf(
+                EffectParamSpec("axis", EffectParamType.String),
+                EffectParamSpec("amplitude", EffectParamType.Float, minValue = -2000f, maxValue = 2000f),
+                EffectParamSpec("offset", EffectParamType.Float, minValue = -2000f, maxValue = 2000f),
+                EffectParamSpec("cycles", EffectParamType.Float, minValue = 0f, maxValue = 50f),
+                EffectParamSpec("phasePerPiece", EffectParamType.Float, minValue = -1f, maxValue = 1f),
+                EffectParamSpec("phasePerLine", EffectParamType.Float, minValue = -1f, maxValue = 1f),
+                EffectParamSpec("shape", EffectParamType.String),
+                EffectParamSpec("fade", EffectParamType.Float, minValue = 0f, maxValue = 0.5f),
+                EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
+            ),
+        ),
+        EffectDeclaration(
+            id = MotionPresetDeclarations.AXIS_RISE,
+            tier = EffectTier.Layer,
+            supportedKinds = enterExit,
+            supportedNodeKinds = allNodes,
+            params = listOf(
+                EffectParamSpec("direction", EffectParamType.Direction8),
+                EffectParamSpec("axis", EffectParamType.String),
+                EffectParamSpec("axisFrom", EffectParamType.Float, minValue = -2000f, maxValue = 2000f),
+                EffectParamSpec("distance", EffectParamType.Float, minValue = 0f, maxValue = 5f),
+                EffectParamSpec("reveal", EffectParamType.Boolean),
+                EffectParamSpec("revealPadding", EffectParamType.Float, minValue = 0f, maxValue = 2f),
+                EffectParamSpec("fadeWindow", EffectParamType.Float, minValue = 0f, maxValue = 1f),
+                EffectParamSpec(MotionPresets.CHANNELS_ARG, EffectParamType.Channels),
+            ),
+        ),
     ).associateBy { it.id }
 
     fun get(id: String): EffectDeclaration? = declarations[id]
