@@ -821,7 +821,7 @@ private fun RenderTravellingChildEntry(
                         modifier = childMod,
                         playback = overlayImagePlayback(
                             ctx,
-                            slideId = if (entry is TravellingChildEntry.UnmatchedEntering) ctx.slide.id else fromSlide.id,
+                            slideId = fromSlide.id,
                             nodeId = node.id,
                             image = img,
                         ),

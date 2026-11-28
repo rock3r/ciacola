@@ -8,7 +8,10 @@ import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
 import dev.bnorm.storyboard.AdvanceDirection
 import dev.sebastiano.ciacola.document.BeatSpec
 import dev.sebastiano.ciacola.document.Build
+import dev.sebastiano.ciacola.document.ClipPlayback
 import dev.sebastiano.ciacola.document.ClipPlayhead
+import dev.sebastiano.ciacola.document.ClipWindow
+import dev.sebastiano.ciacola.document.ContainerPayload
 import dev.sebastiano.ciacola.document.DeckClipControls
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.FrameSpec
@@ -19,6 +22,8 @@ import dev.sebastiano.ciacola.document.RenderPurpose
 import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.SlideSpec
 import java.io.File
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -36,6 +41,7 @@ class DocumentClipPlaybackTest {
         val target = File(dir, "clip-deck.assets/clip.webp")
         target.parentFile.mkdirs()
         target.writeBytes(checkNotNull(javaClass.getResourceAsStream("/animated-images/sample.webp")).use { it.readBytes() })
+        target.copyTo(File(dir, "clip-deck.assets/other.webp"))
     }
 
     @AfterTest
@@ -222,6 +228,63 @@ class DocumentClipPlaybackTest {
     }
 
     @Test
+    fun `a clip inside a container hidden until its enter beat neither plays nor takes clicks`() {
+        val doc = deck(ImagePayload("clip.webp", fit = "fill"), emptyList()).let { d ->
+            val clip = d.slides.single().nodes.single()
+            val group = NodeSpec(
+                id = "group",
+                frame = clip.frame,
+                stack = ContainerPayload(children = listOf(clip.copy(frame = clip.frame))),
+                builds = listOf(Build.Enter(beat = 1, effect = "fade")),
+            )
+            d.copy(slides = listOf(d.slides.single().copy(nodes = listOf(group))))
+        }
+        harness(doc).use { h ->
+            val head = h.awaitDecode()
+            repeat(30) { h.renderStep(10_000_000L) }
+            h.send(PointerEventType.Press, 0.65f)
+            h.send(PointerEventType.Release, 0.65f)
+            h.renderStep(1_000_000L)
+            assertEquals(0.0, head.positionMs, "held while its container is hidden")
+            assertFalse(head.playing)
+            h.advanceToRest(AdvanceDirection.Forward)
+            repeat(10) { h.renderStep(10_000_000L) }
+            assertTrue(head.playing && head.positionMs > 0.0, "plays once shown, at ${head.positionMs}")
+        }
+    }
+
+    @Test
+    fun `a mirror follows the new playhead when a change build swaps the source`() {
+        val swap = Build.Change(
+            beat = 1,
+            set = buildJsonObject { put("image", buildJsonObject { put("src", "other.webp") }) },
+        )
+        val doc = deck(ImagePayload("clip.webp", fit = "fill", posterMs = 700), listOf(swap))
+        val window = ClipWindow(0.0, 1000.0, loop = false)
+        harness(doc).use { stage ->
+            stage.awaitDecode().seek(700.0, window)
+            // Already decoded, so the mirror stays mounted across the swap instead of remounting.
+            checkNotNull(DocumentAssetLoader.loadAnimation("clip-deck", "other.webp", assetsDir.absolutePath, null))
+            val other = ImagePayload("other.webp", fit = "fill")
+            val paused = ClipPlayback.stateAtBeat(other, listOf(Build.Playback(beat = 0, action = PlaybackAction.Pause, atMs = 200)), 0)
+            stage.session.getOrPutRetained(OTHER_KEY) { ClipPlayhead() }.enterBeat(0, paused, window)
+            val previewSession = RenderSession.forStill(doc).also { it.clipMirrorSource = stage.session }
+            harness(doc, RenderPurpose.Still, previewSession).use { preview ->
+                fun settle(expected: IntArray) = repeat(200) {
+                    preview.renderStep(10_000_000L)
+                    if (preview.probe().contentEquals(expected)) return@repeat
+                    Thread.sleep(5)
+                }
+                settle(BLUE)
+                assertColor(BLUE, preview.probe(), "mirrors the first clip at 700 ms")
+                preview.jumpAndSettle(dev.bnorm.storyboard.Storyboard.Index(0, 1))
+                settle(YELLOW)
+                assertColor(YELLOW, preview.probe(), "mirrors the swapped clip at 200 ms")
+            }
+        }
+    }
+
+    @Test
     fun `a clip decoded by another mount shows its poster on the first frame`() {
         val doc = deck(
             ImagePayload("clip.webp", fit = "fill", posterMs = 700),
@@ -323,6 +386,7 @@ class DocumentClipPlaybackTest {
 
     private companion object {
         const val KEY = "clip:s/clip/clip.webp"
+        const val OTHER_KEY = "clip:s/clip/other.webp"
         val RED = intArrayOf(255, 0, 0, 255)
         val YELLOW = intArrayOf(255, 255, 0, 255)
         val BLUE = intArrayOf(0, 0, 255, 255)

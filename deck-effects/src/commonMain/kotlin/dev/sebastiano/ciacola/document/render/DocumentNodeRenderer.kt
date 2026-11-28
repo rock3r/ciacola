@@ -103,6 +103,8 @@ internal data class DocumentNodeRenderContext(
     val loupeTargetId: String? = null,
     val lookaheadStore: CrossSlideLookaheadGeometryStore? = null,
     val isGhostSubtree: Boolean = false,
+    /** True inside a container that is hidden at the current beat (before its `enter`, after its `exit`). */
+    val isHiddenSubtree: Boolean = false,
     val parentNodeId: String? = null,
     val parentContentPadLeftPx: Double = 0.0,
     val parentContentPadTopPx: Double = 0.0,
@@ -296,7 +298,13 @@ internal fun DocumentNodeItem(
     val node = eval.resolvedNode
     val density = LocalDensity.current
     val isGhost = ctx.isGhostSubtree || rawNode.id in ctx.suppressedNodeIds
-    val nodeCtx = if (isGhost && !ctx.isGhostSubtree) ctx.copy(isGhostSubtree = true) else ctx
+    val ghostCtx = if (isGhost && !ctx.isGhostSubtree) ctx.copy(isGhostSubtree = true) else ctx
+    val nodeCtx = if (!ghostCtx.isHiddenSubtree && rawNode.kind in HIDEABLE_CONTAINERS && rawNode.builds.isNotEmpty() &&
+        !isNodePresent(ghostCtx, rawNode)) {
+        ghostCtx.copy(isHiddenSubtree = true)
+    } else {
+        ghostCtx
+    }
     val dragPreview = LocalStageDragPreview.current
     val slotPool = LocalMovableSpecimenSlotPool.current
     val textMetricsHolder = remember(rawNode.id) {
@@ -948,9 +956,10 @@ private fun documentImagePlayback(
     image: ImagePayload,
 ): DocumentImagePlayback {
     val live = ctx.isAnimatedMount && ctx.session.purpose == RenderPurpose.Present && !ctx.isGhostSubtree
-    val beat = ClipPlayback.effectiveBeat(ctx.clock, ctx.slide.id, lastBeat = ctx.slide.beats.lastIndex)
-    // Before its `enter` or after its `exit` the node is drawn invisible: it must not play or take clicks.
-    val present = beat == null || beat < 0 || JsonMergePatch.isNodePresentAtBeat(rawNode, beat)
+    val beat = clipBeat(ctx)
+    // Before its `enter` or after its `exit` the node, or a container holding it, is drawn invisible:
+    // it must not play or take clicks.
+    val present = !ctx.isHiddenSubtree && isNodePresent(ctx, rawNode, beat)
     return DocumentImagePlayback(
         payload = image,
         builds = rawNode.builds,
@@ -964,6 +973,14 @@ private fun documentImagePlayback(
         mirrorOf = ctx.session.clipMirrorSource,
     )
 }
+
+private val HIDEABLE_CONTAINERS = setOf(NodeKind.Stack, NodeKind.Row, NodeKind.Column)
+
+private fun clipBeat(ctx: DocumentNodeRenderContext): Int? =
+    ClipPlayback.effectiveBeat(ctx.clock, ctx.slide.id, lastBeat = ctx.slide.beats.lastIndex)
+
+private fun isNodePresent(ctx: DocumentNodeRenderContext, rawNode: NodeSpec, beat: Int? = clipBeat(ctx)): Boolean =
+    beat == null || beat < 0 || JsonMergePatch.isNodePresentAtBeat(rawNode, beat)
 
 private fun clipRetainKey(slideId: String, nodeId: String, image: ImagePayload): String = "clip:$slideId/$nodeId/${image.src}"
 

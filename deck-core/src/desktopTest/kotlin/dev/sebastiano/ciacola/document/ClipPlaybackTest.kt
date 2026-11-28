@@ -165,6 +165,19 @@ class ClipPlaybackTest {
     }
 
     @Test
+    fun `after unmounting a slide left backward the next arrival shows the poster again`() {
+        val head = ClipPlayhead()
+        val before = ClipPlayback.stateAtBeat(image, emptyList(), ClipPlayback.BEFORE_FIRST_BEAT)
+        head.enterBeat(0, ClipPlayback.stateAtBeat(image, emptyList(), 0), window)
+        head.advance(700.0, window)
+        head.enterBeat(ClipPlayback.BEFORE_FIRST_BEAT, before, window)
+        head.detach()
+        head.enterBeat(ClipPlayback.BEFORE_FIRST_BEAT, before, window)
+        assertTrue(head.showPoster, "a fresh forward arrival shows the poster, not the stale frame")
+        assertEquals(0.0, head.positionMs)
+    }
+
+    @Test
     fun `a held clip stops until its node is shown again`() {
         val head = ClipPlayhead()
         head.hold()
@@ -298,6 +311,32 @@ class ClipPlaybackTest {
         val edited = DeckStructureEdits.deleteBeat(doc, "s", 2)
         val after = edited.slides.single().nodes.first { it.id == "label" }.builds.single().after
         assertTrue(after == "clip" || after?.startsWith("clip#") == true && after != "clip#play1", "after rewritten to $after")
+    }
+
+    @Test
+    fun `deleting a beat never rebinds a beat-0 enter to a playback build`() {
+        val clip = NodeSpec(
+            id = "clip",
+            image = image,
+            builds = listOf(
+                Build.Emphasis(beat = 0, effect = "pulse"),
+                Build.Playback(beat = 0, id = "play0", action = PlaybackAction.Play),
+                Build.Emphasis(beat = 1, effect = "pulse"),
+            ),
+        )
+        val label = NodeSpec(
+            id = "label",
+            text = TextPayload(value = RichTextValue.Plain("x")),
+            builds = listOf(Build.Enter(beat = 0, effect = "fade", after = "clip")),
+        )
+        val doc = DeckDocument(
+            id = "d",
+            slides = listOf(SlideSpec(id = "s", beats = listOf(BeatSpec(), BeatSpec()), nodes = listOf(clip, label))),
+        )
+        val edited = DeckStructureEdits.deleteBeat(doc, "s", 1)
+        val after = edited.slides.single().nodes.first { it.id == "label" }.builds.single().after
+        assertTrue(after != "clip#play0", "after rewritten to $after")
+        assertTrue(DeckDocumentCodec.validate(edited).none { it.code == "AFTER_PLAYBACK_BUILD" })
     }
 
     @Test

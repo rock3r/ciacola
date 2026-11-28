@@ -9,7 +9,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -188,13 +187,17 @@ private fun MirroredClip(
 ) {
     val payload = playback.payload
     val window = remember(payload, frames) { ClipWindow.of(payload, animationDurationMs(frames)) }
-    val head by produceState<ClipPlayhead?>(null, source, playback.retainKey) {
-        while (value == null) {
-            value = source.retainedOrNull<ClipPlayhead>(playback.retainKey)
-            if (value == null) delay(MIRROR_LOOKUP_INTERVAL_MS)
+    // Keyed state, so a new source or key starts from that key's playhead, never the previous one.
+    val head = remember(source, playback.retainKey) {
+        mutableStateOf(source.retainedOrNull<ClipPlayhead>(playback.retainKey))
+    }
+    LaunchedEffect(head) {
+        while (head.value == null) {
+            delay(MIRROR_LOOKUP_INTERVAL_MS)
+            head.value = source.retainedOrNull<ClipPlayhead>(playback.retainKey)
         }
     }
-    val shown = head?.let { shownMs(it, payload, window) } ?: posterMs(payload).toDouble()
+    val shown = head.value?.let { shownMs(it, payload, window) } ?: posterMs(payload).toDouble()
     ClipImage(frames[frameIndexAt(frames, shown)].first, src, contentScale, colorFilter, modifier)
 }
 

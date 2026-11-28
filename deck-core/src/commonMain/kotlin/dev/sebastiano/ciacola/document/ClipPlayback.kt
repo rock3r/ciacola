@@ -234,6 +234,7 @@ class ClipPlayhead {
 
     /** Marks the node as no longer composed, so its next appearance counts as a fresh arrival. */
     fun detach() {
+        held = false
         currentBeat = null
         currentState = null
     }
