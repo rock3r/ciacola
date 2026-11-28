@@ -9,6 +9,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performKeyPress
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -673,5 +676,47 @@ class PresenterWindowAndStageAidsTest {
         assertEquals(epoch + 1, dev.sebastiano.ciacola.document.DeckClipControls.pauseEpoch)
         assertEquals(before, animatic.currentIndex)
         assertEquals(StageCurtain.None, presenterWindow.controller.curtain)
+    }
+
+    @Test
+    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    fun clipKeysIgnoreKeyRepeatAndCapturedSpecimens() = runComposeUiTest {
+        val deck = buildFoundationTestStoryboard()
+        lateinit var presenterWindow: PresenterWindow
+        var capturing = false
+        setContent {
+            val animatic = rememberAnimatic(storyboard = { deck })
+            val overviewVisibility = rememberOverviewVisibility(initiallyVisible = false)
+            presenterWindow = rememberPresenterWindow(animatic = animatic, isExternalTextInputActiveProvider = { capturing })
+            Box(Modifier.size(960.dp, 540.dp)) {
+                CompositionLocalProvider(LocalOverviewOpen provides overviewVisibility.isVisible) {
+                    presenterWindow.decorator.decorate {
+                        EaselOverview(animatic, visibility = overviewVisibility) {
+                            Easel(animatic)
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        val controls = dev.sebastiano.ciacola.document.DeckClipControls
+        val epoch = controls.pauseEpoch
+        onRoot().performKeyPress(KeyEvent(Key.P, KeyEventType.KeyDown))
+        onRoot().performKeyPress(KeyEvent(Key.P, KeyEventType.KeyDown))
+        onRoot().performKeyPress(KeyEvent(Key.P, KeyEventType.KeyDown))
+        onRoot().performKeyPress(KeyEvent(Key.P, KeyEventType.KeyUp))
+        waitForIdle()
+        assertEquals(epoch + 1, controls.pauseEpoch, "holding P toggles once")
+        onRoot().performKeyPress(KeyEvent(Key.P, KeyEventType.KeyDown))
+        onRoot().performKeyPress(KeyEvent(Key.P, KeyEventType.KeyUp))
+        waitForIdle()
+        assertEquals(epoch + 2, controls.pauseEpoch, "the next press toggles again")
+
+        capturing = true
+        val restart = controls.restartEpoch
+        onRoot().performKeyInput { pressKey(Key.P); pressKey(Key.R) }
+        waitForIdle()
+        assertEquals(epoch + 2, controls.pauseEpoch, "typing into a captured specimen keeps P")
+        assertEquals(restart, controls.restartEpoch, "typing into a captured specimen keeps R")
     }
 }

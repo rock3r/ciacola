@@ -929,6 +929,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         },
         isExternalTextInputActiveProvider = {
             textInputTracker.hasFocusedTextInput ||
+                keyboardController.isCaptured ||
                 elementController.textInputHasFocus ||
                 elementController.inlineEditingNodeId != null ||
                 reviewStageCoordinator.pendingSelection != null ||

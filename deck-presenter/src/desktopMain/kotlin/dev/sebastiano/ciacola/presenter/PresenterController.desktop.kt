@@ -589,12 +589,18 @@ class PresenterController(
         }
     }
 
+    /** Clip keys held down since their last `KeyDown`: OS key repeat must not toggle them again. */
+    private val heldClipKeys = HashSet<Key>()
+
+    private fun firstPress(event: KeyEvent): Boolean = heldClipKeys.add(event.key)
+
     /**
      * Preview key handler installed at the Story window root: manages `B` / `W` blackout/whiteout,
      * `R` clip restart on the current slide,
      * `Esc` curtain/dialog dismissal without leaking KeyUp to `EaselOverview`, and `Cmd+G` jump.
      */
     fun handleStoryKeyEvent(event: KeyEvent): Boolean {
+        if (event.type == KeyEventType.KeyUp) heldClipKeys.remove(event.key)
         if (event.key == Key.Escape) {
             if (swallowNextEscapeKeyUp) {
                 if (event.type == KeyEventType.KeyUp) {
@@ -633,6 +639,8 @@ class PresenterController(
 
         val noModifiers = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed
         if (!noModifiers) return false
+        // A captured keyboard specimen or a text field gets the letter keys.
+        if (isExternalTextInputActive && event.key in LETTER_SHORTCUTS) return false
 
         when (event.key) {
             Key.B -> {
@@ -646,12 +654,12 @@ class PresenterController(
             }
 
             Key.R -> {
-                DeckClipControls.requestRestart()
+                if (firstPress(event)) DeckClipControls.requestRestart()
                 return true
             }
 
             Key.P -> {
-                DeckClipControls.requestTogglePause()
+                if (firstPress(event)) DeckClipControls.requestTogglePause()
                 return true
             }
 
@@ -729,11 +737,12 @@ class PresenterController(
      * (`P` pauses/resumes, `Shift+R` restarts), and smooth deck navigation.
      */
     fun handlePresenterBubbleKeyEvent(event: KeyEvent, scope: CoroutineScope): Boolean {
+        if (event.type == KeyEventType.KeyUp) heldClipKeys.remove(event.key)
         if (event.type != KeyEventType.KeyDown || jumpDialogOpen || isEditingNotes) return false
 
         val onlyShift = event.isShiftPressed && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed
         if (onlyShift && event.key == Key.R && isShowModeActive()) {
-            DeckClipControls.requestRestart()
+            if (firstPress(event)) DeckClipControls.requestRestart()
             return true
         }
 
@@ -780,7 +789,7 @@ class PresenterController(
 
             Key.P -> {
                 if (isShowModeActive()) {
-                    DeckClipControls.requestTogglePause()
+                    if (firstPress(event)) DeckClipControls.requestTogglePause()
                     true
                 } else {
                     false
@@ -818,6 +827,8 @@ class PresenterController(
         const val NOTES_FONT_STEP_SP = 2f
 
         private val WALL_CLOCK_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+        /** Show-mode letter shortcuts on the stage, left to a focused text field or captured specimen. */
+        private val LETTER_SHORTCUTS = setOf(Key.B, Key.W, Key.R, Key.P)
         private val RAW_SPECIMEN_KEY_REGEX = Regex("^[a-z][a-z0-9_-]*\\.([A-Za-z][A-Za-z0-9_]*)$")
 
         /** Strips redundant `Slide N · ` prefixes and humanizes raw `prefix.camelCase` specimen keys. */
