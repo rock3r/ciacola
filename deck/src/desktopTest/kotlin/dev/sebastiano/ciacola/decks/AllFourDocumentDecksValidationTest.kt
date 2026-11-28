@@ -288,7 +288,9 @@ class AllFourDocumentDecksValidationTest {
                 "${exp.registration.id}: unexpected specimen registry size",
             )
         }
-        assertEquals(38, AllDocumentDecks.allSpecimens.all.size)
+        // Four deck registries plus the shared typography specimens.
+        assertEquals(39, AllDocumentDecks.allSpecimens.all.size)
+        assertTrue(TypographySpecimenIds.AXIS_BREATH in AllDocumentDecks.allSpecimens)
         assertEquals(ShadersSpecimenIds.allIds.toSet(), shadersQuickieSpecimens.ids)
 
         // Verify live Markdown editor specimen nodes declare interactive = "keyboard"

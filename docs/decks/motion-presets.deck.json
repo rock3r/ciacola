@@ -211,6 +211,18 @@
           ]
         }
       ]
+    },
+    {
+      "id": "axis-loop",
+      "title": "Axis loop",
+      "beats": [{ "notes": "A specimen loops wght and wdth per character in a wave, on its own clock." }],
+      "nodes": [
+        {
+          "id": "axis-loop:word",
+          "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
+          "specimen": { "ref": "typography.axisBreath" }
+        }
+      ]
     }
   ]
 }
