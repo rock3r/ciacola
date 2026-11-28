@@ -175,13 +175,14 @@
         { "notes": "Base: empty stage." },
         { "notes": "Letters rise and settle from thin to bold." },
         { "notes": "Weight swings through the word in a wave." },
-        { "notes": "Width narrows and recovers letter by letter." }
+        { "notes": "Width narrows and recovers letter by letter." },
+        { "notes": "A change build eases the whole word to light and condensed." }
       ],
       "nodes": [
         {
           "id": "axis:word",
           "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
-          "text": { "value": "Variable", "font": "Roboto", "size": 220, "lineHeight": 260, "weight": 700, "align": "center" },
+          "text": { "value": "Variable", "font": "Roboto", "size": 220, "lineHeight": 260, "weight": 700, "align": "center", "axes": { "wdth": 100, "wght": 700 } },
           "builds": [
             { "kind": "enter", "beat": 1, "effect": "axisRise", "args": { "axisFrom": -500 }, "by": "character", "stagger": { "ms": 45 }, "durationMs": 1000 },
             {
@@ -199,6 +200,13 @@
               "args": { "axis": "wdth", "amplitude": 12, "offset": -12, "cycles": 1, "phasePerPiece": 0.12 },
               "by": "character",
               "durationMs": 2400
+            },
+            {
+              "kind": "change",
+              "beat": 4,
+              "set": { "text": { "axes": { "wdth": 75, "wght": 250 } } },
+              "durationMs": 1200,
+              "curve": "easeInOut"
             }
           ]
         }

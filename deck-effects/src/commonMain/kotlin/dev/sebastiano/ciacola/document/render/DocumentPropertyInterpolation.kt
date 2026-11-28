@@ -90,6 +90,7 @@ internal fun interpolateDocumentNodeProperties(
             size = lerpNullableDouble(fromText.size, toText.size, td),
             color = interpolateColorString(fromText.color, toText.color, clampedT, colorResolver),
             surface = interpolateSurface(fromText.surface, toText.surface, clampedT, colorResolver),
+            axes = interpolateAxes(fromText.axes, toText.axes, td),
         )
     } else {
         if (clampedT >= 0.5f) toText else fromText
@@ -463,6 +464,29 @@ private fun colorToHexArgb(color: Color): String {
 }
 
 private fun lerpDouble(a: Double, b: Double, t: Double): Double = a + (b - a) * t
+
+/**
+ * Interpolates per-tag variable font axis coordinates. A tag set on both sides moves smoothly; a
+ * tag set on one side only has no known other end (the face's default lives in the font), so it
+ * switches at the midpoint like other unpaired properties. Values are rounded to 1/100 of an axis
+ * unit, so the same time always yields the same coordinates and reuses the same axis-derived font.
+ */
+internal fun interpolateAxes(a: Map<String, Double>, b: Map<String, Double>, t: Double): Map<String, Double> {
+    if (a == b) return b
+    if (a.isEmpty() && b.isEmpty()) return b
+    val out = LinkedHashMap<String, Double>(a.size + b.size)
+    for (tag in a.keys + b.keys) {
+        val from = a[tag]
+        val to = b[tag]
+        val value = when {
+            from != null && to != null -> kotlin.math.round(lerpDouble(from, to, t) * 100.0) / 100.0
+            t >= 0.5 -> to
+            else -> from
+        } ?: continue
+        out[tag] = value
+    }
+    return out
+}
 
 private fun lerpNullableDouble(a: Double?, b: Double?, t: Double): Double? = when {
     a != null && b != null -> lerpDouble(a, b, t)

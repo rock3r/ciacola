@@ -183,6 +183,7 @@ Discriminated by `"kind"`:
 - `"exit"`: hides/exits the node at `beat` (same timing/effect fields as `"enter"`).
 - `"emphasis"`: in-place emphasis at `beat` (e.g. `"jiggle"`).
 - `"change"`: RFC 7396 JSON Merge Patch applied at `beat` via `"set": { ... }` (plus optional `path` for motion path, `morph` for `TextMorphSpec`, `after`, `delayMs`, `durationMs`, `curve`).
+  - Setting `text.axes` animates variable font axes along the build's curve: a tag set both before and after the change interpolates smoothly (declare the starting coordinate on the node, e.g. `"axes": { "wght": 700 }`), while a tag set on only one side switches at the midpoint. `magicMove` interpolates node `axes` the same way. For per-letter axis motion use the `axisWave`/`axisRise` presets or `axis.<tag>` channels (§5.1).
 - `"playback"`: controls an animated `image` node's clip at `beat` with `action` and optional `atMs` (source milliseconds) and `rate`:
   - `"play"`: start playing, from `atMs` when given, otherwise from where the clip is.
   - `"pause"`: stop, holding the frame at `atMs` when given, otherwise the current frame.
