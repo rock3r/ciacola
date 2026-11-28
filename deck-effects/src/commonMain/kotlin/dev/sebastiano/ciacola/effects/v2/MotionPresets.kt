@@ -37,6 +37,9 @@ object MotionPresets {
      *
      * [focusSweep] is set for `focusPull` used as an emphasis: blur and opacity then follow a
      * focal point travelling across the text, unless `channels` overrides them.
+     *
+     * [revealAlongX] and [revealAlongY] say which axes the reveal mask's tight [revealPaddingEm]
+     * edges sit on, i.e. the axes the piece moves along. The other axis gets a generous 1 em.
      */
     @Immutable
     data class ResolvedMotion(
@@ -45,6 +48,8 @@ object MotionPresets {
         val channels: Map<String, MotionChannelSpec>,
         val revealPaddingEm: Float?,
         val focusSweep: FocusSweep? = null,
+        val revealAlongX: Boolean = false,
+        val revealAlongY: Boolean = true,
     )
 
     @Immutable
@@ -129,9 +134,12 @@ object MotionPresets {
             if (finished) {
                 EffectClip.None
             } else {
-                // Generous side padding keeps italic overhangs and neighbours' kerning intact.
+                // The tight edge sits across the movement; the generous 1 em on the other axis
+                // keeps italic overhangs, accents and neighbours' kerning intact.
                 val pad = padEm * em
-                EffectClip.RestBounds(padLeft = em, padTop = pad, padRight = em, padBottom = pad)
+                val padX = if (resolved.revealAlongX) pad else em
+                val padY = if (resolved.revealAlongY) pad else em
+                EffectClip.RestBounds(padLeft = padX, padTop = padY, padRight = padX, padBottom = padY)
             }
         } ?: EffectClip.None
 
@@ -217,6 +225,8 @@ object MotionPresets {
             kind = kind,
             channels = channels,
             revealPaddingEm = if (reveal && kind != EffectBuildKind.Emphasis) revealPadding else null,
+            revealAlongX = dx != 0.0,
+            revealAlongY = dy != 0.0,
         )
     }
 
@@ -315,9 +325,13 @@ object MotionPresets {
         return if (lineGuess.isFinite() && lineGuess > 1f) lineGuess else 16f * context.density
     }
 
-    /** 0 when the piece sits in the focal plane, 1 when it is fully out of focus. */
+    /**
+     * 0 when the piece sits in the focal plane, 1 when it is fully out of focus. For a single
+     * whole-node piece the focal point crosses the node, so it pulls into focus and out again.
+     */
     private fun focusWeight(sweep: FocusSweep, progress: Float, context: EffectEvalContext, em: Float): Float {
-        val text = context.piece.textBounds ?: return 0f
+        // Whole-node delivery has no text box: the node itself is the text the focal point crosses.
+        val text = context.piece.textBounds ?: context.nodeBounds
         val focusFraction = sweep.focusFrom + (sweep.focusTo - sweep.focusFrom) * smoothstep(progress)
         val focusX = text.left + text.width * focusFraction
         val pieceX = context.nodeBounds.center.x

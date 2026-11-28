@@ -91,6 +91,28 @@ class MotionPresetsTest {
     }
 
     @Test
+    fun `rise reveal mask puts the tight edge across the movement`() {
+        val vertical = assertIs<EffectClip.RestBounds>(eval(MotionPresetDeclarations.RISE, EffectBuildKind.Enter, 0.2f).clip)
+        assertEquals(0.12f * em, vertical.padTop, eps)
+        assertEquals(1f * em, vertical.padLeft, eps)
+
+        val sideways = assertIs<EffectClip.RestBounds>(
+            eval(
+                MotionPresetDeclarations.RISE,
+                EffectBuildKind.Enter,
+                0.2f,
+                EffectArgs.of("direction" to "right", "revealPadding" to 0.05f),
+            ).clip,
+        )
+        assertEquals(0.05f * em, sideways.padLeft, eps)
+        assertEquals(0.05f * em, sideways.padRight, eps)
+        assertEquals(1f * em, sideways.padTop, eps)
+        // The 0.9 em travel starts outside the mask, so the piece is actually revealed.
+        val start = eval(MotionPresetDeclarations.RISE, EffectBuildKind.Enter, 0f, EffectArgs.of("direction" to "right"))
+        assertTrue(abs(start.translationX) > sideways.padLeft + eps)
+    }
+
+    @Test
     fun `channel overrides replace single fields and add new channels`() {
         val args = EffectArgs.of(
             MotionPresets.CHANNELS_ARG to mapOf(
@@ -200,6 +222,20 @@ class MotionPresetsTest {
             val s = eval(MotionPresetDeclarations.FOCUS_PULL, EffectBuildKind.Emphasis, p, settled, context(pieceBox = Rect(0f, 0f, 60f, 120f)))
             assertEquals(0f, s.blurRadiusPx, eps)
         }
+    }
+
+    @Test
+    fun `focus pull emphasis on a whole node sweeps across the node itself`() {
+        val wholeNode = EffectEvalContext(nodeBounds = Rect(0f, 0f, 1600f, 320f))
+        val args = EffectArgs.of("radius" to 0.3f)
+        fun at(p: Float) = eval(MotionPresetDeclarations.FOCUS_PULL, EffectBuildKind.Emphasis, p, args, wholeNode)
+        val emWhole = 320f / 1.2f
+        // Focal point near the left edge, far from the node centre: blurred.
+        assertTrue(at(0.25f).blurRadiusPx > 0.1f * emWhole, "${at(0.25f).blurRadiusPx}")
+        // Focal point on the centre: sharp. Settles sharp at both ends.
+        assertEquals(0f, at(0.5f).blurRadiusPx, eps)
+        assertEquals(0f, at(0f).blurRadiusPx, eps)
+        assertEquals(0f, at(1f).blurRadiusPx, eps)
     }
 
     @Test
