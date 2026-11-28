@@ -188,7 +188,7 @@
               "kind": "emphasis",
               "beat": 2,
               "effect": "axisWave",
-              "args": { "amplitude": 250, "offset": -150, "cycles": 2, "phasePerPiece": 0.1 },
+              "args": { "amplitude": 250, "offset": -250, "cycles": 2, "phasePerPiece": 0.1 },
               "by": "character",
               "durationMs": 2400
             },

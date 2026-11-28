@@ -3,7 +3,12 @@ package dev.sebastiano.ciacola.text.v2
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.FontHinting as ComposeFontHinting
+import androidx.compose.ui.text.FontRasterizationSettings
+import androidx.compose.ui.text.FontSmoothing
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -18,6 +23,7 @@ import org.jetbrains.skia.FontEdging
 import org.jetbrains.skia.FontHinting
 import org.jetbrains.skia.FontVariation as SkiaFontVariation
 import org.jetbrains.skia.Paint as SkiaPaint
+import org.jetbrains.skia.Point
 import org.jetbrains.skia.TextBlob
 import org.jetbrains.skia.Typeface as SkiaTypeface
 import org.jetbrains.skia.shaper.Shaper
@@ -121,7 +127,7 @@ internal object AxisVariationCache {
  */
 internal object AxisPiecePainter {
 
-    /** A paint routine for [piece] at [offsets], or `null` when the piece cannot (or need not) vary. */
+    /** A paint routine for [piece] at [offsets], or `null` when the piece cannot vary its axes. */
     fun prepare(
         piece: AdmittedPiece,
         offsets: Map<String, Float>,
@@ -151,7 +157,11 @@ internal object AxisPiecePainter {
             fontResolver = fontResolver,
             fontFamilyResolver = layout.layoutInput.fontFamilyResolver,
         ) ?: return null
-        val varied = AxisVariationCache.withOffsets(rest, offsets) ?: return null
+        if (rest.variationAxes?.any { it.tag in offsets } != true) return null
+        // An offset that rounds to rest still draws here, with the rest face: switching to the
+        // paragraph paint for a frame mid-animation shows as a twitch, however closely the two match.
+        val varied = AxisVariationCache.withOffsets(rest, offsets) ?: rest
+        val raster = rasterization(baseStyle)
 
         val pxPerSp = density.density * density.fontScale
         val sizePx = if (style.fontSize.isUnspecified) piece.dominantFontSizeSp * pxPerSp else style.fontSize.value * pxPerSp
@@ -170,20 +180,21 @@ internal object AxisPiecePainter {
             val shaper = Shaper.makeShapeDontWrapOrReorder()
             try {
                 val restAdvance = SkiaFont(rest, sizePx).use { font ->
-                    configure(font)
+                    configure(font, raster)
                     shaper.shapeLine(raw, font, options).use { it.width }
                 }
                 SkiaFont(varied, sizePx).use { font ->
-                    configure(font)
+                    configure(font, raster)
                     shaper.shapeLine(raw, font, options).use { line ->
                         val glyphs = line.glyphs
                         if (glyphs.isEmpty()) return@paint
                         val positions = line.positions
                         val shift = (restAdvance - line.width) / 2f
-                        val placed = FloatArray(glyphs.size * 2)
-                        for (gi in glyphs.indices) {
-                            placed[gi * 2] = shift + positions[gi * 2] + gi * letterSpacingPx
-                            placed[gi * 2 + 1] = baselineLocal + positions[gi * 2 + 1]
+                        val placed = Array(glyphs.size) { gi ->
+                            Point(
+                                shift + positions[gi * 2] + gi * letterSpacingPx,
+                                baselineLocal + positions[gi * 2 + 1],
+                            )
                         }
                         val blob = TextBlob.makeFromPos(glyphs, placed, font) ?: return@paint
                         SkiaPaint().use { paint ->
@@ -200,10 +211,39 @@ internal object AxisPiecePainter {
         }
     }
 
-    private fun configure(font: SkiaFont) {
-        font.isSubpixel = true
-        font.isLinearMetrics = true
-        font.hinting = FontHinting.NONE
-        font.edging = FontEdging.SUBPIXEL_ANTI_ALIAS
+    /** Skia font settings matching what Compose applies to the piece's paragraph. */
+    private class Rasterization(
+        val edging: FontEdging,
+        val hinting: FontHinting,
+        val subpixel: Boolean,
+        val forceAutoHinting: Boolean,
+    )
+
+    @OptIn(ExperimentalTextApi::class)
+    private fun rasterization(style: TextStyle): Rasterization {
+        val resolved = style.platformStyle?.paragraphStyle?.fontRasterizationSettings
+            ?: FontRasterizationSettings.PlatformDefault
+        return Rasterization(
+            edging = when (resolved.smoothing) {
+                FontSmoothing.None -> FontEdging.ALIAS
+                FontSmoothing.AntiAlias -> FontEdging.ANTI_ALIAS
+                FontSmoothing.SubpixelAntiAlias -> FontEdging.SUBPIXEL_ANTI_ALIAS
+            },
+            hinting = when (resolved.hinting) {
+                ComposeFontHinting.None -> FontHinting.NONE
+                ComposeFontHinting.Slight -> FontHinting.SLIGHT
+                ComposeFontHinting.Normal -> FontHinting.NORMAL
+                ComposeFontHinting.Full -> FontHinting.FULL
+            },
+            subpixel = resolved.subpixelPositioning,
+            forceAutoHinting = resolved.autoHintingForced,
+        )
+    }
+
+    private fun configure(font: SkiaFont, raster: Rasterization) {
+        font.isSubpixel = raster.subpixel
+        font.hinting = raster.hinting
+        font.edging = raster.edging
+        font.isAutoHintingForced = raster.forceAutoHinting
     }
 }
