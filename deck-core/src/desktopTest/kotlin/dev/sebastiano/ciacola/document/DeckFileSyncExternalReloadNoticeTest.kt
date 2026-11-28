@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.deleteRecursively
 import kotlin.test.Test
@@ -113,6 +114,39 @@ class DeckFileSyncExternalReloadNoticeTest {
                 assertTrue(dragTx.commit())
                 assertEquals("V8-DragPreview", store.document.title)
                 assertEquals(CanonicalJson.print(makeDoc("V7-Disk")), Files.readString(target))
+            } finally {
+                sync.close()
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun sameSizeAtomicReplaceWithinOneTimestampTickIsStillDetected() = runBlocking {
+        val dir = Files.createTempDirectory("external-reload-same-tick")
+        try {
+            val target = dir.resolve("deck.deck.json")
+            Files.writeString(target, CanonicalJson.print(makeDoc("V1")))
+            // Without file keys (some Windows filesystems) only size and mtime are available.
+            if (Files.readAttributes(target, BasicFileAttributes::class.java).fileKey() == null) return@runBlocking
+            val store = DeckDocumentStore()
+            val sync = DeckFileSync(targetFile = target, recoveryRootDir = dir.resolve("rec"), store = store)
+            try {
+                assertEquals(DeckLoadState.Loaded, sync.open())
+                val tick = Files.getLastModifiedTime(target)
+
+                // Same byte length and the same modification time: only the file identity changes.
+                writeCanonicalAtomic(target, makeDoc("V2"))
+                Files.setLastModifiedTime(target, tick)
+                assertEquals(Files.size(target), CanonicalJson.print(makeDoc("V1")).toByteArray().size.toLong())
+                sync.pollExternalChangesNow()
+                assertEquals("V2", store.document.title)
+
+                writeCanonicalAtomic(target, makeDoc("V3"))
+                Files.setLastModifiedTime(target, tick)
+                sync.pollExternalChangesNow()
+                assertEquals("V3", store.document.title)
             } finally {
                 sync.close()
             }
