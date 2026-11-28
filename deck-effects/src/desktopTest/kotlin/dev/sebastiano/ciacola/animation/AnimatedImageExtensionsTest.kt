@@ -36,6 +36,19 @@ class AnimatedImageExtensionsTest {
     }
 
     @Test
+    fun `a still GIF is not checked against the animation budget`() {
+        assertNull(decodeAnimatedFrames(sample("still.gif"), AnimationBudget(maxSidePx = 10, maxPixels = 10)))
+    }
+
+    @Test
+    fun `a GIF with a zero logical screen falls back to its frame size`() {
+        val bytes = sample("sample.gif").copyOf().also { for (i in 6..9) it[i] = 0 }
+        assertEquals(AnimationInfo(64, 48, 4), probeAnimation(bytes))
+        val first = assertNotNull(decodeAnimatedFrames(bytes)).first().first
+        assertEquals(64 to 48, first.width to first.height)
+    }
+
+    @Test
     fun `non-looping playback holds the last frame`() = runComposeUiTest {
         val frames = assertNotNull(decodeAnimatedFrames(sample("sample.webp")))
         mainClock.autoAdvance = false

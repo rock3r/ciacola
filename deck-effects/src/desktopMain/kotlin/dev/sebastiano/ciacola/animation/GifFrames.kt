@@ -21,15 +21,14 @@ internal fun decodeGifFrames(input: InputStream, budget: AnimationBudget): List<
         try {
             reader.input = imageInput
             val count = reader.getNumImages(true)
+            if (count <= 1) return null
             val metadata = reader.streamMetadata
             val root = metadata?.getAsTree(metadata.nativeMetadataFormatName) as? IIOMetadataNode
             val screen = root?.getElementsByTagName("LogicalScreenDescriptor")?.item(0) as? IIOMetadataNode
-            val width = screen?.getAttribute("logicalScreenWidth")?.toIntOrNull()
-            val height = screen?.getAttribute("logicalScreenHeight")?.toIntOrNull()
-            if (count > 0) {
-                budget.check(width ?: reader.getWidth(0), height ?: reader.getHeight(0), count)
-                for (index in 0 until count) budget.check(reader.getWidth(index), reader.getHeight(index), 1)
-            }
+            val width = screen?.getAttribute("logicalScreenWidth")?.toIntOrNull()?.takeIf { it > 0 }
+            val height = screen?.getAttribute("logicalScreenHeight")?.toIntOrNull()?.takeIf { it > 0 }
+            budget.check(width ?: reader.getWidth(0), height ?: reader.getHeight(0), count)
+            for (index in 0 until count) budget.check(reader.getWidth(index), reader.getHeight(index), 1)
             val frames = mutableListOf<AnimationFrame>()
             var canvas: BufferedImage? = null
             for (index in 0 until count) {
@@ -56,8 +55,8 @@ internal fun probeGif(input: InputStream): AnimationInfo? =
             val metadata = reader.streamMetadata
             val root = metadata?.getAsTree(metadata.nativeMetadataFormatName) as? IIOMetadataNode
             val screen = root?.getElementsByTagName("LogicalScreenDescriptor")?.item(0) as? IIOMetadataNode
-            val width = screen?.getAttribute("logicalScreenWidth")?.toIntOrNull() ?: reader.getWidth(0)
-            val height = screen?.getAttribute("logicalScreenHeight")?.toIntOrNull() ?: reader.getHeight(0)
+            val width = screen?.getAttribute("logicalScreenWidth")?.toIntOrNull()?.takeIf { it > 0 } ?: reader.getWidth(0)
+            val height = screen?.getAttribute("logicalScreenHeight")?.toIntOrNull()?.takeIf { it > 0 } ?: reader.getHeight(0)
             AnimationInfo(width, height, count)
         } finally {
             reader.dispose()
