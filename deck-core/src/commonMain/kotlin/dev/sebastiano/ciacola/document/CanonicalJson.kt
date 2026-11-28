@@ -22,7 +22,7 @@ import kotlinx.serialization.json.longOrNull
  * - Typed objects print keys in the order of their [SerialDescriptor].
  * - Objects inside `Build.Change.set` print keys in the order of the patched type ([NodeSpec]).
  * - Name-keyed maps (`palettes`, `themes`, `params`, `args`, `loopPeriodsMs`, `tracks`, `manual`,
- *   `colors`, `typography`, `tokens`, `axes`, `transition.text`) sort lexicographically by key.
+ *   `colors`, `typography`, `tokens`, `axes`, `channels`, `transition.text`) sort lexicographically by key.
  * - Primitive-only objects and arrays whose inline form fits within [MAX_INLINE_COLUMNS] (100)
  *   columns print on one line; everything else prints one child per line.
  * - `encodeDefaults = false`. `null` is printed only inside `set`.
@@ -46,6 +46,7 @@ object CanonicalJson {
         "typography",
         "tokens",
         "axes",
+        "channels",
     )
 
     private val BUILD_DESCRIPTORS_BY_KIND: Map<String, SerialDescriptor> = mapOf(

@@ -7,6 +7,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import dev.bnorm.storyboard.Storyboard
@@ -476,7 +478,7 @@ private fun fullStageShift(direction: EffectDirection8, stageSize: Size): Offset
  */
 fun Modifier.slideLayerTransform(layer: LayerState): Modifier {
     val clampedAlpha = layer.alpha.coerceIn(0f, 1f)
-    val transformed = this.graphicsLayer {
+    val layerBlock: GraphicsLayerScope.() -> Unit = {
         alpha = clampedAlpha
         translationX = layer.translationX
         translationY = layer.translationY
@@ -490,6 +492,7 @@ fun Modifier.slideLayerTransform(layer: LayerState): Modifier {
             CompositingStrategy.Auto
         }
     }
+    val transformed = this.graphicsLayer(layerBlock)
     return when (val clip = layer.clip) {
         EffectClip.None -> transformed
         is EffectClip.Wipe -> transformed.drawWithContent {
@@ -504,5 +507,18 @@ fun Modifier.slideLayerTransform(layer: LayerState): Modifier {
                 this@drawWithContent.drawContent()
             }
         }
+        is EffectClip.RestBounds -> this.restBoundsClip(clip).graphicsLayer(layerBlock)
+    }
+}
+
+/** Clips to the untransformed layout box grown by [clip]'s padding (applied outside the layer). */
+fun Modifier.restBoundsClip(clip: EffectClip.RestBounds): Modifier = this.drawWithContent {
+    clipRect(
+        left = -clip.padLeft,
+        top = -clip.padTop,
+        right = size.width + clip.padRight,
+        bottom = size.height + clip.padBottom,
+    ) {
+        this@drawWithContent.drawContent()
     }
 }

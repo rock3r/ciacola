@@ -29,6 +29,7 @@ import dev.sebastiano.ciacola.document.DeckThemeSpec
 import dev.sebastiano.ciacola.document.Fill
 import dev.sebastiano.ciacola.document.GradientSpec
 import dev.sebastiano.ciacola.document.GradientType
+import dev.sebastiano.ciacola.document.MotionChannelSpec
 import dev.sebastiano.ciacola.document.SlidePaletteSpec
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.document.StrokeSpec
@@ -42,6 +43,7 @@ import dev.sebastiano.ciacola.effects.v2.CurveV2
 import dev.sebastiano.ciacola.effects.v2.EffectArgs
 import dev.sebastiano.ciacola.effects.v2.EffectDirection8
 import dev.sebastiano.ciacola.effects.v2.IrisDirection
+import dev.sebastiano.ciacola.effects.v2.MotionPresets
 import dev.sebastiano.ciacola.effects.v2.SlideTransitionV2
 import dev.sebastiano.ciacola.theme.DeckCodePalette
 import dev.sebastiano.ciacola.theme.DeckTheme
@@ -392,11 +394,15 @@ fun buildEffectArgs(
     rawArgs: Map<String, JsonElement>,
     direction: String?,
     colorResolver: DocumentColorResolver,
+    channels: Map<String, MotionChannelSpec> = emptyMap(),
 ): EffectArgs {
-    if (rawArgs.isEmpty() && direction == null) return EffectArgs.Empty
-    val out = LinkedHashMap<String, Any>(rawArgs.size + 2)
+    if (rawArgs.isEmpty() && direction == null && channels.isEmpty()) return EffectArgs.Empty
+    val out = LinkedHashMap<String, Any>(rawArgs.size + 3)
     if (direction != null) {
         out["direction"] = direction
+    }
+    if (channels.isNotEmpty()) {
+        out[MotionPresets.CHANNELS_ARG] = channels
     }
     for ((key, value) in rawArgs) {
         val converted: Any? = when (value) {

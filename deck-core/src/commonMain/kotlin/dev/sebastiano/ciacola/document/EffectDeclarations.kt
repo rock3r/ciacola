@@ -517,7 +517,7 @@ class BuildEffectRegistry(
                     ),
                     defaultDurationMs = 500,
                 ),
-            ),
+            ) + MotionPresetDeclarations.all,
         )
     }
 }

@@ -14,6 +14,7 @@ import dev.sebastiano.ciacola.document.DocSegment
 import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.MatchedPair
 import dev.sebastiano.ciacola.document.MorphBy
+import dev.sebastiano.ciacola.document.MotionChannelSpec
 import dev.sebastiano.ciacola.document.NodeKind
 import dev.sebastiano.ciacola.document.NodeSpec
 import dev.sebastiano.ciacola.document.PaddingSpec
@@ -362,6 +363,7 @@ object DocumentMotionEvaluator {
                             kind = EffectBuildKind.Enter,
                             by = build.by,
                             rawArgs = build.args,
+                            channels = build.channels,
                             direction = build.direction,
                             curve = build.curve ?: track?.effectCurveOverride,
                             track = track,
@@ -385,6 +387,7 @@ object DocumentMotionEvaluator {
                             kind = EffectBuildKind.Exit,
                             by = build.by,
                             rawArgs = build.args,
+                            channels = build.channels,
                             direction = build.direction,
                             curve = build.curve ?: track?.effectCurveOverride,
                             track = track,
@@ -408,6 +411,7 @@ object DocumentMotionEvaluator {
                             kind = EffectBuildKind.Emphasis,
                             by = build.by,
                             rawArgs = build.args,
+                            channels = build.channels,
                             direction = build.direction,
                             curve = build.curve ?: track?.effectCurveOverride,
                             track = track,
@@ -831,6 +835,7 @@ object DocumentMotionEvaluator {
         kind: EffectBuildKind,
         by: DeliveryBy,
         rawArgs: Map<String, JsonElement>,
+        channels: Map<String, MotionChannelSpec>,
         direction: String?,
         curve: Curve?,
         track: TrackPlan?,
@@ -845,7 +850,7 @@ object DocumentMotionEvaluator {
         onChildDelivery: (String, ChildDeliveryOverride) -> Unit,
     ) {
         if (track == null) return
-        val args = buildEffectArgs(rawArgs, direction, colorResolver)
+        val args = buildEffectArgs(rawArgs, direction, colorResolver, channels)
         val curveV2 = curve?.toCurveV2()
         val startMs = track.startMs
         val rawDurMs = track.durationMs

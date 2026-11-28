@@ -649,6 +649,13 @@ internal object DeckValidationHelpers {
         if (stagger.ms < 0) {
             issues += loadError("NEGATIVE_STAGGER_MS", address, "stagger.ms must be >= 0, got ${stagger.ms}.")
         }
+        val totalMs = stagger.totalMs
+        if (totalMs != null && totalMs < 0) {
+            issues += loadError("NEGATIVE_STAGGER_TOTAL_MS", address, "stagger.totalMs must be >= 0, got $totalMs.")
+        }
+        if (stagger.curve != null) {
+            validateTimingFields(null, null, stagger.curve, "$address/curve", issues)
+        }
         if (isTextContext && stagger.order == StaggerOrder.LeftToRight) {
             issues += lintError(
                 "TEXT_STAGGER_LEFT_TO_RIGHT",
@@ -663,6 +670,72 @@ internal object DeckValidationHelpers {
                     "$address/manual/$k",
                     "Manual delay for '$k' must be >= 0, got $delay.",
                 )
+            }
+        }
+    }
+
+    /**
+     * Validates motion preset `channels` overrides on an enter, exit or emphasis build: channel
+     * names, progress windows, keyframe ordering, wave parameters and embedded curves.
+     */
+    fun validateMotionChannels(
+        channels: Map<String, MotionChannelSpec>,
+        address: String,
+        issues: MutableList<DocumentIssue>,
+    ) {
+        for ((name, spec) in channels) {
+            val channelAddr = "$address/channels/$name"
+            if (name !in MotionChannelNames.all) {
+                issues += lintWarning(
+                    "UNKNOWN_MOTION_CHANNEL",
+                    channelAddr,
+                    "Unknown motion channel '$name' (known: ${MotionChannelNames.all.joinToString()}).",
+                )
+            }
+            spec.window?.let { window ->
+                val valid = window.size == 2 &&
+                    window.all { it.isFinite() && it in 0.0..1.0 } &&
+                    window[0] < window[1]
+                if (!valid) {
+                    issues += loadError(
+                        "INVALID_MOTION_WINDOW",
+                        "$channelAddr/window",
+                        "window must be [start, end] with 0 <= start < end <= 1, got $window.",
+                    )
+                }
+            }
+            spec.keyframes?.let { keys ->
+                if (keys.isEmpty()) {
+                    issues += loadError("EMPTY_MOTION_KEYFRAMES", "$channelAddr/keyframes", "keyframes must not be empty.")
+                }
+                for ((i, key) in keys.withIndex()) {
+                    if (!key.at.isFinite() || key.at !in 0.0..1.0) {
+                        issues += loadError(
+                            "MOTION_KEYFRAME_OUT_OF_RANGE",
+                            "$channelAddr/keyframes/$i",
+                            "Keyframe 'at' must be in 0..1, got ${key.at}.",
+                        )
+                    }
+                    if (i > 0 && key.at < keys[i - 1].at) {
+                        issues += loadError(
+                            "MOTION_KEYFRAMES_UNSORTED",
+                            "$channelAddr/keyframes/$i",
+                            "Keyframes must be sorted by 'at'.",
+                        )
+                    }
+                    key.curve?.let { validateTimingFields(null, null, it, "$channelAddr/keyframes/$i/curve", issues) }
+                }
+            }
+            spec.curve?.let { validateTimingFields(null, null, it, "$channelAddr/curve", issues) }
+            spec.wave?.let { wave ->
+                val cycles = wave.cycles
+                if (cycles != null && (!cycles.isFinite() || cycles < 0.0)) {
+                    issues += loadError("INVALID_MOTION_WAVE", "$channelAddr/wave/cycles", "cycles must be >= 0, got $cycles.")
+                }
+                val fade = wave.fade
+                if (fade != null && (!fade.isFinite() || fade !in 0.0..0.5)) {
+                    issues += loadError("INVALID_MOTION_WAVE", "$channelAddr/wave/fade", "fade must be in 0..0.5, got $fade.")
+                }
             }
         }
     }
@@ -727,4 +800,7 @@ internal object DeckValidationHelpers {
 
     private fun lintError(code: String, address: String, message: String) =
         DocumentIssue(IssueSeverity.LintError, code, address, message)
+
+    private fun lintWarning(code: String, address: String, message: String) =
+        DocumentIssue(IssueSeverity.LintWarning, code, address, message)
 }
