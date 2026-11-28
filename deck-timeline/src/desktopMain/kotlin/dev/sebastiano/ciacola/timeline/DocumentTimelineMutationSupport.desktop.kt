@@ -251,7 +251,7 @@ internal object DocumentTimelineMutationSupport {
                 is Build.Enter -> build.stagger?.manual.orEmpty()
                 is Build.Exit -> build.stagger?.manual.orEmpty()
                 is Build.Emphasis -> build.stagger?.manual.orEmpty()
-                null -> emptyMap()
+                is Build.Playback, null -> emptyMap()
             }
         }
         is DocumentTimelineTrackRef.TransitionTrackBar -> {
@@ -300,6 +300,7 @@ internal object DocumentTimelineMutationSupport {
                 is Build.Enter -> build.copy(stagger = transform(build.stagger ?: Stagger()))
                 is Build.Exit -> build.copy(stagger = transform(build.stagger ?: Stagger()))
                 is Build.Emphasis -> build.copy(stagger = transform(build.stagger ?: Stagger()))
+                is Build.Playback -> build
             }
             node.copy(builds = updatedBuilds)
         }
@@ -893,5 +894,6 @@ internal object DocumentTimelineMutationSupport {
             durationMs = durationMs ?: this.durationMs,
             curve = curve ?: this.curve,
         )
+        is Build.Playback -> this
     }
 }

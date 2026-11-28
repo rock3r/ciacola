@@ -967,14 +967,15 @@ object DeckStructureEdits {
                 if ('#' in afterRaw) continue
 
                 val targetNode = nodesById[afterRaw] ?: continue
-                if (targetNode.builds.none { it.beat == deletedBeat }) continue
+                if (targetNode.builds.none { it.beat == deletedBeat && it !is Build.Playback }) continue
 
                 val targetBuildIdx = if (targetBeat == 0 && build is Build.Enter) {
                     targetNode.builds.indexOfLast { it.beat == targetBeat && it is Build.Enter }
                         .takeIf { it >= 0 }
-                        ?: targetNode.builds.indexOfLast { it.beat == targetBeat }
+                        ?: targetNode.builds.indexOfLast { it.beat == targetBeat && it !is Build.Playback }
                 } else {
-                    targetNode.builds.indexOfLast { it.beat == targetBeat }
+                    // Playback builds are not on the beat timeline, so `after` never binds to them.
+                    targetNode.builds.indexOfLast { it.beat == targetBeat && it !is Build.Playback }
                 }
                 if (targetBuildIdx < 0) continue
 
@@ -1076,6 +1077,7 @@ object DeckStructureEdits {
         is Build.Exit -> copy(beat = newBeat)
         is Build.Emphasis -> copy(beat = newBeat)
         is Build.Change -> copy(beat = newBeat)
+        is Build.Playback -> copy(beat = newBeat)
     }
 
     private fun Build.withAfter(newAfter: String?): Build = when (this) {
@@ -1083,6 +1085,7 @@ object DeckStructureEdits {
         is Build.Exit -> copy(after = newAfter)
         is Build.Emphasis -> copy(after = newAfter)
         is Build.Change -> copy(after = newAfter)
+        is Build.Playback -> this
     }
 
     private fun Build.withId(newId: String?): Build = when (this) {
@@ -1090,5 +1093,6 @@ object DeckStructureEdits {
         is Build.Exit -> copy(id = newId)
         is Build.Emphasis -> copy(id = newId)
         is Build.Change -> copy(id = newId)
+        is Build.Playback -> copy(id = newId)
     }
 }

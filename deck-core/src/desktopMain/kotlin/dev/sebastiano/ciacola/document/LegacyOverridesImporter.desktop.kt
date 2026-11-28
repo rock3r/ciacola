@@ -309,6 +309,7 @@ object LegacyOverridesImporter {
                 durationMs = durationMs ?: build.durationMs,
                 curve = curve ?: build.curve,
             )
+            is Build.Playback -> build
         }
     }
 

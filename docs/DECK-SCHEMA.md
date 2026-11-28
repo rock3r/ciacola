@@ -143,9 +143,15 @@ Common layout/transform properties on `NodeSpec`:
    - `geometry`: `"rect"`, `"ellipse"`, `"line"`, or `{ "path": "M 0 0 L 100 0 ..." }` (SVG path data)
    - `fill`, `stroke`, `cornerRadius`, `heads` (`{ "start": "none"|"open"|"filled", "end": "none"|"open"|"filled" }`)
 4. **`image` (`ImagePayload`)**:
-   - `src`: relative asset path resolved inside `<deckId>.assets/` (supports PNG, JPG, WebP, SVG)
+   - `src`: relative asset path resolved inside `<deckId>.assets/` (supports PNG, JPG, WebP, SVG, and animated WebP/GIF)
    - `fit`: `"contain"` (default), `"cover"`, `"fill"`, `"fitWidth"`, `"fitHeight"`, `"none"`
    - `tint`: optional color token or hex
+   - Animated WebP/GIF only (see [Animated images](#animated-images)):
+     - `loop`: `Boolean` (default `false`: stop on the last frame of the trim)
+     - `playbackRate`: `Double` (default `1.0`, must be `> 0`)
+     - `startMs`, `endMs`: trim window in source milliseconds (defaults: `0` and the clip's duration)
+     - `posterMs`: frame shown before the first `play`/`seek` and in stills, PDF and video export (default: `startMs`, so `0` when untrimmed)
+     - `maxPixels`: decode budget as total full-canvas pixels, `width × height × frames` (default `25165824`, 24 × 1024 × 1024; larger clips show only their first frame)
 5. **`connector` (`ConnectorPayload`)**:
    - `from`, `to`: target node IDs on the same slide
    - `fromAnchor`, `toAnchor`: optional anchor side/name
@@ -177,6 +183,37 @@ Discriminated by `"kind"`:
 - `"exit"`: hides/exits the node at `beat` (same timing/effect fields as `"enter"`).
 - `"emphasis"`: in-place emphasis at `beat` (e.g. `"jiggle"`).
 - `"change"`: RFC 7396 JSON Merge Patch applied at `beat` via `"set": { ... }` (plus optional `path` for motion path, `morph` for `TextMorphSpec`, `after`, `delayMs`, `durationMs`, `curve`).
+- `"playback"`: controls an animated `image` node's clip at `beat` with `action` and optional `atMs` (source milliseconds) and `rate`:
+  - `"play"`: start playing, from `atMs` when given, otherwise from where the clip is.
+  - `"pause"`: stop, holding the frame at `atMs` when given, otherwise the current frame.
+  - `"seek"`: move to `atMs` (the trim start when omitted), keeping the play/pause state.
+  - `"rate"`: change the playback rate to `rate` (required). `rate` is also accepted on the other actions.
+  - Playback builds take no `effect`, `after`, `delayMs`, `durationMs` or `curve`, and add no time to the beat's segment.
+
+### Animated images
+
+An `image` whose `src` is an animated WebP or GIF plays in the live deck. All frames are decoded up front in the background, within the `maxPixels` budget; until then, and for clips over the budget, the first frame shows.
+
+- **Without `playback` builds** the clip plays as soon as its slide is on screen.
+- **With `playback` builds** it waits on its poster frame until a `play` or `seek` build, and its state at any beat is folded from every `playback` build up to that beat. Stepping forward one beat continues from the live position, unless that beat sets `atMs`. Arriving any other way (stepping back, jumping, re-entering the slide) restores the position the beat was entered at, so stepping back and forward again replays the same segment.
+- **Show mode:** `R` restarts the clips on the current slide from the current beat's entry position without changing beat, and `P` pauses or resumes them (on a clip that stopped on its last frame, `P` plays it again). Holding either key acts once. Hovering a clip shows a thin progress bar along the bottom of the drawn image; a plain click or drag seeks (`Ctrl`/`Cmd`-click and right-click are left to review pins and menus). The frame under the pointer holds while the button is down, playback carries on from there on release, and the next beat continues from the scrubbed position. The bar fades out about a second after the pointer leaves. A clip hidden before its `enter` or after its `exit` holds its frame and takes no clicks, and a clip on a slide you step back from holds its frame while the slide leaves. Scrubbing is off in Edit and Review modes.
+- **Presenter window:** `P` pauses or resumes the clips and `Shift+R` restarts them (`R` there resets the talk timer). The `Current` preview mirrors the stage clips, including pauses, scrubbing and restarts; the `Next` preview shows the poster frame.
+- **`magicMove` transitions** carry a clip on the frame it is on in show mode (its poster frame in exports).
+- **Stills, PDF, video export and lint** always show the `posterMs` frame and never the progress bar.
+- `lintDeck` warns with `CLIP_SOURCE_MISSING` (playback builds on a missing asset), `CLIP_SOURCE_NOT_ANIMATED` (playback builds or clip fields on a still image, or on a source that is not `.gif`/`.webp`) and `CLIP_OVER_BUDGET` (with the `maxPixels` value the clip needs, or a note that a side is over the 8192 px limit).
+
+```json
+{
+  "id": "s05:demo",
+  "frame": { "x": 960, "y": 300, "w": 832, "h": 468 },
+  "image": { "src": "demo.webp", "posterMs": 0, "maxPixels": 40000000 },
+  "builds": [
+    { "kind": "playback", "beat": 1, "action": "play" },
+    { "kind": "playback", "beat": 2, "action": "pause", "atMs": 4500 },
+    { "kind": "playback", "beat": 3, "action": "play", "rate": 2.0 }
+  ]
+}
+```
 
 ### `Stagger` & `Timing`
 

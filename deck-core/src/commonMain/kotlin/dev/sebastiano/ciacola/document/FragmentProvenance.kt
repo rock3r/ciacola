@@ -289,6 +289,7 @@ object FragmentProvenance {
                                 issues += lintExternalEdit(oldSrc, newSrc, manual, morph.by, buildAddr, editingExitSource = true)
                             }
                         }
+                        is Build.Playback -> Unit
                     }
                 }
                 // Also lint node-level text.morph.stagger.manual against beat-0 text changes if unused above.
@@ -512,6 +513,7 @@ object FragmentProvenance {
                         build
                     }
                 }
+                is Build.Playback -> build
             }
         }
 

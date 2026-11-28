@@ -44,6 +44,8 @@ object SegmentPlanner {
             var prevTaskOnSameNode: Int? = null
             for ((bIdx, build) in node.builds.withIndex()) {
                 if (build.beat != beat) continue
+                // Clip playback builds drive the image's own playhead, not segment tracks.
+                if (build is Build.Playback) continue
                 // Beat 0 only runs Enter builds as the Entrance segment.
                 if (beat == 0 && build !is Build.Enter) continue
 
@@ -519,6 +521,8 @@ object SegmentPlanner {
                 }
             }
 
+            is Build.Playback -> error("Playback builds never become segment tasks")
+
             is Build.Change -> {
                 val curve = build.curve
                     ?: phaseTiming?.curve
@@ -605,7 +609,7 @@ object SegmentPlanner {
             is Build.Enter -> TrackKind.Enter
             is Build.Exit -> TrackKind.Exit
             is Build.Emphasis -> TrackKind.Emphasis
-            is Build.Change -> TrackKind.Change
+            is Build.Change, is Build.Playback -> TrackKind.Change
         }
         val isZeroAppear = (build is Build.Enter && build.effect == "appear") ||
             (build is Build.Exit && build.effect == "appear") ||
@@ -902,7 +906,7 @@ object SegmentPlanner {
 
     private fun phaseOf(build: Build): SlotPhase = when (build) {
         is Build.Exit -> SlotPhase.Exit
-        is Build.Change, is Build.Emphasis -> SlotPhase.Move
+        is Build.Change, is Build.Emphasis, is Build.Playback -> SlotPhase.Move
         is Build.Enter -> SlotPhase.Enter
     }
 

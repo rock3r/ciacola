@@ -711,6 +711,7 @@ internal fun DocumentTravellingOverlayNode(
                 tint = img.tint?.let { ctx.colorResolver.resolveOrNull(it) },
                 assetsRootDir = ctx.config.assetsRootDir,
                 modifier = overlayTransformMod,
+                playback = overlayImagePlayback(ctx, fromSlideId, pair.nodeId, img),
             )
         }
         NodeKind.Specimen -> {

@@ -352,7 +352,20 @@ actual fun DocumentImagePayloadView(
     tint: Color?,
     assetsRootDir: String?,
     modifier: Modifier,
+    playback: DocumentImagePlayback?,
 ) {
+    if (playback != null && DocumentClipView(
+            deckId = deckId,
+            src = src,
+            assetsRootDir = assetsRootDir,
+            contentScale = DocumentAssetLoader.parseContentScale(fit),
+            colorFilter = tint?.let { ColorFilter.tint(it) },
+            playback = playback,
+            modifier = modifier,
+        )
+    ) {
+        return
+    }
     val painter = remember(deckId, src, assetsRootDir) {
         DocumentAssetLoader.loadPainter(deckId, src, assetsRootDir)
     }

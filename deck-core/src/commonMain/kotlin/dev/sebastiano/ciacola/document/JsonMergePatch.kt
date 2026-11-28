@@ -455,7 +455,7 @@ object JsonMergePatch {
             when (build) {
                 is Build.Enter -> present = true
                 is Build.Exit -> present = false
-                is Build.Emphasis, is Build.Change -> Unit
+                is Build.Emphasis, is Build.Change, is Build.Playback -> Unit
             }
         }
         return present

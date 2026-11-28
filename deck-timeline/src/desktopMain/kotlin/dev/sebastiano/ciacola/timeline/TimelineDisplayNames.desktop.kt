@@ -104,6 +104,7 @@ internal object TimelineDisplayNames {
         is Build.Exit -> "Exit · ${humanizeId(build.effect)}"
         is Build.Emphasis -> "Emphasis · ${humanizeId(build.effect)}"
         is Build.Change -> "Change"
+        is Build.Playback -> "Playback · ${humanizeId(build.action.name)}"
         null -> humanizeId(kind.name)
     }
 

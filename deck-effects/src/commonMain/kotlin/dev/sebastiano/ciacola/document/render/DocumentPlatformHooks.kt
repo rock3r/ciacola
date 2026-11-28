@@ -8,12 +8,15 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
+import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.ConnectorPayload
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DeliveryBy
 import dev.sebastiano.ciacola.document.DocSegment
 import dev.sebastiano.ciacola.document.MorphBy
+import dev.sebastiano.ciacola.document.ImagePayload
 import dev.sebastiano.ciacola.document.PieceSchedule
+import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.ShapePayload
 import dev.sebastiano.ciacola.document.SurfaceSpec
 import dev.sebastiano.ciacola.document.TextPayload
@@ -148,7 +151,37 @@ expect fun DocumentShapePayloadView(
     shapeReferenceSize: Size? = null,
 )
 
-/** Renders a document `image` node (raster PNG/JPG/WebP or vector `.svg`) with `fit` and `tint`. */
+/**
+ * Clip playback binding of an `image` node whose source may be an animated GIF/WebP.
+ *
+ * @property payload the node's image payload resolved at the current beat.
+ * @property builds the node's raw builds (its `playback` builds drive the playhead).
+ * @property retainKey session-unique key of the node's playhead.
+ * @property beat the beat whose playback state is shown, or `null` when the node's slide is not
+ *   the one the clock is on.
+ * @property live the clip plays (an animated `Present` mount); otherwise only the poster frame shows.
+ * @property present the node is shown at [beat]; a hidden node holds its frame and takes no clicks.
+ * @property scrubbable hovering shows the progress bar and clicking or dragging seeks (show mode).
+ * @property mirrorOf session whose playhead for [retainKey] a non-live mount shows instead of the
+ *   poster (the presenter's `Current` preview, magicMove overlays carrying a playing clip).
+ */
+@Immutable
+data class DocumentImagePlayback(
+    val payload: ImagePayload,
+    val builds: List<Build>,
+    val retainKey: String,
+    val session: RenderSession,
+    val beat: Int?,
+    val live: Boolean,
+    val present: Boolean,
+    val scrubbable: Boolean,
+    val mirrorOf: RenderSession? = null,
+)
+
+/**
+ * Renders a document `image` node (raster PNG/JPG/WebP or vector `.svg`) with `fit` and `tint`.
+ * Animated GIF/WebP sources play when [playback] is live and otherwise show their poster frame.
+ */
 @Composable
 expect fun DocumentImagePayloadView(
     deckId: String,
@@ -157,6 +190,7 @@ expect fun DocumentImagePayloadView(
     tint: Color?,
     assetsRootDir: String?,
     modifier: Modifier,
+    playback: DocumentImagePlayback? = null,
 )
 
 /** Renders a `Fill.Image` background fill inside a slide, container, or shape. */

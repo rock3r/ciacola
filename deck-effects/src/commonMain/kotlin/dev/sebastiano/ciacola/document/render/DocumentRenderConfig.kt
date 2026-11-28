@@ -48,6 +48,8 @@ data class DocumentRenderConfig(
     val fontScale: Float = 1f,
     val baseDensity: Float = 2f,
     val isEditMode: Boolean = false,
+    /** Show mode only: hovering an animated image reveals its progress bar and clicks seek it. */
+    val clipScrubbing: Boolean = false,
     val keyboardController: DocumentKeyboardCaptureController? = null,
     val onNodeClick: ((slideId: String, nodeId: String) -> Unit)? = null,
     val onNodeDoubleClick: ((slideId: String, nodeId: String) -> Unit)? = null,

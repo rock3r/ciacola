@@ -22,7 +22,7 @@ TextPayload: value, style, font, size, weight, italic, color, lineHeight, tracki
 CodePayload: value, language, highlightLines, fit, surface
 LineHeads: start, end
 ShapePayload: geometry, fill, stroke, cornerRadius, heads
-ImagePayload: src, fit, tint
+ImagePayload: src, fit, tint, loop, playbackRate, startMs, endMs, posterMs, maxPixels
 ConnectorPayload: from, to, fromAnchor, toAnchor, style, stroke, heads, gap
 SpecimenTrackOverride: beat, delayMs, durationMs, curve
 SpecimenPayload: ref, params, tracks
@@ -37,4 +37,5 @@ Build.Enter: beat, id, effect, direction, args, by, stagger, after, delayMs, dur
 Build.Exit: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
 Build.Emphasis: beat, id, effect, direction, args, by, stagger, after, delayMs, durationMs, curve
 Build.Change: beat, id, set, path, morph, after, delayMs, durationMs, curve
+Build.Playback: beat, id, action, atMs, rate
 TransitionSpec: type, direction, color, center, delayMs, durationMs, curve, phases, stagger, text

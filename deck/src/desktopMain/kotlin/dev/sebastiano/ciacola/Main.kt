@@ -433,8 +433,8 @@ private fun ApplicationScope.CiacolaStudioApplication(
     )
     val presenterVisible = presenterWindowHolder?.visible == true
     val liveSession = remember(store, activeDeck.id) { newPresentSession() }
-    val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible) {
-        if (presenterVisible) newPresentSession() else null
+    val presenterCurrentSession = remember(store, activeDeck.id, presenterVisible, liveSession) {
+        if (presenterVisible) newPresentSession().also { it.clipMirrorSource = liveSession } else null
     }
     val presenterNextSession = remember(store, activeDeck.id, presenterVisible) {
         if (presenterVisible) newPresentSession() else null
@@ -502,6 +502,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         assetsRootDir = assetsRootDir,
         fontsDir = deckFontsDir,
         isEditMode = studioWorkspace.isStudioOpen,
+        clipScrubbing = studioWorkspace.mode == StudioMode.Present,
         keyboardController = keyboardController,
         onNodeClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.selectNode(nodeId) },
         onNodeDoubleClick = { _, nodeId -> if (studioWorkspace.isElementPickingEnabled) elementController.startInlineTextEdit(nodeId) },
@@ -932,6 +933,7 @@ private fun ApplicationScope.CiacolaStudioApplication(
         },
         isExternalTextInputActiveProvider = {
             textInputTracker.hasFocusedTextInput ||
+                keyboardController.isCaptured ||
                 elementController.textInputHasFocus ||
                 elementController.inlineEditingNodeId != null ||
                 reviewStageCoordinator.pendingSelection != null ||

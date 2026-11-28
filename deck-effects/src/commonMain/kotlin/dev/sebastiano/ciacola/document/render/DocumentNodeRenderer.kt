@@ -44,16 +44,19 @@ import dev.bnorm.storyboard.Frame
 import dev.bnorm.storyboard.layout.decorated.DecorationScope
 import dev.sebastiano.ciacola.effects.LocalWarpSegmentObserver
 import dev.sebastiano.ciacola.document.Affine2D
+import dev.sebastiano.ciacola.document.ClipPlayback
 import dev.sebastiano.ciacola.document.ContainerPayload
 import dev.sebastiano.ciacola.document.CrossSlideGeometry
 import dev.sebastiano.ciacola.document.DeckClock
 import dev.sebastiano.ciacola.document.DeckDocument
 import dev.sebastiano.ciacola.document.DecomposedTransform
 import dev.sebastiano.ciacola.document.Fill
+import dev.sebastiano.ciacola.document.ImagePayload
 import dev.sebastiano.ciacola.document.JsonMergePatch
 import dev.sebastiano.ciacola.document.LoupePayload
 import dev.sebastiano.ciacola.document.NodeKind
 import dev.sebastiano.ciacola.document.NodeSpec
+import dev.sebastiano.ciacola.document.RenderPurpose
 import dev.sebastiano.ciacola.document.RenderSession
 import dev.sebastiano.ciacola.document.SegmentPlan
 import dev.sebastiano.ciacola.document.SlideSpec
@@ -100,6 +103,8 @@ internal data class DocumentNodeRenderContext(
     val loupeTargetId: String? = null,
     val lookaheadStore: CrossSlideLookaheadGeometryStore? = null,
     val isGhostSubtree: Boolean = false,
+    /** True inside a container that is hidden at the current beat (before its `enter`, after its `exit`). */
+    val isHiddenSubtree: Boolean = false,
     val parentNodeId: String? = null,
     val parentContentPadLeftPx: Double = 0.0,
     val parentContentPadTopPx: Double = 0.0,
@@ -293,7 +298,13 @@ internal fun DocumentNodeItem(
     val node = eval.resolvedNode
     val density = LocalDensity.current
     val isGhost = ctx.isGhostSubtree || rawNode.id in ctx.suppressedNodeIds
-    val nodeCtx = if (isGhost && !ctx.isGhostSubtree) ctx.copy(isGhostSubtree = true) else ctx
+    val ghostCtx = if (isGhost && !ctx.isGhostSubtree) ctx.copy(isGhostSubtree = true) else ctx
+    val nodeCtx = if (!ghostCtx.isHiddenSubtree && rawNode.kind in HIDEABLE_CONTAINERS && rawNode.builds.isNotEmpty() &&
+        !isNodePresent(ghostCtx, rawNode)) {
+        ghostCtx.copy(isHiddenSubtree = true)
+    } else {
+        ghostCtx
+    }
     val dragPreview = LocalStageDragPreview.current
     val slotPool = LocalMovableSpecimenSlotPool.current
     val textMetricsHolder = remember(rawNode.id) {
@@ -572,6 +583,7 @@ internal fun DocumentNodeItem(
                     tint = img.tint?.let { ctx.colorResolver.resolveOrNull(it) },
                     assetsRootDir = ctx.config.assetsRootDir,
                     modifier = nodeModifier,
+                    playback = documentImagePlayback(nodeCtx, rawNode, img),
                 )
             }
             NodeKind.Connector -> {
@@ -937,3 +949,54 @@ internal fun parseVerticalArrangement(justify: String?, gapDp: androidx.compose.
         "spaceevenly" -> Arrangement.SpaceEvenly
         else -> Arrangement.spacedBy(gapDp, Alignment.Top)
     }
+
+private fun documentImagePlayback(
+    ctx: DocumentNodeRenderContext,
+    rawNode: NodeSpec,
+    image: ImagePayload,
+): DocumentImagePlayback {
+    val live = ctx.isAnimatedMount && ctx.session.purpose == RenderPurpose.Present && !ctx.isGhostSubtree
+    val beat = clipBeat(ctx)
+    // Before its `enter` or after its `exit` the node, or a container holding it, is drawn invisible:
+    // it must not play or take clicks.
+    val present = !ctx.isHiddenSubtree && isNodePresent(ctx, rawNode, beat)
+    return DocumentImagePlayback(
+        payload = image,
+        builds = rawNode.builds,
+        // Keyed by source too, so a `change` build swapping `src` starts the new clip on its own playhead.
+        retainKey = clipRetainKey(ctx.slide.id, rawNode.id, image),
+        session = ctx.session,
+        beat = beat,
+        live = live,
+        present = present,
+        scrubbable = live && present && ctx.config.clipScrubbing,
+        mirrorOf = ctx.session.clipMirrorSource,
+    )
+}
+
+private val HIDEABLE_CONTAINERS = setOf(NodeKind.Stack, NodeKind.Row, NodeKind.Column)
+
+private fun clipBeat(ctx: DocumentNodeRenderContext): Int? =
+    ClipPlayback.effectiveBeat(ctx.clock, ctx.slide.id, lastBeat = ctx.slide.beats.lastIndex)
+
+private fun isNodePresent(ctx: DocumentNodeRenderContext, rawNode: NodeSpec, beat: Int? = clipBeat(ctx)): Boolean =
+    beat == null || beat < 0 || JsonMergePatch.isNodePresentAtBeat(rawNode, beat)
+
+private fun clipRetainKey(slideId: String, nodeId: String, image: ImagePayload): String = "clip:$slideId/$nodeId/${image.src}"
+
+/**
+ * Playback for an image drawn by a magicMove overlay: in show mode it shows the frame the node's
+ * clip on [slideId] is on, elsewhere its poster frame.
+ */
+internal fun overlayImagePlayback(ctx: DocumentNodeRenderContext, slideId: String, nodeId: String, image: ImagePayload) =
+    DocumentImagePlayback(
+        payload = image,
+        builds = emptyList(),
+        retainKey = clipRetainKey(slideId, nodeId, image),
+        session = ctx.session,
+        beat = null,
+        live = false,
+        present = true,
+        scrubbable = false,
+        mirrorOf = if (ctx.isAnimatedMount && ctx.session.purpose == RenderPurpose.Present) ctx.session else ctx.session.clipMirrorSource,
+    )

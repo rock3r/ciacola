@@ -24,6 +24,7 @@ internal object DeckValidationHelpers {
         "exit" to Build.Exit.serializer().descriptor,
         "emphasis" to Build.Emphasis.serializer().descriptor,
         "change" to Build.Change.serializer().descriptor,
+        "playback" to Build.Playback.serializer().descriptor,
     )
 
     private val SCALE_KEYS: Set<String> = setOf("x", "y")
@@ -550,6 +551,14 @@ internal object DeckValidationHelpers {
                             issues += lintError("DANGLING_AFTER_BUILD", buildAddr, "'after' references missing build '$afterRaw'.")
                             continue
                         }
+                        if (targetNode.builds[found] is Build.Playback) {
+                            issues += lintError(
+                                "AFTER_PLAYBACK_BUILD",
+                                buildAddr,
+                                "'after' target '$afterRaw' is a playback build, which does not run on the beat timeline.",
+                            )
+                            continue
+                        }
                         if (targetNode.builds[found].beat != beat) {
                             issues += lintError(
                                 "AFTER_CROSS_BEAT",
@@ -560,7 +569,7 @@ internal object DeckValidationHelpers {
                         }
                         found
                     } else {
-                        val lastIdx = targetNode.builds.indexOfLast { it.beat == beat }
+                        val lastIdx = targetNode.builds.indexOfLast { it.beat == beat && it !is Build.Playback }
                         if (lastIdx < 0) {
                             issues += lintError(
                                 "AFTER_TARGET_NO_BUILD_ON_BEAT",

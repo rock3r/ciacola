@@ -514,6 +514,7 @@ object DeckDocumentCodec {
                 if (assetExists != null && !assetExists(img.src)) {
                     issues += lintError("MISSING_ASSET", addr, "Image asset '${img.src}' not found.")
                 }
+                validateImagePlaybackFields(img, addr, issues)
             }
 
             node.specimen?.let { spec ->
@@ -628,6 +629,51 @@ object DeckDocumentCodec {
         }
     }
 
+    private fun validateImagePlaybackFields(img: ImagePayload, addr: String, issues: MutableList<DocumentIssue>) {
+        if (!(img.playbackRate > 0.0) || img.playbackRate.isInfinite()) {
+            issues += lintError("INVALID_PLAYBACK_RATE", addr, "playbackRate must be a finite number > 0, got ${img.playbackRate}.")
+        }
+        for ((name, value) in listOf("startMs" to img.startMs, "endMs" to img.endMs, "posterMs" to img.posterMs)) {
+            if (value != null && value < 0) {
+                issues += lintError("NEGATIVE_CLIP_TIME", addr, "$name must be >= 0, got $value.")
+            }
+        }
+        if (img.endMs != null && img.endMs <= (img.startMs ?: 0)) {
+            issues += lintError("EMPTY_CLIP_TRIM", addr, "endMs (${img.endMs}) must be greater than startMs (${img.startMs ?: 0}).")
+        }
+        val poster = img.posterMs
+        if (poster != null && ((img.startMs != null && poster < img.startMs) || (img.endMs != null && poster > img.endMs))) {
+            issues += lintWarning("POSTER_OUTSIDE_TRIM", addr, "posterMs ($poster) lies outside the startMs..endMs trim.")
+        }
+        if (img.maxPixels != null && img.maxPixels <= 0L) {
+            issues += lintError("INVALID_MAX_PIXELS", addr, "maxPixels must be > 0, got ${img.maxPixels}.")
+        }
+    }
+
+    private fun validatePlaybackBuild(
+        build: Build.Playback,
+        kind: NodeKind?,
+        buildAddr: String,
+        issues: MutableList<DocumentIssue>,
+    ) {
+        if (kind != NodeKind.Image) {
+            issues += lintError("PLAYBACK_ON_NON_IMAGE", buildAddr, "Playback builds only apply to image nodes.")
+        }
+        if (build.atMs != null && build.atMs < 0) {
+            issues += lintError("NEGATIVE_CLIP_TIME", buildAddr, "atMs must be >= 0, got ${build.atMs}.")
+        }
+        if (build.action == PlaybackAction.Rate && build.rate == null) {
+            issues += lintError("PLAYBACK_RATE_MISSING", buildAddr, "A 'rate' playback build needs a 'rate' value.")
+        }
+        if (build.action == PlaybackAction.Rate && build.atMs != null) {
+            issues += lintWarning("PLAYBACK_AT_IGNORED", buildAddr, "atMs is ignored by a 'rate' playback build.")
+        }
+        val rate = build.rate
+        if (rate != null && (!(rate > 0.0) || rate.isInfinite())) {
+            issues += lintError("INVALID_PLAYBACK_RATE", buildAddr, "rate must be a finite number > 0, got $rate.")
+        }
+    }
+
     private fun validateNodeBuilds(
         node: NodeSpec,
         kind: NodeKind?,
@@ -715,6 +761,7 @@ object DeckDocumentCodec {
                         }
                     }
                 }
+                is Build.Playback -> validatePlaybackBuild(build, kind, buildAddr, issues)
             }
         }
 
@@ -845,6 +892,7 @@ object DeckDocumentCodec {
         if (afterNode.opacity !in 0.0..1.0) {
             issues += loadError("OPACITY_OUT_OF_RANGE", buildAddr, "Patched opacity ${afterNode.opacity} must be in 0..1.")
         }
+        if (build.set["image"] is JsonObject) afterNode.image?.let { validateImagePlaybackFields(it, "$buildAddr/set/image", issues) }
 
         // Validate patched specimen params if present
         if (afterNode.specimen != null) {
