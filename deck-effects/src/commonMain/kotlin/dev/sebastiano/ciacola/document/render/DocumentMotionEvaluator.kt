@@ -691,11 +691,11 @@ object DocumentMotionEvaluator {
             fromEndpointLayoutWidthPx == toEndpointLayoutWidthPx &&
             fromEndpointLayoutWidthPx < fromMaxW &&
             toEndpointLayoutWidthPx < toMaxW
-        if (fromTxt == toTxt && fromMinW == toMinW && fromSurfPad == toSurfPad && (fromMaxW == toMaxW || sameUnwrappedLayout)) {
+        if (!needsTextMorph(fromTxt, toTxt) && fromMinW == toMinW && fromSurfPad == toSurfPad && (fromMaxW == toMaxW || sameUnwrappedLayout)) {
             val charDelivery = isCharacterDeliveryNode(fromNode, transitionSpec) ||
                 isCharacterDeliveryNode(toNode, toSlideTransition, transitionSpec)
             return DocumentTextRenderState.Rest(
-                payload = toTxt,
+                payload = restPayloadAlongMove(fromTxt, toTxt, moveTrack, transitionSpec, clock),
                 characterDeliveryNode = charDelivery,
             )
         }
@@ -736,7 +736,7 @@ object DocumentMotionEvaluator {
         track: TrackPlan,
         clock: DeckClock,
     ): DocumentTextRenderState.Morph? {
-        if (rawNode.kind != NodeKind.Text || fromTxt == null || toTxt == null || fromTxt == toTxt) return null
+        if (rawNode.kind != NodeKind.Text || fromTxt == null || toTxt == null || !needsTextMorph(fromTxt, toTxt)) return null
         val morphSpec = change.morph ?: toTxt.morph ?: fromTxt.morph ?: TextMorphSpec()
         val durMs = track.durationMs.coerceAtLeast(1)
         val elapsedMs = (clock.t - track.startMs.toFloat()).coerceIn(0f, durMs.toFloat())

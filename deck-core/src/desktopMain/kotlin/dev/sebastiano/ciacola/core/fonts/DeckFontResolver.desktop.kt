@@ -241,7 +241,12 @@ class DeckFontResolver(
         if (axes.isEmpty()) return style
         val resolved = findResolvedFamily(style.fontFamily) ?: return style
         val derived = withAxes(resolved, axes)
-        return if (derived.fontFamily == style.fontFamily) style else style.copy(fontFamily = derived.fontFamily)
+        val weight = axisWeight(derived) ?: style.fontWeight
+        return if (derived.fontFamily == style.fontFamily && weight == style.fontWeight) {
+            style
+        } else {
+            style.copy(fontFamily = derived.fontFamily, fontWeight = weight)
+        }
     }
 
     /** Span-level counterpart of [applyAxes]. */
@@ -249,8 +254,22 @@ class DeckFontResolver(
         if (axes.isEmpty()) return style
         val resolved = findResolvedFamily(style.fontFamily) ?: return style
         val derived = withAxes(resolved, axes)
-        return if (derived.fontFamily == style.fontFamily) style else style.copy(fontFamily = derived.fontFamily)
+        val weight = axisWeight(derived) ?: style.fontWeight
+        return if (derived.fontFamily == style.fontFamily && weight == style.fontWeight) {
+            style
+        } else {
+            style.copy(fontFamily = derived.fontFamily, fontWeight = weight)
+        }
     }
+
+    /**
+     * The requested weight that matches an applied `wght` coordinate. Skia synthesizes faux bold
+     * when the requested weight is well above the typeface's actual `wght`, so a style that keeps
+     * its original weight under a lighter `wght` axis would render emboldened.
+     */
+    private fun axisWeight(family: ResolvedFontFamily): FontWeight? =
+        family.faces.firstNotNullOfOrNull { it.axisCoordinates["wght"] }
+            ?.let { FontWeight(kotlin.math.round(it).toInt().coerceIn(1, 1000)) }
 
     /**
      * Clamps [requested] weight to the resolved family's supported weight range for [style].
@@ -278,7 +297,9 @@ class DeckFontResolver(
             } else {
                 style
             }
-        return withAxes(resolved, axes).applyTo(style, disableOptionalLigatures)
+        val derived = withAxes(resolved, axes)
+        val applied = derived.applyTo(style, disableOptionalLigatures)
+        return axisWeight(derived)?.let { applied.copy(fontWeight = it) } ?: applied
     }
 
     /**
@@ -298,7 +319,9 @@ class DeckFontResolver(
             } else {
                 style
             }
-        return withAxes(resolved, axes).applyTo(style, fallbackFontStyle, disableOptionalLigatures)
+        val derived = withAxes(resolved, axes)
+        val applied = derived.applyTo(style, fallbackFontStyle, disableOptionalLigatures)
+        return axisWeight(derived)?.let { applied.copy(fontWeight = it) } ?: applied
     }
 
     /**
