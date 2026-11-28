@@ -8,6 +8,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 import kotlin.time.DurationUnit
 import kotlin.time.TimeSource
 
@@ -589,8 +590,8 @@ class SyntaxSchemeImportersTest {
         val compact = SyntaxColorSchemes.GitHubDark.toCompactJson()
         assertEquals(SyntaxColorSchemes.GitHubDark, SyntaxSchemeImporters.importAuto(compact))
 
-        val xmlWithBom = "\uFEFF<scheme name=\"Auto XML\" parent_scheme=\"Darcula\"/>"
-        val fromXml = SyntaxSchemeImporters.importAuto(xmlWithBom, fileName = "auto.icls")
+        val xmlWithBomAndSpace = "\uFEFF  \n\t<scheme name=\"Auto XML\" parent_scheme=\"Darcula\"/>"
+        val fromXml = SyntaxSchemeImporters.importAuto(xmlWithBomAndSpace, fileName = "auto.icls")
         assertEquals("Auto XML", fromXml.name)
         assertEquals("#CC7832", fromXml.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
 
@@ -602,7 +603,7 @@ class SyntaxSchemeImportersTest {
               "tokenColors": [{ "scope": "keyword", "settings": { "foreground": "#0033B3" } }]
             }
         """.trimIndent()
-        val fromJsonc = SyntaxSchemeImporters.importAuto(jsonc, fileName = "my-light-theme.jsonc")
+        val fromJsonc = SyntaxSchemeImporters.importAuto("\uFEFF  \n$jsonc", fileName = "my-light-theme.jsonc")
         assertEquals("my-light-theme", fromJsonc.name)
         assertEquals("#0033B3", fromJsonc.foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
 
@@ -877,6 +878,36 @@ class SyntaxSchemeImportersTest {
         val manualDecl = manualScheme.effectiveFunctionDeclarationStyle()
         assertEquals("#79C0FF", manualDecl.foreground?.toHexRgb())
         assertTrue(manualDecl.underline)
+
+        // Multi-scope rule containing both shallow and deep scopes keeps maxMatchedDepth precedence over later shallow rules
+        val multiScopeTheme = """
+            {
+              "name": "Multi Scope Depth",
+              "type": "dark",
+              "colors": { "editor.background": "#121417", "editor.foreground": "#E2E6EC" },
+              "tokenColors": [
+                {
+                  "scope": "  comment ,  comment.line , comment ",
+                  "settings": { "foreground": "#6AAB73", "fontStyle": "bold" }
+                },
+                {
+                  "scope": "comment",
+                  "settings": { "foreground": "#F75464", "fontStyle": "" }
+                },
+                {
+                  "scope": ["  keyword , ignored ", "  keyword  "],
+                  "settings": { "foreground": "#CF8E6D", "fontStyle": "italic" }
+                }
+              ]
+            }
+        """.trimIndent()
+        val multiScope = SyntaxSchemeImporters.importVsCodeJson(multiScopeTheme)
+        val multiComment = multiScope.styleFor(SyntaxTokenKind.Comment)
+        assertEquals("#6AAB73", multiComment.foreground?.toHexRgb())
+        assertTrue(multiComment.bold)
+        val multiKw = multiScope.styleFor(SyntaxTokenKind.Keyword)
+        assertEquals("#CF8E6D", multiKw.foreground?.toHexRgb())
+        assertTrue(multiKw.italic)
     }
 
     @Test
@@ -906,7 +937,7 @@ class SyntaxSchemeImportersTest {
 
     @Test
     fun parsersScaleLinearlyOnLargeInputs() {
-        // Warm up bundled scheme lazy initialization before measuring parser scaling
+        // Warm up bundled scheme lazy initialization before exercising parsers
         assertTrue(SyntaxColorSchemes.intelliJ.isNotEmpty())
         assertTrue(SyntaxColorSchemes.gitHub.isNotEmpty())
 
@@ -917,17 +948,6 @@ class SyntaxSchemeImportersTest {
             }
             append("</attributes></scheme>")
         }
-        val xmlN = buildXml(500)
-        val xml4N = buildXml(2000)
-        val xmlNStart = TimeSource.Monotonic.markNow()
-        assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xmlN))
-        val tXmlN = xmlNStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
-
-        val xml4NStart = TimeSource.Monotonic.markNow()
-        assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xml4N))
-        val tXml4N = xml4NStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
-        assertTrue(tXml4N < 500L, "4N XML import took ${tXml4N}ms")
-        assertTrue(tXml4N <= maxOf(tXmlN * 10L, 150L), "XML scaling super-linear: N=${tXmlN}ms, 4N=${tXml4N}ms")
 
         fun buildJsonc(count: Int): String = buildString {
             append("{\n\"name\":\"LargeVS\",\n\"type\":\"dark\",\n\"colors\":{\"editor.background\":\"#000000\",\"editor.foreground\":\"#FFFFFF\"},\n\"tokenColors\":[\n")
@@ -936,33 +956,141 @@ class SyntaxSchemeImportersTest {
             }
             append("{\"scope\":\"keyword\",\"settings\":{\"foreground\":\"#ff7b72\"}}\n]}")
         }
+
+        val xmlN = buildXml(500)
+        val xml4N = buildXml(2_000)
+        val xml8N = buildXml(4_000)
         val jsonN = buildJsonc(500)
-        val json4N = buildJsonc(2000)
-        val jsonNStart = TimeSource.Monotonic.markNow()
-        assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(jsonN).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
-        val tJsonN = jsonNStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
-
-        val json4NStart = TimeSource.Monotonic.markNow()
-        assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(json4N).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
-        val tJson4N = json4NStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
-        assertTrue(tJson4N < 500L, "4N JSONC import took ${tJson4N}ms")
-        assertTrue(tJson4N <= maxOf(tJsonN * 10L, 150L), "JSONC scaling super-linear: N=${tJsonN}ms, 4N=${tJson4N}ms")
-
-        // Pathological stress inputs: 20,000 XML entities and 2,000 DOCTYPE comments
+        val json4N = buildJsonc(2_000)
+        val json8N = buildJsonc(4_000)
         val manyEntities = "<scheme name=\"" + "&amp;".repeat(20_000) + "\" parent_scheme=\"Darcula\"/>"
-        val entStart = TimeSource.Monotonic.markNow()
-        assertTrue(SyntaxSchemeImporters.importIntelliJXml(manyEntities).name.length == 20_000)
-        val entMs = entStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
-        assertTrue(entMs < 500L, "20k XML entities took ${entMs}ms")
-
         val manyDoctypeComments = buildString {
             append("<!DOCTYPE scheme [")
             repeat(2_000) { i -> append("<!-- comment $i -->") }
             append("]><scheme name=\"ManyComments\" parent_scheme=\"Darcula\"/>")
         }
-        val docStart = TimeSource.Monotonic.markNow()
-        assertEquals("#CC7832", SyntaxSchemeImporters.importIntelliJXml(manyDoctypeComments).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
-        val docMs = docStart.elapsedNow().toLong(DurationUnit.MILLISECONDS)
-        assertTrue(docMs < 500L, "2k DOCTYPE comments took ${docMs}ms")
+
+        // Warm up XML/JSONC parsers, TextMate indexer, entity decoder, and DOCTYPE scanner so
+        // classloading and JIT tier-up happen outside the timed scaling measurements.
+        repeat(6) {
+            assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xmlN))
+            assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(jsonN).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        }
+        repeat(2) {
+            assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xml4N))
+            assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xml8N))
+            assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(json4N).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(json8N).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            assertEquals(20_000, SyntaxSchemeImporters.importIntelliJXml(manyEntities).name.length)
+            assertEquals("#CC7832", SyntaxSchemeImporters.importIntelliJXml(manyDoctypeComments).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+        }
+
+        val sampleCount = 7
+        val xmlNSamples = ArrayList<Duration>(sampleCount)
+        val xml4NSamples = ArrayList<Duration>(sampleCount)
+        val xml8NSamples = ArrayList<Duration>(sampleCount)
+        val jsonNSamples = ArrayList<Duration>(sampleCount)
+        val json4NSamples = ArrayList<Duration>(sampleCount)
+        val json8NSamples = ArrayList<Duration>(sampleCount)
+        val entitySamples = ArrayList<Duration>(sampleCount)
+        val doctypeSamples = ArrayList<Duration>(sampleCount)
+
+        repeat(sampleCount) {
+            var start = TimeSource.Monotonic.markNow()
+            assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xmlN))
+            xmlNSamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xml4N))
+            xml4NSamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertNotNull(SyntaxSchemeImporters.importIntelliJXml(xml8N))
+            xml8NSamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(jsonN).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            jsonNSamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(json4N).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            json4NSamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertEquals("#FF7B72", SyntaxSchemeImporters.importVsCodeJson(json8N).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            json8NSamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertEquals(20_000, SyntaxSchemeImporters.importIntelliJXml(manyEntities).name.length)
+            entitySamples += start.elapsedNow()
+
+            start = TimeSource.Monotonic.markNow()
+            assertEquals("#CC7832", SyntaxSchemeImporters.importIntelliJXml(manyDoctypeComments).foregroundFor(SyntaxTokenKind.Keyword).toHexRgb())
+            doctypeSamples += start.elapsedNow()
+        }
+
+        fun List<Duration>.stats(): Triple<Duration, Duration, Duration> {
+            val sorted = sorted()
+            return Triple(sorted.first(), sorted[sorted.size / 2], sorted.last())
+        }
+
+        val xmlNStats = xmlNSamples.stats()
+        val xml4NStats = xml4NSamples.stats()
+        val xml8NStats = xml8NSamples.stats()
+        val jsonNStats = jsonNSamples.stats()
+        val json4NStats = json4NSamples.stats()
+        val json8NStats = json8NSamples.stats()
+        val entityStats = entitySamples.stats()
+        val doctypeStats = doctypeSamples.stats()
+
+        val summary = buildString {
+            append("xml500=(${xmlNStats.first}/${xmlNStats.second}/${xmlNStats.third}), ")
+            append("xml2000=(${xml4NStats.first}/${xml4NStats.second}/${xml4NStats.third}), ")
+            append("xml4000=(${xml8NStats.first}/${xml8NStats.second}/${xml8NStats.third}), ")
+            append("json500=(${jsonNStats.first}/${jsonNStats.second}/${jsonNStats.third}), ")
+            append("json2000=(${json4NStats.first}/${json4NStats.second}/${json4NStats.third}), ")
+            append("json4000=(${json8NStats.first}/${json8NStats.second}/${json8NStats.third}), ")
+            append("entities20k=(${entityStats.first}/${entityStats.second}/${entityStats.third}), ")
+            append("doctype2k=(${doctypeStats.first}/${doctypeStats.second}/${doctypeStats.third})")
+        }
+
+        val singleBudgetMs = 500.0
+        val xmlNMinMs = xmlNStats.first.toDouble(DurationUnit.MILLISECONDS)
+        val xml4NMinMs = xml4NStats.first.toDouble(DurationUnit.MILLISECONDS)
+        val xml8NMinMs = xml8NStats.first.toDouble(DurationUnit.MILLISECONDS)
+        val xml4NMedMs = xml4NStats.second.toDouble(DurationUnit.MILLISECONDS)
+        val xml8NMedMs = xml8NStats.second.toDouble(DurationUnit.MILLISECONDS)
+        assertTrue(xml4NMedMs < singleBudgetMs, "4N XML import median ${xml4NMedMs}ms exceeded ${singleBudgetMs}ms ($summary)")
+        assertTrue(xml8NMedMs < singleBudgetMs, "8N XML import median ${xml8NMedMs}ms exceeded ${singleBudgetMs}ms ($summary)")
+        assertTrue(
+            xml4NMinMs <= maxOf(xmlNMinMs * 8.0, 15.0),
+            "XML 4N scaling super-linear: N=${xmlNMinMs}ms, 4N=${xml4NMinMs}ms ($summary)",
+        )
+        assertTrue(
+            xml8NMinMs <= maxOf(xmlNMinMs * 16.0, 20.0),
+            "XML 8N scaling super-linear: N=${xmlNMinMs}ms, 8N=${xml8NMinMs}ms ($summary)",
+        )
+
+        val jsonNMinMs = jsonNStats.first.toDouble(DurationUnit.MILLISECONDS)
+        val json4NMinMs = json4NStats.first.toDouble(DurationUnit.MILLISECONDS)
+        val json8NMinMs = json8NStats.first.toDouble(DurationUnit.MILLISECONDS)
+        val json4NMedMs = json4NStats.second.toDouble(DurationUnit.MILLISECONDS)
+        val json8NMedMs = json8NStats.second.toDouble(DurationUnit.MILLISECONDS)
+        assertTrue(json4NMedMs < singleBudgetMs, "4N JSONC import median ${json4NMedMs}ms exceeded ${singleBudgetMs}ms ($summary)")
+        assertTrue(json8NMedMs < singleBudgetMs, "8N JSONC import median ${json8NMedMs}ms exceeded ${singleBudgetMs}ms ($summary)")
+        assertTrue(
+            json4NMinMs <= maxOf(jsonNMinMs * 8.0, 15.0),
+            "JSONC 4N scaling super-linear: N=${jsonNMinMs}ms, 4N=${json4NMinMs}ms ($summary)",
+        )
+        assertTrue(
+            json8NMinMs <= maxOf(jsonNMinMs * 16.0, 20.0),
+            "JSONC 8N scaling super-linear: N=${jsonNMinMs}ms, 8N=${json8NMinMs}ms ($summary)",
+        )
+
+        val entMedMs = entityStats.second.toDouble(DurationUnit.MILLISECONDS)
+        assertTrue(entMedMs < singleBudgetMs, "20k XML entities median ${entMedMs}ms exceeded ${singleBudgetMs}ms ($summary)")
+
+        val docMedMs = doctypeStats.second.toDouble(DurationUnit.MILLISECONDS)
+        assertTrue(docMedMs < singleBudgetMs, "2k DOCTYPE comments median ${docMedMs}ms exceeded ${singleBudgetMs}ms ($summary)")
     }
 }

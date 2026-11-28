@@ -28,23 +28,7 @@ public object SyntaxSchemeImporters {
         parentSchemes: Map<String, String> = emptyMap(),
         fallbackParent: SyntaxColorScheme? = null,
     ): SyntaxColorScheme {
-        val schemeMap = LinkedHashMap<String, IjSchemeData>()
-        schemeMap[IjEmbeddedBaseSchemes.defaultScheme.name] = IjEmbeddedBaseSchemes.defaultScheme
-        schemeMap["Classic Light"] = IjEmbeddedBaseSchemes.defaultScheme
-        schemeMap[IjEmbeddedBaseSchemes.darculaScheme.name] = IjEmbeddedBaseSchemes.darculaScheme
-
-        for (bundled in SyntaxColorSchemes.intelliJ) {
-            val ijData = IjEmbeddedBaseSchemes.toIjSchemeData(bundled)
-            if (bundled.name !in schemeMap) {
-                schemeMap[bundled.name] = ijData
-            }
-            when (bundled) {
-                SyntaxColorSchemes.IntelliJDark -> schemeMap["Dark"] = ijData
-                SyntaxColorSchemes.IntelliJLight -> schemeMap["Light"] = ijData
-                SyntaxColorSchemes.IntelliJHighContrast -> schemeMap["High contrast"] = ijData
-                else -> Unit
-            }
-        }
+        val schemeMap = LinkedHashMap(IjEmbeddedBaseSchemes.defaultBaseSchemes)
 
         for ((key, parentXml) in parentSchemes) {
             val parsedParents = IntelliJSchemeMapper.parseXmlSchemes(parentXml)
@@ -104,14 +88,19 @@ public object SyntaxSchemeImporters {
         fileName: String? = null,
         includeResolver: ((String) -> String?)? = null,
     ): SyntaxColorScheme {
-        val trimmed = content.trimStart { it == '\uFEFF' || it == ' ' || it == '\t' || it == '\r' || it == '\n' }
-        if (trimmed.isEmpty()) {
+        var start = 0
+        while (start < content.length) {
+            val ch = content[start]
+            if (ch != '\uFEFF' && ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n') break
+            start++
+        }
+        if (start >= content.length) {
             throw SyntaxSchemeParseException("Cannot import empty syntax color scheme")
         }
-        if (trimmed.startsWith('<')) {
+        if (content[start] == '<') {
             return importIntelliJXml(content)
         }
-        if (trimmed.startsWith('{') || trimmed.startsWith("//") || trimmed.startsWith("/*")) {
+        if (content[start] == '{' || content.startsWith("//", start) || content.startsWith("/*", start)) {
             val parsed = MiniJson.parse(content, allowComments = true, allowTrailingCommas = true)
             val obj = parsed as? JsonObject
                 ?: throw SyntaxSchemeParseException("Expected top-level JSON object")
