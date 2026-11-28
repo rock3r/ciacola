@@ -77,7 +77,6 @@ import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.impl.Stats
 import org.jetbrains.skiko.ExperimentalSkikoApi
-import org.jetbrains.skiko.OpenGLApi
 import org.jetbrains.skiko.graphicapi.DirectXOffscreenContext
 import org.jetbrains.skiko.graphicapi.MetalOffscreenContext
 import org.jetbrains.skiko.graphicapi.OpenGLOffscreenContext
@@ -149,12 +148,7 @@ class MagicTextV2EffectsAndRenderingTest {
     /** Returns the GPU's renderer description, or null when the host has no usable hardware GPU backend. */
     private fun probeHardwareGpu(backend: GpuBackend): String? = try {
         backend.withDirectContext {
-            if (backend == GpuBackend.OpenGL) {
-                val gl = OpenGLApi.instance
-                "${gl.glGetString(gl.GL_VENDOR)} ${gl.glGetString(gl.GL_RENDERER)}"
-            } else {
-                backend.label
-            }
+            if (backend == GpuBackend.OpenGL) currentGlRenderer() ?: backend.label else backend.label
         }.takeUnless { description ->
             // Mesa's software rasterizers are CPU rendering behind a GL API: not a GPU measurement.
             SOFTWARE_GL_RENDERERS.any { description.contains(it, ignoreCase = true) }
@@ -177,6 +171,22 @@ class MagicTextV2EffectsAndRenderingTest {
         gpu.withDirectContext { ctx ->
             runProductionSceneOn(fixtureName, backend, ctx, frames, config, density, captureMidRgba)
         }
+    }
+
+    /**
+     * Reads `GL_VENDOR` / `GL_RENDERER` from the current GL context through Skiko's OpenGLApi, which
+     * is Kotlin-internal, so it is reached reflectively. Returns null if that API is not available.
+     */
+    private fun currentGlRenderer(): String? = try {
+        val api = Class.forName("org.jetbrains.skiko.OpenGLApi")
+        val companion = api.getField("Companion").get(null)
+        val gl = companion.javaClass.getMethod("getInstance").apply { isAccessible = true }.invoke(companion)
+        val glGetString = api.getMethod("glGetString", Int::class.javaPrimitiveType)
+        val vendor = glGetString.invoke(gl, api.getMethod("getGL_VENDOR").invoke(gl))
+        val renderer = glGetString.invoke(gl, api.getMethod("getGL_RENDERER").invoke(gl))
+        "OpenGL: $vendor $renderer"
+    } catch (_: ReflectiveOperationException) {
+        null
     }
 
     @OptIn(InternalComposeUiApi::class)
