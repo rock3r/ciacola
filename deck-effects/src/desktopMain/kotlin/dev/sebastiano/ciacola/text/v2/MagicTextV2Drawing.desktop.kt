@@ -405,7 +405,7 @@ internal object MagicTextV2Drawing {
 
         val motion = MotionPresets.resolve(eff.effectId, eff.kind, eff.args)
         if (motion != null) {
-            drawMotionPresetBuildFrame(plan, timings, elapsedMs, eff, motion, stageSize)
+            drawMotionPresetBuildFrame(plan, timings, elapsedMs, eff, motion, stageSize, config)
             return
         }
 
@@ -442,6 +442,7 @@ internal object MagicTextV2Drawing {
         eff: EffectCallV2,
         motion: MotionPresets.ResolvedMotion,
         stageSize: Size,
+        config: MagicTextV2Config,
     ) {
         val count = timings.size
         var maxLine = 0
@@ -480,7 +481,24 @@ internal object MagicTextV2Drawing {
                 context = ctx,
                 curve = eff.curve ?: timing.curve,
             )
-            drawPieceWithLayerState(piece, layerState)
+            val axisPaint = if (layerState.axisOffsets.isEmpty()) {
+                null
+            } else {
+                AxisPiecePainter.prepare(piece, layerState.axisOffsets, this, config.fontResolver)
+            }
+            if (axisPaint == null) {
+                drawPieceWithLayerState(piece, layerState)
+            } else {
+                // Varying an axis changes the ink, so the verified rest bounds no longer apply.
+                drawLayoutWithLayerState(
+                    layout = piece.layout,
+                    originX = piece.originX,
+                    originY = piece.originY,
+                    state = layerState,
+                    verifiedInkBounds = null,
+                    paintOverride = axisPaint,
+                )
+            }
         }
     }
 
@@ -792,6 +810,7 @@ internal object MagicTextV2Drawing {
         originY: Float,
         state: LayerState,
         verifiedInkBounds: SkiaRect? = null,
+        paintOverride: ((org.jetbrains.skia.Canvas) -> Unit)? = null,
     ) {
         val alpha = state.alpha.coerceIn(0f, 1f)
         if (alpha <= 0.0005f) return
@@ -852,7 +871,7 @@ internal object MagicTextV2Drawing {
                 }
 
                 if (!needsLayer) {
-                    TextPainter.paint(canvas, layout)
+                    if (paintOverride != null) paintOverride(native) else TextPainter.paint(canvas, layout)
                 } else {
                     val paint = reusableLayerPaint.get()
                     paint.reset()
@@ -869,7 +888,7 @@ internal object MagicTextV2Drawing {
                         // Empirically verified bounds (expanded for blur) or null unbounded: never clips.
                         native.saveLayer(layerBounds, paint)
                         try {
-                            TextPainter.paint(canvas, layout)
+                            if (paintOverride != null) paintOverride(native) else TextPainter.paint(canvas, layout)
                         } finally {
                             native.restore()
                         }

@@ -8,7 +8,8 @@
     { "family": "Inter", "src": "fonts/Inter-Regular.ttf", "weight": 400 },
     { "family": "Inter", "src": "fonts/Inter-Medium.ttf", "weight": 500 },
     { "family": "Inter", "src": "fonts/Inter-Bold.ttf", "weight": 700 },
-    { "family": "Inter", "src": "fonts/Inter-ExtraBold.ttf", "weight": 800 }
+    { "family": "Inter", "src": "fonts/Inter-ExtraBold.ttf", "weight": 800 },
+    { "family": "Roboto", "src": "fonts/Roboto-VariableFont_wdth_wght.ttf", "variable": true }
   ],
   "themes": {
     "dark": {
@@ -162,6 +163,42 @@
               "args": { "amplitude": 0.18, "cycles": 2, "phasePerLine": 0.2 },
               "by": "character",
               "durationMs": 4000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "axis",
+      "title": "Axis motion",
+      "beats": [
+        { "notes": "Base: empty stage." },
+        { "notes": "Letters rise and settle from thin to bold." },
+        { "notes": "Weight swings through the word in a wave." },
+        { "notes": "Width narrows and recovers letter by letter." }
+      ],
+      "nodes": [
+        {
+          "id": "axis:word",
+          "frame": { "x": 160, "y": 380, "w": 1600, "h": 320 },
+          "text": { "value": "Variable", "font": "Roboto", "size": 220, "lineHeight": 260, "weight": 700, "align": "center" },
+          "builds": [
+            { "kind": "enter", "beat": 1, "effect": "axisRise", "args": { "axisFrom": -500 }, "by": "character", "stagger": { "ms": 45 }, "durationMs": 1000 },
+            {
+              "kind": "emphasis",
+              "beat": 2,
+              "effect": "axisWave",
+              "args": { "amplitude": 250, "offset": -250, "cycles": 2, "phasePerPiece": 0.1 },
+              "by": "character",
+              "durationMs": 2400
+            },
+            {
+              "kind": "emphasis",
+              "beat": 3,
+              "effect": "axisWave",
+              "args": { "axis": "wdth", "amplitude": 12, "offset": -12, "cycles": 1, "phasePerPiece": 0.12 },
+              "by": "character",
+              "durationMs": 2400
             }
           ]
         }

@@ -252,6 +252,25 @@ class MotionChannelsTest {
     }
 
     @Test
+    fun `axis channels are known by tag and malformed tags are flagged`() {
+        assertEquals("wght", MotionChannelNames.axisTagOrNull("axis.wght"))
+        assertEquals("GRAD", MotionChannelNames.axisTagOrNull(MotionChannelNames.axis("GRAD")))
+        assertEquals(null, MotionChannelNames.axisTagOrNull("axis.weight"))
+        assertEquals(null, MotionChannelNames.axisTagOrNull("wght"))
+        assertTrue(MotionChannelNames.isKnown("axis.wdth") && MotionChannelNames.isKnown("blur"))
+
+        val doc = presetDocument(
+            mapOf(
+                "axis.wght" to MotionChannelSpec(from = -300.0, to = 0.0),
+                "axis.weight" to MotionChannelSpec(from = 1.0),
+            ),
+        )
+        val unknown = DeckDocumentCodec.validate(doc).filter { it.code == "UNKNOWN_MOTION_CHANNEL" }
+        assertEquals(1, unknown.size, "$unknown")
+        assertTrue(unknown.single().address.endsWith("/channels/axis.weight"), "$unknown")
+    }
+
+    @Test
     fun `example motion presets deck decodes without validation errors`() {
         val file = listOf(
             java.io.File("docs/decks/motion-presets.deck.json"),

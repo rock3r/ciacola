@@ -224,6 +224,12 @@ data class LayerState(
     val blurRadiusPx: Float = 0f,
     val colorMatrix: FloatArray? = null,
     val clip: EffectClip = EffectClip.None,
+    /**
+     * Variable font axis offsets keyed by OpenType tag (e.g. `wght`), in axis units, added to the
+     * piece's resting coordinates. Only text renderers that draw pieces apply them; other layers
+     * ignore them.
+     */
+    val axisOffsets: Map<String, Float> = emptyMap(),
 ) {
     val isIdentity: Boolean
         get() = alpha == 1f &&
@@ -234,7 +240,8 @@ data class LayerState(
             rotationZ == 0f &&
             blurRadiusPx == 0f &&
             colorMatrix == null &&
-            clip == EffectClip.None
+            clip == EffectClip.None &&
+            axisOffsets.isEmpty()
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -248,7 +255,8 @@ data class LayerState(
             rotationZ == other.rotationZ &&
             blurRadiusPx == other.blurRadiusPx &&
             (colorMatrix contentEquals other.colorMatrix) &&
-            clip == other.clip
+            clip == other.clip &&
+            axisOffsets == other.axisOffsets
     }
 
     override fun hashCode(): Int {
@@ -262,6 +270,7 @@ data class LayerState(
         result = 31 * result + blurRadiusPx.hashCode()
         result = 31 * result + (colorMatrix?.contentHashCode() ?: 0)
         result = 31 * result + clip.hashCode()
+        result = 31 * result + axisOffsets.hashCode()
         return result
     }
 

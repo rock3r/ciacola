@@ -250,6 +250,64 @@ class MotionPresetsTest {
     }
 
     @Test
+    fun `axis wave swings the axis per piece and rests at both ends`() {
+        for (p in listOf(0f, 1f)) {
+            assertTrue(eval(MotionPresetDeclarations.AXIS_WAVE, EffectBuildKind.Emphasis, p).axisOffsets.isEmpty())
+        }
+        val a = eval(MotionPresetDeclarations.AXIS_WAVE, EffectBuildKind.Emphasis, 0.4f, ctx = context(index = 0, count = 8))
+        val b = eval(MotionPresetDeclarations.AXIS_WAVE, EffectBuildKind.Emphasis, 0.4f, ctx = context(index = 3, count = 8))
+        val wa = assertNotNull(a.axisOffsets["wght"])
+        val wb = assertNotNull(b.axisOffsets["wght"])
+        assertTrue(abs(wa - wb) > 1f, "$wa vs $wb")
+        assertTrue(abs(wa) <= 200f + eps)
+        // Nothing else moves.
+        assertEquals(0f, a.translationY, eps)
+        assertEquals(1f, a.alpha, eps)
+
+        val width = eval(
+            MotionPresetDeclarations.AXIS_WAVE,
+            EffectBuildKind.Emphasis,
+            0.125f,
+            EffectArgs.of("axis" to "wdth", "amplitude" to 0f, "offset" to -20f, "fade" to 0f),
+        )
+        assertEquals(mapOf("wdth" to -20f), width.axisOffsets)
+
+        val badTag = eval(MotionPresetDeclarations.AXIS_WAVE, EffectBuildKind.Emphasis, 0.4f, EffectArgs.of("axis" to "weight"))
+        assertTrue("wght" in badTag.axisOffsets, "${badTag.axisOffsets}")
+    }
+
+    @Test
+    fun `axis rise settles the axis while it rises`() {
+        val start = eval(MotionPresetDeclarations.AXIS_RISE, EffectBuildKind.Enter, 0f)
+        assertEquals(-300f, start.axisOffsets.getValue("wght"), eps)
+        assertEquals(0.5f * em, start.translationY, eps)
+        assertIs<EffectClip.RestBounds>(start.clip)
+
+        val end = eval(MotionPresetDeclarations.AXIS_RISE, EffectBuildKind.Enter, 1f)
+        assertTrue(end.axisOffsets.isEmpty(), "${end.axisOffsets}")
+        assertEquals(0f, end.translationY, eps)
+
+        val exitEnd = eval(
+            MotionPresetDeclarations.AXIS_RISE,
+            EffectBuildKind.Exit,
+            1f,
+            EffectArgs.of("axis" to "wdth", "axisFrom" to 25f, "distance" to 0f),
+        )
+        assertEquals(25f, exitEnd.axisOffsets.getValue("wdth"), eps)
+        assertEquals(0f, exitEnd.translationY, eps)
+    }
+
+    @Test
+    fun `axis channel overrides work on any preset`() {
+        val args = EffectArgs.of(
+            MotionPresets.CHANNELS_ARG to mapOf("axis.GRAD" to MotionChannelSpec(from = 0.0, to = 100.0, curve = Curve.Linear)),
+        )
+        val half = eval(MotionPresetDeclarations.RISE, EffectBuildKind.Enter, 0.5f, args)
+        assertEquals(50f, half.axisOffsets.getValue("GRAD"), eps)
+        assertTrue(!half.isIdentity)
+    }
+
+    @Test
     fun `reduced motion degrades to a dissolve`() {
         val state = eval(MotionPresetDeclarations.RISE, EffectBuildKind.Enter, 0.5f, ctx = context(reducedMotion = true))
         assertEquals(0f, state.translationY, eps)

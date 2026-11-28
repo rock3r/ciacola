@@ -127,6 +127,28 @@ object MotionChannelNames {
         OPACITY, OFFSET_X, OFFSET_Y, SCALE, SCALE_X, SCALE_Y, ROTATION, BLUR, TRACKING,
     )
 
+    /**
+     * Prefix of variable-font axis channels, e.g. `axis.wght` or `axis.wdth`. Their value is an
+     * offset in the axis's own units, added to the piece's resting coordinate and clamped to the
+     * face's `fvar` range. Axes the face lacks are ignored.
+     */
+    const val AXIS_PREFIX: String = "axis."
+
+    private val AXIS_TAG: Regex = Regex("^[A-Za-z0-9 ]{4}$")
+
+    /** `axis.<tag>` for a 4-character OpenType axis [tag]. */
+    fun axis(tag: String): String = AXIS_PREFIX + tag
+
+    /** The axis tag of an `axis.<tag>` channel name, or `null` when [name] is not a valid axis channel. */
+    fun axisTagOrNull(name: String): String? {
+        if (!name.startsWith(AXIS_PREFIX)) return null
+        val tag = name.substring(AXIS_PREFIX.length)
+        return tag.takeIf { AXIS_TAG.matches(it) && it.isNotBlank() }
+    }
+
+    /** True for a built-in channel or a well-formed `axis.<tag>` channel. */
+    fun isKnown(name: String): Boolean = name in all || axisTagOrNull(name) != null
+
     /** Value a channel has when nothing animates it. */
     fun restValue(name: String): Double = when (name) {
         OPACITY, SCALE, SCALE_X, SCALE_Y -> 1.0

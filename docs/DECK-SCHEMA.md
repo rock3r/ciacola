@@ -263,10 +263,12 @@ An `image` whose `src` is an animated WebP or GIF plays in the live deck. All fr
 | `focusPull` | Layer | All (+ emphasis) | Yes | — | `900 ms` | `radius` (em, `0.3`), `restOpacity` (`0.45`), `fromScale` (`1.06`), `focusFrom` (`0`), `focusTo` (`1`), `focusWidth` (em, `1.2`), `settle` (`true`) |
 | `wave` (emphasis) | Layer | All | Yes | — | `2000 ms` | `amplitude` (em, `0.18`), `rotation` (deg, `0`), `scale` (`0`), `cycles` (`2`), `phasePerPiece` (`0.08`), `shape` (`sine`), `fade` (`0.15`) |
 | `trackingBreathe` (emphasis) | Layer | All | Yes | — | `3000 ms` | `amplitude` (em per glyph, `0.12`), `cycles` (`1`), `phasePerLine` (`0.15`), `shape` (`sine`), `fade` (`0.12`) |
+| `axisWave` (emphasis) | Layer | All | Yes | — | `2400 ms` | `axis` (tag, `wght`), `amplitude` (axis units, `200`), `offset` (`0`), `cycles` (`2`), `phasePerPiece` (`0.08`), `phasePerLine` (`0`), `shape` (`sine`), `fade` (`0.15`) |
+| `axisRise` | Layer | All | Yes | `up`, `down`, `left`, `right` | `900 ms` | `axis` (tag, `wght`), `axisFrom` (axis units, `-300`), `distance` (em, `0.5`), `reveal` (`true`), `revealPadding` (em, `0.12`), `fadeWindow` (`0.35`) |
 
 ### 5.1 Motion presets and channels
 
-`rise`, `focusPull`, `wave` and `trackingBreathe` are **motion presets**: typographic effects built
+`rise`, `focusPull`, `wave`, `trackingBreathe`, `axisWave` and `axisRise` are **motion presets**: typographic effects built
 from per-piece animatable **channels**. Each preset turns its `args` into default channels, and a
 build's `channels` map overrides any of them field by field, so you can change one curve, window or
 amplitude and keep the rest. Presets work on any node, and shine with `by: "character"` or `"word"`.
@@ -285,6 +287,15 @@ line of the node's height):
 | `rotation` | `0` | degrees |
 | `blur` | `0` | em |
 | `tracking` | `0` | em per glyph, spread around the centre of each line |
+| `axis.<tag>` | `0` | offset in the axis's own units (for example `axis.wght`, `axis.wdth`) |
+
+An `axis.<tag>` channel varies a variable font axis per piece. Its value is added to the piece's
+resting coordinate and clamped to the axis range; an axis the face does not have is ignored. The
+tag is the four-character OpenType tag. Axis motion needs the node's variable font declared in the
+deck's `fonts` (with `"variable": true`), and it draws only for plain single-style left-to-right
+pieces (no brush, shadow, background, decoration or baseline shift); other pieces keep their normal
+paint and still play the other channels. Each moving piece keeps its resting centre as its advance
+changes.
 
 A channel value is `base + wave` over the piece's progress (`0..1`):
 

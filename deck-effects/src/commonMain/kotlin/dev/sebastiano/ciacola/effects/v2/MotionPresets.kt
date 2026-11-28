@@ -69,6 +69,8 @@ object MotionPresets {
             MotionPresetDeclarations.FOCUS_PULL -> resolveFocusPull(kind, args)
             MotionPresetDeclarations.WAVE -> resolveWave(effectId, kind, args)
             MotionPresetDeclarations.TRACKING_BREATHE -> resolveTrackingBreathe(kind, args)
+            MotionPresetDeclarations.AXIS_WAVE -> resolveAxisWave(kind, args)
+            MotionPresetDeclarations.AXIS_RISE -> resolveAxisRise(kind, args)
             else -> return null
         }
         val overrides = channelOverrides(args)
@@ -152,7 +154,21 @@ object MotionPresets {
             rotationZ = value(MotionChannelNames.ROTATION).toFloat(),
             blurRadiusPx = (blurEm * em).coerceAtLeast(0f),
             clip = clip,
+            axisOffsets = axisOffsets(resolved, ::value),
         )
+    }
+
+    /** Non-zero `axis.<tag>` channel values, keyed by tag. */
+    private fun axisOffsets(resolved: ResolvedMotion, value: (String) -> Double): Map<String, Float> {
+        var out: LinkedHashMap<String, Float>? = null
+        for (name in resolved.channels.keys) {
+            val tag = MotionChannelNames.axisTagOrNull(name) ?: continue
+            val v = value(name).toFloat()
+            if (v == 0f || !v.isFinite()) continue
+            if (out == null) out = LinkedHashMap()
+            out[tag] = v
+        }
+        return out ?: emptyMap()
     }
 
     /** Convenience for single-shot callers: resolve then evaluate. */
@@ -310,6 +326,44 @@ object MotionPresets {
             )
         }
         return ResolvedMotion(MotionPresetDeclarations.TRACKING_BREATHE, kind, channels, revealPaddingEm = null)
+    }
+
+    private fun axisTag(args: EffectArgs): String =
+        args.string("axis", "wght").takeIf { MotionChannelNames.axisTagOrNull(MotionChannelNames.axis(it)) != null } ?: "wght"
+
+    private fun resolveAxisWave(kind: EffectBuildKind, args: EffectArgs): ResolvedMotion {
+        val channels = LinkedHashMap<String, MotionChannelSpec>()
+        val amplitude = args.float("amplitude", 200f).toDouble()
+        val offset = args.float("offset", 0f).toDouble()
+        if (amplitude != 0.0 || offset != 0.0) {
+            channels[MotionChannelNames.axis(axisTag(args))] = MotionChannelSpec(
+                wave = MotionWaveSpec(
+                    amplitude = amplitude,
+                    offset = offset,
+                    shape = parseShape(args.string("shape", "sine")),
+                    cycles = args.float("cycles", 2f).toDouble(),
+                    phasePerPiece = args.float("phasePerPiece", 0.08f).toDouble(),
+                    phasePerLine = args.float("phasePerLine", 0f).toDouble(),
+                    fade = args.float("fade", 0.15f).toDouble().coerceIn(0.0, 0.5),
+                ),
+            )
+        }
+        return ResolvedMotion(MotionPresetDeclarations.AXIS_WAVE, kind, channels, revealPaddingEm = null)
+    }
+
+    /** `rise` with a variable-axis settle: the axis starts offset by `axisFrom` and eases to rest. */
+    private fun resolveAxisRise(kind: EffectBuildKind, args: EffectArgs): ResolvedMotion {
+        val riseArgs = if (args.values.containsKey("distance")) args else EffectArgs(args.values + ("distance" to 0.5f))
+        val rise = resolveRise(kind, riseArgs)
+        val axisFrom = args.float("axisFrom", -300f).toDouble()
+        val channels = LinkedHashMap(rise.channels)
+        if (axisFrom != 0.0) {
+            channels[MotionChannelNames.axis(axisTag(args))] = when (kind) {
+                EffectBuildKind.Exit -> MotionChannelSpec(from = 0.0, to = axisFrom, curve = IN_QUINT)
+                else -> MotionChannelSpec(from = axisFrom, to = 0.0, curve = OUT_QUINT)
+            }
+        }
+        return rise.copy(effectId = MotionPresetDeclarations.AXIS_RISE, channels = channels)
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────

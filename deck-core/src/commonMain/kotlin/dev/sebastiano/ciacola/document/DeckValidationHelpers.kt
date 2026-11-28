@@ -685,11 +685,12 @@ internal object DeckValidationHelpers {
     ) {
         for ((name, spec) in channels) {
             val channelAddr = "$address/channels/$name"
-            if (name !in MotionChannelNames.all) {
+            if (!MotionChannelNames.isKnown(name)) {
                 issues += lintWarning(
                     "UNKNOWN_MOTION_CHANNEL",
                     channelAddr,
-                    "Unknown motion channel '$name' (known: ${MotionChannelNames.all.joinToString()}).",
+                    "Unknown motion channel '$name' (known: ${MotionChannelNames.all.joinToString()}, " +
+                        "or ${MotionChannelNames.AXIS_PREFIX}<tag> for a variable font axis).",
                 )
             }
             spec.window?.let { window ->
