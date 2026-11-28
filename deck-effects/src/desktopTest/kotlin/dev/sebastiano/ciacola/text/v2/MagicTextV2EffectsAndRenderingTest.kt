@@ -162,6 +162,22 @@ class MagicTextV2EffectsAndRenderingTest {
         GpuProbe(null, "${backend.label} offscreen context unavailable: ${t.javaClass.simpleName}: ${t.message}")
     }
 
+    private fun runProductionScene(
+        fixtureName: String,
+        backend: String,
+        gpu: GpuBackend?,
+        frames: Array<TextContent>,
+        config: MagicTextV2Config,
+        density: Density,
+        captureMidRgba: Boolean = false,
+    ): ProductionRunResult = if (gpu == null) {
+        runProductionSceneOn(fixtureName, backend, null, frames, config, density, captureMidRgba)
+    } else {
+        gpu.withDirectContext { ctx ->
+            runProductionSceneOn(fixtureName, backend, ctx, frames, config, density, captureMidRgba)
+        }
+    }
+
     /**
      * Reads `GL_VENDOR` / `GL_RENDERER` from the current GL context through Skiko's OpenGLApi, which
      * is Kotlin-internal, so it is reached reflectively. Returns null if that API is not available.
