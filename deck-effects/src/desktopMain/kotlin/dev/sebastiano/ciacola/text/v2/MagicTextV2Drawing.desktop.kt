@@ -448,7 +448,10 @@ internal object MagicTextV2Drawing {
         for (i in 0 until count) maxLine = maxOf(maxLine, timings[i].piece.line)
         val lineLengths = IntArray(maxLine + 1)
         for (i in 0 until count) lineLengths[timings[i].piece.line]++
-        val seenInLine = IntArray(maxLine + 1)
+        val visualRanks = MotionPresets.visualRanksInLine(
+            lines = IntArray(count) { timings[it].piece.line },
+            centerX = FloatArray(count) { timings[it].piece.boundingBox.center.x },
+        )
         val whole = plan.partition.wholeLayout
         val textBounds = Rect(0f, 0f, whole.size.width.toFloat(), whole.size.height.toFloat())
 
@@ -456,8 +459,6 @@ internal object MagicTextV2Drawing {
             val timing = timings[i]
             val piece = timing.piece
             val line = piece.line
-            val indexInLine = seenInLine[line]
-            seenInLine[line] = indexInLine + 1
             val ctx = EffectEvalContext(
                 nodeBounds = piece.boundingBox,
                 stageSize = stageSize,
@@ -467,7 +468,7 @@ internal object MagicTextV2Drawing {
                     index = i,
                     count = count,
                     line = line,
-                    indexInLine = indexInLine,
+                    indexInLine = visualRanks[i],
                     lineLength = lineLengths[line],
                     emPx = piece.dominantFontSizeSp.sp.toPx(),
                     textBounds = textBounds,

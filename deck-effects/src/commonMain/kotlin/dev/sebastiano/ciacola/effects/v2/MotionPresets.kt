@@ -160,6 +160,27 @@ object MotionPresets {
         return evaluate(resolved, progress, context, curve)
     }
 
+    /**
+     * Left-to-right rank of each piece inside its line, for spatial channels such as tracking.
+     * Pieces arrive in logical order, which runs right-to-left for RTL runs, so ranks come from
+     * the pieces' horizontal centres instead. Ties keep logical order.
+     */
+    fun visualRanksInLine(lines: IntArray, centerX: FloatArray): IntArray {
+        require(lines.size == centerX.size) { "lines and centerX must have the same size" }
+        val order = lines.indices.sortedWith(compareBy<Int>({ lines[it] }, { centerX[it] }))
+        val ranks = IntArray(lines.size)
+        var previousLine = Int.MIN_VALUE
+        var rank = 0
+        for (i in order) {
+            if (lines[i] != previousLine) {
+                previousLine = lines[i]
+                rank = 0
+            }
+            ranks[i] = rank++
+        }
+        return ranks
+    }
+
     // ── Presets ─────────────────────────────────────────────────────────────────────────────────
 
     private fun resolveRise(kind: EffectBuildKind, args: EffectArgs): ResolvedMotion {

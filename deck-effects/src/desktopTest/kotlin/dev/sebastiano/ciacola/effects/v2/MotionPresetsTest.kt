@@ -154,6 +154,26 @@ class MotionPresetsTest {
     }
 
     @Test
+    fun `tracking ranks follow visual order so rtl lines spread outwards`() {
+        // Line 0 is RTL: logical order runs from the right edge. Line 1 is LTR.
+        val lines = intArrayOf(0, 0, 0, 1, 1)
+        val centres = floatArrayOf(250f, 150f, 50f, 30f, 90f)
+        val ranks = MotionPresets.visualRanksInLine(lines, centres)
+        assertEquals(listOf(2, 1, 0, 0, 1), ranks.toList())
+
+        val args = EffectArgs.of("amplitude" to 0.2f, "fade" to 0f, "phasePerLine" to 0f)
+        val firstLogical = eval(
+            MotionPresetDeclarations.TRACKING_BREATHE,
+            EffectBuildKind.Emphasis,
+            0.5f,
+            args,
+            context(index = 0, count = 3, indexInLine = ranks[0], lineLength = 3),
+        )
+        // The rightmost glyph moves right even though it comes first logically.
+        assertTrue(firstLogical.translationX > 0f, "${firstLogical.translationX}")
+    }
+
+    @Test
     fun `focus pull sweep blurs pieces by distance from the focal point`() {
         val args = EffectArgs.of("radius" to 0.3f, "focusWidth" to 1f, "settle" to false)
         val near = eval(
