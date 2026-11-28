@@ -30,3 +30,18 @@ tasks.named<Test>("desktopTest") {
         rootProject.file("deck/src/desktopMain/resources/fonts").absolutePath,
     )
 }
+
+// Skiko 0.156.1 (pinned by Compose) cannot create its offscreen OpenGL context on Mesa, because
+// glXCreateContext gets a pbuffer config with no X visual; 0.157.0 switched to glXCreateNewContext.
+// Tests only: the GPU benchmark needs that offscreen context on Linux; the app keeps Compose's Skiko.
+val testSkikoVersion = "0.157.0"
+configurations
+    .matching { it.name == "desktopTestCompileClasspath" || it.name == "desktopTestRuntimeClasspath" }
+    .configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.skiko") {
+                useVersion(testSkikoVersion)
+                because("Skiko 0.157.0 fixes OpenGLOffscreenContext creation on Mesa")
+            }
+        }
+    }

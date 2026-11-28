@@ -19,6 +19,10 @@ dependencyResolutionManagement {
         mavenCentral()
         google()
         maven(url = uri("https://www.jetbrains.com/intellij-repository/releases"))
+        // Skiko builds newer than the one Compose pins (see deck-effects' desktopTest override).
+        maven(url = uri("https://maven.pkg.jetbrains.space/public/p/compose/dev")) {
+            content { includeGroup("org.jetbrains.skiko") }
+        }
     }
 }
 
