@@ -145,32 +145,21 @@ class MagicTextV2EffectsAndRenderingTest {
         }
     }
 
-    /** Returns the GPU's renderer description, or null when the host has no usable hardware GPU backend. */
-    private fun probeHardwareGpu(backend: GpuBackend): String? = try {
-        backend.withDirectContext {
-            if (backend == GpuBackend.OpenGL) currentGlRenderer() ?: backend.label else backend.label
-        }.takeUnless { description ->
-            // Mesa's software rasterizers are CPU rendering behind a GL API: not a GPU measurement.
-            SOFTWARE_GL_RENDERERS.any { description.contains(it, ignoreCase = true) }
-        }
-    } catch (_: Throwable) {
-        null
-    }
+    /** Hardware GPU [description] when usable, otherwise null with the [skipReason] for the report. */
+    private data class GpuProbe(val description: String?, val skipReason: String?)
 
-    private fun runProductionScene(
-        fixtureName: String,
-        backend: String,
-        gpu: GpuBackend?,
-        frames: Array<TextContent>,
-        config: MagicTextV2Config,
-        density: Density,
-        captureMidRgba: Boolean = false,
-    ): ProductionRunResult = if (gpu == null) {
-        runProductionSceneOn(fixtureName, backend, null, frames, config, density, captureMidRgba)
-    } else {
-        gpu.withDirectContext { ctx ->
-            runProductionSceneOn(fixtureName, backend, ctx, frames, config, density, captureMidRgba)
+    private fun probeHardwareGpu(backend: GpuBackend): GpuProbe = try {
+        val description = backend.withDirectContext {
+            if (backend == GpuBackend.OpenGL) currentGlRenderer() ?: backend.label else backend.label
         }
+        if (SOFTWARE_GL_RENDERERS.any { description.contains(it, ignoreCase = true) }) {
+            // Mesa's software rasterizers are CPU rendering behind a GL API: not a GPU measurement.
+            GpuProbe(null, "software renderer ($description)")
+        } else {
+            GpuProbe(description, null)
+        }
+    } catch (t: Throwable) {
+        GpuProbe(null, "${backend.label} offscreen context unavailable: ${t.javaClass.simpleName}: ${t.message}")
     }
 
     /**
@@ -588,7 +577,8 @@ class MagicTextV2EffectsAndRenderingTest {
         // Windows, OpenGL on Linux) whenever the host has a hardware GPU for it.
         val osName = System.getProperty("os.name").orEmpty()
         val gpuBackend = GpuBackend.forHost(osName)
-        val gpuDescription = probeHardwareGpu(gpuBackend)
+        val gpuProbe = probeHardwareGpu(gpuBackend)
+        val gpuDescription = gpuProbe.description
         if (osName.lowercase().contains("mac")) {
             assertNotNull(gpuDescription, "Production Metal benchmark requires real Metal offscreen context on macOS")
         }
@@ -603,7 +593,7 @@ class MagicTextV2EffectsAndRenderingTest {
             "  Host : ${System.getProperty("os.name")} ${System.getProperty("os.version")} (${System.getProperty("os.arch")}), " +
                 "${Runtime.getRuntime().availableProcessors()} cores, JDK ${System.getProperty("java.version")}\n",
         )
-        report.append("  GPU  : ${gpuDescription ?: "none (${gpuBackend.label} offscreen context unavailable or software)"}\n")
+        report.append("  GPU  : ${gpuDescription ?: "none (${gpuProbe.skipReason})"}\n")
 
         val isCi = System.getenv("CI").equals("true", ignoreCase = true) ||
             System.getenv("GITHUB_ACTIONS").equals("true", ignoreCase = true)
