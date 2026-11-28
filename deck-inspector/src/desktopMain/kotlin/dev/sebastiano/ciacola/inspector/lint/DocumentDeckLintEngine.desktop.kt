@@ -190,7 +190,7 @@ class DocumentDeckLintEngine(
             }
         }
         collectTodoVideoIssues(slide, slideIndex, allIssues)
-        clipAssetReader(document.id, deckDir, assetsDir)?.let { DocumentClipLint.collect(slide, slideIndex, allIssues, it) }
+        DocumentClipLint.collect(slide, slideIndex, allIssues, clipAssetReader(document.id, deckDir, assetsDir))
         collectCrossSlideIssuesForNeighbor(document, slideIndex, allIssues)
         for (ext in externalEditWarnings) {
             if (ext.address.contains(slide.id)) {
@@ -347,7 +347,7 @@ class DocumentDeckLintEngine(
             }
 
             collectTodoVideoIssues(slide, slideIndex, allIssues)
-            clipAssetReader(document.id, deckDir, assetsDir)?.let { DocumentClipLint.collect(slide, slideIndex, allIssues, it) }
+            DocumentClipLint.collect(slide, slideIndex, allIssues, clipAssetReader(document.id, deckDir, assetsDir))
             val fingerprints = computeAssetFingerprints(deckDir, document, slideIndex, assetsDir = assetsDir)
             val seenStyleHashes = HashSet<String>()
 
@@ -1019,11 +1019,8 @@ class DocumentDeckLintEngine(
         }
     }
 
-    private fun clipAssetReader(deckId: String, deckDir: Path?, assetsDir: Path?): ((String) -> ByteArray?)? =
-        if (deckDir == null && assetsDir == null) null else { src ->
-            resolveAssetPathOnDisk(deckId, src, deckDir, assetsDir)?.let { runCatching { Files.readAllBytes(it) }.getOrNull() }
-                ?: DocumentClipLint.readClasspathAsset(deckId, src)
-        }
+    private fun clipAssetReader(deckId: String, deckDir: Path?, assetsDir: Path?): (String) -> DocumentClipLint.ClipSource =
+        DocumentClipLint.assetProbe(deckId) { src -> resolveAssetPathOnDisk(deckId, src, deckDir, assetsDir) }
 
     private fun collectCrossSlideIssuesForNeighbor(
         document: DeckDocument,

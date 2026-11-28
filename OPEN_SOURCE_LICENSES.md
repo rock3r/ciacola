@@ -15,7 +15,7 @@ license.
 |---|---|---|---|
 | **Storyboard** (derived from revision `499cda890a7591c8fc56044726531f6f38a82e35`) | Copyright the Storyboard contributors (Brian Norman et al.) | Apache-2.0 | <https://github.com/bnorm/storyboard> |
 | **Warp** (`:storyboard-warp`, animated code snippet diffing/rendering incorporated into Storyboard) | Copyright Rahul Ravikumar | Apache-2.0 | <https://github.com/tikurahul/warp> |
-| **Animated image test fixtures** (`deck-effects/src/desktopTest/resources/animated-images/`) | Generated geometric shapes | CC0-1.0 ([text](deck-effects/src/desktopTest/resources/animated-images/CC0-1.0.txt)) | Not published |
+| **Animated image test fixtures** (`deck-effects/src/desktopTest/resources/animated-images/`, copied to `deck-inspector/src/desktopTest/resources/decks/clip-lint-cp.assets/`) | Generated geometric shapes | CC0-1.0 ([text](deck-effects/src/desktopTest/resources/animated-images/CC0-1.0.txt)) | Not published |
 
 ---
 

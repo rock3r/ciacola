@@ -62,6 +62,60 @@ class ClipLintTest {
         }
     }
 
+    private fun node(id: String, image: ImagePayload, builds: List<Build> = emptyList()) =
+        NodeSpec(id = id, frame = FrameSpec(0.0, 0.0, 100.0, 100.0), image = image, builds = builds)
+
+    private fun lint(doc: DeckDocument, assets: java.nio.file.Path?) = DocumentDeckLintEngine().use { engine ->
+        runBlocking { engine.lintSingleSlide(document = doc, slideIndex = 0, assetsDir = assets) }
+    }.issues.filter { it.code.startsWith("CLIP_") }
+
+    private fun deck(id: String, vararg nodes: NodeSpec) =
+        DeckDocument(id = id, slides = listOf(SlideSpec(id = "s", beats = listOf(BeatSpec(), BeatSpec()), nodes = nodes.toList())))
+
+    @Test
+    fun `clip lint reads classpath assets when no deck folder is known`() {
+        val issues = lint(deck("clip-lint-cp", node("tight", ImagePayload("clip.webp", maxPixels = 100))), assets = null)
+        assertEquals(listOf("CLIP_OVER_BUDGET"), issues.map { it.code })
+    }
+
+    @Test
+    fun `only gif and webp sources animate, whatever their bytes`() {
+        val assets = Files.createTempDirectory("clip-lint-ext")
+        try {
+            Files.write(assets.resolve("anim.png"), Base64.getDecoder().decode(SAMPLE_WEBP))
+            val issues = lint(deck("d", node("misnamed", ImagePayload("anim.png", loop = true))), assets)
+            assertEquals(listOf("CLIP_SOURCE_NOT_ANIMATED"), issues.map { it.code })
+        } finally {
+            assets.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a clip over the side limit is not told to raise maxPixels`() {
+        val assets = Files.createTempDirectory("clip-lint-side")
+        try {
+            Files.write(assets.resolve("wide.gif"), wideGif(width = 8193))
+            val issue = lint(deck("d", node("wide", ImagePayload("wide.gif"))), assets).single()
+            assertEquals("CLIP_OVER_BUDGET", issue.code)
+            kotlin.test.assertTrue("8192" in issue.detail && "maxPixels" !in issue.detail, issue.detail)
+        } finally {
+            assets.toFile().deleteRecursively()
+        }
+    }
+
+    /** A 2-frame GIF whose logical screen is [width] x 1, each frame a single pixel. */
+    private fun wideGif(width: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write("GIF89a".toByteArray())
+        out.write(byteArrayOf(width.toByte(), (width shr 8).toByte(), 1, 0, 0x80.toByte(), 0, 0, -1, -1, -1, 0, 0, 0))
+        repeat(2) {
+            out.write(byteArrayOf(0x21, 0xF9.toByte(), 4, 0, 10, 0, 0, 0))
+            out.write(byteArrayOf(0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0))
+        }
+        out.write(0x3B)
+        return out.toByteArray()
+    }
+
     private companion object {
         /** The CC0 4-frame 64x48 animated WebP fixture from `deck-effects` test resources. */
         const val SAMPLE_WEBP =

@@ -1,23 +1,59 @@
 package dev.sebastiano.ciacola.inspector.lint
 
 import dev.sebastiano.ciacola.animation.AnimationBudget
+import dev.sebastiano.ciacola.animation.AnimationInfo
 import dev.sebastiano.ciacola.animation.probeAnimation
 import dev.sebastiano.ciacola.document.Build
 import dev.sebastiano.ciacola.document.ImagePayload
 import dev.sebastiano.ciacola.document.SlideSpec
 import dev.sebastiano.ciacola.inspector.document.DocumentThemeResolver
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Animated image checks that need the asset bytes: playback builds or clip fields on a missing or
  * non-animated source, and animations whose decode budget would leave only the first frame.
  */
 internal object DocumentClipLint {
+    /** What lint knows about an image source. */
+    sealed interface ClipSource {
+        data object Missing : ClipSource
+        data object Still : ClipSource
+        data class Animated(val info: AnimationInfo) : ClipSource
+    }
+
+    /** Probes keyed by file path, size and modification time (or classpath entry), so a lint pass reads each clip once. */
+    private val probeCache = ConcurrentHashMap<String, ClipSource>()
+
+    /**
+     * Probes a deck's image sources: the file [onDisk] resolves, else the classpath copy that
+     * packaged decks ship with. Missing sources are not cached, so a file added later is found.
+     */
+    fun assetProbe(deckId: String, onDisk: (String) -> Path?): (String) -> ClipSource = { src ->
+        val path = onDisk(src)
+        val key = if (path != null) {
+            runCatching { "$path|${Files.size(path)}|${Files.getLastModifiedTime(path).toMillis()}" }.getOrNull()
+        } else {
+            "classpath:$deckId|$src"
+        }
+        key?.let(probeCache::get) ?: run {
+            val bytes = path?.let { runCatching { Files.readAllBytes(it) }.getOrNull() } ?: readClasspathAsset(deckId, src)
+            val source = when {
+                bytes == null -> ClipSource.Missing
+                else -> probeAnimation(bytes)?.let(ClipSource::Animated) ?: ClipSource.Still
+            }
+            if (key != null && source != ClipSource.Missing) probeCache[key] = source
+            source
+        }
+    }
+
     fun collect(
         slide: SlideSpec,
         slideIndex: Int,
         out: MutableMap<String, DocumentLintIssue>,
-        readAsset: (String) -> ByteArray?,
+        probe: (String) -> ClipSource,
     ) {
         for (node in DocumentThemeResolver.flattenNodes(slide.nodes)) {
             val image = node.image ?: continue
@@ -37,8 +73,10 @@ internal object DocumentClipLint {
                 )
                 out.putIfAbsent(issue.id, issue)
             }
-            val bytes = readAsset(image.src)
-            if (bytes == null) {
+            // The deck only animates .gif/.webp sources, so nothing else is read.
+            val animatable = image.src.endsWith(".gif", ignoreCase = true) || image.src.endsWith(".webp", ignoreCase = true)
+            val source = if (animatable) probe(image.src) else ClipSource.Still
+            if (source == ClipSource.Missing) {
                 if (hasPlaybackBuilds) {
                     warn(
                         "CLIP_SOURCE_MISSING",
@@ -48,8 +86,7 @@ internal object DocumentClipLint {
                 }
                 continue
             }
-            val info = probeAnimation(bytes)
-            if (info == null) {
+            if (source !is ClipSource.Animated) {
                 if (usesClipFields) {
                     warn(
                         "CLIP_SOURCE_NOT_ANIMATED",
@@ -59,8 +96,16 @@ internal object DocumentClipLint {
                 }
                 continue
             }
+            val info = source.info
             val budget = AnimationBudget(maxPixels = image.maxPixels?.takeIf { it > 0 } ?: AnimationBudget().maxPixels)
-            if (info.totalPixels > budget.maxPixels || info.width > budget.maxSidePx || info.height > budget.maxSidePx) {
+            if (info.width > budget.maxSidePx || info.height > budget.maxSidePx) {
+                warn(
+                    "CLIP_OVER_BUDGET",
+                    "Animated image exceeds its decode budget",
+                    "'${image.src}' is ${info.width}x${info.height}, over the ${budget.maxSidePx} px side limit for animation; " +
+                        "it will show only its first frame. Scale the clip down.",
+                )
+            } else if (info.totalPixels > budget.maxPixels) {
                 warn(
                     "CLIP_OVER_BUDGET",
                     "Animated image exceeds its decode budget",
