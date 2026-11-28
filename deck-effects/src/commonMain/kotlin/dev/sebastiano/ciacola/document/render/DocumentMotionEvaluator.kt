@@ -28,7 +28,6 @@ import dev.sebastiano.ciacola.document.TrackKind
 import dev.sebastiano.ciacola.document.TrackPlan
 import dev.sebastiano.ciacola.document.TransitionSpec
 import dev.sebastiano.ciacola.effects.v2.BuildEffects
-import dev.sebastiano.ciacola.effects.v2.CurveV2
 import dev.sebastiano.ciacola.effects.v2.EffectArgs
 import dev.sebastiano.ciacola.effects.v2.EffectBuildKind
 import dev.sebastiano.ciacola.effects.v2.EffectClip

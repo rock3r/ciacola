@@ -8,6 +8,8 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.FileTime
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -64,8 +66,7 @@ class DeckFileSync(
 
     private var watcherJob: Job? = null
 
-    private var lastObservedSize: Long = -1L
-    private var lastObservedMtimeMs: Long = -1L
+    private var lastObservedStat: TargetStat? = null
     private var inFlightTxId: String? = null
     private var inFlightRevision: Long? = null
     private val dismissedNames: MutableSet<String> = LinkedHashSet()
@@ -944,18 +945,9 @@ class DeckFileSync(
             return
         }
         if (!Files.exists(targetFile)) return
-        val size = try {
-            Files.size(targetFile)
-        } catch (_: IOException) {
-            return
-        }
-        val mtime = try {
-            Files.getLastModifiedTime(targetFile).toMillis()
-        } catch (_: IOException) {
-            return
-        }
+        val stat = TargetStat.readOrNull(targetFile) ?: return
 
-        val statChanged = size != lastObservedSize || mtime != lastObservedMtimeMs
+        val statChanged = stat != lastObservedStat
         val shouldHash = statChanged || store.sync is SyncState.ExternalInvalid || store.load is DeckLoadState.Invalid
         if (!shouldHash) return
 
@@ -964,8 +956,7 @@ class DeckFileSync(
         } catch (_: IOException) {
             return
         }
-        lastObservedSize = bytes.size.toLong()
-        lastObservedMtimeMs = mtime
+        lastObservedStat = stat
         val currentHash = SyncFilesHelper.sha256Hex(bytes)
 
         if (currentHash == diskHash && store.sync !is SyncState.ExternalInvalid && store.load !is DeckLoadState.Invalid) {
@@ -1056,10 +1047,7 @@ class DeckFileSync(
     }
 
     private fun recordStatSnapshot() {
-        runCatching {
-            lastObservedSize = Files.size(targetFile)
-            lastObservedMtimeMs = Files.getLastModifiedTime(targetFile).toMillis()
-        }
+        TargetStat.readOrNull(targetFile)?.let { lastObservedStat = it }
     }
 
     companion object {
@@ -1069,5 +1057,25 @@ class DeckFileSync(
         const val DEFAULT_RETENTION_MS: Long = 10L * 60L * 1_000L
 
         fun sha256Hex(bytes: ByteArray): String = SyncFilesHelper.sha256Hex(bytes)
+    }
+}
+
+/**
+ * Cheap change fingerprint for the watched deck file. Size and modification time alone miss a
+ * same-size rewrite within one timestamp tick (coarse filesystem clocks make that likely), so the
+ * file key is included too: an editor's atomic save replaces the file and changes its key.
+ */
+private data class TargetStat(
+    val size: Long,
+    val modified: FileTime,
+    val fileKey: Any?,
+) {
+    companion object {
+        fun readOrNull(file: Path): TargetStat? = try {
+            val attrs = Files.readAttributes(file, BasicFileAttributes::class.java)
+            TargetStat(attrs.size(), attrs.lastModifiedTime(), attrs.fileKey())
+        } catch (_: IOException) {
+            null
+        }
     }
 }
